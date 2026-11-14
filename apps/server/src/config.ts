@@ -1,6 +1,7 @@
 export interface ServerConfig {
   telegramBotToken: string;
   allowedUserIds: ReadonlySet<number>;
+  agent: { id: string; name: string; ownerId: number };
 }
 
 export function readConfig(env: NodeJS.ProcessEnv): ServerConfig {
@@ -21,5 +22,29 @@ export function readConfig(env: NodeJS.ProcessEnv): ServerConfig {
       "TELEGRAM_ALLOWED_USER_IDS must contain comma-separated positive user IDs.",
     );
   }
-  return { telegramBotToken, allowedUserIds: new Set(ids.map(Number)) };
+  const allowedUserIds = new Set(ids.map(Number));
+  const ownerText = env.TELEGRAM_OWNER_USER_ID?.trim();
+  const ownerId = ownerText
+    ? Number(ownerText)
+    : allowedUserIds.size === 1
+      ? [...allowedUserIds][0]
+      : undefined;
+  if (
+    ownerId === undefined ||
+    (ownerText && !/^[1-9]\d*$/.test(ownerText)) ||
+    !Number.isSafeInteger(ownerId) ||
+    !allowedUserIds.has(ownerId)
+  ) {
+    throw new Error(
+      "TELEGRAM_OWNER_USER_ID must identify an allowlisted owner; set it explicitly when multiple users are allowed.",
+    );
+  }
+  const id = env.AGENT_ID?.trim() || "default";
+  const name = env.AGENT_NAME?.trim() || "Agente configurado";
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id) || name.length > 128) {
+    throw new Error(
+      "AGENT_ID must use 1–64 letters, digits, underscores or hyphens; AGENT_NAME must have at most 128 characters.",
+    );
+  }
+  return { telegramBotToken, allowedUserIds, agent: { id, name, ownerId } };
 }

@@ -9,6 +9,10 @@ import { verifyPassword } from "./panel-auth.js";
 import type { PanelConfig } from "./panel-config.js";
 
 export interface AgentStatus {
+  agentId?: string;
+  agentName?: string;
+  ownerId?: number;
+  chatActivated?: boolean;
   botUsername?: string;
   telegram: "connecting" | "connected" | "disconnected";
 }
@@ -22,7 +26,7 @@ const css =
   `
 body{margin:0;min-height:100vh;background:var(--color-base-200);color:var(--color-base-content);font:1rem/1.6 Georgia,serif}
 header,main{max-width:62rem;margin:auto;padding:1.5rem}header{display:flex;justify-content:space-between;align-items:center;gap:1rem;border-bottom:1px solid var(--color-base-300)}header a{font-size:1.5rem;font-weight:bold;color:inherit;text-decoration:none}
-main{padding-top:4rem}h1{font-size:clamp(2rem,6vw,3rem);line-height:1.15;margin:0 0 1rem}h2{font-size:1.5rem}p{margin:.75rem 0}form{display:grid;gap:1rem}label{font-weight:bold}.card{background:var(--color-base-100);border:1px solid var(--color-base-300);padding:clamp(1rem,4vw,2rem);margin-top:2rem}.input{width:100%;box-sizing:border-box;border-color:var(--color-base-content)}section[aria-label="Acceso"]{max-width:28rem;margin:auto}dl{display:grid;grid-template-columns:1fr 1fr;gap:1rem}dt{font-weight:bold}dd{margin:0;overflow-wrap:anywhere}footer{margin-top:2rem}button,a.btn{min-height:44px}a{overflow-wrap:anywhere}:focus-visible{outline:3px solid var(--color-base-content);outline-offset:4px}header form{display:block}small{font-family:monospace}*{box-sizing:border-box}
+main{padding-top:4rem}h1{font-size:clamp(2rem,6vw,3rem);line-height:1.15;margin:0 0 1rem}h2{font-size:1.5rem;overflow-wrap:anywhere}p{margin:.75rem 0}form{display:grid;gap:1rem}label{font-weight:bold}.card{background:var(--color-base-100);border:1px solid var(--color-base-300);padding:clamp(1rem,4vw,2rem);margin-top:2rem}.input{width:100%;box-sizing:border-box;border-color:var(--color-base-content)}section[aria-label="Acceso"]{max-width:28rem;margin:auto}dl{display:grid;grid-template-columns:1fr 1fr;gap:1rem}dt{font-weight:bold}dd{margin:0;overflow-wrap:anywhere}footer{margin-top:2rem}button,a.btn{min-height:44px}a{overflow-wrap:anywhere}:focus-visible{outline:3px solid var(--color-base-content);outline-offset:4px}header form{display:block}small{font-family:monospace}*{box-sizing:border-box}
 @media(max-width:400px){header,main{padding:1rem}main{padding-top:2rem}dl{grid-template-columns:1fr;gap:.5rem}dd{margin-bottom:.5rem}}`;
 
 function page(
@@ -191,9 +195,13 @@ export function createPanel(
           <h1>Tus agentes.</h1>
           <p>Un bot de Telegram por agente. Cada conversación, en su lugar.</p>
           <article class="card">
-            <h2>Agente configurado</h2>
+            <h2>${status.agentName ?? "Agente configurado"}</h2>
             <p class="badge">Configuración inicial</p>
             <dl>
+              <dt>Identificador</dt>
+              <dd>${status.agentId ?? "Sin configurar"}</dd>
+              <dt>Dueño de Telegram</dt>
+              <dd>${status.ownerId ?? "Sin configurar"}</dd>
               <dt>Telegram</dt>
               <dd>${labels[status.telegram]}</dd>
               <dt>Bot</dt>
@@ -203,7 +211,9 @@ export function createPanel(
               <dt>Ejecución de tareas</dt>
               <dd>Agent Host sin conectar</dd>
               <dt>Activación del chat</dt>
-              <dd>Todavía sin verificar</dd>
+              <dd>
+                ${status.chatActivated ? "Activado por el dueño" : "Pendiente: enviá /start al bot"}
+              </dd>
             </dl>
             ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Abrir bot en Telegram</a>` : html`<p>El enlace aparecerá cuando Telegram confirme la conexión.</p>`}
           </article>

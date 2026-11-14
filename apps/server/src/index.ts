@@ -17,7 +17,13 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const status: AgentStatus = { telegram: "connecting" };
+  const status: AgentStatus = {
+    telegram: "connecting",
+    agentId: config.agent.id,
+    agentName: config.agent.name,
+    ownerId: config.agent.ownerId,
+    chatActivated: false,
+  };
   const panel = createPanel(panelConfig, () => ({ ...status }));
   const server = serve({
     fetch: panel.fetch,
@@ -32,7 +38,9 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   });
   console.log(`Nimbot panel: ${panelConfig.origin}`);
-  const bot = createBot(config);
+  const bot = createBot(config, () => {
+    status.chatActivated = true;
+  });
   let stopping = false;
   const stop = () => {
     stopping = true;

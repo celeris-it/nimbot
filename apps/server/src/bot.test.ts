@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 import { createBot } from "./bot.js";
 
 function setup() {
-  const bot = createBot({
-    telegramBotToken: "123:fake_test_token",
-    allowedUserIds: new Set([42]),
-  });
+  const activations: number[] = [];
+  const bot = createBot(
+    {
+      telegramBotToken: "123:fake_test_token",
+      allowedUserIds: new Set([42, 73]),
+      agent: { id: "test", name: "Agente de prueba", ownerId: 42 },
+    },
+    (chatId) => activations.push(chatId),
+  );
   bot.botInfo = {
     id: 123,
     is_bot: true,
@@ -40,7 +45,7 @@ function setup() {
       },
     } as Awaited<ReturnType<typeof _prev>>;
   });
-  return { bot, sent };
+  return { bot, sent, activations };
 }
 
 function message(
@@ -99,6 +104,26 @@ describe("Telegram access", () => {
     Reflect.deleteProperty(update.message, "from");
     await bot.handleUpdate(update);
     expect(sent).toEqual([]);
+  });
+  it("rejects an allowlisted user who is not the owner", async () => {
+    const { bot, sent, activations } = setup();
+    for (const text of ["/start", "/status", "hola"])
+      await bot.handleUpdate(message(text, 73));
+    expect(sent).toEqual([]);
+    expect(activations).toEqual([]);
+  });
+  it("activates only on start and reports activation in status", async () => {
+    const { bot, sent, activations } = setup();
+    await bot.handleUpdate(message("/help"));
+    expect(activations).toEqual([]);
+    await bot.handleUpdate(message("/status"));
+    expect(sent.at(-1)).toContain("pendiente");
+    await bot.handleUpdate(message("/start"));
+    expect(activations).toEqual([42]);
+    await bot.handleUpdate(message("/status"));
+    expect(sent.at(-1)).toContain("Chat: activado");
+    await bot.handleUpdate(message("create a file"));
+    expect(sent.at(-1)).toContain("falta conectar el Agent Host");
   });
   it("explains that tasks are not connected yet", async () => {
     const { bot, sent } = setup();

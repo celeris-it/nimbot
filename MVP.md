@@ -341,7 +341,7 @@ There is no dynamic agent creation in this phase. One Agent Host container is de
 - [x] Only allowlisted Telegram user IDs get a response; everyone else is rejected.
 - [x] Locally configured administrator authentication, login/logout, protected panel/API routes, session expiry, CSRF protection, and login rate limiting work.
 - [ ] The panel lists the pre-configured agent, its status, bot connectivity and activation state, and a link to its Telegram chat.
-- [ ] The pre-configured agent bot token and owner ID are validated and explicitly bound to that agent.
+- [x] The pre-configured agent bot token and owner ID are validated and explicitly bound to that agent.
 - [ ] One Agent Host container runs with a persistent workspace volume.
 - [ ] The agent bot is bound to that Agent Host and the authorized owner’s private chat after `/start`.
 - [ ] The server sends tasks to the Agent Host and receives events over an authenticated internal API.
@@ -349,9 +349,9 @@ There is no dynamic agent creation in this phase. One Agent Host container is de
 - [ ] Long answers are split to fit Telegram's message length limit.
 - [ ] Errors are reported to the user in plain language.
 
-Current implementation: the server validates one Telegram token and a non-empty user allowlist, starts grammY long polling, and handles `/start` and `/help` in private chats. An authenticated Hono panel shows Telegram connectivity, the bot link once connected, and that Agent Host execution and chat activation tracking are still pending. It does not yet report a verified container state, so the full agent status task remains open.
+Current implementation: the server validates one Telegram token and a non-empty user allowlist, starts grammY long polling, and handles `/start` and `/help` in private chats. The pre-configured agent has an ID, name, and Telegram owner. An authenticated Hono panel shows that binding, Telegram connectivity, the bot link once connected, chat activation after the owner sends `/start`, and that Agent Host execution is still pending. It does not yet report a verified container state, so the full agent status task remains open.
 
-The panel uses a locally configured scrypt password hash, opaque server-side sessions with an eight-hour expiry, HttpOnly/SameSite cookies (Secure for HTTPS), same-origin validation on all POST requests, and a global limit of five login attempts per fifteen minutes. Sessions and rate-limit state are in memory for this phase; restarting the server signs administrators out. The panel stays available with a disconnected status if Telegram startup fails. Authentication, logout, expiry, CSRF, rate limits, and protected API access have automated coverage; login/logout and responsive layouts were checked in Chromium with a simulated bot status. Live Telegram validation previously confirmed that an allowlisted user receives the welcome and setup notices. Explicit bot-to-agent binding and Agent Host routing remain unimplemented, so no tasks execute.
+The panel uses a locally configured scrypt password hash, opaque server-side sessions with an eight-hour expiry, HttpOnly/SameSite cookies (Secure for HTTPS), same-origin validation on all POST requests, and a global limit of five login attempts per fifteen minutes. Sessions and rate-limit state are in memory for this phase; restarting the server signs administrators out. The panel stays available with a disconnected status if Telegram startup fails. Authentication, logout, expiry, CSRF, rate limits, and protected API access have automated coverage; login/logout and responsive layouts were checked in Chromium with a simulated bot status. Live Telegram validation previously confirmed that an allowlisted user receives the welcome and setup notices. Owner checks apply in addition to the allowlist, so another allowlisted user cannot activate or use this agent. `/help` and `/status` do not activate the chat. Activation is currently held in memory and requires `/start` again after a restart; durable chat bindings remain pending. Agent Host routing remains unimplemented, so no tasks execute.
 
 ### Acceptance Criteria
 
