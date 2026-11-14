@@ -255,9 +255,9 @@ Add a new package only when two apps need to share the code.
 
 ### Tasks
 
-- [ ] The monorepo is set up with pnpm, TypeScript strict mode, ESLint, Prettier, and Vitest.
-- [ ] An Agent Host Docker image runs OpenCode as a non-root user.
-- [ ] A minimal ACP client can start a session, send a prompt, and receive streaming output.
+- [x] The monorepo is set up with pnpm, TypeScript strict mode, ESLint, Prettier, and Vitest.
+- [x] An Agent Host Docker image runs OpenCode as a non-root user.
+- [x] A minimal ACP client can start a session, send a prompt, and receive streaming output.
 - [ ] OpenCode can edit a file and run a terminal command in the workspace.
 - [ ] A browser task works, and the way OpenCode reaches the browser is decided and documented.
 - [ ] Session resumption after a process restart and cancellation of a running prompt are tested.

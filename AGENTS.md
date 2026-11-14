@@ -4,7 +4,7 @@
 
 Nimbot is a self-hosted platform for running persistent AI agents through Telegram. Each agent runs in its own Docker container with a persistent workspace.
 
-The repo is in the planning stage: there is no code yet, only documentation.
+Phase 0 is in progress: the monorepo, the Agent Host image, and a minimal ACP client exist in `apps/agent-host/`.
 
 - [MVP.md](MVP.md) is the source of truth for scope, architecture, and phases.
 - [README.md](README.md) is the short public summary and must stay consistent with MVP.md.
@@ -34,7 +34,14 @@ Planned monorepo layout, from MVP.md section 5:
 
 ## Commands
 
-The toolchain is not set up yet. Once Phase 0 adds it, update this section with the real install, build, lint, type-check, and test commands, and run lint, type-check, and tests before finishing any change.
+- `pnpm install` — install dependencies
+- `pnpm build` — compile all workspaces
+- `pnpm lint` — ESLint and Prettier check (`pnpm format` to fix formatting)
+- `pnpm typecheck` — type-check all workspaces
+- `pnpm test` — run Vitest
+- `docker build -f infrastructure/docker/agent-host.Dockerfile -t nimbot-agent-host .` — build the Agent Host image
+
+Run lint, type-check, and tests before finishing any change.
 
 ## Architecture constraints
 

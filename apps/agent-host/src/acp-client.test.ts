@@ -1,0 +1,99 @@
+import { PassThrough } from "node:stream";
+import { createInterface } from "node:readline";
+import { describe, expect, it } from "vitest";
+import { AcpClient, type SessionUpdate } from "./acp-client.js";
+
+type Rpc = {
+  id?: number;
+  method?: string;
+  params?: Record<string, unknown>;
+  result?: unknown;
+};
+
+/** Fake agent: answers the client's requests with scripted behaviour. */
+function fakeAgent(handler: (msg: Rpc, send: (m: unknown) => void) => void) {
+  const toAgent = new PassThrough();
+  const toClient = new PassThrough();
+  const send = (m: unknown) =>
+    toClient.write(JSON.stringify({ jsonrpc: "2.0", ...(m as object) }) + "\n");
+  createInterface({ input: toAgent }).on("line", (line) =>
+    handler(JSON.parse(line) as Rpc, send),
+  );
+  return { input: toClient, output: toAgent };
+}
+
+describe("AcpClient", () => {
+  it("runs a session and streams updates", async () => {
+    const { input, output } = fakeAgent((msg, send) => {
+      if (msg.method === "initialize")
+        send({ id: msg.id, result: { protocolVersion: 1 } });
+      if (msg.method === "session/new")
+        send({ id: msg.id, result: { sessionId: "s1" } });
+      if (msg.method === "session/prompt") {
+        for (const text of ["Hel", "lo"]) {
+          send({
+            method: "session/update",
+            params: {
+              sessionId: "s1",
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text },
+              },
+            },
+          });
+        }
+        send({ id: msg.id, result: { stopReason: "end_turn" } });
+      }
+    });
+
+    const updates: SessionUpdate[] = [];
+    const client = new AcpClient(input, output, {
+      onUpdate: (_id, u) => updates.push(u),
+    });
+
+    await client.initialize();
+    const sessionId = await client.newSession("/workspace");
+    expect(sessionId).toBe("s1");
+    expect(await client.prompt(sessionId, "hi")).toBe("end_turn");
+    expect(
+      updates.map((u) => (u.content as { text: string }).text).join(""),
+    ).toBe("Hello");
+  });
+
+  it("answers permission requests and rejects on errors", async () => {
+    let outcome: unknown;
+    const { input, output } = fakeAgent((msg, send) => {
+      if (msg.method === "session/prompt") {
+        send({
+          id: 99,
+          method: "session/request_permission",
+          params: {
+            sessionId: "s1",
+            options: [{ optionId: "ok", name: "Allow", kind: "allow_once" }],
+          },
+        });
+      } else if (msg.id === 99) {
+        outcome = msg.result;
+        send({ id: 1, error: { code: -32000, message: "boom" } });
+      }
+    });
+
+    const client = new AcpClient(input, output, {
+      onPermission: (o) => o[0]?.optionId,
+    });
+    await expect(client.prompt("s1", "hi")).rejects.toThrow("boom");
+    expect(outcome).toEqual({
+      outcome: { outcome: "selected", optionId: "ok" },
+    });
+  });
+
+  it("sends cancel as a notification", async () => {
+    const seen: Rpc[] = [];
+    const { input, output } = fakeAgent((msg) => seen.push(msg));
+    new AcpClient(input, output).cancel("s1");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen).toEqual([
+      { jsonrpc: "2.0", method: "session/cancel", params: { sessionId: "s1" } },
+    ]);
+  });
+});
