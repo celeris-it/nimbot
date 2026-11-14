@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -159,4 +160,92 @@ it("does not execute a task if its initial record cannot be committed", async ()
   const id = await runner.submit("retry");
   expect(id).toBeTruthy();
   expect((await settled(store, id!)).status).toBe("completed");
+});
+
+it("persists ordered state events and serves them only with authentication", async () => {
+  const { runner, store, request } = await setup({
+    async run(_prompt, onText) {
+      onText("event result");
+      return "end_turn";
+    },
+    async stop() {},
+  });
+  const id = (await runner.submit("test events"))!;
+  await settled(store, id);
+  const events = await store.getEvents(id);
+  expect(events.map((event) => event.status)).toEqual([
+    "accepted",
+    "running",
+    "completed",
+  ]);
+  expect(events.at(-1)?.output).toBe("event result");
+  expect(events.at(-1)?.stopReason).toBe("end_turn");
+  expect(
+    (await request(`/tasks/${id}/events`, undefined, "wrong")).status,
+  ).toBe(401);
+  const response = await request(
+    `/tasks/${id}/events?after=${events[0]!.sequence}`,
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ id, events: events.slice(1) });
+  expect((await request(`/tasks/${id}/events?after=-1`)).status).toBe(400);
+  expect(
+    (await request(`/tasks/${id}/events?after=9007199254740992`)).status,
+  ).toBe(400);
+  expect((await request("/tasks/missing/events")).status).toBe(404);
+});
+
+it("retains events across restart and records interruption once", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-events-"));
+  const url = pathToFileURL(join(dir, "tasks.sqlite")).href;
+  let store = await openTaskStore(url);
+  try {
+    await store.insert("pending", "test recovery");
+    await store.update("pending", { status: "running" });
+    store.close();
+    store = await openTaskStore(url);
+    expect((await store.get("pending"))?.status).toBe("interrupted");
+    const events = await store.getEvents("pending");
+    expect(events.map((event) => event.status)).toEqual([
+      "accepted",
+      "running",
+      "interrupted",
+    ]);
+    store.close();
+    store = await openTaskStore(url);
+    expect(await store.getEvents("pending")).toEqual(events);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("migrates existing tasks and rolls back state when its event cannot be saved", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-migration-"));
+  const path = join(dir, "tasks.sqlite");
+  const legacy = new DatabaseSync(path);
+  legacy.exec(
+    "CREATE TABLE tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT); INSERT INTO tasks VALUES ('old', 'prompt', 'completed', 'saved output', 'end_turn')",
+  );
+  legacy.close();
+  const store = await openTaskStore(pathToFileURL(path).href);
+  try {
+    const events = await store.getEvents("old");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      status: "completed",
+      output: "saved output",
+    });
+    const control = new DatabaseSync(path);
+    control.exec(
+      "CREATE TRIGGER reject_event BEFORE INSERT ON task_events BEGIN SELECT RAISE(ABORT, 'event write failed'); END",
+    );
+    control.close();
+    await expect(store.update("old", { status: "failed" })).rejects.toThrow();
+    expect((await store.get("old"))?.status).toBe("completed");
+    expect(await store.getEvents("old")).toEqual(events);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

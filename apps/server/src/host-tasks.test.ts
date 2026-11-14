@@ -9,9 +9,17 @@ describe("internal task client", () => {
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(accepted())
-      .mockResolvedValueOnce(Response.json({ id: "task-1", status: "running" }))
       .mockResolvedValueOnce(
-        Response.json({ id: "task-1", status: "completed", output: "Done" }),
+        Response.json({
+          id: "task-1",
+          events: [{ sequence: 1, status: "running" }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "task-1",
+          events: [{ sequence: 2, status: "completed", output: "Done" }],
+        }),
       );
     const pause = vi.fn().mockResolvedValue(undefined);
     expect(await createHostTasks(config, request, pause)("create a file")).toBe(
@@ -30,14 +38,21 @@ describe("internal task client", () => {
         redirect: "error",
       }),
     ]);
-    expect(request.mock.calls[1]?.[0]).toBe(`${config.url}/tasks/task-1`);
+    expect(request.mock.calls[1]?.[0]).toBe(
+      `${config.url}/tasks/task-1/events?after=0`,
+    );
+    expect(request.mock.calls[2]?.[0]).toBe(
+      `${config.url}/tasks/task-1/events?after=1`,
+    );
     expect(pause).toHaveBeenCalledOnce();
   });
   it.each(["failed", "interrupted"] as const)("reports %s", async (status) => {
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(accepted())
-      .mockResolvedValueOnce(Response.json({ id: "task-1", status }));
+      .mockResolvedValueOnce(
+        Response.json({ id: "task-1", events: [{ sequence: 1, status }] }),
+      );
     await expect(
       createHostTasks(config, request)("hello"),
     ).rejects.toMatchObject({ kind: status });
@@ -63,6 +78,8 @@ describe("internal task client", () => {
   it.each([
     { id: "other", status: "completed", output: "wrong" },
     { id: "task-1", status: "unknown" },
+    { id: "task-1", events: [{ sequence: 0, status: "running" }] },
+    { id: "task-1", events: [{ sequence: 1, status: "unknown" }] },
     null,
   ])("rejects malformed or mismatched results", async (task) => {
     const request = vi

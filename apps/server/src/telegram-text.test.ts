@@ -14,7 +14,7 @@ describe("Telegram text splitting", () => {
     for (const part of parts) {
       expect(part.length).toBeLessThanOrEqual(4096);
       expect(part.length).toBeGreaterThan(0);
-      expect(part.isWellFormed()).toBe(true);
+      expect(part).not.toMatch(/[\uD800-\uDFFF]/u);
     }
   });
 });

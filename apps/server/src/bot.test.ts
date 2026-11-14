@@ -38,6 +38,7 @@ function setup(
     if (
       method !== "sendMessage" ||
       !("text" in payload) ||
+      !("chat_id" in payload) ||
       typeof payload.text !== "string"
     )
       throw new Error("Unexpected API call");

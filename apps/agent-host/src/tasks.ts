@@ -64,6 +64,7 @@ export function createTaskRunner(
       return id;
     },
     get: store.get,
+    getEvents: store.getEvents,
     isBusy: () => busy,
     async close() {
       closing = true;

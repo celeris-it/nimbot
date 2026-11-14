@@ -45,25 +45,39 @@ export function createHostTasks(
         accepted.status !== "accepted"
       )
         throw new HostTaskError("unavailable");
+      let sequence = 0;
       while (!deadline.aborted) {
-        const task = await call(`/tasks/${encodeURIComponent(accepted.id)}`);
+        const result = await call(
+          `/tasks/${encodeURIComponent(accepted.id)}/events?after=${sequence}`,
+        );
         if (
-          typeof task !== "object" ||
-          task === null ||
-          !("id" in task) ||
-          task.id !== accepted.id ||
-          !("status" in task)
+          typeof result !== "object" ||
+          result === null ||
+          !("id" in result) ||
+          result.id !== accepted.id ||
+          !("events" in result) ||
+          !Array.isArray(result.events)
         )
           throw new HostTaskError("unavailable");
-        if (task.status === "completed") {
-          if (!("output" in task) || typeof task.output !== "string")
+        for (const event of result.events) {
+          if (
+            typeof event !== "object" ||
+            event === null ||
+            !Number.isSafeInteger(event.sequence) ||
+            event.sequence <= sequence
+          )
             throw new HostTaskError("unavailable");
-          return task.output;
+          sequence = event.sequence;
+          if (event.status === "completed") {
+            if (typeof event.output !== "string")
+              throw new HostTaskError("unavailable");
+            return event.output;
+          }
+          if (event.status === "failed" || event.status === "interrupted")
+            throw new HostTaskError(event.status);
+          if (event.status !== "accepted" && event.status !== "running")
+            throw new HostTaskError("unavailable");
         }
-        if (task.status === "failed" || task.status === "interrupted")
-          throw new HostTaskError(task.status);
-        if (task.status !== "accepted" && task.status !== "running")
-          throw new HostTaskError("unavailable");
         await pause();
       }
       throw new HostTaskError("timeout");

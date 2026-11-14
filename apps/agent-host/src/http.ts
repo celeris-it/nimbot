@@ -55,6 +55,18 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
       ? c.json({ id, status: "accepted" }, 202)
       : c.json({ error: "Agent is busy" }, 409);
   });
+  app.get("/tasks/:id/events", async (c) => {
+    const after = c.req.query("after") ?? "0";
+    if (!/^\d+$/.test(after) || !Number.isSafeInteger(Number(after)))
+      return c.json(
+        { error: "after must be a non-negative safe integer" },
+        400,
+      );
+    const id = c.req.param("id");
+    if (!runner || !(await runner.get(id)))
+      return c.json({ error: "Task not found" }, 404);
+    return c.json({ id, events: await runner.getEvents(id, Number(after)) });
+  });
   app.get("/tasks/:id", async (c) => {
     const task = await runner?.get(c.req.param("id"));
     return task ? c.json(task) : c.json({ error: "Task not found" }, 404);
