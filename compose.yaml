@@ -47,6 +47,7 @@ services:
     volumes:
       - agent-workspace:/workspace
       - agent-engine-state:/home/node/.local/share/opencode
+      - agent-task-state:/home/node/.local/share/nimbot
     cpus: 1
     mem_limit: 1g
     pids_limit: 256
@@ -65,3 +66,4 @@ services:
 volumes:
   agent-workspace:
   agent-engine-state:
+  agent-task-state:

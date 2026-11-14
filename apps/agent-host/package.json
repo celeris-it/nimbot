@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.8",
+    "@libsql/client": "^0.18.0",
+    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.18",
     "playwright": "^1.65.1"
   }

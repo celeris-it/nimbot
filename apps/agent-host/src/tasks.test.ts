@@ -1,0 +1,162 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { afterEach, expect, it, vi } from "vitest";
+import { openTaskStore, type TaskStore } from "./task-store.js";
+import { createTaskRunner } from "./tasks.js";
+import { createHostApi } from "./http.js";
+import type { Engine } from "./engine.js";
+
+const token = "test-token-for-api-at-least-32-characters";
+const cleanups: (() => Promise<void>)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+async function setup(engine: Engine, timeout = 1000) {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-tasks-"));
+  const url = pathToFileURL(join(dir, "tasks.sqlite")).href;
+  const store = await openTaskStore(url);
+  const runner = createTaskRunner(store, engine, timeout);
+  cleanups.push(async () => {
+    await runner.close();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const app = createHostApi({ token, workspace: dir }, runner);
+  const request = (path: string, body?: unknown, auth = token) =>
+    app.request(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        Authorization: `Bearer ${auth}`,
+        "Content-Type": "application/json",
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  return { store, runner, request, url };
+}
+async function settled(store: TaskStore, id: string) {
+  for (let i = 0; i < 100; i++) {
+    const task = await store.get(id);
+    if (task && !["accepted", "running"].includes(task.status)) return task;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error("Task did not settle");
+}
+
+it("persists the prompt before engine execution and returns the recorded result", async () => {
+  let taskId = "";
+  const setupResult = await setup({
+    async run(prompt, onText) {
+      const persisted = await setupResult.store.get(taskId);
+      expect(persisted?.prompt).toBe(prompt);
+      expect(persisted?.status).toBe("running");
+      onText("hello ");
+      onText("world");
+      return "end_turn";
+    },
+    async stop() {},
+  });
+  const store = setupResult.store;
+  const insert = store.insert;
+  vi.spyOn(store, "insert").mockImplementation(async (id, prompt) => {
+    taskId = id;
+    await insert(id, prompt);
+  });
+  const res = await setupResult.request("/tasks", { prompt: "say hello" });
+  expect(res.status).toBe(202);
+  taskId = (await res.json()).id;
+  const task = await settled(store, taskId);
+  expect(task.status).toBe("completed");
+  expect(task.output).toBe("hello world");
+  expect(task.stopReason).toBe("end_turn");
+  const saved = await setupResult.request(`/tasks/${taskId}`);
+  expect((await saved.json()).output).toBe("hello world");
+});
+
+it("requires authorization, validates input, and rejects concurrent work", async () => {
+  let finish: () => void = () => {};
+  const { request, store } = await setup({
+    run: () =>
+      new Promise<string>((resolve) => {
+        finish = () => resolve("end_turn");
+      }),
+    async stop() {
+      finish();
+    },
+  });
+  expect((await request("/tasks", { prompt: "x" }, "incorrect")).status).toBe(
+    401,
+  );
+  for (const body of [
+    {},
+    { prompt: " " },
+    { prompt: 42 },
+    { prompt: "x".repeat(16001) },
+  ])
+    expect((await request("/tasks", body)).status).toBe(400);
+  const first = await request("/tasks", { prompt: "first" });
+  const { id } = await first.json();
+  expect((await request("/tasks", { prompt: "second" })).status).toBe(409);
+  expect((await request("/tasks/missing")).status).toBe(404);
+  finish();
+  await settled(store, id);
+});
+
+it("times out failed work and accepts a subsequent task", async () => {
+  let calls = 0;
+  const { request, store } = await setup(
+    {
+      run: async () => {
+        if (++calls === 1) return new Promise<string>(() => {});
+        return "end_turn";
+      },
+      async stop() {},
+    },
+    20,
+  );
+  const first = await (await request("/tasks", { prompt: "hang" })).json();
+  expect((await settled(store, first.id)).status).toBe("failed");
+  const second = await (await request("/tasks", { prompt: "next" })).json();
+  expect((await settled(store, second.id)).status).toBe("completed");
+});
+
+it("retains completed records and marks unfinished work interrupted after reopening", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-recovery-"));
+  const url = pathToFileURL(join(dir, "tasks.sqlite")).href;
+  const store = await openTaskStore(url);
+  await store.insert("done", "hello");
+  await store.update("done", { status: "completed", output: "saved" });
+  await store.insert("pending", "unfinished");
+  await store.update("pending", { status: "running" });
+  store.close();
+  const reopened = await openTaskStore(url);
+  try {
+    expect((await reopened.get("done"))?.output).toBe("saved");
+    expect((await reopened.get("pending"))?.status).toBe("interrupted");
+  } finally {
+    reopened.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("does not execute a task if its initial record cannot be committed", async () => {
+  let executed = false;
+  const { store, runner } = await setup({
+    async run() {
+      executed = true;
+      return "end_turn";
+    },
+    async stop() {},
+  });
+  vi.spyOn(store, "insert").mockRejectedValueOnce(
+    new Error("Storage unavailable"),
+  );
+  await expect(runner.submit("must not execute")).rejects.toThrow(
+    "Storage unavailable",
+  );
+  expect(executed).toBe(false);
+  const id = await runner.submit("retry");
+  expect(id).toBeTruthy();
+  expect((await settled(store, id!)).status).toBe("completed");
+});

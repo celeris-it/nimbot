@@ -3,6 +3,8 @@ import { constants } from "node:fs";
 import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import { HTTPException } from "hono/http-exception";
+import { bodyLimit } from "hono/body-limit";
+import type { TaskRunner } from "./tasks.js";
 
 export interface HostConfig {
   token: string;
@@ -20,13 +22,43 @@ export function readHostConfig(env: NodeJS.ProcessEnv): HostConfig {
 }
 
 /** Container readiness only: does not start or validate the AI engine. */
-export function createHostApi(config: HostConfig) {
+export function createHostApi(config: HostConfig, runner?: TaskRunner) {
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store");
     await next();
   });
   app.use("*", bearerAuth({ token: config.token }));
+  app.use(
+    "/tasks",
+    bodyLimit({
+      maxSize: 32_768,
+      onError: (c) => c.json({ error: "Request too large" }, 413),
+    }),
+  );
+  app.post("/tasks", async (c) => {
+    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
+    const prompt =
+      typeof body === "object" && body !== null && "prompt" in body
+        ? body.prompt
+        : undefined;
+    if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 16_000)
+      return c.json({ error: "prompt must contain 1–16000 characters" }, 400);
+    const id = await runner.submit(prompt);
+    return id
+      ? c.json({ id, status: "accepted" }, 202)
+      : c.json({ error: "Agent is busy" }, 409);
+  });
+  app.get("/tasks/:id", async (c) => {
+    const task = await runner?.get(c.req.param("id"));
+    return task ? c.json(task) : c.json({ error: "Task not found" }, 404);
+  });
   app.get("/health", async (c) => {
     try {
       await access(
@@ -36,14 +68,14 @@ export function createHostApi(config: HostConfig) {
       return c.json({
         status: "ok",
         workspace: "writable",
-        engine: "not_started",
+        engine: runner?.isBusy() ? "busy" : "not_started",
       });
     } catch {
       return c.json(
         {
           status: "unavailable",
           workspace: "unavailable",
-          engine: "not_started",
+          engine: runner?.isBusy() ? "busy" : "not_started",
         },
         503,
       );
