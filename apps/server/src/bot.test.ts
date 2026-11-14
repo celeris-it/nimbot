@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createBot } from "./bot.js";
 
-function setup() {
+function setup(execute?: (prompt: string) => Promise<string>) {
   const activations: number[] = [];
   const bot = createBot(
     {
@@ -10,6 +10,7 @@ function setup() {
       agent: { id: "test", name: "Agente de prueba", ownerId: 42 },
     },
     (chatId) => activations.push(chatId),
+    execute,
   );
   bot.botInfo = {
     id: 123,
@@ -27,6 +28,7 @@ function setup() {
     supports_join_request_queries: false,
   };
   const sent: string[] = [];
+  const destinations: number[] = [];
   bot.api.config.use(async (_prev, method, payload) => {
     if (
       method !== "sendMessage" ||
@@ -35,6 +37,8 @@ function setup() {
     )
       throw new Error("Unexpected API call");
     sent.push(payload.text);
+    destinations.push(Number(payload.chat_id));
+    expect("parse_mode" in payload).toBe(false);
     return {
       ok: true,
       result: {
@@ -45,7 +49,7 @@ function setup() {
       },
     } as Awaited<ReturnType<typeof _prev>>;
   });
-  return { bot, sent, activations };
+  return { bot, sent, activations, destinations };
 }
 
 function message(
@@ -76,6 +80,38 @@ function message(
 }
 
 describe("Telegram access", () => {
+  it("routes only activated owner text and returns split plain text", async () => {
+    const output = "<code> & *plain* " + "😀".repeat(3000);
+    const execute = vi.fn().mockResolvedValue(output);
+    const { bot, sent, destinations } = setup(execute);
+    await bot.handleUpdate(message("before start"));
+    await bot.handleUpdate(message("hello", 99));
+    await bot.handleUpdate(message("hello", 73));
+    await bot.handleUpdate(message("hello", 42, "group"));
+    expect(execute).not.toHaveBeenCalled();
+    await bot.handleUpdate(message("/start"));
+    await bot.handleUpdate(message("/unknown"));
+    expect(execute).not.toHaveBeenCalled();
+    const count = sent.length;
+    await bot.handleUpdate(message("create a file"));
+    expect(execute).toHaveBeenCalledExactlyOnceWith("create a file");
+    expect(sent.slice(count).join("")).toBe(output);
+    expect(destinations.slice(count)).toEqual([42, 42]);
+    expect(sent.slice(count).every((part) => part.length <= 4096)).toBe(true);
+  });
+  it("reports errors without exposing internal details and accepts the next task", async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("secret"))
+      .mockResolvedValueOnce("Recovered");
+    const { bot, sent } = setup(execute);
+    await bot.handleUpdate(message("/start"));
+    await bot.handleUpdate(message("first"));
+    expect(sent.at(-1)).toContain("No pude confirmar");
+    expect(sent.join("")).not.toContain("secret");
+    await bot.handleUpdate(message("second"));
+    expect(sent.at(-1)).toBe("Recovered");
+  });
   it.each(["/start", "/help"])(
     "welcomes an authorized user for %s",
     async (command) => {

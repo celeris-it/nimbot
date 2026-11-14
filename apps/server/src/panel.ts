@@ -216,7 +216,7 @@ export function createPanel(
                 ${status.host === "ready" ? "Disponible" : status.host === "busy" ? "Ocupado" : "Sin conexión"}
               </dd>
               <dt>Ejecución de tareas por Telegram</dt>
-              <dd>Pendiente de implementación</dd>
+              <dd>Disponible tras activar el chat con /start</dd>
               <dt>Activación del chat</dt>
               <dd>
                 ${status.chatActivated ? "Activado por el dueño" : "Pendiente: enviá /start al bot"}

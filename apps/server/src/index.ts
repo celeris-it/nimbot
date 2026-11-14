@@ -1,3 +1,4 @@
+import { createHostTasks } from "./host-tasks.js";
 import { getHostStatus, readAgentHostConfig } from "./agent-host.js";
 import { serve } from "@hono/node-server";
 import { createPanel, type AgentStatus } from "./panel.js";
@@ -44,9 +45,13 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   });
   console.log(`Nimbot panel: ${panelConfig.origin}`);
-  const bot = createBot(config, () => {
-    status.chatActivated = true;
-  });
+  const bot = createBot(
+    config,
+    () => {
+      status.chatActivated = true;
+    },
+    createHostTasks(hostConfig),
+  );
   let stopping = false;
   const stop = () => {
     stopping = true;
