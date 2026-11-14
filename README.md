@@ -6,7 +6,7 @@ Nimbot is a self-hosted platform for creating, running, and managing persistent 
 
 You install Nimbot on a Linux server with Docker Compose, connect your own Telegram bot, and talk to your agents from your phone. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-> **Project status:** Phase 0 in progress. The monorepo, non-root Agent Host image, and minimal ACP client are implemented. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
+> **Project status:** Phase 1 in progress. Docker/ACP validation is complete. The initial Telegram server supports configuration validation, a user allowlist, and `/start` and `/help`; task execution over Telegram is still pending. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
 
 ## What the MVP does
 
@@ -92,6 +92,8 @@ Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly
 ## Contributing
 
 Run `pnpm install`, then `pnpm build`. Before submitting changes, run `pnpm lint`, `pnpm typecheck`, and `pnpm test`.
+
+The Telegram server reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated numeric IDs) from environment variables or the root `.env`; `.env.example` lists the required settings. Start the compiled server with `pnpm start:server`. It currently handles private chats for allowlisted users; connecting tasks to the Agent Host is the next step.
 
 ## License
 

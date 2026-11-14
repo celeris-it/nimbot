@@ -4,7 +4,7 @@
 
 Nimbot is a self-hosted platform for running persistent AI agents through Telegram. Each agent runs in its own Docker container with a persistent workspace.
 
-Phase 0 is in progress: the monorepo, the Agent Host image, and a minimal ACP client exist in `apps/agent-host/`.
+Phase 0 validation is complete. Phase 1 is in progress: the Agent Host lives in `apps/agent-host/`, and the initial Telegram server lives in `apps/server/`.
 
 - [MVP.md](MVP.md) is the source of truth for scope, architecture, and phases.
 - [README.md](README.md) is the short public summary and must stay consistent with MVP.md.

@@ -1,7 +1,7 @@
 # Nimbot — MVP Specification
 
 **Version:** 0.1.0  
-**Status:** Phase 0 in progress  
+**Status:** Phase 1 in progress  
 **License:** Apache License 2.0  
 **Deployment:** Self-hosted  
 **Primary Interface:** Telegram  
@@ -283,13 +283,15 @@ There is no agent management in this phase. One Agent Host container is defined 
 
 ### Tasks
 
-- [ ] The Nimbot Server starts, validates its configuration, and connects to Telegram with long polling.
-- [ ] Only allowlisted Telegram user IDs get a response; everyone else is rejected.
+- [x] The Nimbot Server starts, validates its configuration, and connects to Telegram with long polling.
+- [x] Only allowlisted Telegram user IDs get a response; everyone else is rejected.
 - [ ] One Agent Host container runs with a persistent workspace volume.
 - [ ] The server sends tasks to the Agent Host and receives events over an authenticated internal API.
 - [ ] A text message becomes an OpenCode task, and the final answer is delivered to Telegram.
 - [ ] Long answers are split to fit Telegram's message length limit.
 - [ ] Errors are reported to the user in plain language.
+
+The server now validates its Telegram token and a non-empty user allowlist, starts grammY long polling, and handles `/start` and `/help` in private chats. Unauthorized users and group messages are ignored. Configuration and authorization are tested with a simulated Telegram API. A live Telegram check confirmed that an allowlisted user receives the welcome and setup notices. Agent Host routing is not implemented yet, so text messages receive a setup notice and no tasks execute.
 
 ### Acceptance Criteria
 
