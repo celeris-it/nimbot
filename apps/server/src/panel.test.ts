@@ -138,6 +138,13 @@ describe("panel access", () => {
     advance(15 * 60 * 1000);
     expect((await post("/login", "password=wrong")).status).toBe(401);
   });
+  it("does not count successful logins towards the limit", async () => {
+    const { post, login } = setup();
+    for (let i = 0; i < 4; i++)
+      expect((await post("/login", "password=wrong")).status).toBe(401);
+    for (let i = 0; i < 6; i++)
+      expect((await login()).response.status).toBe(303);
+  });
   it("uses Secure cookies on HTTPS", async () => {
     const app = createPanel(
       readPanelConfig({
@@ -169,6 +176,25 @@ describe("panel access", () => {
     expect(() =>
       readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash, PANEL_URL: url }),
     ).toThrow();
+  });
+  it("names PANEL_URL when it is not a URL", () => {
+    expect(() =>
+      readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash, PANEL_URL: "nope" }),
+    ).toThrow("PANEL_URL");
+  });
+  it("uses loopback defaults for blank settings", () => {
+    expect(
+      readPanelConfig({
+        PANEL_PASSWORD_HASH: passwordHash,
+        PANEL_URL: "",
+        PANEL_HOST: " ",
+        PANEL_PORT: "",
+      }),
+    ).toMatchObject({
+      origin: "http://localhost:3000",
+      hostname: "127.0.0.1",
+      port: 3000,
+    });
   });
   it("requires a properly encoded password hash", () => {
     expect(() => readPanelConfig({ PANEL_PASSWORD_HASH: "plaintext" })).toThrow(

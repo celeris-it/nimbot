@@ -150,6 +150,7 @@ export function createPanel(
         login("La contraseña no es correcta. Intentá nuevamente."),
         401,
       );
+    attempts = 0;
     for (const [id, expires] of sessions)
       if (expires <= now()) sessions.delete(id);
     if (sessions.size >= 10) sessions.delete(sessions.keys().next().value!);

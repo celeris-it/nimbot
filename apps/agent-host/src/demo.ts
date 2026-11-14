@@ -45,9 +45,9 @@ process.on("SIGTERM", interrupt);
 
 try {
   await client.initialize();
-  const sessionId = process.env.ACP_SESSION_ID;
+  const sessionId = process.env.ACP_SESSION_ID?.trim();
   if (sessionId) await client.loadSession(sessionId, cwd);
-  activeSessionId = sessionId ?? (await client.newSession(cwd));
+  activeSessionId = sessionId || (await client.newSession(cwd));
   console.error(`[session] ${activeSessionId}`);
   const stopReason = await client.prompt(activeSessionId, text);
   console.error(`\n[done] ${stopReason}`);

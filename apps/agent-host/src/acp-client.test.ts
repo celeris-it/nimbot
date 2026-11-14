@@ -169,4 +169,32 @@ describe("AcpClient", () => {
     expect(await pending).toBe("cancelled");
     expect(await client.prompt("s1", "next task")).toBe("end_turn");
   });
+
+  it("rejects pending and later requests once the connection closes", async () => {
+    const { input, output } = fakeAgent(() => {});
+    const client = new AcpClient(input, output);
+    const pending = client.initialize();
+    input.end();
+    await expect(pending).rejects.toThrow("ACP connection closed");
+    await expect(client.newSession("/w")).rejects.toThrow(
+      "ACP connection closed",
+    );
+  });
+
+  it("fails requests instead of crashing when the engine's stdin breaks", async () => {
+    const output = new PassThrough();
+    const client = new AcpClient(new PassThrough(), output);
+    const pending = client.initialize();
+    output.destroy(new Error("EPIPE"));
+    await expect(pending).rejects.toThrow("ACP connection closed");
+    client.cancel("s1");
+  });
+
+  it("ignores JSON output that is not a protocol message", async () => {
+    const { input, output } = fakeAgent((msg, send) => {
+      input.write("null\n42\n");
+      send({ id: msg.id, result: { sessionId: "s1" } });
+    });
+    expect(await new AcpClient(input, output).newSession("/w")).toBe("s1");
+  });
 });

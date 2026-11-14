@@ -11,7 +11,11 @@ export function readPanelConfig(env: NodeJS.ProcessEnv): PanelConfig {
   const passwordHash = env.PANEL_PASSWORD_HASH ?? "";
   if (!passwordHashPattern.test(passwordHash))
     throw new Error("Set PANEL_PASSWORD_HASH using pnpm panel:password.");
-  const url = new URL(env.PANEL_URL ?? "http://localhost:3000");
+  // Blank values (e.g. `PANEL_HOST=` in .env) fall back to the defaults.
+  const urlText = env.PANEL_URL?.trim() || "http://localhost:3000";
+  if (!URL.canParse(urlText))
+    throw new Error("PANEL_URL must be an HTTPS origin, or HTTP on loopback.");
+  const url = new URL(urlText);
   if (
     url.username ||
     url.password ||
@@ -26,13 +30,13 @@ export function readPanelConfig(env: NodeJS.ProcessEnv): PanelConfig {
   ) {
     throw new Error("PANEL_URL must be an HTTPS origin, or HTTP on loopback.");
   }
-  const port = Number(env.PANEL_PORT ?? 3000);
+  const port = Number(env.PANEL_PORT?.trim() || 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("PANEL_PORT must be between 1 and 65535.");
   return {
     passwordHash,
     origin: url.origin,
     port,
-    hostname: env.PANEL_HOST ?? "127.0.0.1",
+    hostname: env.PANEL_HOST?.trim() || "127.0.0.1",
   };
 }

@@ -38,6 +38,7 @@ interface RpcMessage {
 export class AcpClient {
   private nextId = 1;
   private supportsLoadSession = false;
+  private closedWith: Error | undefined;
   private readonly pending = new Map<number | string, Pending>();
 
   constructor(
@@ -47,12 +48,16 @@ export class AcpClient {
   ) {
     const lines = createInterface({ input });
     lines.on("line", (line) => this.handleLine(line));
-    lines.on("close", () => {
-      for (const { reject } of this.pending.values()) {
-        reject(new Error("ACP connection closed"));
-      }
-      this.pending.clear();
-    });
+    lines.on("close", () => this.close());
+    // A dead engine closes its stdin; without a listener, EPIPE would crash us.
+    output.on("error", () => this.close());
+  }
+
+  /** Fails pending and future requests; used when the engine goes away. */
+  close(error = new Error("ACP connection closed")): void {
+    this.closedWith ??= error;
+    for (const { reject } of this.pending.values()) reject(this.closedWith);
+    this.pending.clear();
   }
 
   async initialize(): Promise<unknown> {
@@ -104,6 +109,7 @@ export class AcpClient {
   }
 
   private request(method: string, params: unknown): Promise<unknown> {
+    if (this.closedWith) return Promise.reject(this.closedWith);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -112,6 +118,7 @@ export class AcpClient {
   }
 
   private send(message: unknown): void {
+    if (this.closedWith) return;
     this.output.write(JSON.stringify(message) + "\n");
   }
 
@@ -123,6 +130,7 @@ export class AcpClient {
     } catch {
       return; // not protocol output
     }
+    if (typeof message !== "object" || message === null) return;
 
     if (message.method === undefined) {
       if (message.id === undefined) return;
@@ -182,8 +190,10 @@ export function spawnOpenCode(
     cwd,
     stdio: ["pipe", "pipe", "inherit"],
   });
-  return {
-    client: new AcpClient(child.stdout, child.stdin, options),
-    process: child,
-  };
+  const client = new AcpClient(child.stdout, child.stdin, options);
+  // Spawn failures (e.g. opencode missing) arrive as an "error" event.
+  child.on("error", (error) =>
+    client.close(new Error(`Could not run opencode: ${error.message}`)),
+  );
+  return { client, process: child };
 }
