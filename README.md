@@ -6,7 +6,7 @@ Nimbot is a self-hosted platform for creating, running, and managing persistent 
 
 You install Nimbot on a Linux server with Docker Compose, connect your own Telegram bot, and talk to your agents from your phone. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-> **Project status:** Planning. Nothing is implemented yet. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
+> **Project status:** Phase 0 in progress. The monorepo, non-root Agent Host image, and minimal ACP client are implemented. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
 
 ## What the MVP does
 
@@ -64,6 +64,8 @@ One Nimbot Server manages one container per agent on the same machine.
 
 TypeScript on Node.js LTS, pnpm, Hono, grammY, Drizzle with SQLite, Docker, Playwright, and Vitest. The AI engine is [OpenCode](https://opencode.ai), driven through the Agent Client Protocol (ACP).
 
+The Agent Host image includes Playwright and headless Chromium. During Phase 0, OpenCode uses its container terminal to run the browser probe (`node /app/apps/agent-host/dist/browser-demo.js <url>`); no host browser or external MCP server is needed. The probe returns the page title and text. The demo waits up to two seconds for engine shutdown before forcing termination.
+
 ## Security
 
 The MVP is intended for trusted, self-hosted use. Agent containers run as non-root with resource limits and no access to the Docker socket or server credentials.
@@ -89,7 +91,7 @@ Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly
 
 ## Contributing
 
-Contribution guidelines and development setup will be added once there is code to contribute to.
+Run `pnpm install`, then `pnpm build`. Before submitting changes, run `pnpm lint`, `pnpm typecheck`, and `pnpm test`.
 
 ## License
 

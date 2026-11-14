@@ -1,7 +1,7 @@
 # Nimbot — MVP Specification
 
 **Version:** 0.1.0  
-**Status:** Planning  
+**Status:** Phase 0 in progress  
 **License:** Apache License 2.0  
 **Deployment:** Self-hosted  
 **Primary Interface:** Telegram  
@@ -258,10 +258,14 @@ Add a new package only when two apps need to share the code.
 - [x] The monorepo is set up with pnpm, TypeScript strict mode, ESLint, Prettier, and Vitest.
 - [x] An Agent Host Docker image runs OpenCode as a non-root user.
 - [x] A minimal ACP client can start a session, send a prompt, and receive streaming output.
-- [ ] OpenCode can edit a file and run a terminal command in the workspace.
-- [ ] A browser task works, and the way OpenCode reaches the browser is decided and documented.
-- [ ] Session resumption after a process restart and cancellation of a running prompt are tested.
-- [ ] A short write-up lists what OpenCode already provides (sessions, history, tools) and what Nimbot must build.
+- [x] OpenCode can edit a file and run a terminal command in the workspace.
+- [x] A browser task works, and the way OpenCode reaches the browser is decided and documented.
+- [x] Session resumption after a process restart and cancellation of a running prompt are tested.
+- [x] A short write-up lists what OpenCode already provides (sessions, history, tools) and what Nimbot must build.
+
+The client supports capability-checked session loading and cancellation. Docker validation with OpenCode 1.19.5 confirmed file writes, terminal execution, persistent workspaces and history, session loading after container recreation, cancellation, and a new turn after cancellation. Browser validation confirmed that OpenCode can launch headless Chromium through its terminal using the bundled Playwright probe and summarize https://example.org. The browser runs inside the Agent Host; no external MCP server is required. The demo bounds engine shutdown with a two-second grace period before SIGKILL.
+
+OpenCode provides sessions, history replay, filesystem and terminal tools. Nimbot must provide Telegram routing and authorization, durable task state, container lifecycle, progress delivery, and user approvals. Client-side ACP filesystem and terminal capabilities remain disabled; tools run through OpenCode inside the container. Browser automation uses terminal execution rather than a dedicated ACP browser capability.
 
 ### Acceptance Criteria
 

@@ -37,6 +37,7 @@ interface RpcMessage {
 
 export class AcpClient {
   private nextId = 1;
+  private supportsLoadSession = false;
   private readonly pending = new Map<number | string, Pending>();
 
   constructor(
@@ -54,8 +55,8 @@ export class AcpClient {
     });
   }
 
-  initialize(): Promise<unknown> {
-    return this.request("initialize", {
+  async initialize(): Promise<unknown> {
+    const result = await this.request("initialize", {
       protocolVersion: 1,
       // No client-side fs/terminal: the engine uses its own tools inside the container.
       clientCapabilities: {
@@ -63,6 +64,18 @@ export class AcpClient {
         terminal: false,
       },
     });
+    this.supportsLoadSession =
+      (result as { agentCapabilities?: { loadSession?: boolean } })
+        .agentCapabilities?.loadSession === true;
+    return result;
+  }
+
+  /** Restore an existing session only when the engine advertises support. */
+  async loadSession(sessionId: string, cwd: string): Promise<void> {
+    if (!this.supportsLoadSession) {
+      throw new Error("The ACP engine does not support loading sessions");
+    }
+    await this.request("session/load", { sessionId, cwd, mcpServers: [] });
   }
 
   async newSession(cwd: string): Promise<string> {

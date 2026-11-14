@@ -54,7 +54,10 @@ Run lint, type-check, and tests before finishing any change.
 
 ## Conventions
 
+- Do not create standalone manual validation guides or test run reports unless the user explicitly requests them. If the user needs to run commands to test something, provide the commands and instructions directly in chat.
 - Never commit secrets. Configuration comes from environment variables; keep `.env.example` current once it exists.
 - Add tests with new behaviour.
 - When a change affects scope or architecture, update MVP.md and README.md in the same change.
 - Commit or push only when the user asks.
+- Match the existing commit message style: an English imperative subject without Conventional Commit prefixes, followed by a blank line and a short explanatory body.
+- Include a `Co-Authored-By` trailer for the assisting AI, naming both the assistant and the model and using the provider's attribution email. Use the actual model identity available in the session; do not invent a model name or version.

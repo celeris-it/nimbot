@@ -11,10 +11,16 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY apps/agent-host apps/agent-host
-RUN pnpm install --frozen-lockfile && pnpm --filter @nimbot/agent-host build
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN pnpm install --frozen-lockfile \
+ && pnpm --filter @nimbot/agent-host build \
+ && pnpm --filter @nimbot/agent-host exec playwright install --with-deps chromium \
+ && chmod -R a+rX /opt/playwright \
+ && rm -rf /var/lib/apt/lists/*
 
 # The base image ships a non-root "node" user (uid 1000).
-RUN mkdir -p /workspace && chown node:node /workspace
+RUN mkdir -p /workspace /home/node/.local/share/opencode \
+ && chown -R node:node /workspace /home/node/.local
 USER node
 ENV WORKSPACE=/workspace
 VOLUME /workspace

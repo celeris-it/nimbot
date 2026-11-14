@@ -96,4 +96,77 @@ describe("AcpClient", () => {
       { jsonrpc: "2.0", method: "session/cancel", params: { sessionId: "s1" } },
     ]);
   });
+
+  it("loads a session on a new connection and replays history", async () => {
+    const seen: Rpc[] = [];
+    const updates: SessionUpdate[] = [];
+    const { input, output } = fakeAgent((msg, send) => {
+      seen.push(msg);
+      if (msg.method === "initialize")
+        send({
+          id: msg.id,
+          result: { agentCapabilities: { loadSession: true } },
+        });
+      if (msg.method === "session/load") {
+        send({
+          method: "session/update",
+          params: {
+            sessionId: "saved",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "Previous reply" },
+            },
+          },
+        });
+        send({ id: msg.id, result: {} });
+      }
+      if (msg.method === "session/prompt")
+        send({ id: msg.id, result: { stopReason: "end_turn" } });
+    });
+    const client = new AcpClient(input, output, {
+      onUpdate: (_id, update) => updates.push(update),
+    });
+    await client.initialize();
+    await client.loadSession("saved", "/workspace");
+    expect(seen[1]?.params).toEqual({
+      sessionId: "saved",
+      cwd: "/workspace",
+      mcpServers: [],
+    });
+    expect(updates).toHaveLength(1);
+    expect(await client.prompt("saved", "continue")).toBe("end_turn");
+  });
+
+  it("does not request loading when the engine lacks support", async () => {
+    const seen: Rpc[] = [];
+    const { input, output } = fakeAgent((msg, send) => {
+      seen.push(msg);
+      send({ id: msg.id, result: { protocolVersion: 1 } });
+    });
+    const client = new AcpClient(input, output);
+    await client.initialize();
+    await expect(client.loadSession("saved", "/workspace")).rejects.toThrow(
+      "does not support loading sessions",
+    );
+    expect(seen).toHaveLength(1);
+  });
+
+  it("finishes a cancelled prompt and accepts the next turn", async () => {
+    let promptId: number | undefined;
+    let turns = 0;
+    const { input, output } = fakeAgent((msg, send) => {
+      if (msg.method === "session/prompt") {
+        promptId = msg.id;
+        if (++turns > 1)
+          send({ id: msg.id, result: { stopReason: "end_turn" } });
+      }
+      if (msg.method === "session/cancel")
+        send({ id: promptId, result: { stopReason: "cancelled" } });
+    });
+    const client = new AcpClient(input, output);
+    const pending = client.prompt("s1", "long task");
+    client.cancel("s1");
+    expect(await pending).toBe("cancelled");
+    expect(await client.prompt("s1", "next task")).toBe("end_turn");
+  });
 });

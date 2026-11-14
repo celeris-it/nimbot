@@ -7,5 +7,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "acp:demo": "node dist/demo.js"
+  },
+  "dependencies": {
+    "playwright": "^1.65.1"
   }
 }
