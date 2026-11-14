@@ -26,7 +26,7 @@ Use pnpm, not npm or yarn.
 
 Planned monorepo layout, from MVP.md section 5:
 
-- `apps/server/` — Nimbot Server: Telegram, agent registry, task routing, container management
+- `apps/server/` — Nimbot Server: authenticated administration panel, Telegram, agent registry, task routing, container management
 - `apps/agent-host/` — runs inside each agent container: AI engine, tasks, workspace
 - `packages/` — shared code
 - `infrastructure/docker/` — Dockerfiles
@@ -47,6 +47,8 @@ Run lint, type-check, and tests before finishing any change.
 
 - The Nimbot Server must never run agent-generated shell commands on the host OS; they run only inside the agent's container.
 - Agent containers run as non-root, with resource limits, and must not get the Docker socket or server credentials.
+- Each agent must have its own distinct Telegram bot and owner-bound private chat; the authenticated web panel handles administration. Do not add a management bot. Do not introduce a shared selected-agent or `/use` workflow.
+- Keep Telegram bot tokens and all polling connections on the Nimbot Server, outside agent containers.
 - Keep Telegram-specific code out of the agent runtime.
 - Keep OpenCode-specific code behind the engine interface.
 - Persist messages and tasks before executing them.

@@ -4,18 +4,18 @@
 **Status:** Phase 1 in progress  
 **License:** Apache License 2.0  
 **Deployment:** Self-hosted  
-**Primary Interface:** Telegram  
+**Interfaces:** Web panel for administration; Telegram for agent conversations  
 **Primary AI Engine:** OpenCode (ACP)
 
 ---
 
 ## 1. Overview
 
-Nimbot is a self-hosted platform for creating, running, and managing persistent AI agents through messaging applications.
+Nimbot is a self-hosted platform for creating, running, and managing persistent AI agents through a local web panel, with agent conversations delivered through Telegram.
 
 Users install Nimbot on their own servers and interact with their agents through Telegram.
 
-Each agent has its own identity, instructions, conversations, persistent workspace, and execution environment.
+Each agent has its own Telegram bot, private chat, identity, instructions, conversations, persistent workspace, and execution environment. An authenticated web panel handles agent administration; users send tasks directly to each agent’s bot. There is no management bot.
 
 Agents can execute commands, modify files, browse the web, and perform long-running tasks without requiring users to remain connected.
 
@@ -26,10 +26,10 @@ The MVP focuses on delivering a reliable, extensible, single-server installation
 A user should be able to:
 
 1. Install Nimbot on a Linux server using Docker Compose.
-2. Connect their own Telegram bot.
-3. Create and manage multiple AI agents.
+2. Sign in to the administration panel and link a distinct Telegram bot for each agent.
+3. Create and manage multiple AI agents through the panel.
 4. Assign a dedicated execution environment to each agent.
-5. Send tasks to agents through Telegram.
+5. Send tasks in each agent bot’s private chat, with no shared active-agent selection.
 6. Allow agents to execute terminal commands, manipulate files, and use a browser.
 7. Receive progress updates and task results.
 8. Stop and restart agents without losing persistent data.
@@ -40,7 +40,10 @@ A user should be able to:
 The MVP is complete when:
 
 - Nimbot can be installed with documented Docker Compose instructions.
-- Telegram can create, list, select, stop, and delete agents.
+- The authenticated panel can create, list, configure, start, stop, and delete agents.
+- Unauthenticated users cannot access agent administration or credentials.
+- Every agent has a distinct Telegram bot and private conversation.
+- Tasks, progress, approvals, and results stay in the originating agent bot’s chat.
 - At least two agents can operate independently.
 - Each agent has a persistent workspace.
 - OpenCode can execute tasks through ACP.
@@ -59,7 +62,10 @@ The MVP is complete when:
 
 - Self-hosted deployment
 - Docker Compose installation
-- Telegram integration
+- Minimal authenticated web administration panel
+- Telegram integration with one distinct bot per agent
+- Manual bot creation in BotFather and secure token linking through the panel
+- Private one-to-one chats with explicit bot-to-agent bindings
 - Multiple persistent agents
 - OpenCode integration through ACP
 - Dedicated Docker execution environment per agent
@@ -78,7 +84,9 @@ The MVP is complete when:
 
 ### 2.2 Excluded from MVP
 
-- Web dashboard
+- Advanced dashboards, analytics, and a web chat interface
+- Management bots and Telegram Managed Bots provisioning
+- Public registration, multiple panel accounts, and shared agent administration
 - Mobile application
 - WhatsApp integration
 - Slack and Discord integrations
@@ -103,7 +111,7 @@ The MVP is complete when:
 | Language | TypeScript |
 | Runtime | Node.js LTS |
 | Package Manager | pnpm |
-| HTTP Framework | Hono |
+| HTTP Framework and Administration Panel | Hono; minimal server-served UI |
 | Telegram Bot | grammY |
 | AI Engine | OpenCode |
 | Agent Protocol | Agent Client Protocol (ACP) |
@@ -125,7 +133,9 @@ Redis, PostgreSQL, Kubernetes, and external message brokers are not required.
 Nimbot uses a local server architecture with a central application and independent agent execution environments.
 
 ```text
-                    Telegram
+  Web panel (admin)      Telegram agent bots A, B
+          |                         |
+          +------------+------------+
                        |
                        v
               +------------------+
@@ -160,7 +170,9 @@ Nimbot uses a local server architecture with a central application and independe
 
 The Nimbot Server is responsible for:
 
-- Telegram communication
+- Serving the administration panel and enforcing administrator authentication
+- Telegram communication through each agent’s bot
+- Bot credentials, long-polling connections, and bot-to-agent bindings
 - Agent registration
 - Agent configuration
 - Task routing
@@ -171,6 +183,45 @@ The Nimbot Server is responsible for:
 - Logging and diagnostics
 
 The server must not execute agent-generated shell commands directly on the host operating system.
+
+### 4.1.1 Administration panel
+
+The MVP has one administrator account per self-hosted installation. Credentials are configured locally before startup; there is no public registration, password recovery by email, or external identity provider. The panel and its API are served by the Nimbot Server, without a separate frontend service.
+
+The panel supports only:
+
+- Sign in and sign out.
+- List agents, their runtime and bot connection states, and links to open their Telegram chats.
+- Create an agent with a name, optional instructions, the owner's numeric Telegram user ID, and a bot token created in BotFather.
+- Edit the name and instructions, and replace a revoked bot token. Instruction changes apply on the next task, without rewriting a running task.
+- Start and stop an agent's container. Stopping an agent safely interrupts an active task and records its status; it is distinct from Telegram `/stop`, which cancels only the current task.
+- Delete an agent with explicit confirmation and a separate explicit choice to delete its persistent data. Retaining the volume is the default.
+
+Authentication and authorization protect every administration page and API endpoint. Passwords are stored as hashes; sessions use expiring HttpOnly cookies, Secure cookies when served over HTTPS, and SameSite restrictions. State-changing requests have CSRF protection and login attempts are rate limited. Remote deployment requires HTTPS; local access may use loopback HTTP. Bot tokens are accepted only through authenticated requests, masked after saving, and never returned to the browser in subsequent responses.
+
+Web task chat, terminal access, file browsing, analytics, and additional panel accounts are deferred. Telegram remains the interface for tasks, progress, results, and approvals.
+
+### 4.1.2 Telegram routing
+
+- Each agent has exactly one distinct Telegram bot. A bot cannot be bound to multiple agents.
+- A single Nimbot Server maintains a grammY long-polling connection for each bot; agent containers do not connect to Telegram.
+- Routing resolves the receiving bot ID to its bound agent, then checks the Telegram sender against the installation allowlist and the agent's configured owner. Each agent has one Telegram owner for the MVP; shared agents are deferred.
+- The server records the private chat ID after the owner starts the agent bot. Tasks, progress, approvals, cancellations, and final responses use that same bot and chat. Telegram delivery uses chat IDs, not phone numbers.
+- There is no global selected agent and no `/use` command. Different agents have separate chats, histories, and queues.
+- Telegram bot tokens stay in protected server-side secret storage and never enter agent containers, model context, logs, or task events. SQLite stores bot identity and a reference to its credential.
+- Users must open each agent bot and press Start before it can send private notifications. The panel distinguishes container readiness, bot connectivity, and chat activation.
+
+### 4.1.3 Agent creation and bot linking
+
+1. The administrator creates a bot in BotFather and obtains its token.
+2. In the authenticated panel, the administrator enters an agent name, optional instructions, the owner's numeric Telegram user ID, and the token. The Telegram owner must be allowlisted.
+3. The server validates the token with Telegram, verifies the bot identity, rejects an already-bound bot, and persists pending setup with a server-side credential reference before provisioning.
+4. Nimbot provisions the Agent Host and starts polling its bot. The panel shows progress, the resulting status, and the bot's chat link; incomplete or failed agents cannot execute tasks.
+5. The owner opens the bot and presses Start. Only that authorized owner can activate the private-chat binding and send tasks.
+
+Retries must not create multiple agents or bind the same bot twice. Failed or cancelled provisioning records what was created and allows an explicit retry or cleanup. Deleting an agent stops its bot connection and removes its local binding and credential; it does not delete the Telegram bot identity. The panel explains that Telegram identity deletion is handled separately in BotFather. Replacing a token verifies the same bot identity; switching an existing agent to a different bot is deferred.
+
+Telegram references: [BotFather](https://core.telegram.org/bots/features#botfather) and [bot conversation restrictions](https://core.telegram.org/bots#how-are-bots-different-from-humans).
 
 ### 4.2 Agent Host
 
@@ -193,10 +244,13 @@ The host communicates with the Nimbot Server through an authenticated internal A
 
 The Nimbot Server maintains a SQLite database containing:
 
+- Administrator account and panel session state
 - Agents
 - Agent configurations
 - Telegram user permissions
-- Telegram conversation routes
+- Agent owners, Telegram bot IDs and usernames, credential references, and private-chat bindings
+- Pending bot setup and activation state
+- Telegram conversation routes keyed by bot ID and chat ID
 - Task metadata
 - Container metadata
 - Application settings
@@ -279,23 +333,28 @@ OpenCode provides sessions, history replay, filesystem and terminal tools. Nimbo
 
 **Goal:** A single, pre-configured agent answers over Telegram, end to end.
 
-There is no agent management in this phase. One Agent Host container is defined in `compose.yaml`.
+There is no dynamic agent creation in this phase. One Agent Host container is defined in `compose.yaml`, and one pre-configured agent bot is bound to it. A minimal authenticated panel shows that agent’s status and Telegram link. This validates the administration/conversation split before adding provisioning in Phase 2.
 
 ### Tasks
 
 - [x] The Nimbot Server starts, validates its configuration, and connects to Telegram with long polling.
 - [x] Only allowlisted Telegram user IDs get a response; everyone else is rejected.
+- [ ] Locally configured administrator authentication, login/logout, protected panel/API routes, session expiry, CSRF protection, and login rate limiting work.
+- [ ] The panel lists the pre-configured agent, its status, bot connectivity and activation state, and a link to its Telegram chat.
+- [ ] The pre-configured agent bot token and owner ID are validated and explicitly bound to that agent.
 - [ ] One Agent Host container runs with a persistent workspace volume.
+- [ ] The agent bot is bound to that Agent Host and the authorized owner’s private chat after `/start`.
 - [ ] The server sends tasks to the Agent Host and receives events over an authenticated internal API.
-- [ ] A text message becomes an OpenCode task, and the final answer is delivered to Telegram.
+- [ ] A text message in the agent bot’s chat becomes an OpenCode task, and the final answer is delivered by that same bot to that chat.
 - [ ] Long answers are split to fit Telegram's message length limit.
 - [ ] Errors are reported to the user in plain language.
 
-The server now validates its Telegram token and a non-empty user allowlist, starts grammY long polling, and handles `/start` and `/help` in private chats. Unauthorized users and group messages are ignored. Configuration and authorization are tested with a simulated Telegram API. A live Telegram check confirmed that an allowlisted user receives the welcome and setup notices. Agent Host routing is not implemented yet, so text messages receive a setup notice and no tasks execute.
+Current implementation (before the multiple-bot routing change): the server validates its single Telegram token and a non-empty user allowlist, starts grammY long polling, and handles `/start` and `/help` in private chats. Unauthorized users and group messages are ignored. Configuration and authorization are tested with a simulated Telegram API. A live Telegram check confirmed that an allowlisted user receives the welcome and setup notices. The administration panel, explicit bot-to-agent binding, and Agent Host routing are not implemented yet, so text messages receive a setup notice and no tasks execute.
 
 ### Acceptance Criteria
 
-- An authorized user sends a programming task and receives the result in Telegram.
+- An authorized owner starts the agent bot, sends a programming task in its private chat, and receives the result there.
+- The administrator can sign in to the panel, inspect the agent, and open its Telegram chat. Unauthenticated requests cannot access the panel or administration API.
 - An unauthorized user is rejected.
 - Files the agent created are still there after the container restarts.
 
@@ -303,34 +362,41 @@ The server now validates its Telegram token and a non-empty user allowlist, star
 
 ## 8. Phase 2 — Multiple Agents
 
-**Goal:** Create and manage agents from Telegram, each in its own container.
+**Goal:** Create and manage agents from the authenticated panel, each with its own Telegram bot, private conversation, container, and persistent volume.
 
 ### Tasks
 
-- [ ] The server stores agents, their instructions, their containers, and each user's selected agent in SQLite, with migrations.
+- [ ] The server stores agents, owners, instructions, containers, bot identities, credential references, chat bindings, and provisioning state in SQLite, with migrations.
 - [ ] The server can create, start, stop, and delete agent containers and volumes through the Docker Engine API.
 - [ ] Agent containers run as non-root with CPU, memory, and process limits, and without the Docker socket or server credentials.
-- [ ] `/new` asks for a name and optional instructions, provisions the agent, selects it, and reports provisioning failures.
-- [ ] `/agents`, `/use`, `/status`, `/start`, and `/help` work.
-- [ ] `/delete` asks for confirmation before removing an agent and its data.
-- [ ] Messages go to the selected agent, with a clear reply when no agent is selected or the agent is stopped.
+- [ ] The panel creates agents with a name, optional instructions, owner Telegram ID, and a bot token from BotFather; the server validates and links the bot before provisioning.
+- [ ] The panel edits agent names and instructions, replaces tokens for the same bot, and starts/stops containers with explicit task interruption status.
+- [ ] Bot setup, owner verification, cancellation, and provisioning failures have explicit states; incomplete setup does not route tasks or leave an untracked container.
+- [ ] Starting an agent bot verifies its owner and activates its private-chat binding.
+- [ ] Each agent bot has its own long-polling connection, managed by the same server; one bot’s failure does not stop the others.
+- [ ] The panel lists agent and bot states and provides links to the respective agent chats.
+- [ ] Panel deletion requires confirmation, retains persistent volumes by default, and deletes data only when explicitly selected. It stops polling the bot and removes its local binding and credential. The confirmation explains that Telegram bot identity deletion is separate.
+- [ ] Messages go only to the agent bound to the receiving bot, with a clear reply when that agent is stopped or not ready.
+- [ ] A bot already bound to another agent, an invalid token, a non-allowlisted owner, and unauthenticated setup requests are rejected.
 
 ### Telegram Commands
 
 | Command | Description |
 |---|---|
-| `/start` | Display welcome message and help |
-| `/new` | Create a new agent |
-| `/agents` | List existing agents |
-| `/use` | Select the active agent |
-| `/status` | Display agent and task status |
-| `/stop` | Cancel the active task (Phase 3) |
-| `/delete` | Delete an agent with confirmation |
-| `/help` | Display available commands |
+| `/start`, `/help` | Activate the owner's chat and display this agent's help |
+| `/status` | Display this agent's status |
+| `/stop` | Cancel this agent's active task (Phase 3) |
+| Text message | Send a task to this bot's bound agent |
+
+Agent creation, configuration, container start/stop, token linking, and deletion are panel actions. Telegram has no `/new`, `/agents`, `/delete`, or `/use` administration workflow.
 
 ### Acceptance Criteria
 
-- Two agents run independently, each with its own container and persistent volume.
+- Two agents run independently, each with a distinct Telegram bot, private chat, container, and persistent volume.
+- Interleaved messages to agent bots A and B produce replies in the matching chats without switching an active agent.
+- An allowlisted user cannot access an agent owned by another user.
+- The panel can create, configure, start, stop, and delete agents; its API rejects unauthenticated and forged state-changing requests.
+- Deleting an agent preserves its volume unless data deletion is explicitly confirmed.
 - One agent cannot read another agent's workspace through its workspace or supported tools.
 - Agent Hosts are reachable only from the Nimbot Server.
 
@@ -342,13 +408,13 @@ The server now validates its Telegram token and a non-empty user allowlist, star
 
 ### Tasks
 
-- [ ] Each conversation has a persistent FIFO task queue and runs one turn at a time.
+- [ ] Each agent conversation, identified by bot ID and private chat ID, has a persistent FIFO task queue and runs one turn at a time.
 - [ ] Incoming messages and task state changes are saved before execution.
-- [ ] Progress updates are sent to Telegram while a task runs.
-- [ ] `/stop` cancels the running task, and the agent accepts a new task afterwards.
+- [ ] Progress updates are sent through the originating agent bot to its owner’s bound chat while a task runs.
+- [ ] `/stop` in an agent bot cancels only that agent’s running task, and the agent accepts a new task afterwards.
 - [ ] Tasks have a timeout, and a failed task does not block the tasks behind it.
 - [ ] Browser tasks work through Playwright, using the approach chosen in Phase 0.
-- [ ] Approval requests for sensitive actions are shown in Telegram and can be accepted or denied.
+- [ ] Approval requests for sensitive actions are sent through the originating agent bot and can be accepted or denied only by its authorized owner; callbacks are bound to that agent and task.
 
 ### Acceptance Criteria
 
@@ -364,13 +430,13 @@ The server now validates its Telegram token and a non-empty user allowlist, star
 
 ### Tasks
 
-- [ ] After a server restart, agents, selected agents, and container states are restored, and missing or stopped containers are detected.
+- [ ] After a server restart, agents, owners, bot credentials and bindings, polling connections, and container states are restored, and missing or stopped containers are detected.
 - [ ] After an Agent Host restart, the conversation continues, and in-flight tasks are resumed or marked interrupted and reported to the user.
-- [ ] Duplicate Telegram updates do not create duplicate tasks.
-- [ ] Telegram, Docker, and OpenCode failures are retried a bounded number of times and then reported, without leaving the system stuck.
+- [ ] Duplicate Telegram updates do not create duplicate tasks; deduplication uses bot ID and update ID, since update IDs are not shared across bots.
+- [ ] Telegram, Docker, and OpenCode failures are retried a bounded number of times and then reported, without leaving the system stuck. A revoked or invalid agent bot token is shown in the panel and does not stop other agents.
 - [ ] The server and Agent Hosts expose health checks and write structured logs with agent and task IDs, with secrets redacted.
 - [ ] Agent containers have restricted Linux capabilities and networking, and internal APIs are not exposed outside the Docker network.
-- [ ] Automated tests cover authorization, message routing, task state transitions, restart recovery, cancellation, and multi-agent isolation.
+- [ ] Automated tests cover panel authentication, session expiry, CSRF protection, bot linking, owner authorization, message routing, task state transitions, restart recovery, cancellation, and multi-agent isolation.
 
 **Security limitation:** The MVP is intended for trusted self-hosted deployments. Docker containers alone do not provide sufficient isolation for hostile multi-tenant workloads.
 
@@ -391,7 +457,7 @@ The server now validates its Telegram token and a non-empty user allowlist, star
 
 - [ ] Dockerfiles for both apps, `compose.yaml`, and `.env.example` exist, with restart policies and health checks.
 - [ ] A fresh install on a clean Linux server works by following the documentation alone.
-- [ ] The documentation covers installation, Telegram bot creation, AI provider authentication, environment variables, and commands.
+- [ ] The documentation covers installation, panel administrator setup, HTTPS access, per-agent BotFather token linking and chat activation, token replacement, AI provider authentication, environment variables, and commands.
 - [ ] The documentation covers backup and restore, troubleshooting, and security limitations.
 - [ ] The repo has an Apache 2.0 `LICENSE`, `CONTRIBUTING.md`, and `.gitignore`.
 - [ ] CI runs linting, type checking, and tests.
@@ -399,7 +465,7 @@ The server now validates its Telegram token and a non-empty user allowlist, star
 
 ### Acceptance Criteria
 
-- A user can install Nimbot, connect a Telegram bot, authenticate the AI provider, and operate agents using only the documentation.
+- A user can install Nimbot, sign in to the panel and link distinct agent bots, authenticate the AI provider, and operate agents using only the documentation.
 
 ---
 
@@ -413,21 +479,17 @@ The following scenario must work before releasing `v0.1.0`.
 
 Install Nimbot on a Linux server using Docker Compose.
 
-**Expected:** The Nimbot Server starts successfully and connects to Telegram.
+**Expected:** The Nimbot Server starts successfully and serves the panel. Unauthenticated access is rejected; the configured administrator can sign in.
 
 **Step 2 — Create Agent A**
 
-Send:
+Create a distinct bot in BotFather. In the panel, create an agent named `developer`, enter its instructions, owner Telegram ID, and bot token, and submit.
 
-`/new`
-
-Create an agent named `developer`.
-
-**Expected:** Nimbot creates an Agent Host with a dedicated persistent workspace.
+**Expected:** Nimbot binds a distinct Telegram bot to the agent, creates an Agent Host with a dedicated persistent workspace, and returns the bot link. Open that bot and press Start to activate the owner’s private chat.
 
 **Step 3 — Execute a Task**
 
-Send:
+In the `developer` bot’s private chat, send:
 
 `Create a Python script that generates a CSV file containing 100 random numbers.`
 
@@ -437,7 +499,7 @@ Send:
 
 Restart the Agent Host.
 
-Send:
+In the same `developer` bot’s chat, send:
 
 `Read the CSV file you created earlier and calculate its average.`
 
@@ -445,19 +507,19 @@ Send:
 
 **Step 5 — Create Agent B**
 
-Create an agent named `researcher`.
+Return to the panel, create an agent named `researcher`, link another BotFather-created bot, and press Start in its chat.
 
-**Expected:** A separate Agent Host and workspace are created.
+**Expected:** A separate Telegram bot, Agent Host, and workspace are created. Send interleaved tasks to both bots; each replies only in its own chat, without `/use`.
 
 **Step 6 — Verify Isolation**
 
-Ask Agent B to list its workspace.
+In the `researcher` bot’s chat, ask Agent B to list its workspace.
 
 **Expected:** Agent B cannot access Agent A's files through its assigned workspace or supported tools.
 
 **Step 7 — Browser Task**
 
-Ask Agent B to open a public website and summarize its contents.
+In the `researcher` bot’s chat, ask Agent B to open a public website and summarize its contents.
 
 **Expected:** The browser launches and the agent returns a summary.
 
@@ -465,17 +527,17 @@ Ask Agent B to open a public website and summarize its contents.
 
 Restart the Nimbot Server and both Agent Hosts.
 
-**Expected:** Agents, conversations, workspaces, and configurations remain available.
+**Expected:** Both agent bots reconnect with their original owners and chat bindings; agents, conversations, workspaces, and configurations remain available. Neither agent requires selecting it again.
 
 **Step 9 — Cancel a Task**
 
-Start a long-running task and send `/stop`.
+Start a long-running task in the `developer` bot and send `/stop` in that chat while the `researcher` bot is also working.
 
-**Expected:** The running task is cancelled or safely terminated, and the agent can accept a new task.
+**Expected:** Only the developer task is cancelled or safely terminated; its agent can accept a new task, and the researcher task is unaffected.
 
 **Step 10 — Authorization**
 
-Send a command from an unauthorized Telegram account.
+Attempt to access panel pages and administration API endpoints without a session, and submit a forged state-changing request. Send commands to both agent bots from an unauthorized Telegram account. Also attempt to use an agent from an allowlisted account that does not own it.
 
 **Expected:** Access is rejected without exposing agent data.
 
@@ -488,7 +550,12 @@ Nimbot `v0.1.0` is complete when all of the following are true:
 - [ ] Installation works through Docker Compose.
 - [ ] Telegram integration works.
 - [ ] Telegram authorization works.
-- [ ] Users can create multiple agents.
+- [ ] The authenticated panel can create, configure, start, stop, and delete agents.
+- [ ] Panel credentials and sessions are protected, and unauthorized API requests are rejected.
+- [ ] Bot tokens can be linked and replaced securely through the panel.
+- [ ] Each agent has a distinct Telegram bot and owner-bound private chat.
+- [ ] Tasks, progress, approvals, and results remain in the correct agent chat.
+- [ ] There is no shared active-agent selection or `/use` workflow.
 - [ ] Each agent runs in its own Docker container.
 - [ ] Each agent has persistent storage.
 - [ ] OpenCode works through ACP.
@@ -523,10 +590,11 @@ The following features are intentionally deferred.
 - WhatsApp
 - Slack
 - Discord
-- Multiple Telegram bots
-- Group conversation support
+- Shared agents and multiple owners
+- Group, channel, and topic-based agent conversations
 - File and media attachments
 - Voice messages
+- Management bots and Telegram Managed Bots provisioning
 
 ### Agent Capabilities
 
@@ -541,9 +609,9 @@ The following features are intentionally deferred.
 
 ### User Experience
 
-- Web dashboard
+- Advanced dashboards and analytics
+- Web chat and richer agent configuration tools
 - Agent templates
-- Agent configuration editor
 - Browser-based terminal
 - Workspace file explorer
 - Conversation search
@@ -568,11 +636,11 @@ All MVP development should follow these principles.
 
 **2. Persistent by default.** Agent conversations, sessions, and files must survive restarts.
 
-**3. One agent, one execution environment.** Agents must not share workspaces or execution processes by default.
+**3. One agent, one bot, one execution environment.** Each agent has a distinct Telegram bot and private conversation. Agents must not share workspaces, execution processes, or a global active-agent selector.
 
 **4. Engine independence.** Agent management must not be tightly coupled to OpenCode.
 
-**5. Messaging independence.** Telegram-specific logic must remain outside the core agent runtime.
+**5. Interface separation.** The web panel handles administration and Telegram handles agent conversations. Telegram and panel-specific logic must remain outside the core agent runtime.
 
 **6. Durable execution.** Messages and tasks must be persisted before execution whenever possible.
 

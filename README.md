@@ -2,15 +2,17 @@
 
 **Your AI agents, on your own server.**
 
-Nimbot is a self-hosted platform for creating, running, and managing persistent AI agents through Telegram.
+Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram.
 
-You install Nimbot on a Linux server with Docker Compose, connect your own Telegram bot, and talk to your agents from your phone. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
+You install Nimbot on a Linux server with Docker Compose, sign in to a minimal administration panel, link a bot created in BotFather for each agent, and talk to each agent through its own distinct Telegram bot and private chat. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-> **Project status:** Phase 1 in progress. Docker/ACP validation is complete. The initial Telegram server supports configuration validation, a user allowlist, and `/start` and `/help`; task execution over Telegram is still pending. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
+> **Project status:** Phase 1 in progress. Docker/ACP validation is complete. The initial Telegram server supports configuration validation, a user allowlist, and `/start` and `/help`; the administration panel, per-agent bot bindings, and task execution over Telegram are still pending. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
 
 ## What the MVP does
 
-- Create and manage multiple agents from Telegram (`/new`, `/agents`, `/use`, `/status`, `/stop`, `/delete`)
+- Sign in to a minimal web panel to create, configure, start, stop, and delete agents
+- Link each agent to a distinct BotFather-created bot by entering its token in the panel
+- Chat with each agent through its own Telegram bot; tasks and `/stop` apply only to that agent
 - Give each agent its own Docker container and persistent workspace
 - Let agents run terminal commands, read and write files, and use a browser
 - Send progress updates and final results back to Telegram
@@ -18,14 +20,16 @@ You install Nimbot on a Linux server with Docker Compose, connect your own Teleg
 - Keep conversations, files, and pending tasks across restarts
 - Restrict access to an allowlist of Telegram user IDs
 
-Out of scope for the MVP: web dashboard, other messaging channels, other AI engines, multi-server deployments, and hosted multi-tenant use. See the [post-MVP backlog](MVP.md#14-post-mvp-backlog).
+Out of scope for the MVP: advanced dashboards, web chat, management bots, other messaging channels, other AI engines, multi-server deployments, and hosted multi-tenant use. See the [post-MVP backlog](MVP.md#14-post-mvp-backlog).
 
 ## Architecture
 
-One Nimbot Server manages one container per agent on the same machine.
+One Nimbot Server serves the authenticated administration panel, maintains a distinct Telegram bot connection per agent, and manages one container per agent on the same machine. The panel uses a single locally configured administrator account. Each agent has one configured Telegram owner; there is no shared active-agent selection or `/use` command. Bot tokens are entered only in the authenticated panel and remain on the server. The owner must open each agent bot and press Start before it can send private notifications.
 
 ```text
-                    Telegram
+  Web panel (admin)      Telegram agent bots A, B
+          |                         |
+          +------------+------------+
                        |
                        v
               +------------------+
@@ -56,9 +60,9 @@ One Nimbot Server manages one container per agent on the same machine.
    Persistent Volume         Persistent Volume
 ```
 
-- **Nimbot Server** handles Telegram, user authorization, the agent registry, task routing, and container lifecycle. It never runs agent-generated commands on the host.
+- **Nimbot Server** serves the panel and its authenticated administration API, maintains each bot’s long-polling connection, validates the allowlist and agent owner, and routes messages by bot identity to the bound agent. It also handles agent registration and container lifecycle. Telegram tokens remain on the server and are never sent to agent containers. It never runs agent-generated commands on the host.
 - **Agent Host** is one container per agent. It runs the AI engine, executes tasks, and owns the agent's workspace and conversation state.
-- **Storage** is SQLite plus Docker volumes. No PostgreSQL, Redis, or message broker is required.
+- **Storage** includes bot identities, owners, chat bindings, credential references, and administrator/session state in SQLite, protected server-side bot secrets, and Docker volumes. No PostgreSQL, Redis, or message broker is required.
 
 ## Technology
 
@@ -68,7 +72,7 @@ The Agent Host image includes Playwright and headless Chromium. During Phase 0, 
 
 ## Security
 
-The MVP is intended for trusted, self-hosted use. Agent containers run as non-root with resource limits and no access to the Docker socket or server credentials.
+The MVP is intended for trusted, self-hosted use. The panel requires administrator authentication; remote access requires HTTPS. Telegram access requires both the allowlist and the agent’s configured owner. Deleting an agent retains its persistent volume unless data deletion is explicitly confirmed. Agent containers run as non-root with resource limits and no access to the Docker socket or server credentials.
 
 Docker containers alone are not a sufficient isolation boundary for hostile or multi-tenant workloads.
 
@@ -77,8 +81,8 @@ Docker containers alone are not a sufficient isolation boundary for hostile or m
 | Phase | Goal |
 |---|---|
 | 0 | Validate OpenCode through ACP inside Docker |
-| 1 | One pre-configured agent answering over Telegram |
-| 2 | Multiple agents, created and managed from Telegram |
+| 1 | One pre-configured agent bot answering tasks, plus an authenticated status panel |
+| 2 | Create and manage multiple agents and their bot bindings through the panel |
 | 3 | Task queue, progress updates, cancellation, and browser |
 | 4 | Recovery and hardening |
 | 5 | Packaging and `v0.1.0` release |
@@ -93,7 +97,7 @@ Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly
 
 Run `pnpm install`, then `pnpm build`. Before submitting changes, run `pnpm lint`, `pnpm typecheck`, and `pnpm test`.
 
-The Telegram server reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated numeric IDs) from environment variables or the root `.env`; `.env.example` lists the required settings. Start the compiled server with `pnpm start:server`. It currently handles private chats for allowlisted users; connecting tasks to the Agent Host is the next step.
+The Telegram server reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated numeric IDs) from environment variables or the root `.env`; `.env.example` lists the required settings. Start the compiled server with `pnpm start:server`. The current implementation still uses a single bot and handles private chats for allowlisted users. The MVP now requires an authenticated panel and a distinct bot per agent; panel administration and Agent Host routing still need implementation. The existing environment variables describe the current prototype, not the future panel configuration. Users must open each agent bot and press Start before it can send notifications; delivery uses Telegram chat IDs, not phone numbers.
 
 ## License
 
