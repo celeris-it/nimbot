@@ -1,356 +1,96 @@
 # Nimbot
 
-**Your AI agents, always in the cloud.**
+**Your AI agents, on your own server.**
 
-Nimbot is an open-source-oriented, cloud-first platform for creating, running, and managing persistent AI agents through messaging applications.
+Nimbot is a self-hosted platform for creating, running, and managing persistent AI agents through Telegram.
 
-Each agent operates in its own isolated cloud computer, with access to a filesystem, terminal, browser, and AI coding engines such as OpenCode, Codex, and Claude Code.
+You install Nimbot on a Linux server with Docker Compose, connect your own Telegram bot, and talk to your agents from your phone. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-Nimbot is designed to make autonomous AI agents accessible without requiring users to configure servers, containers, or development environments.
+> **Project status:** Planning. Nothing is implemented yet. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
 
-> **Project status:** Early development. The architecture and specifications are being established. Features described below represent the intended design and are not necessarily implemented yet.
+## What the MVP does
 
-## Vision
+- Create and manage multiple agents from Telegram (`/new`, `/agents`, `/use`, `/status`, `/stop`, `/delete`)
+- Give each agent its own Docker container and persistent workspace
+- Let agents run terminal commands, read and write files, and use a browser
+- Send progress updates and final results back to Telegram
+- Cancel a running task
+- Keep conversations, files, and pending tasks across restarts
+- Restrict access to an allowlist of Telegram user IDs
 
-AI agents should be more than chatbots.
-
-They should have their own computers, persistent workspaces, tools, and the ability to perform tasks independently.
-
-Nimbot aims to make this possible through a simple messaging interface.
-
-Instead of configuring infrastructure, users should be able to create an agent, assign a task, and let it work.
-
-**One agent. One computer. Accessible from anywhere.**
-
-## Core Features
-
-### Persistent AI Agents
-
-Create agents with their own identity, instructions, memory, conversations, and workspace.
-
-Agents are designed to retain their state across tasks, sessions, and computer restarts.
-
-### Isolated Cloud Computers
-
-Each agent runs inside a dedicated computing environment with:
-
-- Persistent filesystem and workspace
-- Terminal and command execution
-- Python and Node.js runtimes
-- Browser automation with Playwright
-- Configurable CPU, memory, and storage limits
-- Independent processes and execution state
-
-Computers can be started and stopped without deleting their persistent data.
-
-### Multiple AI Engines
-
-Nimbot is designed to support different AI agent engines through a common interface.
-
-Planned integrations include:
-
-- **OpenCode** — Initial integration through Agent Client Protocol (ACP)
-- **OpenAI Codex** — Native SDK integration
-- **Claude Code** — Future integration
-- **Other ACP-compatible agents** — Extensible through a generic ACP adapter
-
-AI engines are interchangeable execution backends, while Nimbot manages agent identity, persistence, messaging, and infrastructure.
-
-Provider-specific capabilities and session compatibility may vary.
-
-### Messaging-First Experience
-
-Manage agents directly from messaging applications.
-
-**Initial channel:**
-- Telegram
-
-**Planned channels:**
-- WhatsApp
-- Web interface
-- Additional messaging platforms
-
-Messaging adapters are independent from the agent runtime, allowing new channels to be added without modifying the core execution system.
-
-### Background Task Execution
-
-Agents can execute long-running tasks without requiring users to remain connected.
-
-The execution system is designed to support:
-
-- Persistent task queues
-- Asynchronous execution
-- Progress updates
-- Cancellation
-- Human approval requests
-- Failure recovery
-- Scheduled tasks and automations
-
-### Persistent Memory and Conversations
-
-Each agent maintains its own conversation history, execution events, memories, and provider sessions.
-
-Nimbot separates global platform metadata from agent-local state to keep execution environments independent.
+Out of scope for the MVP: web dashboard, other messaging channels, other AI engines, multi-server deployments, and hosted multi-tenant use. See the [post-MVP backlog](MVP.md#14-post-mvp-backlog).
 
 ## Architecture
 
-Nimbot follows a distributed architecture consisting of a central **Control Plane** and independent **Agent Hosts**.
+One Nimbot Server manages one container per agent on the same machine.
 
 ```text
-                  Messaging Channels
-                ┌─────────────────────┐
-                │ Telegram / WhatsApp │
-                └──────────┬──────────┘
-                           │
-                           ▼
-                ┌─────────────────────┐
-                │   Channel Gateway   │
-                └──────────┬──────────┘
-                           │
-                           ▼
-              ┌──────────────────────────┐
-              │   Nimbot Control Plane   │
-              │                          │
-              │  - Account Management    │
-              │  - Agent Registry        │
-              │  - Host Registry         │
-              │  - Task Routing          │
-              │  - Computer Provisioning │
-              │  - Event Relay           │
-              └────────────┬─────────────┘
-                           │
-                    PostgreSQL
-                           │
-              ┌────────────┴─────────────┐
-              │                          │
-              ▼                          ▼
-       ┌──────────────┐           ┌──────────────┐
-       │  Agent Host  │           │  Agent Host  │
-       │              │           │              │
-       │ AgentService │           │ AgentService │
-       │ Task Queue   │           │ Task Queue   │
-       │ Event Store  │           │ Event Store  │
-       │ Tool Router  │           │ Tool Router  │
-       │ AI Engine    │           │ AI Engine    │
-       └──────┬───────┘           └──────┬───────┘
-              │                          │
-              ▼                          ▼
-       ┌──────────────┐           ┌──────────────┐
-       │  Persistent  │           │  Persistent  │
-       │  Workspace   │           │  Workspace   │
-       │  + SQLite    │           │  + SQLite    │
-       └──────────────┘           └──────────────┘
+                    Telegram
+                       |
+                       v
+              +------------------+
+              |   Nimbot Server  |
+              |                  |
+              | Telegram Adapter |
+              | Agent Registry   |
+              | Task Router      |
+              | Container Manager|
+              | SQLite Database  |
+              +--------+---------+
+                       |
+                Docker Engine
+                       |
+          +------------+------------+
+          |                         |
+          v                         v
+   +-------------+           +-------------+
+   | Agent Host A|           | Agent Host B|
+   |             |           |             |
+   | OpenCode    |           | OpenCode    |
+   | ACP Adapter |           | ACP Adapter |
+   | Tools       |           | Tools       |
+   | Workspace   |           | Workspace   |
+   +------+------+           +------+------+
+          |                         |
+          v                         v
+   Persistent Volume         Persistent Volume
 ```
 
-### Control Plane
+- **Nimbot Server** handles Telegram, user authorization, the agent registry, task routing, and container lifecycle. It never runs agent-generated commands on the host.
+- **Agent Host** is one container per agent. It runs the AI engine, executes tasks, and owns the agent's workspace and conversation state.
+- **Storage** is SQLite plus Docker volumes. No PostgreSQL, Redis, or message broker is required.
 
-The Control Plane manages platform-wide operations, including:
+## Technology
 
-- User accounts and authorization
-- Agent registration and configuration
-- Computer provisioning and lifecycle
-- Channel routing
-- Host discovery and health monitoring
-- Task dispatching
-- Platform-level metadata
+TypeScript on Node.js LTS, pnpm, Hono, grammY, Drizzle with SQLite, Docker, Playwright, and Vitest. The AI engine is [OpenCode](https://opencode.ai), driven through the Agent Client Protocol (ACP).
 
-The Control Plane does not directly execute AI agent workloads.
+## Security
 
-### Agent Host
+The MVP is intended for trusted, self-hosted use. Agent containers run as non-root with resource limits and no access to the Docker socket or server credentials.
 
-An Agent Host is an autonomous runtime responsible for executing agents and managing their local state.
+Docker containers alone are not a sufficient isolation boundary for hostile or multi-tenant workloads.
 
-Each host provides:
+## Roadmap
 
-- Agent lifecycle management
-- Conversation and session management
-- Persistent task queues
-- AI engine adapters
-- Tool discovery and execution
-- Event storage
-- Memory management
-- Workspace management
-- Task scheduling
-
-The initial architecture assigns one isolated host to each agent.
-
-### AI Engine Layer
-
-Nimbot uses a provider-independent engine interface.
-
-ACP-compatible engines communicate through a generic adapter, while engines requiring additional capabilities can use native integrations.
-
-The engine layer normalizes execution events, tool calls, errors, approvals, and cancellation.
-
-### Storage
-
-Nimbot uses two storage layers:
-
-| Storage | Purpose |
+| Phase | Goal |
 |---|---|
-| PostgreSQL | Accounts, agent registry, host registry, channel routes, and platform metadata |
-| SQLite | Agent conversations, task queues, execution events, memories, and local sessions |
-| Persistent volumes | Agent files, workspace data, and provider runtime state |
+| 0 | Validate OpenCode through ACP inside Docker |
+| 1 | One pre-configured agent answering over Telegram |
+| 2 | Multiple agents, created and managed from Telegram |
+| 3 | Task queue, progress updates, cancellation, and browser |
+| 4 | Recovery and hardening |
+| 5 | Packaging and `v0.1.0` release |
 
-Each host owns its local database and persistent workspace.
-
-## Technology Stack
-
-| Component | Technology |
-|---|---|
-| Language | TypeScript |
-| Runtime | Node.js LTS |
-| Package manager | pnpm |
-| HTTP framework | Hono |
-| Telegram integration | grammY |
-| Database ORM | Drizzle |
-| Central database | PostgreSQL |
-| Host database | SQLite |
-| Agent protocol | ACP |
-| Browser automation | Playwright |
-| Container runtime | Docker |
-| Testing | Vitest |
-
-The stack may evolve as the implementation progresses.
-
-## Security Model
-
-Nimbot is designed around isolated execution environments.
-
-The intended security model includes:
-
-- Dedicated workspaces and persistent storage per agent
-- Non-root container execution
-- Resource limits
-- Restricted filesystem access
-- Network access controls
-- Secure credential management
-- Human approval for sensitive operations
-- Authenticated communication between hosts and the Control Plane
-- Execution and security event logging
-
-**Security note:** Docker containers alone are not considered a sufficient isolation boundary for untrusted multi-tenant workloads. Public multi-tenant deployment will require stronger isolation, such as microVMs or equivalent sandboxing.
-
-## Project Structure
-
-The proposed monorepo structure is:
-
-```text
-nimbot/
-├── apps/
-│   ├── control-plane/
-│   ├── channel-gateway/
-│   └── host/
-│
-├── packages/
-│   ├── contracts/
-│   ├── agent-core/
-│   ├── provider-acp/
-│   ├── provider-codex/
-│   ├── channel-telegram/
-│   ├── channel-whatsapp/
-│   ├── host-client/
-│   ├── event-store/
-│   ├── security/
-│   └── logging/
-│
-├── infrastructure/
-│   ├── docker/
-│   └── migrations/
-│
-├── tests/
-│   ├── integration/
-│   └── e2e/
-│
-└── docs/
-    ├── architecture.md
-    ├── protocols.md
-    ├── security.md
-    └── roadmap.md
-```
-
-This structure represents the intended organization and may change during development.
-
-## Development Roadmap
-
-### Phase 1 — Agent Host
-
-- [ ] Implement the Agent Host runtime
-- [ ] Integrate OpenCode through ACP
-- [ ] Implement SQLite persistence
-- [ ] Add conversation and event storage
-- [ ] Implement persistent task execution
-- [ ] Support workspace persistence across restarts
-
-### Phase 2 — Telegram Integration
-
-- [ ] Implement the Telegram channel adapter
-- [ ] Add agent creation and management commands
-- [ ] Route messages to the correct agent
-- [ ] Implement asynchronous task execution
-- [ ] Deliver progress updates and results
-- [ ] Support task cancellation
-
-### Phase 3 — Cloud Computers
-
-- [ ] Implement the Control Plane
-- [ ] Add computer provisioning through Docker
-- [ ] Create isolated agent environments
-- [ ] Add computer lifecycle management
-- [ ] Implement persistent volumes
-- [ ] Support multiple concurrent agents
-
-### Phase 4 — Engines and Automation
-
-- [ ] Add native Codex integration
-- [ ] Implement scheduled tasks
-- [ ] Add human approval workflows
-- [ ] Improve task recovery and session resumption
-- [ ] Expand ACP engine compatibility
-
-### Phase 5 — Cloud Platform
-
-- [ ] Implement multi-user authentication
-- [ ] Add stronger multi-tenant isolation
-- [ ] Integrate WhatsApp
-- [ ] Add usage monitoring
-- [ ] Implement billing
-- [ ] Add a web management interface
-
-## Design Principles
-
-**Messaging first.** Users should be able to manage agents without opening a dashboard.
-
-**Persistent by default.** Agent files, memories, and conversations should survive restarts.
-
-**Engine agnostic.** AI providers should remain replaceable.
-
-**Isolation by design.** Agent workloads should not share execution environments by default.
-
-**Simple infrastructure.** Avoid unnecessary distributed systems and infrastructure dependencies during early development.
-
-**Recoverable execution.** Tasks and messages should survive transient failures whenever possible.
-
-**Extensible architecture.** New channels, AI engines, and computer providers should be integrated through stable interfaces.
+Details and acceptance criteria for each phase are in [MVP.md](MVP.md).
 
 ## Inspiration
 
-Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly-labs/openbot), particularly its agent runtime, provider adapters, event persistence, messaging integrations, and task execution model.
-
-Nimbot is an independent project with a cloud-first architecture focused on isolated agent computers and messaging-based management.
-
-OpenBot's source code is distributed under the PolyForm Noncommercial License 1.0.0. Nimbot does not assume permission to reuse that code for commercial purposes.
+Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly-labs/openbot). It is an independent project and does not reuse OpenBot's source code, which is distributed under the PolyForm Noncommercial License 1.0.0.
 
 ## Contributing
 
-Nimbot is in early development.
-
-Contribution guidelines, development setup instructions, and issue templates will be added as the project matures.
+Contribution guidelines and development setup will be added once there is code to contribute to.
 
 ## License
 
-The license for Nimbot has not yet been selected.
-
----
-
-**Nimbot — Your AI agents, always in the cloud.**
+Nimbot will be released under the Apache License 2.0.

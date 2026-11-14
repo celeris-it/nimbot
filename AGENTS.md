@@ -1,0 +1,53 @@
+# AGENTS.md
+
+## Project
+
+Nimbot is a self-hosted platform for running persistent AI agents through Telegram. Each agent runs in its own Docker container with a persistent workspace.
+
+The repo is in the planning stage: there is no code yet, only documentation.
+
+- [MVP.md](MVP.md) is the source of truth for scope, architecture, and phases.
+- [README.md](README.md) is the short public summary and must stay consistent with MVP.md.
+
+## Scope rules
+
+- Build only what MVP.md section 2.1 includes. Anything in section 2.2 or the post-MVP backlog (section 14) is out of scope unless the user asks for it.
+- Work in phase order, starting with Phase 0 (validating OpenCode through ACP inside Docker).
+- Prefer the simplest thing that satisfies the phase's acceptance criteria. Do not add services, packages, or abstractions the current phase does not need.
+- No PostgreSQL, Redis, Kubernetes, or message brokers. Storage is SQLite and Docker volumes.
+
+## Stack
+
+TypeScript (strict mode) on Node.js LTS, pnpm workspaces, Hono, grammY, Drizzle with SQLite, Docker, Playwright, Vitest, ESLint, and Prettier.
+
+Use pnpm, not npm or yarn.
+
+## Layout
+
+Planned monorepo layout, from MVP.md section 5:
+
+- `apps/server/` — Nimbot Server: Telegram, agent registry, task routing, container management
+- `apps/agent-host/` — runs inside each agent container: AI engine, tasks, workspace
+- `packages/` — shared code
+- `infrastructure/docker/` — Dockerfiles
+- `tests/` — integration and end-to-end tests
+
+## Commands
+
+The toolchain is not set up yet. Once Phase 0 adds it, update this section with the real install, build, lint, type-check, and test commands, and run lint, type-check, and tests before finishing any change.
+
+## Architecture constraints
+
+- The Nimbot Server must never run agent-generated shell commands on the host OS; they run only inside the agent's container.
+- Agent containers run as non-root, with resource limits, and must not get the Docker socket or server credentials.
+- Keep Telegram-specific code out of the agent runtime.
+- Keep OpenCode-specific code behind the engine interface.
+- Persist messages and tasks before executing them.
+- Deleting an agent must not silently delete its persistent volume.
+
+## Conventions
+
+- Never commit secrets. Configuration comes from environment variables; keep `.env.example` current once it exists.
+- Add tests with new behaviour.
+- When a change affects scope or architecture, update MVP.md and README.md in the same change.
+- Commit or push only when the user asks.

@@ -206,7 +206,6 @@ Each Agent Host maintains its own persistent state:
 - Conversation history
 - Provider sessions
 - Task execution events
-- Agent memory
 - Workspace files
 
 The Agent Host may use its own SQLite database for local execution state.
@@ -225,13 +224,8 @@ nimbot/
 │
 ├── packages/
 │   ├── contracts/
-│   ├── agent-core/
 │   ├── provider-acp/
-│   ├── channel-telegram/
-│   ├── event-store/
-│   ├── container-manager/
-│   ├── security/
-│   └── logging/
+│   └── channel-telegram/
 │
 ├── infrastructure/
 │   └── docker/
@@ -241,236 +235,81 @@ nimbot/
 │   └── e2e/
 │
 ├── docs/
-│   ├── architecture.md
-│   ├── agents.md
-│   ├── providers.md
-│   ├── messaging.md
-│   ├── execution.md
-│   ├── security.md
-│   └── MVP.md
 │
 ├── compose.yaml
 ├── package.json
 ├── pnpm-workspace.yaml
+├── AGENTS.md
+├── MVP.md
 ├── README.md
 └── LICENSE
 ```
+
+Add a new package only when two apps need to share the code.
 
 ---
 
 ## 6. Phase 0 — Technical Validation
 
-**Goal:** Validate the most important technical dependency before implementing the platform.
+**Goal:** Prove that OpenCode can be driven through ACP inside Docker before building anything around it.
 
 ### Tasks
 
-- [ ] Initialize the TypeScript monorepo.
-- [ ] Configure Node.js LTS and pnpm.
-- [ ] Configure TypeScript strict mode.
-- [ ] Configure ESLint and Prettier.
-- [ ] Configure Vitest.
-- [ ] Create a minimal Docker image for the Agent Host.
-- [ ] Install OpenCode inside the container.
-- [ ] Investigate and validate the OpenCode ACP interface.
-- [ ] Implement a minimal ACP client.
-- [ ] Start an OpenCode session programmatically.
-- [ ] Send a prompt to OpenCode.
-- [ ] Receive streaming responses.
-- [ ] Execute a filesystem operation.
-- [ ] Execute a terminal command.
-- [ ] Verify session persistence after restarting the process.
-- [ ] Verify cancellation behavior.
-- [ ] Document limitations and supported ACP capabilities.
+- [ ] The monorepo is set up with pnpm, TypeScript strict mode, ESLint, Prettier, and Vitest.
+- [ ] An Agent Host Docker image runs OpenCode as a non-root user.
+- [ ] A minimal ACP client can start a session, send a prompt, and receive streaming output.
+- [ ] OpenCode can edit a file and run a terminal command in the workspace.
+- [ ] A browser task works, and the way OpenCode reaches the browser is decided and documented.
+- [ ] Session resumption after a process restart and cancellation of a running prompt are tested.
+- [ ] A short write-up lists what OpenCode already provides (sessions, history, tools) and what Nimbot must build.
 
 ### Acceptance Criteria
 
-- OpenCode can receive and execute a task through ACP.
-- Responses and tool execution events are observable.
-- The workspace persists after a restart.
-- The integration works inside Docker.
-- Unsupported ACP capabilities are documented.
+- OpenCode executes a task through ACP inside Docker, with responses and tool events observable.
+- The workspace persists after a container restart.
+- Unsupported or missing ACP capabilities are documented.
 
 ---
 
-## 7. Phase 1 — Agent Host Runtime
+## 7. Phase 1 — One Agent over Telegram
 
-**Goal:** Build a persistent and independently executable agent environment.
+**Goal:** A single, pre-configured agent answers over Telegram, end to end.
 
-### 7.1 Agent Runtime
+There is no agent management in this phase. One Agent Host container is defined in `compose.yaml`.
 
-- [ ] Implement `AgentService`.
-- [ ] Implement `ConversationService`.
-- [ ] Implement `ProviderManager`.
-- [ ] Implement `WorkspaceManager`.
-- [ ] Implement `EventStore`.
-- [ ] Implement `TaskExecutor`.
-- [ ] Implement `TaskScheduler`.
-- [ ] Implement `ToolRouter`.
-- [ ] Implement `MemoryService` with basic persistent storage.
-- [ ] Implement Agent Host configuration.
-- [ ] Implement host startup and shutdown lifecycle.
-- [ ] Implement health checks.
+### Tasks
 
-### 7.2 ACP Integration
-
-- [ ] Create an `AgentEngine` interface.
-- [ ] Implement `AcpEngine`.
-- [ ] Support prompt submission.
-- [ ] Support streaming output.
-- [ ] Support tool execution events.
-- [ ] Support session identifiers.
-- [ ] Support session resumption where available.
-- [ ] Support cancellation.
-- [ ] Normalize provider errors.
-- [ ] Normalize execution events.
-- [ ] Define provider capability detection.
-
-### 7.3 Persistent Storage
-
-- [ ] Create the Agent Host SQLite schema.
-- [ ] Implement database migrations.
-- [ ] Enable SQLite WAL mode where appropriate.
-- [ ] Persist conversations.
-- [ ] Persist messages.
-- [ ] Persist task execution events.
-- [ ] Persist provider session identifiers.
-- [ ] Persist agent configuration.
-- [ ] Persist task states.
-- [ ] Implement startup recovery.
-- [ ] Implement database integrity checks.
-- [ ] Document backup and restore procedures.
-
-### 7.4 Task Execution
-
-- [ ] Implement a persistent task queue.
-- [ ] Implement FIFO ordering per conversation.
-- [ ] Prevent overlapping turns within the same conversation.
-- [ ] Implement task status transitions.
-- [ ] Implement task cancellation.
-- [ ] Implement execution timeouts.
-- [ ] Implement bounded retries.
-- [ ] Implement interrupted-task recovery.
-- [ ] Implement idempotency keys.
-- [ ] Persist task results before delivery.
-- [ ] Ensure failed tasks do not block subsequent tasks indefinitely.
-
-### 7.5 Tools and Workspace
-
-- [ ] Provide a persistent workspace directory.
-- [ ] Enable filesystem operations.
-- [ ] Enable terminal command execution.
-- [ ] Integrate Playwright.
-- [ ] Install and configure a supported browser.
-- [ ] Implement browser startup and cleanup.
-- [ ] Configure workspace access boundaries.
-- [ ] Implement tool execution logging.
-- [ ] Implement basic approval handling for sensitive actions.
-- [ ] Validate resource usage during browser execution.
+- [ ] The Nimbot Server starts, validates its configuration, and connects to Telegram with long polling.
+- [ ] Only allowlisted Telegram user IDs get a response; everyone else is rejected.
+- [ ] One Agent Host container runs with a persistent workspace volume.
+- [ ] The server sends tasks to the Agent Host and receives events over an authenticated internal API.
+- [ ] A text message becomes an OpenCode task, and the final answer is delivered to Telegram.
+- [ ] Long answers are split to fit Telegram's message length limit.
+- [ ] Errors are reported to the user in plain language.
 
 ### Acceptance Criteria
 
-- An Agent Host runs independently inside Docker.
-- OpenCode can execute filesystem, terminal, and browser tasks.
-- Conversations and files persist across restarts.
-- Task events are stored and retrievable.
-- Cancellation works for supported operations.
-- Interrupted tasks are recovered or explicitly marked interrupted.
-- The host exposes a working health endpoint.
+- An authorized user sends a programming task and receives the result in Telegram.
+- An unauthorized user is rejected.
+- Files the agent created are still there after the container restarts.
 
 ---
 
-## 8. Phase 2 — Nimbot Server
+## 8. Phase 2 — Multiple Agents
 
-**Goal:** Manage multiple Agent Hosts from one self-hosted application.
+**Goal:** Create and manage agents from Telegram, each in its own container.
 
-### 8.1 Server Foundation
+### Tasks
 
-- [ ] Create the Nimbot Server application.
-- [ ] Configure Hono.
-- [ ] Implement application configuration.
-- [ ] Implement environment variable validation.
-- [ ] Implement structured logging.
-- [ ] Implement graceful shutdown.
-- [ ] Implement health checks.
-- [ ] Create the server SQLite schema.
-- [ ] Implement database migrations.
+- [ ] The server stores agents, their instructions, their containers, and each user's selected agent in SQLite, with migrations.
+- [ ] The server can create, start, stop, and delete agent containers and volumes through the Docker Engine API.
+- [ ] Agent containers run as non-root with CPU, memory, and process limits, and without the Docker socket or server credentials.
+- [ ] `/new` asks for a name and optional instructions, provisions the agent, selects it, and reports provisioning failures.
+- [ ] `/agents`, `/use`, `/status`, `/start`, and `/help` work.
+- [ ] `/delete` asks for confirmation before removing an agent and its data.
+- [ ] Messages go to the selected agent, with a clear reply when no agent is selected or the agent is stopped.
 
-### 8.2 Agent Management
-
-- [ ] Implement `AgentRegistry`.
-- [ ] Implement agent creation.
-- [ ] Implement agent listing.
-- [ ] Implement agent selection.
-- [ ] Implement agent configuration updates.
-- [ ] Implement agent deletion.
-- [ ] Implement agent status reporting.
-- [ ] Generate unique agent identifiers.
-- [ ] Validate agent names.
-- [ ] Persist agent instructions.
-- [ ] Persist agent-to-container mappings.
-
-### 8.3 Docker Integration
-
-- [ ] Implement `ContainerManager`.
-- [ ] Connect to Docker Engine API.
-- [ ] Create Agent Host containers.
-- [ ] Start Agent Host containers.
-- [ ] Stop Agent Host containers.
-- [ ] Restart Agent Host containers.
-- [ ] Delete Agent Host containers.
-- [ ] Create persistent volumes.
-- [ ] Mount agent-specific volumes.
-- [ ] Configure container resource limits.
-- [ ] Configure container networking.
-- [ ] Implement container health monitoring.
-- [ ] Recover container state after server restarts.
-- [ ] Handle missing or unexpectedly stopped containers.
-- [ ] Prevent accidental deletion of persistent data.
-
-### 8.4 Server-to-Host Communication
-
-- [ ] Define the internal Host API.
-- [ ] Implement authenticated requests.
-- [ ] Implement task submission.
-- [ ] Implement task status retrieval.
-- [ ] Implement event streaming or polling.
-- [ ] Implement task cancellation.
-- [ ] Implement host health checks.
-- [ ] Implement request timeouts.
-- [ ] Implement retry behavior.
-- [ ] Implement protocol version negotiation.
-- [ ] Validate all incoming and outgoing payloads.
-
-### Acceptance Criteria
-
-- The server can create and manage multiple Agent Hosts.
-- Each agent has its own container and persistent volume.
-- Agents cannot access each other's workspaces through supported application interfaces.
-- Agent state survives Nimbot Server restarts.
-- The server can communicate reliably with running hosts.
-
----
-
-## 9. Phase 3 — Telegram Integration
-
-**Goal:** Provide the complete user experience through Telegram.
-
-### 9.1 Telegram Adapter
-
-- [ ] Integrate grammY.
-- [ ] Configure Telegram bot token.
-- [ ] Implement long polling for self-hosted deployment.
-- [ ] Implement Telegram user authorization.
-- [ ] Support an allowlist of authorized Telegram user IDs.
-- [ ] Reject unauthorized users.
-- [ ] Normalize incoming Telegram messages.
-- [ ] Implement outgoing message delivery.
-- [ ] Implement Telegram API error handling.
-- [ ] Implement message deduplication.
-- [ ] Implement rate-limit handling.
-- [ ] Implement basic message formatting.
-
-### 9.2 Telegram Commands
+### Telegram Commands
 
 | Command | Description |
 |---|---|
@@ -479,204 +318,82 @@ nimbot/
 | `/agents` | List existing agents |
 | `/use` | Select the active agent |
 | `/status` | Display agent and task status |
-| `/stop` | Cancel the active task |
+| `/stop` | Cancel the active task (Phase 3) |
 | `/delete` | Delete an agent with confirmation |
 | `/help` | Display available commands |
 
-### 9.3 Agent Creation Flow
-
-- [ ] Implement the `/new` command.
-- [ ] Request an agent name.
-- [ ] Request optional agent instructions.
-- [ ] Create the agent record.
-- [ ] Provision the Agent Host container.
-- [ ] Initialize the workspace.
-- [ ] Initialize OpenCode.
-- [ ] Report agent readiness.
-- [ ] Select the new agent automatically.
-- [ ] Handle provisioning failures.
-
-### 9.4 Messaging and Tasks
-
-- [ ] Route incoming messages to the selected agent.
-- [ ] Persist incoming messages before execution.
-- [ ] Submit tasks to the Agent Host.
-- [ ] Return task acknowledgment.
-- [ ] Stream or periodically send progress updates.
-- [ ] Deliver final responses.
-- [ ] Handle long Telegram messages.
-- [ ] Handle Telegram message length limits.
-- [ ] Implement task cancellation through `/stop`.
-- [ ] Report errors in user-friendly language.
-- [ ] Restore active agent selection after restart.
-- [ ] Prevent duplicate task execution from repeated updates.
-
-### 9.5 User Experience
-
-- [ ] Provide clear command descriptions.
-- [ ] Display agent status consistently.
-- [ ] Display running task indicators.
-- [ ] Confirm destructive actions.
-- [ ] Handle invalid commands.
-- [ ] Handle messages when no agent is selected.
-- [ ] Handle messages when an agent is stopped.
-- [ ] Provide meaningful error messages.
-- [ ] Document the complete Telegram workflow.
-
 ### Acceptance Criteria
 
-An authorized user can:
-
-1. Open Telegram.
-2. Send `/new`.
-3. Create an agent named `developer`.
-4. Send a programming task.
-5. Receive progress updates.
-6. Receive the final result.
-7. Stop the agent.
-8. Restart the agent.
-9. Continue the previous conversation.
-10. Create a second independent agent.
+- Two agents run independently, each with its own container and persistent volume.
+- One agent cannot read another agent's workspace through its workspace or supported tools.
+- Agent Hosts are reachable only from the Nimbot Server.
 
 ---
 
-## 10. Phase 4 — Reliability and Security
+## 9. Phase 3 — Tasks, Progress, and Browser
 
-**Goal:** Make the self-hosted MVP reliable enough for practical use.
+**Goal:** Agents handle long-running work that the user can follow and stop.
 
-### 10.1 Reliability
+### Tasks
 
-- [ ] Implement automatic recovery after application restarts.
-- [ ] Implement container restart reconciliation.
-- [ ] Implement task timeout handling.
-- [ ] Implement retry limits.
-- [ ] Implement dead-letter or failed-task handling.
-- [ ] Prevent duplicate task submission.
-- [ ] Implement graceful process termination.
-- [ ] Handle database connection failures.
-- [ ] Handle Docker Engine failures.
-- [ ] Handle Telegram API failures.
-- [ ] Handle OpenCode crashes.
-- [ ] Implement health checks for critical components.
-
-### 10.2 Security
-
-- [ ] Require Telegram user authorization.
-- [ ] Validate all incoming commands.
-- [ ] Authenticate Server-to-Host communication.
-- [ ] Run Agent Hosts as non-root users.
-- [ ] Restrict Linux capabilities.
-- [ ] Configure container CPU limits.
-- [ ] Configure container memory limits.
-- [ ] Configure process limits.
-- [ ] Configure storage limits where supported.
-- [ ] Prevent access to the Docker socket from Agent Hosts.
-- [ ] Prevent access to server credentials from Agent Hosts.
-- [ ] Isolate agent volumes.
-- [ ] Restrict unnecessary container networking.
-- [ ] Prevent accidental exposure of internal APIs.
-- [ ] Redact secrets from logs.
-- [ ] Avoid storing credentials in plaintext when practical.
-- [ ] Document the Docker security limitations.
-
-**Security limitation:** The MVP is intended for trusted self-hosted deployments. Docker containers alone do not provide sufficient isolation for hostile multi-tenant workloads.
-
-### 10.3 Observability
-
-- [ ] Implement structured JSON logs.
-- [ ] Include correlation IDs in requests.
-- [ ] Include agent IDs in execution logs.
-- [ ] Include task IDs in execution logs.
-- [ ] Log task state transitions.
-- [ ] Log container lifecycle events.
-- [ ] Log provider failures.
-- [ ] Implement basic runtime metrics.
-- [ ] Document troubleshooting procedures.
-
-### 10.4 Testing
-
-- [ ] Add unit tests for Agent Registry.
-- [ ] Add unit tests for task state transitions.
-- [ ] Add unit tests for message routing.
-- [ ] Add unit tests for authorization.
-- [ ] Add integration tests for SQLite persistence.
-- [ ] Add integration tests for Docker lifecycle.
-- [ ] Add integration tests for ACP.
-- [ ] Add integration tests for Telegram routing.
-- [ ] Add restart recovery tests.
-- [ ] Add task cancellation tests.
-- [ ] Add multi-agent isolation tests.
-- [ ] Add end-to-end tests for the main user journey.
+- [ ] Each conversation has a persistent FIFO task queue and runs one turn at a time.
+- [ ] Incoming messages and task state changes are saved before execution.
+- [ ] Progress updates are sent to Telegram while a task runs.
+- [ ] `/stop` cancels the running task, and the agent accepts a new task afterwards.
+- [ ] Tasks have a timeout, and a failed task does not block the tasks behind it.
+- [ ] Browser tasks work through Playwright, using the approach chosen in Phase 0.
+- [ ] Approval requests for sensitive actions are shown in Telegram and can be accepted or denied.
 
 ### Acceptance Criteria
 
-- Application restarts do not lose committed conversations or files.
-- Duplicate Telegram updates do not create duplicate tasks.
+- A long-running task shows progress and can be cancelled.
+- Several messages sent in a row are processed in order.
+- An agent can open a public website and summarize it.
+
+---
+
+## 10. Phase 4 — Recovery and Hardening
+
+**Goal:** Make the self-hosted MVP reliable enough for practical use.
+
+### Tasks
+
+- [ ] After a server restart, agents, selected agents, and container states are restored, and missing or stopped containers are detected.
+- [ ] After an Agent Host restart, the conversation continues, and in-flight tasks are resumed or marked interrupted and reported to the user.
+- [ ] Duplicate Telegram updates do not create duplicate tasks.
+- [ ] Telegram, Docker, and OpenCode failures are retried a bounded number of times and then reported, without leaving the system stuck.
+- [ ] The server and Agent Hosts expose health checks and write structured logs with agent and task IDs, with secrets redacted.
+- [ ] Agent containers have restricted Linux capabilities and networking, and internal APIs are not exposed outside the Docker network.
+- [ ] Automated tests cover authorization, message routing, task state transitions, restart recovery, cancellation, and multi-agent isolation.
+
+**Security limitation:** The MVP is intended for trusted self-hosted deployments. Docker containers alone do not provide sufficient isolation for hostile multi-tenant workloads.
+
+### Acceptance Criteria
+
+- Restarts do not lose committed conversations or files.
 - Unauthorized Telegram users cannot access agents.
 - Agent Hosts do not receive host-level credentials.
 - Failed tasks do not leave the system permanently blocked.
-- Critical application flows have automated tests.
 
 ---
 
 ## 11. Phase 5 — Packaging and Release
 
-**Goal:** Make Nimbot installable and maintainable by self-hosted users.
+**Goal:** Make Nimbot installable by self-hosted users.
 
-### 11.1 Docker Packaging
+### Tasks
 
-- [ ] Create the Nimbot Server Dockerfile.
-- [ ] Create the Agent Host Dockerfile.
-- [ ] Create `compose.yaml`.
-- [ ] Configure persistent volumes.
-- [ ] Configure environment variables.
-- [ ] Create `.env.example`.
-- [ ] Configure Docker restart policies.
-- [ ] Configure container health checks.
-- [ ] Verify container startup ordering.
-- [ ] Verify clean installation.
-- [ ] Verify upgrades preserve persistent data.
-
-### 11.2 Documentation
-
-- [ ] Complete `README.md`.
-- [ ] Create installation instructions.
-- [ ] Document Telegram bot creation.
-- [ ] Document AI provider authentication.
-- [ ] Document environment variables.
-- [ ] Document agent management commands.
-- [ ] Document data persistence.
-- [ ] Document backup and restore.
-- [ ] Document upgrade procedures.
-- [ ] Document troubleshooting.
-- [ ] Document security limitations.
-- [ ] Add architecture documentation.
-- [ ] Add developer contribution instructions.
-
-### 11.3 Release Preparation
-
-- [ ] Add Apache License 2.0 `LICENSE` file.
-- [ ] Add `CONTRIBUTING.md`.
-- [ ] Add `.gitignore`.
-- [ ] Add CI workflows.
-- [ ] Configure automated tests.
-- [ ] Configure TypeScript type checking.
-- [ ] Configure linting.
-- [ ] Build versioned Docker images.
-- [ ] Test fresh installation.
-- [ ] Test upgrade from a previous build.
-- [ ] Test persistent volume recovery.
-- [ ] Create release notes.
-- [ ] Tag `v0.1.0`.
+- [ ] Dockerfiles for both apps, `compose.yaml`, and `.env.example` exist, with restart policies and health checks.
+- [ ] A fresh install on a clean Linux server works by following the documentation alone.
+- [ ] The documentation covers installation, Telegram bot creation, AI provider authentication, environment variables, and commands.
+- [ ] The documentation covers backup and restore, troubleshooting, and security limitations.
+- [ ] The repo has an Apache 2.0 `LICENSE`, `CONTRIBUTING.md`, and `.gitignore`.
+- [ ] CI runs linting, type checking, and tests.
+- [ ] The end-to-end test in section 12 passes, versioned Docker images are built, and `v0.1.0` is tagged with release notes.
 
 ### Acceptance Criteria
 
-- A user can install Nimbot using documented instructions.
-- A user can connect a Telegram bot.
-- A user can authenticate the configured AI provider.
-- A user can create and operate agents.
-- Application upgrades preserve persistent state.
-- The release includes sufficient documentation for self-hosted operation.
+- A user can install Nimbot, connect a Telegram bot, authenticate the AI provider, and operate agents using only the documentation.
 
 ---
 
