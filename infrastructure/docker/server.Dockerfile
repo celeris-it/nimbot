@@ -1,0 +1,11 @@
+FROM node:22-bookworm-slim
+WORKDIR /app
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
+COPY apps/server apps/server
+RUN npm install -g pnpm@10 \
+ && pnpm install --frozen-lockfile \
+ && pnpm --filter @nimbot/server build
+USER node
+ENV PANEL_HOST=0.0.0.0
+EXPOSE 3000
+CMD ["node", "apps/server/dist/index.js"]

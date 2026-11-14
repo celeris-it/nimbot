@@ -32,6 +32,12 @@ importers:
 
   apps/agent-host:
     dependencies:
+      '@hono/node-server':
+        specifier: ^2.1.8
+        version: 2.1.8(hono@4.13.18)
+      hono:
+        specifier: ^4.13.18
+        version: 4.13.18
       playwright:
         specifier: ^1.65.1
         version: 1.65.1

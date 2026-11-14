@@ -9,6 +9,8 @@
     "acp:demo": "node dist/demo.js"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.8",
+    "hono": "^4.13.18",
     "playwright": "^1.65.1"
   }
 }
