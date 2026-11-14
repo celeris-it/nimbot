@@ -11,7 +11,8 @@
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "start:server": "node --env-file-if-exists=.env apps/server/dist/index.js"
+    "start:server": "node --env-file-if-exists=.env apps/server/dist/index.js",
+    "panel:password": "node apps/server/dist/password.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

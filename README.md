@@ -6,7 +6,7 @@ Nimbot is a self-hosted platform for creating and managing persistent AI agents 
 
 You install Nimbot on a Linux server with Docker Compose, sign in to a minimal administration panel, link a bot created in BotFather for each agent, and talk to each agent through its own distinct Telegram bot and private chat. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-> **Project status:** Phase 1 in progress. Docker/ACP validation is complete. The initial Telegram server supports configuration validation, a user allowlist, and `/start` and `/help`; the administration panel, per-agent bot bindings, and task execution over Telegram are still pending. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
+> **Project status:** Phase 1 in progress. Docker/ACP validation is complete. The initial Telegram server supports configuration validation, a user allowlist, and `/start` and `/help`; a password-protected status panel is available; per-agent bot bindings and task execution over Telegram are still pending. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
 
 ## What the MVP does
 
@@ -97,7 +97,7 @@ Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly
 
 Run `pnpm install`, then `pnpm build`. Before submitting changes, run `pnpm lint`, `pnpm typecheck`, and `pnpm test`.
 
-The Telegram server reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated numeric IDs) from environment variables or the root `.env`; `.env.example` lists the required settings. Start the compiled server with `pnpm start:server`. The current implementation still uses a single bot and handles private chats for allowlisted users. The MVP now requires an authenticated panel and a distinct bot per agent; panel administration and Agent Host routing still need implementation. The existing environment variables describe the current prototype, not the future panel configuration. Users must open each agent bot and press Start before it can send notifications; delivery uses Telegram chat IDs, not phone numbers.
+The Telegram server reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated numeric IDs) from environment variables or the root `.env`; `.env.example` lists the required settings. Start the compiled server with `pnpm start:server`. The current implementation still uses a single bot and handles private chats for allowlisted users. The panel reads `PANEL_PASSWORD_HASH` (generated with `pnpm panel:password` after building), `PANEL_URL` (default `http://localhost:3000`), `PANEL_HOST` (default `127.0.0.1`), and `PANEL_PORT` (default `3000`). A valid password hash is required at startup. Sessions expire after eight hours and are invalidated on restart; login allows five attempts per fifteen minutes. Remote access requires an HTTPS origin and a reverse proxy terminating TLS. The panel currently shows Telegram connectivity and the bot link; agent creation, verified container status, and Agent Host routing still need implementation. Users must open each agent bot and press Start before it can send notifications; delivery uses Telegram chat IDs, not phone numbers.
 
 ## License
 

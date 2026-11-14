@@ -1,10 +1,15 @@
+import { serve } from "@hono/node-server";
+import { createPanel, type AgentStatus } from "./panel.js";
+import { readPanelConfig } from "./panel-config.js";
 import { createBot } from "./bot.js";
 import { readConfig } from "./config.js";
 
 async function main(): Promise<void> {
   let config;
+  let panelConfig;
   try {
     config = readConfig(process.env);
+    panelConfig = readPanelConfig(process.env);
   } catch (error) {
     console.error(
       error instanceof Error ? error.message : "Invalid server configuration.",
@@ -12,10 +17,27 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const status: AgentStatus = { telegram: "connecting" };
+  const panel = createPanel(panelConfig, () => ({ ...status }));
+  const server = serve({
+    fetch: panel.fetch,
+    hostname: panelConfig.hostname,
+    port: panelConfig.port,
+  });
+  server.on("error", () => {
+    console.error(
+      "Could not start the panel HTTP server. Check PANEL_HOST and PANEL_PORT.",
+    );
+    stop();
+    process.exitCode = 1;
+  });
+  console.log(`Nimbot panel: ${panelConfig.origin}`);
   const bot = createBot(config);
   let stopping = false;
   const stop = () => {
     stopping = true;
+    server.close();
+    if ("closeIdleConnections" in server) server.closeIdleConnections();
     if (bot.isRunning()) {
       void bot.stop().catch(() => {
         console.error("Could not stop Telegram polling.");
@@ -28,19 +50,24 @@ async function main(): Promise<void> {
   try {
     await bot.start({
       allowed_updates: ["message"],
-      onStart: () => {
+      onStart: (info) => {
+        status.telegram = "connected";
+        status.botUsername = info.username;
         if (stopping) stop();
         else console.log("Nimbot Server started with Telegram long polling.");
       },
     });
   } catch {
+    status.telegram = "disconnected";
     console.error(
       "Telegram connection failed. Check the bot token, network, and whether another instance is running.",
     );
     process.exitCode = 1;
   } finally {
-    process.off("SIGINT", stop);
-    process.off("SIGTERM", stop);
+    if (stopping) {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    }
   }
 }
 
