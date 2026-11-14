@@ -1,3 +1,4 @@
+import type { ChatBinding } from "./chat-binding.js";
 import { HostTaskError } from "./host-tasks.js";
 import { splitTelegramText } from "./telegram-text.js";
 import { Bot } from "grammy";
@@ -7,6 +8,7 @@ export function createBot(
   config: ServerConfig,
   onActivation: (chatId: number) => void = () => {},
   execute?: (prompt: string) => Promise<string>,
+  binding?: ChatBinding,
 ): Bot {
   let activeChatId: number | undefined;
   const bot = new Bot(config.telegramBotToken);
@@ -24,6 +26,14 @@ export function createBot(
   });
 
   bot.command("start", async (ctx) => {
+    try {
+      binding?.save(ctx.me.id, ctx.chat.id);
+    } catch {
+      await ctx.reply(
+        "No pude guardar la activación del chat. Intentá /start nuevamente.",
+      );
+      return;
+    }
     activeChatId = ctx.chat.id;
     onActivation(activeChatId);
     await ctx.reply(
@@ -37,11 +47,11 @@ export function createBot(
   });
   bot.command("status", async (ctx) => {
     await ctx.reply(
-      `${config.agent.name}\nChat: ${activeChatId === ctx.chat.id ? "activado" : "pendiente; usá /start"}\n${execute ? "Agent Host configurado. Consultá el panel para verificar disponibilidad." : "Agent Host: sin conectar. No hay tareas en ejecución."}`,
+      `${config.agent.name}\nChat: ${(binding ? binding.get(ctx.me.id) : activeChatId) === ctx.chat.id ? "activado" : "pendiente; usá /start"}\n${execute ? "Agent Host configurado. Consultá el panel para verificar disponibilidad." : "Agent Host: sin conectar. No hay tareas en ejecución."}`,
     );
   });
   bot.on("message:text", async (ctx) => {
-    if (activeChatId !== ctx.chat.id) {
+    if ((binding ? binding.get(ctx.me.id) : activeChatId) !== ctx.chat.id) {
       await ctx.reply(
         "Usá /start para activar el chat de este agente. Tu mensaje no se ha enviado a ningún agente.",
       );

@@ -17,8 +17,11 @@ services:
       PANEL_URL: ${PANEL_URL:-http://localhost:3000}
       PANEL_HOST: 0.0.0.0
       PANEL_PORT: 3000
+      SERVER_STATE_DIR: /home/node/.local/share/nimbot
       AGENT_HOST_TOKEN: ${AGENT_HOST_TOKEN:?Set AGENT_HOST_TOKEN}
       AGENT_HOST_URL: http://agent-host:3001
+    volumes:
+      - server-state:/home/node/.local/share/nimbot
     healthcheck:
       test:
         - CMD
@@ -64,6 +67,7 @@ services:
       start_period: 10s
       retries: 3
 volumes:
+  server-state:
   agent-workspace:
   agent-engine-state:
   agent-task-state:

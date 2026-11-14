@@ -1,3 +1,6 @@
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import { openChatBinding } from "./chat-binding.js";
 import { createHostTasks } from "./host-tasks.js";
 import { getHostStatus, readAgentHostConfig } from "./agent-host.js";
 import { serve } from "@hono/node-server";
@@ -21,6 +24,19 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  let binding;
+  try {
+    const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
+    await mkdir(stateDir, { recursive: true, mode: 0o700 });
+    binding = openChatBinding(resolve(stateDir, "server.sqlite"), config.agent);
+  } catch {
+    console.error(
+      "Could not initialize server state. Check SERVER_STATE_DIR and writable storage.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  process.once("exit", () => binding.close());
   const status: AgentStatus = {
     telegram: "connecting",
     agentId: config.agent.id,
@@ -51,6 +67,7 @@ async function main(): Promise<void> {
       status.chatActivated = true;
     },
     createHostTasks(hostConfig),
+    binding,
   );
   let stopping = false;
   const stop = () => {
@@ -70,6 +87,7 @@ async function main(): Promise<void> {
     await bot.start({
       allowed_updates: ["message"],
       onStart: (info) => {
+        status.chatActivated = binding.get(info.id) !== undefined;
         status.telegram = "connected";
         status.botUsername = info.username;
         if (stopping) stop();

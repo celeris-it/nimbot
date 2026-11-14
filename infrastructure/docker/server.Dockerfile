@@ -5,6 +5,8 @@ COPY apps/server apps/server
 RUN npm install -g pnpm@10 \
  && pnpm install --frozen-lockfile \
  && pnpm --filter @nimbot/server build
+RUN mkdir -p /home/node/.local/share/nimbot \
+ && chown -R node:node /home/node/.local
 USER node
 ENV PANEL_HOST=0.0.0.0
 EXPOSE 3000

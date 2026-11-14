@@ -1,7 +1,11 @@
+import { openChatBinding, type ChatBinding } from "./chat-binding.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBot } from "./bot.js";
 
-function setup(execute?: (prompt: string) => Promise<string>) {
+function setup(
+  execute?: (prompt: string) => Promise<string>,
+  binding?: ChatBinding,
+) {
   const activations: number[] = [];
   const bot = createBot(
     {
@@ -11,6 +15,7 @@ function setup(execute?: (prompt: string) => Promise<string>) {
     },
     (chatId) => activations.push(chatId),
     execute,
+    binding,
   );
   bot.botInfo = {
     id: 123,
@@ -80,6 +85,41 @@ function message(
 }
 
 describe("Telegram access", () => {
+  it("restores activation in a new bot instance and still rejects non-owners", async () => {
+    const binding = openChatBinding(":memory:", { id: "test", ownerId: 42 });
+    try {
+      const first = setup(undefined, binding);
+      await first.bot.handleUpdate(message("/start"));
+      expect(binding.get(123)).toBe(42);
+      const execute = vi.fn().mockResolvedValue("Restored");
+      const second = setup(execute, binding);
+      await second.bot.handleUpdate(message("hello", 73));
+      expect(execute).not.toHaveBeenCalled();
+      await second.bot.handleUpdate(message("/status"));
+      expect(second.sent.at(-1)).toContain("Chat: activado");
+      await second.bot.handleUpdate(message("hello"));
+      expect(execute).toHaveBeenCalledExactlyOnceWith("hello");
+      expect(second.sent.at(-1)).toBe("Restored");
+    } finally {
+      binding.close();
+    }
+  });
+  it("does not activate or execute when saving activation fails", async () => {
+    const execute = vi.fn();
+    const binding = {
+      get: () => undefined,
+      save: () => {
+        throw new Error("secret");
+      },
+    };
+    const { bot, sent, activations } = setup(execute, binding);
+    await bot.handleUpdate(message("/start"));
+    expect(sent.at(-1)).toContain("No pude guardar");
+    expect(activations).toEqual([]);
+    await bot.handleUpdate(message("hello"));
+    expect(execute).not.toHaveBeenCalled();
+    expect(sent.join("")).not.toContain("secret");
+  });
   it("routes only activated owner text and returns split plain text", async () => {
     const output = "<code> & *plain* " + "😀".repeat(3000);
     const execute = vi.fn().mockResolvedValue(output);
