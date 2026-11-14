@@ -8,12 +8,16 @@ let passwordHash: string;
 beforeAll(async () => {
   passwordHash = await hashPassword(password);
 });
-function setup() {
+function setup(host?: "ready" | "busy" | "unavailable") {
   let clock = 1000;
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
   const app = createPanel(
     config,
-    () => ({ telegram: "connected", botUsername: "nimbot_test_bot" }),
+    async () => ({
+      telegram: "connected",
+      botUsername: "nimbot_test_bot",
+      ...(host ? { host } : {}),
+    }),
     () => clock,
   );
   const post = (path: string, body = "", cookie = "", origin = config.origin) =>
@@ -47,6 +51,19 @@ function setup() {
 }
 
 describe("panel access", () => {
+  it.each([
+    ["ready", "Disponible"],
+    ["busy", "Ocupado"],
+    ["unavailable", "Sin conexión"],
+  ] as const)("shows verified host status %s", async (host, label) => {
+    const { app, login } = setup(host);
+    const { cookie } = await login();
+    const headers = { Cookie: cookie };
+    expect(await (await app.request("/", { headers })).text()).toContain(label);
+    expect(
+      await (await app.request("/api/status", { headers })).json(),
+    ).toMatchObject({ host });
+  });
   it("protects the page and API while serving the login and local CSS", async () => {
     const { app } = setup();
     expect((await app.request("/")).headers.get("location")).toBe("/login");

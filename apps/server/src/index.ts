@@ -1,3 +1,4 @@
+import { getHostStatus, readAgentHostConfig } from "./agent-host.js";
 import { serve } from "@hono/node-server";
 import { createPanel, type AgentStatus } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";
@@ -7,8 +8,10 @@ import { readConfig } from "./config.js";
 async function main(): Promise<void> {
   let config;
   let panelConfig;
+  let hostConfig;
   try {
     config = readConfig(process.env);
+    hostConfig = readAgentHostConfig(process.env);
     panelConfig = readPanelConfig(process.env);
   } catch (error) {
     console.error(
@@ -24,7 +27,10 @@ async function main(): Promise<void> {
     ownerId: config.agent.ownerId,
     chatActivated: false,
   };
-  const panel = createPanel(panelConfig, () => ({ ...status }));
+  const panel = createPanel(panelConfig, async () => ({
+    ...status,
+    host: await getHostStatus(hostConfig),
+  }));
   const server = serve({
     fetch: panel.fetch,
     hostname: panelConfig.hostname,

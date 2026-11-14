@@ -6,9 +6,11 @@ import { html } from "hono/html";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { verifyPassword } from "./panel-auth.js";
+import type { HostStatus } from "./agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 
 export interface AgentStatus {
+  host?: HostStatus;
   agentId?: string;
   agentName?: string;
   ownerId?: number;
@@ -84,7 +86,7 @@ function login(error?: string) {
 
 export function createPanel(
   config: PanelConfig,
-  getStatus: () => AgentStatus,
+  getStatus: () => AgentStatus | Promise<AgentStatus>,
   now = Date.now,
 ) {
   const app = new Hono();
@@ -181,9 +183,9 @@ export function createPanel(
     deleteCookie(c, cookieName, { path: "/", secure, sameSite: "Strict" });
     return c.redirect("/login", 303);
   });
-  app.get("/api/status", (c) => c.json(getStatus()));
-  app.get("/", (c) => {
-    const status = getStatus();
+  app.get("/api/status", async (c) => c.json(await getStatus()));
+  app.get("/", async (c) => {
+    const status = await getStatus();
     const labels = {
       connecting: "Conectando",
       connected: "Conectado",
@@ -209,8 +211,12 @@ export function createPanel(
               <dd>
                 ${status.botUsername ? `@${status.botUsername}` : "Pendiente de conexión"}
               </dd>
-              <dt>Ejecución de tareas</dt>
-              <dd>Agent Host sin conectar</dd>
+              <dt>Agent Host</dt>
+              <dd>
+                ${status.host === "ready" ? "Disponible" : status.host === "busy" ? "Ocupado" : "Sin conexión"}
+              </dd>
+              <dt>Ejecución de tareas por Telegram</dt>
+              <dd>Pendiente de implementación</dd>
               <dt>Activación del chat</dt>
               <dd>
                 ${status.chatActivated ? "Activado por el dueño" : "Pendiente: enviá /start al bot"}
