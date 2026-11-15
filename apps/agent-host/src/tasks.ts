@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { Engine } from "./engine.js";
 import type { TaskStore } from "./task-store.js";
 
+const MAX_PROGRESS_EVENTS = 100;
+
 export function createTaskRunner(
   store: TaskStore,
   engine: Engine,
@@ -26,13 +28,26 @@ export function createTaskRunner(
       running = (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined;
         let output = "";
+        let progressCount = 0;
+        let progressWrites: Promise<unknown> = Promise.resolve();
         try {
           await store.update(id, { status: "running" });
           if (closing) throw new Error("Host is stopping");
           const reason = await Promise.race([
-            engine.run(prompt, (chunk) => {
-              output = (output + chunk).slice(0, 64_000);
-            }),
+            engine.run(
+              prompt,
+              (chunk) => {
+                output = (output + chunk).slice(0, 64_000);
+              },
+              (message) => {
+                // Ordered, bounded, and never able to fail or stall the task itself.
+                if (progressCount >= MAX_PROGRESS_EVENTS) return;
+                progressCount++;
+                progressWrites = progressWrites
+                  .then(() => store.progress(id, message.slice(0, 300)))
+                  .catch(() => {});
+              },
+            ),
             new Promise<never>((_, reject) => {
               timer = setTimeout(
                 () => reject(new Error("Task timed out")),
@@ -40,12 +55,14 @@ export function createTaskRunner(
               );
             }),
           ]);
+          await progressWrites;
           await store.update(id, {
             status: closing ? "interrupted" : "completed",
             output,
             stopReason: reason,
           });
         } catch {
+          await progressWrites;
           await store.update(id, {
             status: closing ? "interrupted" : "failed",
             output,

@@ -167,3 +167,69 @@ describe("task queue", () => {
     expect(store.get(saved.id)?.status).toBe("queued");
   });
 });
+
+describe("task progress", () => {
+  function progressSetup(
+    execute: (t: QueuedTask, report: (m: string) => void) => Promise<string>,
+    clock: { now: number },
+  ) {
+    const log: string[] = [];
+    const queue = createTaskQueue({
+      agentId: "a",
+      store: openTaskStore(":memory:"),
+      execute,
+      now: () => clock.now,
+      progress: async (_task, message) => {
+        log.push(`progress:${message}`);
+      },
+      deliver: async (_task, outcome) => {
+        log.push(outcome.ok ? `result:${outcome.output}` : "failed");
+      },
+    });
+    return { queue, log };
+  }
+
+  it("throttles and de-duplicates progress and sends it before the result", async () => {
+    const clock = { now: 0 };
+    const { queue, log } = progressSetup(async (_task, report) => {
+      report("step 1");
+      clock.now = 1000;
+      report("step 2");
+      clock.now = 6000;
+      report("step 2");
+      report("step 3");
+      clock.now = 12000;
+      report("step 4");
+      return "done";
+    }, clock);
+    queue.submit(1, 10, "go");
+    await queue.idle();
+    expect(log).toEqual([
+      "progress:step 1",
+      "progress:step 2",
+      "progress:step 4",
+      "result:done",
+    ]);
+  });
+
+  it("does not let a progress failure change the task outcome", async () => {
+    const queue = createTaskQueue({
+      agentId: "a",
+      store: openTaskStore(":memory:"),
+      execute: async (_task, report) => {
+        report("x");
+        return "fine";
+      },
+      progress: async () => {
+        throw new Error("telegram down");
+      },
+      deliver: async (_task, outcome) => {
+        delivered.push(outcome);
+      },
+    });
+    const delivered: TaskOutcome[] = [];
+    queue.submit(1, 10, "go");
+    await queue.idle();
+    expect(delivered).toEqual([{ ok: true, output: "fine" }]);
+  });
+});

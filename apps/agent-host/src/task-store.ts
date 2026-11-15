@@ -18,7 +18,7 @@ const events = sqliteTable("task_events", {
   taskId: text("task_id")
     .notNull()
     .references(() => tasks.id),
-  status: text("status").$type<Task["status"]>().notNull(),
+  status: text("status").$type<Task["status"] | "progress">().notNull(),
   output: text("output").notNull().default(""),
   stopReason: text("stop_reason"),
 });
@@ -68,6 +68,12 @@ export async function openTaskStore(url: string) {
           stopReason: values.stopReason,
         }),
       ]);
+    },
+    /** Records a step without changing the task's status; `output` carries the step text. */
+    async progress(id: string, message: string) {
+      await db
+        .insert(events)
+        .values({ taskId: id, status: "progress", output: message });
     },
     async getCurrent() {
       const active = await db

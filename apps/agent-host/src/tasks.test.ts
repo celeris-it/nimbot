@@ -342,3 +342,34 @@ it("serves authenticated task status metadata through recovery without leaking p
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("records bounded progress events in order before the final state", async () => {
+  const { runner, store } = await setup({
+    async run(_prompt, onText, onProgress) {
+      for (let step = 1; step <= 150; step++) onProgress?.(`step ${step}`);
+      onText("result");
+      return "end_turn";
+    },
+    async stop() {},
+  });
+  const id = (await runner.submit("long task"))!;
+  await settled(store, id);
+  const events = await store.getEvents(id);
+  expect(events.map((event) => event.status).slice(0, 3)).toEqual([
+    "accepted",
+    "running",
+    "progress",
+  ]);
+  const progress = events.filter((event) => event.status === "progress");
+  expect(progress).toHaveLength(100);
+  expect(progress.map((event) => event.output).slice(0, 3)).toEqual([
+    "step 1",
+    "step 2",
+    "step 3",
+  ]);
+  expect(events.at(-1)).toMatchObject({
+    status: "completed",
+    output: "result",
+  });
+  expect((await store.get(id))?.status).toBe("completed");
+});

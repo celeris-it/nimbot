@@ -91,3 +91,43 @@ describe("internal task client", () => {
     ).rejects.toMatchObject({ kind: "unavailable" });
   });
 });
+
+it("passes progress events to the callback in order and still returns the result", async () => {
+  const events = [
+    { sequence: 1, status: "running" },
+    { sequence: 2, status: "progress", output: "Using tool: read" },
+    { sequence: 3, status: "progress", output: "Using tool: edit" },
+    { sequence: 4, status: "completed", output: "all done" },
+  ];
+  const request = (async (input: string | URL | Request) =>
+    String(input).endsWith("/tasks")
+      ? Response.json({ id: "t1", status: "accepted" }, { status: 202 })
+      : Response.json({ id: "t1", events })) as typeof fetch;
+  const seen: string[] = [];
+  const run = createHostTasks(
+    { url: "http://host:3001", token: "a".repeat(64) },
+    request,
+    async () => {},
+  );
+  expect(await run("go", (message) => seen.push(message))).toBe("all done");
+  expect(seen).toEqual(["Using tool: read", "Using tool: edit"]);
+  const bad = (async (input: string | URL | Request) =>
+    String(input).endsWith("/tasks")
+      ? Response.json({ id: "t1", status: "accepted" }, { status: 202 })
+      : Response.json({
+          id: "t1",
+          events: [
+            { sequence: 1, status: "progress", output: "x" },
+            { sequence: 2, status: "completed", output: "ok" },
+          ],
+        })) as typeof fetch;
+  expect(
+    await createHostTasks(
+      { url: "http://host:3001", token: "a".repeat(64) },
+      bad,
+      async () => {},
+    )("go", () => {
+      throw new Error("ignored");
+    }),
+  ).toBe("ok");
+});

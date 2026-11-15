@@ -2,10 +2,16 @@ import { spawnOpenCode } from "./acp-client.js";
 import { stopEngine } from "./stop-engine.js";
 import type { Engine } from "./engine.js";
 
+/** Single-line, bounded text for a tool step shown to the user. */
+export function progressLabel(title: string) {
+  const text = title.replace(/\s+/g, " ").trim().slice(0, 200);
+  return `Using tool: ${text || "unnamed step"}`;
+}
+
 export function createOpenCodeEngine(workspace: string): Engine {
   let active: ReturnType<typeof spawnOpenCode> | undefined;
   return {
-    async run(prompt, onText) {
+    async run(prompt, onText, onProgress) {
       const engine = spawnOpenCode(workspace, {
         onUpdate: (_id, update) => {
           const content = update.content as { text?: string } | undefined;
@@ -14,6 +20,11 @@ export function createOpenCodeEngine(workspace: string): Engine {
             typeof content?.text === "string"
           )
             onText(content.text);
+          else if (
+            update.sessionUpdate === "tool_call" &&
+            typeof update.title === "string"
+          )
+            onProgress?.(progressLabel(update.title));
         },
         // Pending Telegram approval support: deny permission requests by default.
       });

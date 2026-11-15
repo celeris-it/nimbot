@@ -8,14 +8,20 @@ export function createBotTasks(config: {
   store: TaskStore;
   agentId: string;
   ownerId: () => number;
-  run: (prompt: string) => Promise<string>;
+  run: (
+    prompt: string,
+    onProgress?: (message: string) => void,
+  ) => Promise<string>;
   access?: BotAccess;
 }) {
   let bot: Bot | undefined;
   const queue = createTaskQueue({
     agentId: config.agentId,
     store: config.store,
-    execute: (task) => config.run(task.prompt),
+    execute: (task, report) => config.run(task.prompt, report),
+    progress: async (task, message) => {
+      if (bot) await bot.api.sendMessage(task.chatId, `Working: ${message}`);
+    },
     // Setup may have changed while the task waited in the queue.
     admit: (task) =>
       !config.access ||

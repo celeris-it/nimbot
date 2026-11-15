@@ -138,7 +138,15 @@ export function createTaskQueue(config: {
     | "pendingConversations"
     | "markRunningInterrupted"
   >;
-  execute: (task: QueuedTask) => Promise<string>;
+  execute: (
+    task: QueuedTask,
+    report: (message: string) => void,
+  ) => Promise<string>;
+  /** Shows a running task's progress to its owner. Best effort. */
+  progress?: (task: QueuedTask, message: string) => Promise<void>;
+  /** Minimum time between two progress messages for one task. */
+  progressIntervalMs?: number;
+  now?: () => number;
   /** Re-checks persisted setup right before a task starts. */
   admit?: (task: QueuedTask) => boolean;
   deliver: (task: QueuedTask, outcome: TaskOutcome) => Promise<void>;
@@ -159,16 +167,37 @@ export function createTaskQueue(config: {
         }
         if (!task) return;
         let outcome: TaskOutcome;
+        const sending: Promise<unknown>[] = [];
         try {
           if (config.admit && !config.admit(task))
             outcome = { ok: false, kind: "not_ready" };
-          else outcome = { ok: true, output: await config.execute(task) };
+          else {
+            const current = task;
+            let lastSent = -Infinity;
+            let lastMessage = "";
+            // Throttled so a chatty engine cannot flood the chat or hit Telegram limits.
+            const report = (message: string) => {
+              const now = (config.now ?? Date.now)();
+              if (
+                !config.progress ||
+                message === lastMessage ||
+                now - lastSent < (config.progressIntervalMs ?? 5000)
+              )
+                return;
+              lastSent = now;
+              lastMessage = message;
+              sending.push(config.progress(current, message).catch(() => {}));
+            };
+            outcome = { ok: true, output: await config.execute(task, report) };
+          }
         } catch (error) {
           outcome = {
             ok: false,
             kind: error instanceof HostTaskError ? error.kind : "unavailable",
           };
         }
+        // Progress must reach the chat before the final result does.
+        await Promise.allSettled(sending);
         try {
           config.store.finish(
             task.id,

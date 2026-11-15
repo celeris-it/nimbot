@@ -16,7 +16,10 @@ export function createHostTasks(
   request: typeof fetch = fetch,
   pause: () => Promise<unknown> = () => delay(1000),
 ) {
-  return async (prompt: string): Promise<string> => {
+  return async (
+    prompt: string,
+    onProgress?: (message: string) => void,
+  ): Promise<string> => {
     const deadline = AbortSignal.timeout(150_000);
     async function call(path: string, body?: string) {
       const response = await request(`${config.url}${path}`, {
@@ -72,6 +75,17 @@ export function createHostTasks(
             if (typeof event.output !== "string")
               throw new HostTaskError("unavailable");
             return event.output;
+          }
+          if (event.status === "progress") {
+            if (typeof event.output !== "string")
+              throw new HostTaskError("unavailable");
+            // A display problem must never change the task's outcome.
+            try {
+              if (event.output) onProgress?.(event.output);
+            } catch {
+              /* Ignore reporting failures. */
+            }
+            continue;
           }
           if (event.status === "failed" || event.status === "interrupted")
             throw new HostTaskError(event.status);

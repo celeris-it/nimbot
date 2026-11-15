@@ -7,7 +7,10 @@ import type { BotAccess } from "./agent-access.js";
 import type { HostStatus } from "./agent-host.js";
 
 function setup(
-  execute?: (prompt: string) => Promise<string>,
+  execute?: (
+    prompt: string,
+    onProgress?: (message: string) => void,
+  ) => Promise<string>,
   binding?: ChatBinding,
   hostStatus?: () => Promise<HostStatus>,
   access?: BotAccess,
@@ -123,7 +126,8 @@ describe("Telegram access", () => {
       await second.bot.handleUpdate(message("/status"));
       expect(second.sent.at(-1)).toContain("Chat: activated");
       await second.bot.handleUpdate(message("hello"));
-      expect(execute).toHaveBeenCalledExactlyOnceWith("hello");
+      expect(execute).toHaveBeenCalledOnce();
+      expect(execute.mock.calls[0]?.[0]).toBe("hello");
       expect(second.sent.at(-1)).toBe("Restored");
     } finally {
       binding.close();
@@ -160,7 +164,8 @@ describe("Telegram access", () => {
     const count = sent.length;
     await bot.handleUpdate(message("create a file"));
     await idle();
-    expect(execute).toHaveBeenCalledExactlyOnceWith("create a file");
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[0]).toBe("create a file");
     expect(sent.slice(count).join("")).toBe(output);
     expect(destinations.slice(count)).toEqual([42, 42]);
     expect(sent.slice(count).every((part) => part.length <= 4096)).toBe(true);
@@ -296,7 +301,9 @@ it("rechecks persisted setup after Host health and never executes incomplete age
     if (changeDuringHealth) registry.beginContainerAction("test", "stop");
     return "ready" as const;
   });
-  const execute = vi.fn(async () => "Done");
+  const execute = vi.fn<(prompt: string) => Promise<string>>(
+    async () => "Done",
+  );
   const { bot, sent, idle } = setup(execute, binding, health, access);
   try {
     await bot.handleUpdate(message("/start"));
@@ -314,7 +321,8 @@ it("rechecks persisted setup after Host health and never executes incomplete age
     changeDuringHealth = false;
     await bot.handleUpdate(message("third"));
     await idle();
-    expect(execute).toHaveBeenCalledExactlyOnceWith("third");
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[0]).toBe("third");
     registry.beginResourceRemoval("test");
     registry.finishProvisioning("test", "cancelled");
     await bot.handleUpdate(message("/start"));
@@ -364,5 +372,24 @@ describe("task queue through Telegram", () => {
       "two",
       "three",
     ]);
+  });
+
+  it("shows progress through the same bot to the owner's chat before the result", async () => {
+    const execute = vi.fn(
+      async (_prompt: string, onProgress?: (message: string) => void) => {
+        onProgress?.("Using tool: read file");
+        return "All done";
+      },
+    );
+    const { bot, sent, destinations, idle } = setup(execute);
+    await bot.handleUpdate(message("/start"));
+    const before = sent.length;
+    await bot.handleUpdate(message("work"));
+    await idle();
+    expect(sent.slice(before)).toEqual([
+      "Working: Using tool: read file",
+      "All done",
+    ]);
+    expect(destinations.slice(before)).toEqual([42, 42]);
   });
 });
