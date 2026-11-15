@@ -1,4 +1,4 @@
-import { createDockerApi } from "./docker-api.js";
+import { createDockerApi, type DockerApi } from "./docker-api.js";
 import { isAbsolute } from "node:path";
 
 export interface ContainerConfig {
@@ -31,9 +31,9 @@ export function createContainerControl(
     action: "start" | "stop",
     status: "pending" | "completed" | "failed",
   ) => void = () => {},
+  call: DockerApi = createDockerApi(config.socketPath),
 ) {
   let busy = false;
-  const call = createDockerApi(config.socketPath);
   async function inspect() {
     const response = await call(
       `/containers/${encodeURIComponent(config.target)}/json`,
