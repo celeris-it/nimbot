@@ -373,3 +373,39 @@ it("records bounded progress events in order before the final state", async () =
   });
   expect((await store.get(id))?.status).toBe("completed");
 });
+
+it("cancels only the named running task and accepts a new task afterwards", async () => {
+  let stops = 0;
+  let calls = 0;
+  const { runner, store, request } = await setup(
+    {
+      async run() {
+        calls++;
+        if (calls === 1) return new Promise<string>(() => {});
+        return "end_turn";
+      },
+      async stop() {
+        stops++;
+      },
+    },
+    60_000,
+  );
+  const id = (await runner.submit("long task"))!;
+  await vi.waitFor(async () =>
+    expect((await store.get(id))?.status).toBe("running"),
+  );
+  expect((await request(`/tasks/${id}/cancel`, {}, "wrong")).status).toBe(401);
+  expect((await request("/tasks/missing/cancel", {})).status).toBe(404);
+  expect(runner.cancel("some-other-task")).toBe(false);
+  expect((await store.get(id))?.status).toBe("running");
+  const response = await request(`/tasks/${id}/cancel`, {});
+  expect(response.status).toBe(202);
+  expect((await settled(store, id)).status).toBe("cancelled");
+  expect((await store.getEvents(id)).at(-1)?.status).toBe("cancelled");
+  expect(stops).toBeGreaterThan(0);
+  // A finished task cannot be cancelled again, and the host is free for new work.
+  expect((await request(`/tasks/${id}/cancel`, {})).status).toBe(409);
+  const next = await runner.submit("next task");
+  expect(next).toBeTruthy();
+  expect((await settled(store, next!)).status).toBe("completed");
+});

@@ -7,7 +7,14 @@ const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   prompt: text("prompt").notNull(),
   status: text("status", {
-    enum: ["accepted", "running", "completed", "failed", "interrupted"],
+    enum: [
+      "accepted",
+      "running",
+      "completed",
+      "failed",
+      "interrupted",
+      "cancelled",
+    ],
   }).notNull(),
   output: text("output").notNull().default(""),
   stopReason: text("stop_reason"),

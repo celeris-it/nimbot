@@ -55,6 +55,19 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
       ? c.json({ id, status: "accepted" }, 202)
       : c.json({ error: "Agent is busy" }, 409);
   });
+  app.post("/tasks/:id/cancel", async (c) => {
+    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
+    const id = c.req.param("id");
+    try {
+      const task = await runner.get(id);
+      if (!task) return c.json({ error: "Task not found" }, 404);
+      return runner.cancel(id)
+        ? c.json({ id, status: "cancelling" }, 202)
+        : c.json({ error: "Task is not running" }, 409);
+    } catch {
+      return c.json({ error: "Task state unavailable" }, 503);
+    }
+  });
   app.get("/tasks/current", async (c) => {
     if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
     try {

@@ -13,6 +13,8 @@ export function createTaskRunner(
   let closing = false;
   let inserting: Promise<void> = Promise.resolve();
   let running: Promise<void> = Promise.resolve();
+  let currentId: string | undefined;
+  let cancelNow: (() => void) | undefined;
   return {
     async submit(prompt: string): Promise<string | undefined> {
       if (busy || closing) return undefined;
@@ -25,6 +27,15 @@ export function createTaskRunner(
         busy = false;
         throw error;
       }
+      currentId = id;
+      let cancelRequested = false;
+      const cancelled = new Promise<never>((_, reject) => {
+        cancelNow = () => {
+          cancelRequested = true;
+          reject(new Error("Task cancelled"));
+        };
+      });
+      cancelled.catch(() => {});
       running = (async () => {
         let timer: ReturnType<typeof setTimeout> | undefined;
         let output = "";
@@ -33,6 +44,7 @@ export function createTaskRunner(
         try {
           await store.update(id, { status: "running" });
           if (closing) throw new Error("Host is stopping");
+          if (cancelRequested) throw new Error("Task cancelled");
           const reason = await Promise.race([
             engine.run(
               prompt,
@@ -48,6 +60,7 @@ export function createTaskRunner(
                   .catch(() => {});
               },
             ),
+            cancelled,
             new Promise<never>((_, reject) => {
               timer = setTimeout(
                 () => reject(new Error("Task timed out")),
@@ -64,11 +77,17 @@ export function createTaskRunner(
         } catch {
           await progressWrites;
           await store.update(id, {
-            status: closing ? "interrupted" : "failed",
+            status: closing
+              ? "interrupted"
+              : cancelRequested
+                ? "cancelled"
+                : "failed",
             output,
           });
         } finally {
           if (timer) clearTimeout(timer);
+          currentId = undefined;
+          cancelNow = undefined;
           try {
             await engine.stop();
           } finally {
@@ -79,6 +98,12 @@ export function createTaskRunner(
       // Storage failures remain failures; never crash the host through an unhandled rejection.
       void running.catch(() => console.error("Could not finalize task state."));
       return id;
+    },
+    /** Cancels only the named task, and only while it is the one running. */
+    cancel(id: string): boolean {
+      if (!busy || currentId !== id || !cancelNow) return false;
+      cancelNow();
+      return true;
     },
     getCurrent: store.getCurrent,
     get: store.get,

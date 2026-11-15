@@ -131,3 +131,75 @@ it("passes progress events to the callback in order and still returns the result
     }),
   ).toBe("ok");
 });
+
+describe("task cancellation", () => {
+  const host = { url: "http://host:3001", token: "a".repeat(64) };
+  function fake(finalStatus: "cancelled" | "completed" = "cancelled") {
+    const requests: string[] = [];
+    let cancelled = false;
+    const request = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      requests.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.endsWith("/tasks"))
+        return Response.json({ id: "t1", status: "accepted" }, { status: 202 });
+      if (url.endsWith("/cancel")) {
+        cancelled = true;
+        return Response.json(
+          { id: "t1", status: "cancelling" },
+          { status: 202 },
+        );
+      }
+      return Response.json({
+        id: "t1",
+        events: cancelled
+          ? [{ sequence: 2, status: finalStatus, output: "partial" }]
+          : [{ sequence: 1, status: "running" }],
+      });
+    }) as typeof fetch;
+    return { request, requests };
+  }
+
+  it("asks the Host to cancel the exact task and reports cancellation", async () => {
+    const { request, requests } = fake();
+    const controller = new AbortController();
+    const run = createHostTasks(host, request, async () => {
+      controller.abort();
+    });
+    await expect(run("go", undefined, controller.signal)).rejects.toMatchObject(
+      { kind: "cancelled" },
+    );
+    expect(requests).toContain("POST http://host:3001/tasks/t1/cancel");
+  });
+
+  it("does not submit anything when already cancelled", async () => {
+    const { request, requests } = fake();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      createHostTasks(host, request)("go", undefined, controller.signal),
+    ).rejects.toMatchObject({ kind: "cancelled" });
+    expect(requests).toEqual([]);
+  });
+
+  it("cancels a task accepted after the signal fired and still returns a completed result", async () => {
+    const { request, requests } = fake("completed");
+    const controller = new AbortController();
+    const slow = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/tasks")) controller.abort();
+      return request(input, init);
+    }) as typeof fetch;
+    await expect(
+      createHostTasks(host, slow, async () => {})(
+        "go",
+        undefined,
+        controller.signal,
+      ),
+    ).resolves.toBe("partial");
+    expect(requests.some((entry) => entry.endsWith("/tasks/t1/cancel"))).toBe(
+      true,
+    );
+  });
+});

@@ -106,6 +106,7 @@ export function createRegisteredBots(
         binding,
         () => getHostStatus(host, request),
         access,
+        tasks.control,
       );
       connection.bot = bot;
       // Avoid init's automatic retries: one bounded identity check, without starting polling.

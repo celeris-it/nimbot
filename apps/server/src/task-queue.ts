@@ -22,20 +22,40 @@ export function openTaskStore(path: string) {
   const db = new DatabaseSync(path);
   try {
     db.exec("PRAGMA busy_timeout = 5000");
-    // Initial schema; subsequent schema changes require migrations.
-    db.exec(`CREATE TABLE IF NOT EXISTS tasks (
+    const tableSql = (
+      db.prepare("SELECT sql FROM sqlite_master WHERE name = 'tasks'").get() as
+        { sql: string } | undefined
+    )?.sql;
+    const table = (name: string) => `CREATE TABLE ${name} (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       id TEXT NOT NULL UNIQUE,
       agent_id TEXT NOT NULL,
       bot_id INTEGER NOT NULL,
       chat_id INTEGER NOT NULL,
       prompt TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted')),
+      status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted', 'cancelled')),
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
+    )`;
+    db.exec("BEGIN IMMEDIATE");
+    if (!tableSql) db.exec(table("tasks"));
+    else if (!tableSql.includes("'cancelled'")) {
+      // Earlier schema lacked the cancelled status; SQLite cannot alter a CHECK.
+      db.exec(`${table("tasks_new")};
+        INSERT INTO tasks_new SELECT * FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_new RENAME TO tasks`);
+    }
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS tasks_conversation ON tasks (bot_id, chat_id, status, seq)",
     );
-    CREATE INDEX IF NOT EXISTS tasks_conversation ON tasks (bot_id, chat_id, status, seq)`);
+    db.exec("COMMIT");
   } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* No active transaction. */
+    }
     db.close();
     throw error;
   }
@@ -92,7 +112,10 @@ export function openTaskStore(path: string) {
         throw error;
       }
     },
-    finish(id: string, status: "completed" | "failed" | "interrupted") {
+    finish(
+      id: string,
+      status: "completed" | "failed" | "interrupted" | "cancelled",
+    ) {
       db.prepare(
         "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = 'running'",
       ).run(status, Date.now(), id);
@@ -141,6 +164,7 @@ export function createTaskQueue(config: {
   execute: (
     task: QueuedTask,
     report: (message: string) => void,
+    cancelSignal: AbortSignal,
   ) => Promise<string>;
   /** Shows a running task's progress to its owner. Best effort. */
   progress?: (task: QueuedTask, message: string) => Promise<void>;
@@ -153,6 +177,7 @@ export function createTaskQueue(config: {
 }) {
   let closed = false;
   const draining = new Map<string, Promise<void>>();
+  const active = new Map<string, AbortController>();
   async function drain(botId: number, chatId: number) {
     const key = `${botId}:${chatId}`;
     // Registered by kick() before this body runs, so the exit below cannot race a submit.
@@ -167,6 +192,8 @@ export function createTaskQueue(config: {
         }
         if (!task) return;
         let outcome: TaskOutcome;
+        const controller = new AbortController();
+        active.set(key, controller);
         const sending: Promise<unknown>[] = [];
         try {
           if (config.admit && !config.admit(task))
@@ -188,7 +215,10 @@ export function createTaskQueue(config: {
               lastMessage = message;
               sending.push(config.progress(current, message).catch(() => {}));
             };
-            outcome = { ok: true, output: await config.execute(task, report) };
+            outcome = {
+              ok: true,
+              output: await config.execute(task, report, controller.signal),
+            };
           }
         } catch (error) {
           outcome = {
@@ -196,6 +226,7 @@ export function createTaskQueue(config: {
             kind: error instanceof HostTaskError ? error.kind : "unavailable",
           };
         }
+        active.delete(key);
         // Progress must reach the chat before the final result does.
         await Promise.allSettled(sending);
         try {
@@ -203,8 +234,8 @@ export function createTaskQueue(config: {
             task.id,
             outcome.ok
               ? "completed"
-              : outcome.kind === "interrupted"
-                ? "interrupted"
+              : outcome.kind === "interrupted" || outcome.kind === "cancelled"
+                ? outcome.kind
                 : "failed",
           );
         } catch {
@@ -237,6 +268,17 @@ export function createTaskQueue(config: {
       });
       kick(botId, chatId);
       return saved;
+    },
+    isRunning(botId: number, chatId: number): boolean {
+      const controller = active.get(`${botId}:${chatId}`);
+      return !!controller && !controller.signal.aborted;
+    },
+    /** Cancels the conversation's running task only; queued tasks behind it still run. */
+    stop(botId: number, chatId: number): boolean {
+      const controller = active.get(`${botId}:${chatId}`);
+      if (!controller || controller.signal.aborted) return false;
+      controller.abort();
+      return true;
     },
     /** Continues queued work saved before a restart. */
     resume() {

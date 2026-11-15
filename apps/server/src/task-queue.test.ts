@@ -233,3 +233,76 @@ describe("task progress", () => {
     expect(delivered).toEqual([{ ok: true, output: "fine" }]);
   });
 });
+
+describe("stopping a task", () => {
+  it("cancels only the running task; queued tasks and other conversations continue", async () => {
+    const started = gate();
+    const store = openTaskStore(":memory:");
+    const delivered: { prompt: string; outcome: TaskOutcome }[] = [];
+    const queue = createTaskQueue({
+      agentId: "a",
+      store,
+      execute: async (task, _report, signal) => {
+        if (task.prompt === "long") {
+          started.open();
+          await new Promise<never>((_, reject) =>
+            signal.addEventListener("abort", () =>
+              reject(new HostTaskError("cancelled")),
+            ),
+          );
+        }
+        return `ran ${task.prompt}`;
+      },
+      deliver: async (task, outcome) => {
+        delivered.push({ prompt: task.prompt, outcome });
+      },
+    });
+    expect(queue.stop(1, 10)).toBe(false);
+    const long = queue.submit(1, 10, "long");
+    queue.submit(1, 10, "after");
+    await started.promise;
+    expect(queue.stop(2, 20)).toBe(false);
+    expect(queue.stop(1, 10)).toBe(true);
+    expect(queue.stop(1, 10)).toBe(false);
+    await queue.idle();
+    expect(store.get(long.id)?.status).toBe("cancelled");
+    expect(delivered).toEqual([
+      { prompt: "long", outcome: { ok: false, kind: "cancelled" } },
+      { prompt: "after", outcome: { ok: true, output: "ran after" } },
+    ]);
+    // The conversation accepts new work afterwards.
+    queue.submit(1, 10, "new");
+    await queue.idle();
+    expect(delivered.at(-1)?.outcome).toEqual({ ok: true, output: "ran new" });
+  });
+
+  it("migrates a task table created before the cancelled status existed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nimbot-task-migration-"));
+    const path = join(dir, "server.sqlite");
+    try {
+      const { DatabaseSync } = await import("node:sqlite");
+      const old = new DatabaseSync(path);
+      old.exec(`CREATE TABLE tasks (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+        agent_id TEXT NOT NULL, bot_id INTEGER NOT NULL, chat_id INTEGER NOT NULL,
+        prompt TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted')),
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+        INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at)
+        VALUES ('old', 'a', 1, 10, 'kept', 'queued', 1, 1)`);
+      old.close();
+      const store = openTaskStore(path);
+      expect(store.get("old")).toMatchObject({
+        prompt: "kept",
+        status: "queued",
+      });
+      const claimed = store.claimNext(1, 10)!;
+      store.finish(claimed.id, "cancelled");
+      expect(store.get("old")?.status).toBe("cancelled");
+      store.close();
+      openTaskStore(path).close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -11,6 +11,7 @@ export function createBotTasks(config: {
   run: (
     prompt: string,
     onProgress?: (message: string) => void,
+    cancelSignal?: AbortSignal,
   ) => Promise<string>;
   access?: BotAccess;
 }) {
@@ -18,7 +19,7 @@ export function createBotTasks(config: {
   const queue = createTaskQueue({
     agentId: config.agentId,
     store: config.store,
-    execute: (task, report) => config.run(task.prompt, report),
+    execute: (task, report, signal) => config.run(task.prompt, report, signal),
     progress: async (task, message) => {
       if (bot) await bot.api.sendMessage(task.chatId, `Working: ${message}`);
     },
@@ -33,6 +34,7 @@ export function createBotTasks(config: {
   });
   return {
     submit: queue.submit,
+    control: { isRunning: queue.isRunning, stop: queue.stop },
     resume: queue.resume,
     idle: queue.idle,
     close: queue.close,

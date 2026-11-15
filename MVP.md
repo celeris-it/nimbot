@@ -443,7 +443,7 @@ The Phase 2 per-bot polling isolation task is now complete across the bootstrap 
 |---|---|
 | `/start`, `/help` | Activate the owner's chat and display this agent's help |
 | `/status` | Display this agent's status |
-| `/stop` | Cancel this agent's active task (Phase 3) |
+| `/stop` | Cancel this agent's active task |
 | Text message | Send a task to this bot's bound agent |
 
 Agent creation, configuration, container start/stop, token linking, and deletion are panel actions. Telegram has no `/new`, `/agents`, `/delete`, or `/use` administration workflow.
@@ -469,7 +469,7 @@ Agent creation, configuration, container start/stop, token linking, and deletion
 - [x] Each agent conversation, identified by bot ID and private chat ID, has a persistent FIFO task queue and runs one turn at a time.
 - [x] Incoming messages and task state changes are saved before execution.
 - [x] Progress updates are sent through the originating agent bot to its owner’s bound chat while a task runs.
-- [ ] `/stop` in an agent bot cancels only that agent’s running task, and the agent accepts a new task afterwards.
+- [x] `/stop` in an agent bot cancels only that agent’s running task, and the agent accepts a new task afterwards.
 - [ ] Tasks have a timeout, and a failed task does not block the tasks behind it.
 - [ ] Browser tasks work through Playwright, using the approach chosen in Phase 0.
 - [ ] Approval requests for sensitive actions are sent through the originating agent bot and can be accepted or denied only by its authorized owner; callbacks are bound to that agent and task.

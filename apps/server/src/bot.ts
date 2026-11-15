@@ -15,6 +15,7 @@ const failureMessages = {
     "I stopped waiting for the result. The task may still be running; check the panel before sending it again.",
   unavailable:
     "I could not confirm the task's status on the Agent Host. It may have started; check the panel before sending it again.",
+  cancelled: "The task was cancelled. You can send a new task.",
   not_ready:
     "The agent's setup changed before this task could start, so it was not run. Check the panel before trying again.",
 };
@@ -49,6 +50,11 @@ export function createBot(
   binding?: ChatBinding,
   hostStatus?: () => Promise<HostStatus>,
   access?: BotAccess,
+  /** Cancels this conversation's running task only. */
+  stopTask?: {
+    isRunning(botId: number, chatId: number): boolean;
+    stop(botId: number, chatId: number): boolean;
+  },
 ): Bot {
   let activeChatId: number | undefined;
   const bot = new Bot(config.telegramBotToken, {
@@ -90,8 +96,19 @@ export function createBot(
   });
   bot.command("help", async (ctx) => {
     await ctx.reply(
-      `${config.agent.name}: your user is authorized. Use /start to activate this chat and /status to check the status. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
+      `${config.agent.name}: your user is authorized. Use /start to activate this chat, /status to check the status and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
     );
+  });
+  bot.command("stop", async (ctx) => {
+    if (!stopTask?.isRunning(ctx.me.id, ctx.chat.id)) {
+      await ctx.reply("No task is running.");
+      return;
+    }
+    // Acknowledge first so the confirmation of the end can never arrive before it.
+    await ctx.reply(
+      "Stopping the current task. I will confirm when it has ended.",
+    );
+    stopTask.stop(ctx.me.id, ctx.chat.id);
   });
   bot.command("status", async (ctx) => {
     const host =

@@ -70,6 +70,7 @@ export function createBootstrapBot(
         binding,
         () => getHostStatus(host, request),
         access,
+        tasks.control,
       );
       // The installed grammY client accepts native signals; its declarations use a legacy shim.
       const info = await bot.api.getMe(

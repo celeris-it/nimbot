@@ -4,7 +4,12 @@ import type { AgentHostConfig } from "./agent-host.js";
 export class HostTaskError extends Error {
   constructor(
     readonly kind:
-      "busy" | "unavailable" | "failed" | "interrupted" | "timeout",
+      | "busy"
+      | "unavailable"
+      | "failed"
+      | "interrupted"
+      | "timeout"
+      | "cancelled",
   ) {
     super(kind);
   }
@@ -19,7 +24,10 @@ export function createHostTasks(
   return async (
     prompt: string,
     onProgress?: (message: string) => void,
+    /** Aborting asks the Host to cancel this exact task; its final state still arrives as an event. */
+    cancelSignal?: AbortSignal,
   ): Promise<string> => {
+    if (cancelSignal?.aborted) throw new HostTaskError("cancelled");
     const deadline = AbortSignal.timeout(150_000);
     async function call(path: string, body?: string) {
       const response = await request(`${config.url}${path}`, {
@@ -36,6 +44,7 @@ export function createHostTasks(
       if (!response.ok) throw new HostTaskError("unavailable");
       return (await response.json()) as unknown;
     }
+    let removeCancelListener = () => {};
     try {
       const accepted = await call("/tasks", JSON.stringify({ prompt }));
       if (
@@ -48,6 +57,23 @@ export function createHostTasks(
         accepted.status !== "accepted"
       )
         throw new HostTaskError("unavailable");
+      const requestCancel = () => {
+        void request(
+          `${config.url}/tasks/${encodeURIComponent(accepted.id as string)}/cancel`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${config.token}` },
+            signal: AbortSignal.timeout(5000),
+            redirect: "error",
+          },
+        ).catch(() => {});
+      };
+      // The signal may have fired while the submission was in flight.
+      if (cancelSignal?.aborted) requestCancel();
+      else
+        cancelSignal?.addEventListener("abort", requestCancel, { once: true });
+      removeCancelListener = () =>
+        cancelSignal?.removeEventListener("abort", requestCancel);
       let sequence = 0;
       while (!deadline.aborted) {
         const result = await call(
@@ -87,7 +113,11 @@ export function createHostTasks(
             }
             continue;
           }
-          if (event.status === "failed" || event.status === "interrupted")
+          if (
+            event.status === "failed" ||
+            event.status === "interrupted" ||
+            event.status === "cancelled"
+          )
             throw new HostTaskError(event.status);
           if (event.status !== "accepted" && event.status !== "running")
             throw new HostTaskError("unavailable");
@@ -98,6 +128,8 @@ export function createHostTasks(
     } catch (error) {
       if (error instanceof HostTaskError) throw error;
       throw new HostTaskError(deadline.aborted ? "timeout" : "unavailable");
+    } finally {
+      removeCancelListener();
     }
   };
 }

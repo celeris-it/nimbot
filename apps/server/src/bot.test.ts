@@ -1,6 +1,7 @@
 import { openChatBinding, type ChatBinding } from "./chat-binding.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBot } from "./bot.js";
+import { HostTaskError } from "./host-tasks.js";
 import { createBotTasks } from "./bot-tasks.js";
 import { openTaskStore } from "./task-queue.js";
 import type { BotAccess } from "./agent-access.js";
@@ -36,6 +37,7 @@ function setup(
     binding,
     hostStatus,
     access,
+    tasks?.control,
   );
   bot.botInfo = {
     id: 123,
@@ -391,5 +393,41 @@ describe("task queue through Telegram", () => {
       "All done",
     ]);
     expect(destinations.slice(before)).toEqual([42, 42]);
+  });
+
+  it("cancels the running task with /stop and accepts a new task afterwards", async () => {
+    const execute = vi.fn(
+      async (
+        prompt: string,
+        _onProgress?: (message: string) => void,
+        signal?: AbortSignal,
+      ) => {
+        if (prompt === "long")
+          await new Promise<never>((_, reject) =>
+            signal?.addEventListener("abort", () =>
+              reject(new HostTaskError("cancelled")),
+            ),
+          );
+        return `done ${prompt}`;
+      },
+    );
+    const { bot, sent, idle } = setup(execute, undefined, async () => "ready");
+    await bot.handleUpdate(message("/start"));
+    await bot.handleUpdate(message("/stop"));
+    expect(sent.at(-1)).toBe("No task is running.");
+    await bot.handleUpdate(message("long"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    await bot.handleUpdate(message("/stop", 73));
+    expect(sent.at(-1)).not.toContain("Stopping");
+    const before = sent.length;
+    await bot.handleUpdate(message("/stop"));
+    await idle();
+    expect(sent.slice(before)).toEqual([
+      "Stopping the current task. I will confirm when it has ended.",
+      "The task was cancelled. You can send a new task.",
+    ]);
+    await bot.handleUpdate(message("next"));
+    await idle();
+    expect(sent.at(-1)).toBe("done next");
   });
 });
