@@ -181,6 +181,12 @@ async function main(): Promise<void> {
               ? { name: agent.name, instructions: agent.instructions }
               : undefined;
           },
+          saveToken: async (id, token) => {
+            const agent = registry.get(id);
+            if (!agent || !config.allowedUserIds.has(agent.ownerId))
+              throw new Error("Agent owner is not authorized");
+            await createBotTokenUpdate(id, registry, botSecrets)(token);
+          },
           save: (id, name, instructions) => {
             const agent = registry.get(id);
             if (!agent || !config.allowedUserIds.has(agent.ownerId))

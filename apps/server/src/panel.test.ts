@@ -900,3 +900,125 @@ it("edits the requested registered agent without changing another agent", async 
     registry.close();
   }
 });
+
+it("replaces only the requested agent's token after verifying the same bot", async () => {
+  const { mkdtemp, rm, readdir } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { openAgentRegistry } = await import("./agent-registry.js");
+  const { openBotSecrets } = await import("./bot-secret.js");
+  const { createBotTokenUpdate } = await import("./bot-token-update.js");
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-panel-token-"));
+  const registry = openAgentRegistry(join(dir, "server.sqlite"));
+  const secrets = await openBotSecrets(join(dir, "secrets"));
+  for (const [id, botId] of [
+    ["first", 123],
+    ["second", 456],
+  ] as const) {
+    registry.syncConfigured({ id, name: id, ownerId: 42 });
+    registry.bindBot(id, botId, `${id}_bot`);
+  }
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const app = createPanel(
+    config,
+    () => ({ telegram: "connected" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      get: (id) => registry.get(id),
+      save: (id, name, instructions) =>
+        registry.updateSettings(id, name, instructions),
+      saveToken: (id, token) =>
+        createBotTokenUpdate(id, registry, secrets, async () => ({
+          id: token === "123:valid_secret" ? 123 : 456,
+        }))(token),
+    },
+  );
+  const post = (
+    path: string,
+    body: string,
+    cookie = "",
+    origin = config.origin,
+  ) =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  try {
+    expect((await app.request("/agents/first/token")).status).toBe(303);
+    expect(
+      (await post("/agents/first/token", "token=123%3Avalid_secret")).status,
+    ).toBe(303);
+    const login = await post(
+      "/login",
+      new URLSearchParams({ password }).toString(),
+    );
+    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    const headers = { Cookie: cookie };
+    const form = await (
+      await app.request("/agents/first/token", { headers })
+    ).text();
+    expect(form).toContain("Agente: first");
+    expect(form).toContain('action="/agents/first/token"');
+    expect(
+      (
+        await post(
+          "/agents/first/token",
+          "token=123%3Avalid_secret",
+          cookie,
+          "https://other.example",
+        )
+      ).status,
+    ).toBe(403);
+    const rejected = await post(
+      "/agents/first/token",
+      "token=456%3Awrong_secret",
+      cookie,
+    );
+    expect(rejected.status).toBe(400);
+    const error = await rejected.text();
+    expect(error).not.toContain("wrong_secret");
+    expect(error).toContain('href="/agents/first/token"');
+    expect(await readdir(join(dir, "secrets"))).toEqual([]);
+    const saved = await post(
+      "/agents/first/token",
+      "token=123%3Avalid_secret",
+      cookie,
+    );
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe("/agents/first/token?saved=1");
+    expect(await secrets.read(registry.get("first")!.credentialRef!)).toBe(
+      "123:valid_secret",
+    );
+    expect(registry.get("second")!.credentialRef).toBe(
+      "env:TELEGRAM_BOT_TOKEN",
+    );
+    const confirmation = await (
+      await app.request("/agents/first/token?saved=1", { headers })
+    ).text();
+    expect(confirmation).toContain("Token guardado.");
+    expect(confirmation).not.toContain("valid_secret");
+    expect(
+      (await post("/agents/missing/token", "token=123%3Avalid_secret", cookie))
+        .status,
+    ).toBe(404);
+    expect(
+      (await app.request("/agents/missing/token", { headers })).status,
+    ).toBe(404);
+  } finally {
+    registry.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

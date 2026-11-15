@@ -25,6 +25,7 @@ export interface AgentStatus {
 export interface RegisteredAgentSettings {
   get(id: string): { name: string; instructions: string } | undefined;
   save(id: string, name: string, instructions: string): void;
+  saveToken?(id: string, token: string): Promise<void>;
 }
 export interface AgentSettings {
   get(): { name: string; instructions: string };
@@ -351,45 +352,56 @@ ${values.instructions}</textarea>
       `/agents/${encodeURIComponent(id)}/setup`,
     );
   });
+  const tokenPage = (
+    target = "/agent/token",
+    back = "/",
+    saved = false,
+    agentName?: string,
+  ) =>
+    page(
+      "Token del bot",
+      html`<h1>Token del bot.</h1>
+        ${agentName ? html`<p>Agente: ${agentName}</p>` : ""}
+        <p>
+          Solo se acepta un token nuevo del mismo bot, creado en BotFather.
+          ${agentName ? "Si el bot ya está conectado, reiniciá el servidor para aplicar el cambio." : "Se aplicará al reiniciar el servidor."}
+        </p>
+        ${saved ? html`<p role="status">${agentName ? "Token guardado. Si el bot ya está conectado, reiniciá el servidor para aplicar el cambio." : "Token guardado. Reiniciá el servidor para aplicarlo."}</p>` : ""}
+        <section class="card" aria-label="Credencial del bot">
+          <form method="post" action="${target}">
+            <label for="token">Nuevo token de Telegram</label
+            ><input
+              class="input"
+              type="password"
+              id="token"
+              name="token"
+              required
+              maxlength="256"
+              autocomplete="off"
+            /><button class="btn" type="submit">Guardar token</button
+            ><a class="btn" href="${back}"
+              >${back === "/" ? "Volver al panel" : "Volver al agente"}</a
+            >
+          </form>
+        </section>`,
+      true,
+    );
   app.get("/agent/token", (c) =>
     saveBotToken
-      ? c.html(
-          page(
-            "Token del bot",
-            html`<h1>Token del bot.</h1>
-              <p>
-                Solo se acepta un token nuevo del mismo bot, creado en
-                BotFather. Se aplicará al reiniciar el servidor.
-              </p>
-              ${c.req.query("saved") === "1" ? html`<p role="status">Token guardado. Reiniciá el servidor para aplicarlo.</p>` : ""}
-              <section class="card" aria-label="Credencial del bot">
-                <form method="post" action="/agent/token">
-                  <label for="token">Nuevo token de Telegram</label
-                  ><input
-                    class="input"
-                    type="password"
-                    id="token"
-                    name="token"
-                    required
-                    maxlength="256"
-                    autocomplete="off"
-                  /><button class="btn" type="submit">Guardar token</button
-                  ><a class="btn" href="/">Volver al panel</a>
-                </form>
-              </section>`,
-            true,
-          ),
-        )
+      ? c.html(tokenPage(undefined, undefined, c.req.query("saved") === "1"))
       : c.notFound(),
   );
-  app.post("/agent/token", async (c) => {
-    if (!saveBotToken) return c.notFound();
+  const updateToken = async (
+    c: Context,
+    save: (token: string) => Promise<void>,
+    target = "/agent/token",
+  ) => {
     const body = await c.req.parseBody({ all: true });
     const token = typeof body.token === "string" ? body.token.trim() : "";
     if (!token || token.length > 256)
       return c.text("Ingresá un token válido del mismo bot.", 400);
     try {
-      await saveBotToken(token);
+      await save(token);
     } catch {
       return c.html(
         page(
@@ -399,13 +411,41 @@ ${values.instructions}</textarea>
               Verificá que sea un token válido del mismo bot y que el servidor
               tenga acceso a Telegram y a su almacenamiento.
             </p>
-            <a class="btn" href="/agent/token">Volver a intentar</a>`,
+            <a class="btn" href="${target}">Volver a intentar</a>`,
           true,
         ),
         400,
       );
     }
-    return c.redirect("/agent/token?saved=1", 303);
+    return c.redirect(`${target}?saved=1`, 303);
+  };
+
+  app.post("/agent/token", (c) =>
+    saveBotToken ? updateToken(c, saveBotToken) : c.notFound(),
+  );
+  app.get("/agents/:id/token", (c) => {
+    const id = c.req.param("id");
+    const agent = agentSettings?.get(id);
+    return agent && agentSettings?.saveToken
+      ? c.html(
+          tokenPage(
+            `/agents/${encodeURIComponent(id)}/token`,
+            `/agents/${encodeURIComponent(id)}/setup`,
+            c.req.query("saved") === "1",
+            agent.name,
+          ),
+        )
+      : c.notFound();
+  });
+  app.post("/agents/:id/token", (c) => {
+    const id = c.req.param("id");
+    if (!agentSettings?.get(id) || !agentSettings.saveToken)
+      return c.notFound();
+    return updateToken(
+      c,
+      (token) => agentSettings.saveToken!(id, token),
+      `/agents/${encodeURIComponent(id)}/token`,
+    );
   });
   app.get("/agent/container/stop", (c) =>
     container
@@ -594,6 +634,7 @@ ${values.instructions}</textarea>
         "Configuración del agente",
         html`<h1>${agent.name}</h1>
           ${agentSettings?.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/settings">Editar agente</a>` : ""}
+          ${agentSettings?.saveToken && agentSettings.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/token">Reemplazar token del bot</a>` : ""}
           <section class="card" aria-label="Resultado de creación">
             <h2>
               ${ready ? "Contenedor disponible." : "Configuración incompleta."}
