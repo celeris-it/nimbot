@@ -174,6 +174,7 @@ it("validates opt-in server provisioning configuration", async () => {
     image: env.AGENT_HOST_IMAGE,
     serverContainerRef: "nimbot-server",
     socketPath: env.DOCKER_SOCKET_PATH,
+    taskTimeoutSeconds: 600,
   });
   for (const invalid of [
     { ...env, AGENT_HOST_IMAGE: "nimbot:latest" },

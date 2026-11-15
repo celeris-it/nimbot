@@ -7,7 +7,7 @@ import type { DockerApi } from "./docker-api.js";
 
 const image = `sha256:${"a".repeat(64)}`;
 const token = "b".repeat(64);
-function fixture() {
+function fixture(taskTimeoutSeconds?: number) {
   const resources = new Map<string, Record<string, unknown>>();
   const requests: { path: string; method: string; body: unknown }[] = [];
   let failCreate = false;
@@ -36,7 +36,14 @@ function fixture() {
     resources,
     call,
     requests,
-    manager: createContainerResources({ socketPath: "/unused", image }, call),
+    manager: createContainerResources(
+      {
+        socketPath: "/unused",
+        image,
+        ...(taskTimeoutSeconds ? { taskTimeoutSeconds } : {}),
+      },
+      call,
+    ),
     fail: () => {
       failCreate = true;
     },
@@ -323,4 +330,16 @@ it("does not record a newly created container with a mismatched operation label"
     }),
   ).rejects.toThrow("does not match this creation operation");
   expect(recorded.some((refs) => refs.containerRef)).toBe(false);
+});
+
+it("passes only the validated task timeout into the container environment", async () => {
+  const f = fixture(45);
+  await f.manager.create("dev", token, () => {});
+  const spec = f.requests.find((r) => r.path.startsWith("/containers/create"))!
+    .body as { Env: string[] };
+  expect(spec.Env).toEqual([
+    "WORKSPACE=/workspace",
+    `AGENT_HOST_TOKEN=${token}`,
+    "TASK_TIMEOUT_SECONDS=45",
+  ]);
 });

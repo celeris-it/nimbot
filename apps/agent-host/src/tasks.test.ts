@@ -409,3 +409,28 @@ it("cancels only the named running task and accepts a new task afterwards", asyn
   expect(next).toBeTruthy();
   expect((await settled(store, next!)).status).toBe("completed");
 });
+
+it("fails a task that exceeds its timeout, stops the engine, and accepts the next task", async () => {
+  let stops = 0;
+  let calls = 0;
+  const { runner, store } = await setup(
+    {
+      async run() {
+        calls++;
+        if (calls === 1) return new Promise<string>(() => {});
+        return "end_turn";
+      },
+      async stop() {
+        stops++;
+      },
+    },
+    40,
+  );
+  const first = (await runner.submit("never ends"))!;
+  const failed = await settled(store, first);
+  expect(failed.status).toBe("failed");
+  expect(stops).toBeGreaterThan(0);
+  expect((await store.getEvents(first)).at(-1)?.status).toBe("failed");
+  const next = (await runner.submit("after the timeout"))!;
+  expect((await settled(store, next)).status).toBe("completed");
+});

@@ -28,6 +28,7 @@ export function createBootstrapBot(
   taskStore: TaskStore,
   request: typeof fetch = fetch,
   makeBot: typeof createBot = createBot,
+  taskWait?: number,
 ) {
   const controller = new AbortController();
   let bot: ReturnType<typeof createBot> | undefined;
@@ -56,7 +57,7 @@ export function createBootstrapBot(
         agentId: config.agent.id,
         ownerId: () => config.agent.ownerId,
         run: withAgentInstructions(
-          createHostTasks(host, request),
+          createHostTasks(host, request, undefined, taskWait),
           () => registry.get(config.agent.id)?.instructions ?? "",
         ),
         access,

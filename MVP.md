@@ -470,7 +470,7 @@ Agent creation, configuration, container start/stop, token linking, and deletion
 - [x] Incoming messages and task state changes are saved before execution.
 - [x] Progress updates are sent through the originating agent bot to its owner’s bound chat while a task runs.
 - [x] `/stop` in an agent bot cancels only that agent’s running task, and the agent accepts a new task afterwards.
-- [ ] Tasks have a timeout, and a failed task does not block the tasks behind it.
+- [x] Tasks have a timeout, and a failed task does not block the tasks behind it.
 - [ ] Browser tasks work through Playwright, using the approach chosen in Phase 0.
 - [ ] Approval requests for sensitive actions are sent through the originating agent bot and can be accepted or denied only by its authorized owner; callbacks are bound to that agent and task.
 

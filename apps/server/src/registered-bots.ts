@@ -39,6 +39,8 @@ export function createRegisteredBots(
     allowedOwners: ReadonlySet<number>;
     statePath: string;
     taskStore: TaskStore;
+    /** Upper bound for waiting on one task; omit for the default. */
+    taskWaitMs?: number;
   },
   secrets: Pick<Awaited<ReturnType<typeof openBotSecrets>>, "read">,
   hosts: Pick<Awaited<ReturnType<typeof openHostCredentials>>, "read">,
@@ -83,7 +85,7 @@ export function createRegisteredBots(
         agentId: id,
         ownerId: () => registry.get(id)?.ownerId ?? agent.ownerId,
         run: withAgentInstructions(
-          createHostTasks(host, request),
+          createHostTasks(host, request, undefined, config.taskWaitMs),
           () => registry.get(id)?.instructions ?? "",
         ),
         access,

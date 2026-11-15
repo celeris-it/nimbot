@@ -6,6 +6,7 @@ import { createTaskRunner } from "./tasks.js";
 import { createOpenCodeEngine } from "./opencode-engine.js";
 import { serve } from "@hono/node-server";
 import { createHostApi, readHostConfig } from "./http.js";
+import { readTaskTimeoutMs } from "./task-timeout.js";
 
 try {
   const config = readHostConfig(process.env);
@@ -18,6 +19,7 @@ try {
   const runner = createTaskRunner(
     store,
     createOpenCodeEngine(config.workspace),
+    readTaskTimeoutMs(process.env),
   );
   const app = createHostApi(config, runner);
   const server = serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 3001 });
@@ -46,7 +48,7 @@ try {
   console.log("Agent Host API listening on port 3001.");
 } catch {
   console.error(
-    "Could not initialize Agent Host. Check AGENT_HOST_TOKEN and writable state storage.",
+    "Could not initialize Agent Host. Check AGENT_HOST_TOKEN, TASK_TIMEOUT_SECONDS and writable state storage.",
   );
   process.exitCode = 1;
 }

@@ -34,7 +34,12 @@ export interface ResourceReferences {
 
 /** Internal server service only. Image and token come from trusted server configuration, never panel input. */
 export function createContainerResources(
-  config: { socketPath: string; image: string; serverContainerRef?: string },
+  config: {
+    socketPath: string;
+    image: string;
+    serverContainerRef?: string;
+    taskTimeoutSeconds?: number;
+  },
   call: DockerApi = createDockerApi(config.socketPath),
 ) {
   // Require an immutable local image ID or registry digest; mutable tags are rejected.
@@ -178,7 +183,14 @@ export function createContainerResources(
         Entrypoint: ["node", "/app/apps/agent-host/dist/serve.js"],
         Cmd: [],
         WorkingDir: "/workspace",
-        Env: ["WORKSPACE=/workspace", `AGENT_HOST_TOKEN=${apiToken}`],
+        Env: [
+          "WORKSPACE=/workspace",
+          `AGENT_HOST_TOKEN=${apiToken}`,
+          // A number validated by the server, never panel or agent input.
+          ...(config.taskTimeoutSeconds
+            ? [`TASK_TIMEOUT_SECONDS=${config.taskTimeoutSeconds}`]
+            : []),
+        ],
         Labels: labels,
         HostConfig: {
           Init: true,

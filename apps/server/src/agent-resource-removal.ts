@@ -6,7 +6,12 @@ import { createDockerApi, type DockerApi } from "./docker-api.js";
 /** Removes Docker resources, retaining the agent, bot binding, and API credential. */
 export function createAgentResourceRemoval(
   registry: ReturnType<typeof openAgentRegistry>,
-  config: { socketPath: string; image: string; serverContainerRef?: string },
+  config: {
+    socketPath: string;
+    image: string;
+    serverContainerRef?: string;
+    taskTimeoutSeconds?: number;
+  },
   call: DockerApi = createDockerApi(config.socketPath),
 ) {
   const resources = createContainerResources(config, call);

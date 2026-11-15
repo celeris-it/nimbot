@@ -203,3 +203,27 @@ describe("task cancellation", () => {
     );
   });
 });
+
+it("gives up after its wait limit, tells the Host to cancel that task, and reports a timeout", async () => {
+  const requests: string[] = [];
+  const request = (async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    const url = String(input);
+    requests.push(`${init?.method ?? "GET"} ${url}`);
+    if (url.endsWith("/tasks"))
+      return Response.json({ id: "t9", status: "accepted" }, { status: 202 });
+    if (url.endsWith("/cancel"))
+      return Response.json({ id: "t9", status: "cancelling" }, { status: 202 });
+    return Response.json({ id: "t9", events: [] });
+  }) as typeof fetch;
+  const run = createHostTasks(
+    { url: "http://host:3001", token: "a".repeat(64) },
+    request,
+    () => new Promise((resolve) => setTimeout(resolve, 5)),
+    40,
+  );
+  await expect(run("hang")).rejects.toMatchObject({ kind: "timeout" });
+  expect(requests).toContain("POST http://host:3001/tasks/t9/cancel");
+});

@@ -5,6 +5,7 @@ import type { openAgentRegistry } from "./agent-registry.js";
 import { getHostStatus } from "./agent-host.js";
 import { createContainerResources } from "./container-resources.js";
 import { createContainerControl } from "./container-control.js";
+import { readTaskTimeoutSeconds } from "./task-timeout.js";
 import { createDockerApi, type DockerApi } from "./docker-api.js";
 
 export function readProvisioningConfig(env: NodeJS.ProcessEnv) {
@@ -22,7 +23,12 @@ export function readProvisioningConfig(env: NodeJS.ProcessEnv) {
     throw new Error(
       "Provisioning requires AGENT_HOST_IMAGE, SERVER_CONTAINER_NAME, and an absolute DOCKER_SOCKET_PATH.",
     );
-  const config = { image, serverContainerRef, socketPath };
+  const config = {
+    image,
+    serverContainerRef,
+    socketPath,
+    taskTimeoutSeconds: readTaskTimeoutSeconds(env),
+  };
   // Validate the immutable image before starting the HTTP server or Telegram.
   createContainerResources(config);
   return config;
@@ -32,7 +38,12 @@ export function readProvisioningConfig(env: NodeJS.ProcessEnv) {
 export function createAgentProvisioning(
   registry: ReturnType<typeof openAgentRegistry>,
   credentials: Pick<Awaited<ReturnType<typeof openHostCredentials>>, "prepare">,
-  config: { socketPath: string; image: string; serverContainerRef?: string },
+  config: {
+    socketPath: string;
+    image: string;
+    serverContainerRef?: string;
+    taskTimeoutSeconds?: number;
+  },
   call: DockerApi = createDockerApi(config.socketPath),
   request: typeof fetch = fetch,
   shutdownSignal?: AbortSignal,

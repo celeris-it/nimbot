@@ -20,6 +20,8 @@ export function createHostTasks(
   config: AgentHostConfig,
   request: typeof fetch = fetch,
   pause: () => Promise<unknown> = () => delay(1000),
+  /** Backstop only: the Host enforces the real task timeout. */
+  waitMs = 630_000,
 ) {
   return async (
     prompt: string,
@@ -28,7 +30,7 @@ export function createHostTasks(
     cancelSignal?: AbortSignal,
   ): Promise<string> => {
     if (cancelSignal?.aborted) throw new HostTaskError("cancelled");
-    const deadline = AbortSignal.timeout(150_000);
+    const deadline = AbortSignal.timeout(waitMs);
     async function call(path: string, body?: string) {
       const response = await request(`${config.url}${path}`, {
         method: body === undefined ? "GET" : "POST",
@@ -45,6 +47,15 @@ export function createHostTasks(
       return (await response.json()) as unknown;
     }
     let removeCancelListener = () => {};
+    let acceptedId: string | undefined;
+    const cancelOnHost = (id: string) => {
+      void request(`${config.url}/tasks/${encodeURIComponent(id)}/cancel`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${config.token}` },
+        signal: AbortSignal.timeout(5000),
+        redirect: "error",
+      }).catch(() => {});
+    };
     try {
       const accepted = await call("/tasks", JSON.stringify({ prompt }));
       if (
@@ -57,17 +68,8 @@ export function createHostTasks(
         accepted.status !== "accepted"
       )
         throw new HostTaskError("unavailable");
-      const requestCancel = () => {
-        void request(
-          `${config.url}/tasks/${encodeURIComponent(accepted.id as string)}/cancel`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${config.token}` },
-            signal: AbortSignal.timeout(5000),
-            redirect: "error",
-          },
-        ).catch(() => {});
-      };
+      acceptedId = accepted.id;
+      const requestCancel = () => cancelOnHost(accepted.id as string);
       // The signal may have fired while the submission was in flight.
       if (cancelSignal?.aborted) requestCancel();
       else
@@ -126,7 +128,12 @@ export function createHostTasks(
       }
       throw new HostTaskError("timeout");
     } catch (error) {
-      if (error instanceof HostTaskError) throw error;
+      if (error instanceof HostTaskError) {
+        if (error.kind === "timeout" && acceptedId) cancelOnHost(acceptedId);
+        throw error;
+      }
+      // Stop waiting without leaving the Host busy for the tasks behind this one.
+      if (deadline.aborted && acceptedId) cancelOnHost(acceptedId);
       throw new HostTaskError(deadline.aborted ? "timeout" : "unavailable");
     } finally {
       removeCancelListener();

@@ -30,6 +30,7 @@ import { serve } from "@hono/node-server";
 import { createPanel, type AgentStatus } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";
 import { readConfig } from "./config.js";
+import { readTaskTimeoutSeconds, taskWaitMs } from "./task-timeout.js";
 
 async function main(): Promise<void> {
   let config;
@@ -37,9 +38,11 @@ async function main(): Promise<void> {
   let hostConfig;
   let containerConfig;
   let provisioningConfig;
+  let taskTimeoutSeconds: number;
   try {
     config = readConfig(process.env);
     provisioningConfig = readProvisioningConfig(process.env);
+    taskTimeoutSeconds = readTaskTimeoutSeconds(process.env);
     containerConfig =
       provisioningConfig && !process.env.AGENT_CONTAINER_NAME?.trim()
         ? undefined
@@ -125,6 +128,7 @@ async function main(): Promise<void> {
           allowedOwners: config.allowedUserIds,
           statePath,
           taskStore,
+          taskWaitMs: taskWaitMs(taskTimeoutSeconds),
         },
         botSecrets,
         hostCredentials,
@@ -374,6 +378,9 @@ async function main(): Promise<void> {
     hostConfig,
     status,
     taskStore,
+    undefined,
+    undefined,
+    taskWaitMs(taskTimeoutSeconds),
   );
   const stop = () => {
     provisioningShutdown.abort();

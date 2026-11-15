@@ -20,6 +20,7 @@ services:
       SERVER_STATE_DIR: /home/node/.local/share/nimbot
       AGENT_HOST_TOKEN: ${AGENT_HOST_TOKEN:?Set AGENT_HOST_TOKEN}
       AGENT_HOST_URL: http://agent-host:3001
+      TASK_TIMEOUT_SECONDS: ${TASK_TIMEOUT_SECONDS:-600}
     volumes:
       - server-state:/home/node/.local/share/nimbot
     healthcheck:
@@ -50,6 +51,7 @@ services:
     environment:
       WORKSPACE: /workspace
       AGENT_HOST_TOKEN: ${AGENT_HOST_TOKEN:?Set AGENT_HOST_TOKEN}
+      TASK_TIMEOUT_SECONDS: ${TASK_TIMEOUT_SECONDS:-600}
     volumes:
       - agent-workspace:/workspace
       - agent-engine-state:/home/node/.local/share/opencode

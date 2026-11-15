@@ -306,3 +306,18 @@ describe("stopping a task", () => {
     }
   });
 });
+
+it("lets queued tasks run after a task times out", async () => {
+  const { queue, delivered, store } = setup(async (task) => {
+    if (task.prompt === "slow") throw new HostTaskError("timeout");
+    return `ok ${task.prompt}`;
+  });
+  const slow = queue.submit(1, 10, "slow");
+  queue.submit(1, 10, "next");
+  await queue.idle();
+  expect(delivered.map((d) => d.outcome)).toEqual([
+    { ok: false, kind: "timeout" },
+    { ok: true, output: "ok next" },
+  ]);
+  expect(store.get(slow.id)?.status).toBe("failed");
+});
