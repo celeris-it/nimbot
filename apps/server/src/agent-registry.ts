@@ -113,6 +113,27 @@ export function openAgentRegistry(path: string) {
     "id, name, owner_id AS ownerId, instructions, bot_id AS botId, bot_username AS botUsername, credential_ref AS credentialRef, container_ref AS containerRef";
   const provisioningColumns =
     "status, volume_ref AS volumeRef, network_ref AS networkRef, updated_at AS updatedAt";
+  function assertBotAvailable(id: string, botId: number) {
+    // Refuse accidental bot reuse, including bindings created before this registry.
+    const legacyExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_bindings'",
+      )
+      .get();
+    if (
+      legacyExists &&
+      db
+        .prepare(
+          "SELECT agent_id FROM chat_bindings WHERE bot_id = ? AND agent_id <> ?",
+        )
+        .get(botId, id)
+    )
+      throw new Error("Bot is already assigned to another agent");
+    const other = db
+      .prepare("SELECT id FROM agents WHERE bot_id = ? AND id <> ?")
+      .get(botId, id);
+    if (other) throw new Error("Bot is already assigned to another agent");
+  }
   return {
     listResourceReferences(): {
       id: string;
@@ -238,6 +259,53 @@ export function openAgentRegistry(path: string) {
         .run(status, Date.now(), id, status, id, id);
       if (!result.changes) throw new Error("Agent cannot finish provisioning");
     },
+    registerLinkedAgent(
+      agent: {
+        id: string;
+        name: string;
+        ownerId: number;
+        instructions: string;
+      },
+      bot: { id: number; username: string },
+      credentialRef: string,
+    ) {
+      const name = agent.name.trim();
+      if (
+        !/^[a-z0-9][a-z0-9-]{0,47}$/.test(agent.id) ||
+        !name ||
+        name.length > 128 ||
+        agent.instructions.length > 4000 ||
+        !Number.isSafeInteger(agent.ownerId) ||
+        agent.ownerId <= 0 ||
+        !Number.isSafeInteger(bot.id) ||
+        bot.id <= 0 ||
+        !/^[A-Za-z0-9_]{1,64}$/.test(bot.username) ||
+        !/^file:telegram-[a-f0-9-]{36}$/.test(credentialRef)
+      )
+        throw new Error("Invalid linked agent settings");
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        assertBotAvailable(agent.id, bot.id);
+        db.prepare(
+          "INSERT INTO agents (id, name, owner_id, instructions, bot_id, bot_username, credential_ref) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).run(
+          agent.id,
+          name,
+          agent.ownerId,
+          agent.instructions,
+          bot.id,
+          bot.username,
+          credentialRef,
+        );
+        db.prepare(
+          "INSERT INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'pending', ?)",
+        ).run(agent.id, Date.now());
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
     createPending(agent: {
       id: string;
       name: string;
@@ -287,25 +355,7 @@ export function openAgentRegistry(path: string) {
       if (!result.changes) throw new Error("Agent is not registered");
     },
     bindBot(id: string, botId: number, botUsername: string) {
-      // Refuse accidental bot reuse, including bindings created before this registry.
-      const legacyExists = db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_bindings'",
-        )
-        .get();
-      if (
-        legacyExists &&
-        db
-          .prepare(
-            "SELECT agent_id FROM chat_bindings WHERE bot_id = ? AND agent_id <> ?",
-          )
-          .get(botId, id)
-      )
-        throw new Error("Bot is already assigned to another agent");
-      const other = db
-        .prepare("SELECT id FROM agents WHERE bot_id = ? AND id <> ?")
-        .get(botId, id);
-      if (other) throw new Error("Bot is already assigned to another agent");
+      assertBotAvailable(id, botId);
       const result = db
         .prepare(
           "UPDATE agents SET bot_id = ?, bot_username = ?, credential_ref = COALESCE(credential_ref, 'env:TELEGRAM_BOT_TOKEN') WHERE id = ?",

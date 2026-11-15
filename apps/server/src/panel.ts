@@ -105,6 +105,9 @@ export function createPanel(
     agentId: string,
     action: "start" | "stop",
   ) => Promise<void>,
+  registerAgent?: (
+    input: import("./agent-registration.js").AgentRegistrationInput,
+  ) => Promise<{ agentId: string; provisioning: string }>,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -394,6 +397,36 @@ ${values.instructions}</textarea>
       );
     }
     return c.redirect("/?containerChanged=1", 303);
+  });
+  app.post("/api/agents", async (c) => {
+    if (!registerAgent) return c.notFound();
+    const body = await c.req.parseBody({ all: true });
+    if (
+      typeof body.name !== "string" ||
+      typeof body.ownerId !== "string" ||
+      !/^[1-9]\d*$/.test(body.ownerId) ||
+      !Number.isSafeInteger(Number(body.ownerId)) ||
+      typeof body.token !== "string" ||
+      (body.instructions !== undefined && typeof body.instructions !== "string")
+    )
+      return c.json({ error: "Invalid agent settings" }, 400);
+    try {
+      const result = await registerAgent({
+        name: body.name,
+        ownerId: Number(body.ownerId),
+        token: body.token,
+        instructions: body.instructions ?? "",
+      });
+      return c.json(result, 201);
+    } catch {
+      return c.json(
+        {
+          error:
+            "Could not register the agent; check the owner, bot token, and whether the bot is already linked",
+        },
+        400,
+      );
+    }
   });
   app.post("/api/agents/:id/provision", async (c) => {
     if (!provisionAgent) return c.notFound();

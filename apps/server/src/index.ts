@@ -1,3 +1,4 @@
+import { createAgentRegistration } from "./agent-registration.js";
 import { createResourceReconciliation } from "./resource-reconciliation.js";
 import { createAgentContainerAction } from "./agent-container-action.js";
 import { createAgentResourceRemoval } from "./agent-resource-removal.js";
@@ -150,6 +151,14 @@ async function main(): Promise<void> {
             throw new Error("Agent owner is not authorized");
           await containerAction(id, action);
         }
+      : undefined,
+    provision
+      ? createAgentRegistration(
+          registry,
+          botSecrets,
+          config.allowedUserIds,
+          provision,
+        )
       : undefined,
   );
   const server = serve({

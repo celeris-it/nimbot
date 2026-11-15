@@ -607,3 +607,73 @@ it("protects per-agent container actions and requires confirmation before stoppi
     { id: "dev", action: "stop" },
   ]);
 });
+
+it("authenticates agent registration and validates owner fields without echoing tokens", async () => {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const calls: unknown[] = [];
+  const app = createPanel(
+    config,
+    () => ({ telegram: "connected" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (input) => {
+      calls.push(input);
+      if (input.token === "invalid") throw new Error("private-token-details");
+      return { agentId: "agent-test", provisioning: "ready" };
+    },
+  );
+  const post = (
+    path: string,
+    body: string,
+    cookie = "",
+    origin = config.origin,
+  ) =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  const body = "name=Dev&ownerId=42&token=123%3Asecret";
+  expect((await post("/api/agents", body)).status).toBe(401);
+  const login = await post(
+    "/login",
+    new URLSearchParams({ password }).toString(),
+  );
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  expect(
+    (await post("/api/agents", body, cookie, "https://other.example")).status,
+  ).toBe(403);
+  expect((await post("/api/agents", body + "&ownerId=43", cookie)).status).toBe(
+    400,
+  );
+  expect(
+    (await post("/api/agents", "name=Dev&ownerId=1e2&token=secret", cookie))
+      .status,
+  ).toBe(400);
+  expect(calls).toEqual([]);
+  const response = await post("/api/agents", body, cookie);
+  expect(response.status).toBe(201);
+  expect(await response.json()).toEqual({
+    agentId: "agent-test",
+    provisioning: "ready",
+  });
+  expect(calls).toEqual([
+    { name: "Dev", ownerId: 42, token: "123:secret", instructions: "" },
+  ]);
+  const failed = await post(
+    "/api/agents",
+    "name=Dev&ownerId=42&token=invalid",
+    cookie,
+  );
+  expect(failed.status).toBe(400);
+  expect(await failed.text()).not.toContain("private-token-details");
+});
