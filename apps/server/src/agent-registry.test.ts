@@ -36,7 +36,7 @@ it("migrates once and restores metadata without storing tokens", async () => {
       expect(
         db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
           ?.total,
-      ).toBe(2);
+      ).toBe(3);
     } finally {
       db.close();
     }
@@ -111,6 +111,93 @@ it("persists lifecycle outcomes and marks only pending operations interrupted on
       expect(restored.getContainerOperation("missing")).toBeUndefined();
     } finally {
       restored.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("preserves provisioning resources across interruption and explicit retry", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-provisioning-"));
+  const path = join(dir, "server.sqlite");
+  try {
+    const registry = openAgentRegistry(path);
+    registry.createPending({ id: "new", name: " New agent ", ownerId: 42 });
+    expect(registry.get("new")?.name).toBe("New agent");
+    expect(registry.getProvisioning("new")?.status).toBe("pending");
+    expect(() =>
+      registry.createPending({ id: "new", name: "Duplicate", ownerId: 42 }),
+    ).toThrow();
+    expect(() => registry.finishProvisioning("new", "ready")).toThrow();
+    registry.beginProvisioning("new");
+    expect(() => registry.beginProvisioning("new")).toThrow();
+    registry.recordProvisioningResources("new", { volumeRef: "workspace-new" });
+    expect(() => registry.finishProvisioning("new", "ready")).toThrow();
+    registry.close();
+
+    const restored = openAgentRegistry(path);
+    try {
+      expect(restored.getProvisioning("new")).toMatchObject({
+        status: "interrupted",
+        volumeRef: "workspace-new",
+        networkRef: null,
+      });
+      restored.beginProvisioning("new");
+      restored.recordProvisioningResources("new", {
+        networkRef: "network-new",
+        containerRef: "container-new",
+      });
+      expect(() => restored.finishProvisioning("new", "ready")).toThrow();
+      restored.bindBot("new", 321, "new_bot");
+      restored.finishProvisioning("new", "failed");
+      restored.beginProvisioning("new");
+      restored.finishProvisioning("new", "ready");
+      expect(restored.getProvisioning("new")).toMatchObject({
+        status: "ready",
+        volumeRef: "workspace-new",
+        networkRef: "network-new",
+      });
+      expect(restored.get("new")?.containerRef).toBe("container-new");
+      expect(() =>
+        restored.recordProvisioningResources("new", { volumeRef: "wrong" }),
+      ).toThrow();
+      expect(restored.getProvisioning("new")?.volumeRef).toBe("workspace-new");
+      expect(() => restored.beginProvisioning("missing")).toThrow();
+    } finally {
+      restored.close();
+    }
+    const again = openAgentRegistry(path);
+    expect(again.getProvisioning("new")?.status).toBe("ready");
+    again.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("migrates existing configured agents without treating them as provisioned", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-migration-"));
+  const path = join(dir, "server.sqlite");
+  try {
+    const registry = openAgentRegistry(path);
+    registry.syncConfigured({ id: "existing", name: "Existing", ownerId: 42 });
+    registry.bindBot("existing", 123, "existing_bot");
+    registry.setContainerRef("existing", "container-existing");
+    registry.close();
+    const legacy = new DatabaseSync(path);
+    legacy.exec(
+      "DROP TABLE agent_provisioning; DELETE FROM registry_migrations WHERE version = 3",
+    );
+    legacy.close();
+    const migrated = openAgentRegistry(path);
+    try {
+      expect(migrated.getProvisioning("existing")?.status).toBe("external");
+      expect(migrated.get("existing")).toMatchObject({
+        botId: 123,
+        containerRef: "container-existing",
+      });
+      expect(() => migrated.beginProvisioning("existing")).toThrow();
+    } finally {
+      migrated.close();
     }
   } finally {
     await rm(dir, { recursive: true, force: true });

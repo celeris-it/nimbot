@@ -11,6 +11,19 @@ export interface RegisteredAgent {
   containerRef: string | null;
 }
 
+export interface ProvisioningState {
+  status:
+    | "external"
+    | "pending"
+    | "provisioning"
+    | "ready"
+    | "failed"
+    | "interrupted";
+  volumeRef: string | null;
+  networkRef: string | null;
+  updatedAt: number;
+}
+
 export interface ContainerOperation {
   action: "start" | "stop";
   status: "pending" | "completed" | "failed" | "interrupted";
@@ -53,6 +66,25 @@ export function openAgentRegistry(path: string) {
         updated_at INTEGER NOT NULL
       ); INSERT INTO registry_migrations(version) VALUES (2)`);
     }
+    if (
+      !db
+        .prepare("SELECT version FROM registry_migrations WHERE version = 3")
+        .get()
+    ) {
+      db.exec(`CREATE TABLE agent_provisioning (
+        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+        status TEXT NOT NULL CHECK(status IN ('external', 'pending', 'provisioning', 'ready', 'failed', 'interrupted')),
+        volume_ref TEXT,
+        network_ref TEXT,
+        updated_at INTEGER NOT NULL
+      );
+      INSERT INTO agent_provisioning (agent_id, status, updated_at)
+        SELECT id, 'external', 0 FROM agents;
+      INSERT INTO registry_migrations(version) VALUES (3)`);
+    }
+    db.prepare(
+      "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
+    ).run(Date.now());
     // A lost response cannot establish whether Docker completed the operation.
     db.prepare(
       "UPDATE container_operations SET status = 'interrupted', updated_at = ? WHERE status = 'pending'",
@@ -69,11 +101,105 @@ export function openAgentRegistry(path: string) {
   }
   const columns =
     "id, name, owner_id AS ownerId, instructions, bot_id AS botId, bot_username AS botUsername, credential_ref AS credentialRef, container_ref AS containerRef";
+  const provisioningColumns =
+    "status, volume_ref AS volumeRef, network_ref AS networkRef, updated_at AS updatedAt";
   return {
+    getProvisioning(id: string): ProvisioningState | undefined {
+      return db
+        .prepare(
+          `SELECT ${provisioningColumns} FROM agent_provisioning WHERE agent_id = ?`,
+        )
+        .get(id) as unknown as ProvisioningState | undefined;
+    },
+    beginProvisioning(id: string) {
+      const result = db
+        .prepare(
+          "UPDATE agent_provisioning SET status = 'provisioning', updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'failed', 'interrupted')",
+        )
+        .run(Date.now(), id);
+      if (!result.changes) throw new Error("Agent cannot begin provisioning");
+    },
+    recordProvisioningResources(
+      id: string,
+      resources: {
+        containerRef?: string;
+        volumeRef?: string;
+        networkRef?: string;
+      },
+    ) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const result = db
+          .prepare(
+            "UPDATE agent_provisioning SET volume_ref = COALESCE(?, volume_ref), network_ref = COALESCE(?, network_ref), updated_at = ? WHERE agent_id = ? AND status = 'provisioning'",
+          )
+          .run(
+            resources.volumeRef ?? null,
+            resources.networkRef ?? null,
+            Date.now(),
+            id,
+          );
+        if (!result.changes) throw new Error("Agent is not provisioning");
+        if (resources.containerRef !== undefined)
+          db.prepare("UPDATE agents SET container_ref = ? WHERE id = ?").run(
+            resources.containerRef,
+            id,
+          );
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    finishProvisioning(id: string, status: "ready" | "failed") {
+      const result = db
+        .prepare(
+          `UPDATE agent_provisioning SET status = ?, updated_at = ?
+        WHERE agent_id = ? AND status = 'provisioning'
+        AND (? = 'failed' OR (volume_ref IS NOT NULL AND network_ref IS NOT NULL
+          AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND container_ref IS NOT NULL AND bot_id IS NOT NULL AND credential_ref IS NOT NULL)))`,
+        )
+        .run(status, Date.now(), id, status, id);
+      if (!result.changes) throw new Error("Agent cannot finish provisioning");
+    },
+    createPending(agent: {
+      id: string;
+      name: string;
+      ownerId: number;
+      instructions?: string;
+    }) {
+      const name = agent.name.trim();
+      const instructions = agent.instructions ?? "";
+      if (
+        !agent.id ||
+        !name ||
+        name.length > 128 ||
+        instructions.length > 4000 ||
+        !Number.isSafeInteger(agent.ownerId) ||
+        agent.ownerId <= 0
+      )
+        throw new Error("Invalid agent settings");
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(
+          "INSERT INTO agents (id, name, owner_id, instructions) VALUES (?, ?, ?, ?)",
+        ).run(agent.id, name, agent.ownerId, instructions);
+        db.prepare(
+          "INSERT INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'pending', ?)",
+        ).run(agent.id, Date.now());
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
     syncConfigured(agent: { id: string; name: string; ownerId: number }) {
       db.prepare(
         "INSERT INTO agents (id, name, owner_id) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET owner_id = excluded.owner_id",
       ).run(agent.id, agent.name, agent.ownerId);
+      db.prepare(
+        "INSERT OR IGNORE INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'external', ?)",
+      ).run(agent.id, Date.now());
     },
     updateSettings(id: string, name: string, instructions: string) {
       const normalized = name.trim();

@@ -82,6 +82,7 @@ async function main(): Promise<void> {
       agentName: registry.get(config.agent.id)!.name,
       host: await getHostStatus(hostConfig),
       containerOperation: registry.getContainerOperation(config.agent.id),
+      provisioning: registry.getProvisioning(config.agent.id),
     }),
     Date.now,
     {

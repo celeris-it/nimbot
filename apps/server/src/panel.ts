@@ -12,6 +12,7 @@ import type { PanelConfig } from "./panel-config.js";
 
 export interface AgentStatus {
   host?: HostStatus;
+  provisioning?: import("./agent-registry.js").ProvisioningState;
   containerOperation?: import("./agent-registry.js").ContainerOperation;
   agentId?: string;
   agentName?: string;
