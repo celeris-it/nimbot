@@ -93,6 +93,7 @@ export function createPanel(
   getStatus: () => AgentStatus | Promise<AgentStatus>,
   now = Date.now,
   settings?: AgentSettings,
+  saveBotToken?: (token: string) => Promise<void>,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -279,6 +280,62 @@ ${values.instructions}</textarea>
     }
     return c.redirect("/agent/settings?saved=1", 303);
   });
+  app.get("/agent/token", (c) =>
+    saveBotToken
+      ? c.html(
+          page(
+            "Token del bot",
+            html`<h1>Token del bot.</h1>
+              <p>
+                Solo se acepta un token nuevo del mismo bot, creado en
+                BotFather. Se aplicará al reiniciar el servidor.
+              </p>
+              ${c.req.query("saved") === "1" ? html`<p role="status">Token guardado. Reiniciá el servidor para aplicarlo.</p>` : ""}
+              <section class="card" aria-label="Credencial del bot">
+                <form method="post" action="/agent/token">
+                  <label for="token">Nuevo token de Telegram</label
+                  ><input
+                    class="input"
+                    type="password"
+                    id="token"
+                    name="token"
+                    required
+                    maxlength="256"
+                    autocomplete="off"
+                  /><button class="btn" type="submit">Guardar token</button
+                  ><a class="btn" href="/">Volver al panel</a>
+                </form>
+              </section>`,
+            true,
+          ),
+        )
+      : c.notFound(),
+  );
+  app.post("/agent/token", async (c) => {
+    if (!saveBotToken) return c.notFound();
+    const body = await c.req.parseBody({ all: true });
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    if (!token || token.length > 256)
+      return c.text("Ingresá un token válido del mismo bot.", 400);
+    try {
+      await saveBotToken(token);
+    } catch {
+      return c.html(
+        page(
+          "Token no guardado",
+          html`<h1>No pude guardar el token.</h1>
+            <p>
+              Verificá que sea un token válido del mismo bot y que el servidor
+              tenga acceso a Telegram y a su almacenamiento.
+            </p>
+            <a class="btn" href="/agent/token">Volver a intentar</a>`,
+          true,
+        ),
+        400,
+      );
+    }
+    return c.redirect("/agent/token?saved=1", 303);
+  });
   app.get("/api/status", async (c) => c.json(await getStatus()));
   app.get("/", async (c) => {
     const status = await getStatus();
@@ -295,6 +352,7 @@ ${values.instructions}</textarea>
           <p>Un bot de Telegram por agente. Cada conversación, en su lugar.</p>
           <article class="card">
             ${settings ? html`<a class="btn" href="/agent/settings">Editar agente</a>` : ""}
+            ${saveBotToken ? html`<a class="btn" href="/agent/token">Reemplazar token del bot</a>` : ""}
             <h2>${status.agentName ?? "Agente configurado"}</h2>
             <p class="badge">Configuración inicial</p>
             <dl>

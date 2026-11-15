@@ -302,3 +302,58 @@ it("protects settings, validates input, escapes values and persists updates", as
     registry.close();
   }
 });
+
+it("protects token replacement and never echoes or prepopulates the credential", async () => {
+  let stored = "";
+  const app = createPanel(
+    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
+    () => ({ telegram: "disconnected" }),
+    Date.now,
+    undefined,
+    async (token) => {
+      stored = token;
+    },
+  );
+  const post = (
+    path: string,
+    body: string,
+    cookie = "",
+    origin = "http://localhost:3000",
+  ) =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  expect((await app.request("/agent/token")).status).toBe(303);
+  expect((await post("/agent/token", "token=123%3Asecret")).status).toBe(303);
+  expect(stored).toBe("");
+  const login = await post(
+    "/login",
+    new URLSearchParams({ password }).toString(),
+  );
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  expect(
+    (
+      await post(
+        "/agent/token",
+        "token=123%3Asecret",
+        cookie,
+        "https://other.example",
+      )
+    ).status,
+  ).toBe(403);
+  const result = await post("/agent/token", "token=123%3Asecret", cookie);
+  expect(result.status).toBe(303);
+  expect(stored).toBe("123:secret");
+  const form = await (
+    await app.request("/agent/token?saved=1", { headers: { Cookie: cookie } })
+  ).text();
+  expect(form).not.toContain("123:secret");
+  expect(form).toContain("Reiniciá el servidor");
+  expect(form).toContain('type="password"');
+});

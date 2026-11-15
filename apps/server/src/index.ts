@@ -1,3 +1,5 @@
+import { openBotSecrets } from "./bot-secret.js";
+import { createBotTokenUpdate } from "./bot-token-update.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 import { openAgentRegistry } from "./agent-registry.js";
 import { mkdir } from "node:fs/promises";
@@ -28,11 +30,16 @@ async function main(): Promise<void> {
   }
   let binding;
   let registry;
+  let botSecrets;
   try {
     const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     registry = openAgentRegistry(resolve(stateDir, "server.sqlite"));
     registry.syncConfigured(config.agent);
+    botSecrets = await openBotSecrets(resolve(stateDir, "bot-secrets"));
+    const credential = registry.get(config.agent.id)?.credentialRef;
+    if (credential?.startsWith("file:"))
+      config.telegramBotToken = await botSecrets.read(credential);
     binding = openChatBinding(resolve(stateDir, "server.sqlite"), config.agent);
   } catch {
     registry?.close();
@@ -69,6 +76,7 @@ async function main(): Promise<void> {
         config.agent.name = name;
       },
     },
+    createBotTokenUpdate(config.agent.id, registry, botSecrets),
   );
   const server = serve({
     fetch: panel.fetch,

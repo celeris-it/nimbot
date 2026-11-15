@@ -84,9 +84,15 @@ export function openAgentRegistry(path: string) {
       if (other) throw new Error("Bot is already assigned to another agent");
       const result = db
         .prepare(
-          "UPDATE agents SET bot_id = ?, bot_username = ?, credential_ref = 'env:TELEGRAM_BOT_TOKEN' WHERE id = ?",
+          "UPDATE agents SET bot_id = ?, bot_username = ?, credential_ref = COALESCE(credential_ref, 'env:TELEGRAM_BOT_TOKEN') WHERE id = ?",
         )
         .run(botId, botUsername, id);
+      if (!result.changes) throw new Error("Agent is not registered");
+    },
+    setCredentialRef(id: string, ref: string) {
+      const result = db
+        .prepare("UPDATE agents SET credential_ref = ? WHERE id = ?")
+        .run(ref, id);
       if (!result.changes) throw new Error("Agent is not registered");
     },
     get(id: string): RegisteredAgent | undefined {
