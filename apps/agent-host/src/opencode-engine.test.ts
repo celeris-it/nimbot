@@ -52,6 +52,11 @@ const chunk = (sessionId, text) => send({ method: "session/update", params: { se
 const known = process.env.FAKE_KNOWN_SESSION;
 lines.on("line", (line) => {
   const m = JSON.parse(line);
+  if (m.method === "initialize" && process.env.FAKE_FAIL_STARTS) {
+    const file = process.env.FAKE_LOG + ".starts";
+    const n = fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8")) : 0;
+    if (n < Number(process.env.FAKE_FAIL_STARTS)) { fs.writeFileSync(file, String(n + 1)); process.exit(1); }
+  }
   if (m.method === "initialize") send({ id: m.id, result: { agentCapabilities: { loadSession: process.env.FAKE_NO_LOAD !== "1" } } });
   else if (m.method === "session/new") { fs.appendFileSync(process.env.FAKE_LOG, "new\\n"); send({ id: m.id, result: { sessionId: "fresh-" + process.pid } }); }
   else if (m.method === "session/load") {
@@ -126,5 +131,24 @@ describe("session continuity", () => {
     ).toBeUndefined();
     expect(await sessions.read()).toBeUndefined();
     expect(await run(createOpenCodeEngine(dir))).toMatch(/^answer from fresh-/);
+  });
+
+  it("repeats a failed engine start before the prompt is sent, within a bound", async () => {
+    const { sessions, log } = await setup({ FAKE_FAIL_STARTS: "2" });
+    const text = await run(createOpenCodeEngine(dir, sessions, [0, 0]));
+    expect(text).toMatch(/^answer from fresh-/);
+    // Two crashes before initialize, then one working engine and one session.
+    expect(await log()).toEqual(["new"]);
+  });
+
+  it("gives up after the bounded number of start attempts and does not start after stop", async () => {
+    const { sessions } = await setup({ FAKE_FAIL_STARTS: "5" });
+    await expect(
+      run(createOpenCodeEngine(dir, sessions, [0, 0])),
+    ).rejects.toThrow();
+    const stoppedEngine = createOpenCodeEngine(dir, sessions, [50]);
+    const pending = run(stoppedEngine).catch((error: Error) => error);
+    await stoppedEngine.stop();
+    expect(await pending).toBeInstanceOf(Error);
   });
 });

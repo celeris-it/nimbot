@@ -1,4 +1,6 @@
 import { request } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
+import { log } from "./logger.js";
 
 export type DockerApi = (
   path: string,
@@ -6,8 +8,41 @@ export type DockerApi = (
   body?: unknown,
 ) => Promise<{ code: number; body: string }>;
 
-/** Bounded local transport. Never include Docker response bodies in errors: they may contain secrets. */
-export function createDockerApi(socketPath: string): DockerApi {
+/** Waits between the attempts that follow the first one; its length bounds read retries. */
+export const DOCKER_READ_RETRY_DELAYS_MS: readonly number[] = [200, 600];
+
+/**
+ * Bounded local transport. Never include Docker response bodies in errors: they may contain secrets.
+ * Only reads are retried (transport failures and 5xx answers). A create, start, stop, or delete
+ * whose outcome is unknown is never repeated; callers track those as uncertain operations.
+ */
+export function createDockerApi(
+  socketPath: string,
+  retryDelaysMs: readonly number[] = DOCKER_READ_RETRY_DELAYS_MS,
+  transport: DockerApi = createTransport(socketPath),
+): DockerApi {
+  return async (path, method = "GET", body) => {
+    for (let failures = 0; ; failures++) {
+      const wait = method === "GET" ? retryDelaysMs[failures] : undefined;
+      try {
+        const result = await transport(path, method, body);
+        if (result.code < 500 || wait === undefined) return result;
+      } catch (error) {
+        if (wait === undefined) {
+          log.error("docker.request_failed", {
+            method,
+            attempts: failures + 1,
+          });
+          throw error;
+        }
+      }
+      log.warn("docker.read_retry", { method, attempt: failures + 1 });
+      await delay(wait);
+    }
+  };
+}
+
+function createTransport(socketPath: string): DockerApi {
   return (path, method = "GET", body) =>
     new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);

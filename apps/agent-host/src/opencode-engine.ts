@@ -66,72 +66,109 @@ export function createSessionFile(path: string): SessionStore {
   };
 }
 
+/** Waits between engine start attempts; its length bounds how often a failed start is repeated. */
+export const ENGINE_START_RETRY_DELAYS_MS: readonly number[] = [500, 1500];
+
 export function createOpenCodeEngine(
   workspace: string,
   sessions?: SessionStore,
+  startRetryDelaysMs: readonly number[] = ENGINE_START_RETRY_DELAYS_MS,
 ): Engine {
   let active: ReturnType<typeof spawnOpenCode> | undefined;
+  let stopped = false;
+  async function shutdown(engine: ReturnType<typeof spawnOpenCode>) {
+    engine.client.close();
+    try {
+      if (engine.process.pid) await stopEngine(engine.process);
+    } finally {
+      if (active === engine) active = undefined;
+    }
+  }
   return {
     async run(prompt, onText, onProgress, requestApproval) {
+      stopped = false;
       // Loading a session replays its history as updates; those are not new output.
       let replaying = false;
-      const engine = spawnOpenCode(workspace, {
-        onUpdate: (_id, update) => {
-          if (replaying) return;
-          const content = update.content as { text?: string } | undefined;
-          if (
-            update.sessionUpdate === "agent_message_chunk" &&
-            typeof content?.text === "string"
-          )
-            onText(content.text);
-          else if (
-            update.sessionUpdate === "tool_call" &&
-            typeof update.title === "string"
-          )
-            onProgress?.(progressLabel(update.title));
-        },
-        // Without an approver, or if asking fails, the request is denied.
-        onPermission: async (options, request) => {
-          let allow: boolean;
-          try {
-            allow = (await requestApproval?.(describeAction(request))) === true;
-          } catch {
-            allow = false;
+      /** Starts the engine and opens its session; nothing has been sent to the model yet. */
+      async function connect() {
+        const engine = spawnOpenCode(workspace, {
+          onUpdate: (_id, update) => {
+            if (replaying) return;
+            const content = update.content as { text?: string } | undefined;
+            if (
+              update.sessionUpdate === "agent_message_chunk" &&
+              typeof content?.text === "string"
+            )
+              onText(content.text);
+            else if (
+              update.sessionUpdate === "tool_call" &&
+              typeof update.title === "string"
+            )
+              onProgress?.(progressLabel(update.title));
+          },
+          // Without an approver, or if asking fails, the request is denied.
+          onPermission: async (options, request) => {
+            let allow: boolean;
+            try {
+              allow =
+                (await requestApproval?.(describeAction(request))) === true;
+            } catch {
+              allow = false;
+            }
+            return chooseOption(options, allow);
+          },
+        });
+        active = engine;
+        try {
+          await engine.client.initialize();
+          let session = await sessions?.read();
+          if (session) {
+            replaying = true;
+            try {
+              await engine.client.loadSession(session, workspace);
+            } catch {
+              // Unsupported or no longer available: continue in a fresh session.
+              session = undefined;
+            } finally {
+              replaying = false;
+            }
           }
-          return chooseOption(options, allow);
-        },
-      });
-      active = engine;
+          if (!session) {
+            session = await engine.client.newSession(workspace);
+            // Losing continuity must not fail the task.
+            await sessions?.write(session).catch(() => undefined);
+          }
+          return { engine, session };
+        } catch (error) {
+          await shutdown(engine);
+          throw error;
+        }
+      }
+      // A start that fails before the prompt is sent is safe to repeat. Once the
+      // prompt is sent, a failure ends the task: repeating could act twice.
+      let ready: Awaited<ReturnType<typeof connect>>;
+      for (let failures = 0; ; failures++) {
+        try {
+          ready = await connect();
+          break;
+        } catch (error) {
+          const wait = startRetryDelaysMs[failures];
+          if (wait === undefined || stopped) throw error;
+          await new Promise((resolve) => setTimeout(resolve, wait));
+          if (stopped) throw error;
+        }
+      }
       try {
-        await engine.client.initialize();
-        let session = await sessions?.read();
-        if (session) {
-          replaying = true;
-          try {
-            await engine.client.loadSession(session, workspace);
-          } catch {
-            // Unsupported or no longer available: continue in a fresh session.
-            session = undefined;
-          } finally {
-            replaying = false;
-          }
-        }
-        if (!session) {
-          session = await engine.client.newSession(workspace);
-          // Losing continuity must not fail the task.
-          await sessions?.write(session).catch(() => undefined);
-        }
-        return await engine.client.prompt(
-          session,
+        return await ready.engine.client.prompt(
+          ready.session,
           withEnvironmentNotes(prompt),
         );
       } finally {
-        engine.client.close();
-        if (engine.process.pid) await stopEngine(engine.process);
-        if (active === engine) active = undefined;
+        await shutdown(ready.engine);
       }
     },
     async stop() {
+      stopped = true;
       if (!active) return;
       active.client.close();
       if (active.process.pid) await stopEngine(active.process);

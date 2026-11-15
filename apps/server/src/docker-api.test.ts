@@ -54,3 +54,56 @@ it("sends JSON bodies over the versioned Unix socket transport", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+import { vi } from "vitest";
+import type { DockerApi } from "./docker-api.js";
+
+it("retries reads after a transport failure or a 5xx answer, within a bound", async () => {
+  const transport = vi
+    .fn<DockerApi>()
+    .mockRejectedValueOnce(new Error("socket hang up"))
+    .mockResolvedValueOnce({ code: 503, body: "" })
+    .mockResolvedValue({ code: 200, body: "{}" });
+  const call = createDockerApi("/unused", [0, 0], transport);
+  expect(await call("/containers/x/json")).toEqual({ code: 200, body: "{}" });
+  expect(transport).toHaveBeenCalledTimes(3);
+
+  const down = vi.fn<DockerApi>().mockRejectedValue(new Error("refused"));
+  await expect(
+    createDockerApi("/unused", [0, 0], down)("/containers/json"),
+  ).rejects.toThrow("refused");
+  expect(down).toHaveBeenCalledTimes(3);
+
+  const broken = vi.fn<DockerApi>().mockResolvedValue({ code: 500, body: "x" });
+  expect(await createDockerApi("/unused", [0], broken)("/info")).toEqual({
+    code: 500,
+    body: "x",
+  });
+  expect(broken).toHaveBeenCalledTimes(2);
+});
+
+it("never repeats a mutation whose outcome is unknown and does not retry client errors", async () => {
+  for (const method of ["POST", "DELETE"]) {
+    const lost = vi.fn<DockerApi>().mockRejectedValue(new Error("reset"));
+    await expect(
+      createDockerApi("/unused", [0, 0], lost)(
+        "/containers/create",
+        method,
+        {},
+      ),
+    ).rejects.toThrow("reset");
+    expect(lost).toHaveBeenCalledOnce();
+    const failed = vi
+      .fn<DockerApi>()
+      .mockResolvedValue({ code: 500, body: "" });
+    expect(
+      (await createDockerApi("/unused", [0, 0], failed)("/x", method, {})).code,
+    ).toBe(500);
+    expect(failed).toHaveBeenCalledOnce();
+  }
+  const missing = vi.fn<DockerApi>().mockResolvedValue({ code: 404, body: "" });
+  expect((await createDockerApi("/unused", [0, 0], missing)("/x")).code).toBe(
+    404,
+  );
+  expect(missing).toHaveBeenCalledOnce();
+});
