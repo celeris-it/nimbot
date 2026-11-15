@@ -1,12 +1,14 @@
 import { openChatBinding, type ChatBinding } from "./chat-binding.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBot } from "./bot.js";
+import type { BotAccess } from "./agent-access.js";
 import type { HostStatus } from "./agent-host.js";
 
 function setup(
   execute?: (prompt: string) => Promise<string>,
   binding?: ChatBinding,
   hostStatus?: () => Promise<HostStatus>,
+  access?: BotAccess,
 ) {
   const activations: number[] = [];
   const bot = createBot(
@@ -19,6 +21,7 @@ function setup(
     execute,
     binding,
     hostStatus,
+    access,
   );
   bot.botInfo = {
     id: 123,
@@ -229,4 +232,75 @@ describe("Telegram access", () => {
     await bot.handleUpdate(message("create a file"));
     expect(sent[0]).toContain("no se ha enviado");
   });
+});
+
+it("refuses activation when the persisted bot-owner identity cannot be verified", async () => {
+  const execute = vi.fn();
+  const binding = { get: () => undefined, save: vi.fn() };
+  const { bot, sent, activations } = setup(execute, binding, undefined, {
+    canActivate: () => false,
+    canExecute: () => false,
+  });
+  await bot.handleUpdate(message("/start"));
+  expect(sent.at(-1)).toContain("No pude verificar la vinculación");
+  expect(binding.save).not.toHaveBeenCalled();
+  expect(activations).toEqual([]);
+  expect(execute).not.toHaveBeenCalled();
+});
+
+it("rechecks persisted setup after Host health and never executes incomplete agent tasks", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { openAgentRegistry } = await import("./agent-registry.js");
+  const { createAgentAccess } = await import("./agent-access.js");
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-bot-admission-"));
+  const path = join(dir, "state.sqlite");
+  const registry = openAgentRegistry(path);
+  registry.createPending({ id: "test", name: "Test", ownerId: 42 });
+  registry.bindBot("test", 123, "test_bot");
+  registry.beginProvisioning("test");
+  registry.setHostCredentialRef("test", "file:host-saved");
+  registry.recordProvisioningResources("test", {
+    containerRef: "c".repeat(64),
+    volumeRef: "workspace",
+    networkRef: "network",
+  });
+  registry.finishProvisioning("test", "ready");
+  const binding = openChatBinding(path, { id: "test", ownerId: 42 });
+  const access = createAgentAccess(registry, "test", new Set([42]));
+  let changeDuringHealth = true;
+  const health = vi.fn(async () => {
+    if (changeDuringHealth) registry.beginContainerAction("test", "stop");
+    return "ready" as const;
+  });
+  const execute = vi.fn(async () => "Done");
+  const { bot, sent } = setup(execute, binding, health, access);
+  try {
+    await bot.handleUpdate(message("/start"));
+    expect(registry.getOwnerChat("test")).toBe(42);
+    await bot.handleUpdate(message("first"));
+    expect(health).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+    expect(sent.at(-1)).toContain("configuración del agente no está completa");
+    await bot.handleUpdate(message("second"));
+    expect(health).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+    await bot.handleUpdate(message("/status"));
+    expect(sent.at(-1)).toContain("no puede recibir tareas");
+    registry.recordContainerOperation("test", "stop", "failed");
+    changeDuringHealth = false;
+    await bot.handleUpdate(message("third"));
+    expect(execute).toHaveBeenCalledExactlyOnceWith("third");
+    registry.beginResourceRemoval("test");
+    registry.finishProvisioning("test", "cancelled");
+    await bot.handleUpdate(message("/start"));
+    expect(sent.at(-1)).toContain("todavía no permite ejecutar tareas");
+    await bot.handleUpdate(message("fourth"));
+    expect(execute).toHaveBeenCalledTimes(1);
+  } finally {
+    binding.close();
+    registry.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

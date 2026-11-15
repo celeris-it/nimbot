@@ -195,6 +195,29 @@ export function openAgentRegistry(path: string) {
     if (other) throw new Error("Bot is already assigned to another agent");
   }
   return {
+    getOwnerChat(id: string): number | undefined {
+      if (
+        !db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_bindings'",
+          )
+          .get()
+      )
+        return undefined;
+      const row = db
+        .prepare(
+          `SELECT b.chat_id FROM chat_bindings b
+        JOIN agents a ON a.id = b.agent_id AND a.bot_id = b.bot_id AND a.owner_id = b.owner_id
+        WHERE a.id = ?`,
+        )
+        .get(id);
+      const chatId = row?.chat_id;
+      return typeof chatId === "number" &&
+        Number.isSafeInteger(chatId) &&
+        chatId > 0
+        ? chatId
+        : undefined;
+    },
     listResourceReferences(): {
       id: string;
       containerRef: string | null;

@@ -11,6 +11,7 @@ import type { HostStatus } from "./agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 
 export interface AgentStatus {
+  setupAccess?: import("./agent-access.js").AgentSetupAccess;
   resources?: import("./resource-reconciliation.js").ResourceInventory;
   host?: HostStatus;
   provisioning?: import("./agent-registry.js").ProvisioningState;
@@ -103,6 +104,29 @@ function stopTaskSection(
     : "";
 }
 
+function setupAccessDetails(
+  access?: import("./agent-access.js").AgentSetupAccess,
+) {
+  if (!access) return "";
+  const botLabels = {
+    linked: "Bot verificado y vinculado",
+    unlinked: "Bot sin vincular",
+    unavailable: "No disponible",
+  };
+  const ownerLabels = {
+    pending: "Pendiente: falta activar el chat del dueño",
+    verified: "Verificado mediante /start",
+    not_allowlisted: "Dueño fuera de la lista autorizada",
+    unavailable: "No disponible",
+  };
+  return html`<dl>
+    <dt>Vinculación del bot</dt>
+    <dd>${botLabels[access.bot]}</dd>
+    <dt>Verificación del dueño</dt>
+    <dd>${ownerLabels[access.owner]}</dd>
+  </dl>`;
+}
+
 function login(error?: string) {
   return page(
     "Acceso",
@@ -155,6 +179,7 @@ export function createPanel(
         name: string;
         botUsername: string | null;
         provisioning: string;
+        setupAccess?: import("./agent-access.js").AgentSetupAccess;
         cancellationRequested?: boolean;
         canCancelProvisioning?: boolean;
         containerOperation?: import("./agent-registry.js").ContainerOperation;
@@ -748,6 +773,7 @@ ${values.instructions}</textarea>
                     ${operation.action === "stop" && !stopObservation ? html`<p>Una tarea activa puede quedar interrumpida. Su resultado se confirmará cuando el agente vuelva a estar disponible.</p>` : ""}`
                 : ""
             }
+            ${setupAccessDetails(agent.setupAccess)}
             ${stopTaskSection(stopObservation)}
             ${
               containerAction && ready
@@ -1063,12 +1089,15 @@ ${values.instructions}</textarea>
                 ${status.host === "ready" ? "Disponible" : status.host === "busy" ? "Ocupado" : "Sin conexión"}
               </dd>
               <dt>Ejecución de tareas por Telegram</dt>
-              <dd>Disponible tras activar el chat con /start</dd>
+              <dd>
+                ${status.setupAccess?.owner === "not_allowlisted" ? "Bloqueada: dueño no autorizado" : "Requiere configuración completa y chat activado"}
+              </dd>
               <dt>Activación del chat</dt>
               <dd>
                 ${status.chatActivated ? "Activado por el dueño" : "Pendiente: enviá /start al bot"}
               </dd>
             </dl>
+            ${setupAccessDetails(status.setupAccess)}
             ${stopTaskSection(status.stopObservation)}
             ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Abrir bot en Telegram</a>` : html`<p>El enlace aparecerá cuando Telegram confirme la conexión.</p>`}
           </article>

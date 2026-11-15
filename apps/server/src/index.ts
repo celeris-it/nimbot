@@ -1,3 +1,4 @@
+import { createAgentAccess } from "./agent-access.js";
 import { createProvisioningControl } from "./provisioning-control.js";
 import { createAgentRegistration } from "./agent-registration.js";
 import { createResourceReconciliation } from "./resource-reconciliation.js";
@@ -150,16 +151,24 @@ async function main(): Promise<void> {
   const observeStop = createStopObservation(registry, async (id) =>
     id === config.agent.id ? hostConfig : hostCredentials!.read(id),
   );
+  const configuredAccess = createAgentAccess(
+    registry,
+    config.agent.id,
+    config.allowedUserIds,
+    true,
+  );
   const panel = createPanel(
     panelConfig,
     async () => ({
       ...status,
+      chatActivated: configuredAccess.getSetup().owner === "verified",
       ...(reconcile ? { resources: await reconcile() } : {}),
       agentName: registry.get(config.agent.id)!.name,
       host: await getHostStatus(hostConfig),
       containerOperation: registry.getContainerOperation(config.agent.id),
       stopObservation: await observeStop(config.agent.id),
       provisioning: registry.getProvisioning(config.agent.id),
+      setupAccess: configuredAccess.getSetup(),
     }),
     Date.now,
     {
@@ -214,6 +223,12 @@ async function main(): Promise<void> {
                 name: agent.name,
                 botUsername: agent.botUsername,
                 provisioning: setup.status,
+                setupAccess: createAgentAccess(
+                  registry,
+                  id,
+                  config.allowedUserIds,
+                  id === config.agent.id,
+                ).getSetup(),
                 cancellationRequested:
                   registry.getProvisioningCancellation(id) !== undefined,
                 canCancelProvisioning: provisioning!.canCancel(id),
@@ -302,6 +317,7 @@ async function main(): Promise<void> {
     ),
     binding,
     () => getHostStatus(hostConfig),
+    configuredAccess,
   );
   let stopping = false;
   const stop = () => {

@@ -1430,3 +1430,72 @@ it.each(["/agents/dev/setup/cancel", "/api/agents/dev/provision/cancel"])(
     ).toBe(404);
   },
 );
+
+it.each([
+  [
+    { bot: "linked", owner: "pending" },
+    "Bot verificado y vinculado",
+    "Pendiente: falta activar el chat del dueño",
+  ],
+  [
+    { bot: "linked", owner: "verified" },
+    "Bot verificado y vinculado",
+    "Verificado mediante /start",
+  ],
+  [
+    { bot: "unlinked", owner: "not_allowlisted" },
+    "Bot sin vincular",
+    "Dueño fuera de la lista autorizada",
+  ],
+  [
+    { bot: "unavailable", owner: "unavailable" },
+    "No disponible",
+    "No disponible",
+  ],
+] as const)(
+  "shows explicit bot linking and owner verification state: %j",
+  async (setupAccess, botLabel, ownerLabel) => {
+    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+    const app = createPanel(
+      config,
+      () => ({ telegram: "connected", setupAccess }),
+      Date.now,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (id) =>
+        id === "dev"
+          ? {
+              name: "Developer",
+              botUsername: "dev_bot",
+              provisioning: "pending",
+              setupAccess,
+            }
+          : undefined,
+    );
+    const login = await app.request("/login", {
+      method: "POST",
+      headers: {
+        Origin: config.origin,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ password }).toString(),
+    });
+    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
+    for (const path of ["/", "/agents/dev/setup"]) {
+      const body = await (await app.request(path, { headers })).text();
+      expect(body).toContain("Vinculación del bot");
+      expect(body).toContain(botLabel);
+      expect(body).toContain("Verificación del dueño");
+      expect(body).toContain(ownerLabel);
+      expect(body).not.toContain("file:host");
+    }
+    expect(
+      await (await app.request("/api/status", { headers })).json(),
+    ).toMatchObject({ setupAccess });
+  },
+);
