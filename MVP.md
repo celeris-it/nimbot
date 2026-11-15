@@ -371,8 +371,10 @@ Initial registry implementation: the server now keeps the configured agent's nam
 ### Tasks
 
 - [ ] The server stores agents, owners, instructions, containers, bot identities, credential references, chat bindings, and provisioning state in SQLite, with migrations.
-- [ ] The server can create, start, stop, and delete agent containers and volumes through the Docker Engine API.
-- [ ] Agent containers run as non-root with CPU, memory, and process limits, and without the Docker socket or server credentials.
+- [ ] The server can create, start, stop, and delete agent containers and volumes through the Docker Engine API. Container specifications come from a fixed template in server code: a pinned Agent Host image, named volumes only, no host bind mounts, no privileged mode, and no settings taken from panel input or agent output beyond the agent ID and resource limits.
+- [ ] Containers, volumes, and networks created by the server carry a Nimbot agent ID label, so the server can reconcile them with the registry and detect untracked or missing resources.
+- [ ] Agent containers run as non-root with all Linux capabilities dropped, `no-new-privileges`, CPU, memory (with no additional swap), and process limits, and without the Docker socket or server credentials.
+- [ ] Each Agent Host has its own internal API token and its own Docker network shared only with the Nimbot Server, so one agent cannot reach another agent's API. Agent Host ports are never published on the host.
 - [ ] The panel creates agents with a name, optional instructions, owner Telegram ID, and a bot token from BotFather; the server validates and links the bot before provisioning.
 - [ ] The panel edits agent names and instructions, replaces tokens for the same bot, and starts/stops containers with explicit task interruption status.
 - [ ] Bot setup, owner verification, cancellation, and provisioning failures have explicit states; incomplete setup does not route tasks or leave an untracked container.
@@ -439,10 +441,14 @@ Agent creation, configuration, container start/stop, token linking, and deletion
 - [ ] Duplicate Telegram updates do not create duplicate tasks; deduplication uses bot ID and update ID, since update IDs are not shared across bots.
 - [ ] Telegram, Docker, and OpenCode failures are retried a bounded number of times and then reported, without leaving the system stuck. A revoked or invalid agent bot token is shown in the panel and does not stop other agents.
 - [ ] The server and Agent Hosts expose health checks and write structured logs with agent and task IDs, with secrets redacted.
-- [ ] Agent containers have restricted Linux capabilities and networking, and internal APIs are not exposed outside the Docker network.
+- [ ] Automated checks confirm that agent containers keep their dropped capabilities, resource limits, and per-agent networks after recreation and server restart, and that internal APIs are not exposed outside their Docker networks.
 - [ ] Automated tests cover panel authentication, session expiry, CSRF protection, bot linking, owner authorization, message routing, task state transitions, restart recovery, cancellation, and multi-agent isolation.
 
 **Security limitation:** The MVP is intended for trusted self-hosted deployments. Docker containers alone do not provide sufficient isolation for hostile multi-tenant workloads.
+
+Managing containers requires giving the Nimbot Server access to the Docker Engine API. That access is equivalent to root on the host, so a compromise of the server or its panel is a compromise of the host. The fixed container template limits what the server asks Docker to do; it does not limit what an attacker controlling the server could do. Running Nimbot under rootless Docker reduces this exposure and is recommended where practical.
+
+Agent containers have unrestricted outbound network access in the MVP, including to private addresses reachable from the host's network. Disk usage of agent volumes is not limited. Operators who need either restriction must apply it on the host.
 
 ### Acceptance Criteria
 

@@ -78,9 +78,9 @@ The Agent Host image includes Playwright and headless Chromium. During Phase 0, 
 
 ## Security
 
-The MVP is intended for trusted, self-hosted use. The panel requires administrator authentication; remote access requires HTTPS. Telegram access requires both the allowlist and the agent’s configured owner. Deleting an agent retains its persistent volume unless data deletion is explicitly confirmed. Agent containers run as non-root with resource limits and no access to the Docker socket or server credentials.
+The MVP is intended for trusted, self-hosted use. The panel requires administrator authentication; remote access requires HTTPS. Telegram access requires both the allowlist and the agent’s configured owner. Deleting an agent retains its persistent volume unless data deletion is explicitly confirmed. Agent containers run as non-root with dropped capabilities, resource limits, a separate network and API token per agent, and no access to the Docker socket or server credentials.
 
-Docker containers alone are not a sufficient isolation boundary for hostile or multi-tenant workloads.
+Docker containers alone are not a sufficient isolation boundary for hostile or multi-tenant workloads. The Nimbot Server manages agent containers through the Docker Engine API, which is equivalent to root access on the host: protect the panel accordingly, and prefer rootless Docker where practical. Agent containers have unrestricted outbound network access, and agent volumes have no disk limit.
 
 ## Roadmap
 
