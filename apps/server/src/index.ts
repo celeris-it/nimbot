@@ -169,6 +169,7 @@ async function main(): Promise<void> {
                 name: agent.name,
                 botUsername: agent.botUsername,
                 provisioning: setup.status,
+                containerOperation: registry.getContainerOperation(id),
               }
             : undefined;
         }
@@ -180,6 +181,26 @@ async function main(): Promise<void> {
             return agent && config.allowedUserIds.has(agent.ownerId)
               ? { name: agent.name, instructions: agent.instructions }
               : undefined;
+          },
+          containerStatus: async (id) => {
+            const ref = registry.get(id)?.containerRef;
+            if (!ref) return "missing";
+            return createContainerControl({
+              socketPath: provisioningConfig!.socketPath,
+              target: ref,
+              agentId: id,
+            }).status();
+          },
+          hostStatus: async (id) => {
+            try {
+              return await getHostStatus(
+                id === config.agent.id
+                  ? hostConfig
+                  : await hostCredentials!.read(id),
+              );
+            } catch {
+              return "unavailable";
+            }
           },
           saveToken: async (id, token) => {
             const agent = registry.get(id);

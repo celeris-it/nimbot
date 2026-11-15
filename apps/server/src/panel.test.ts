@@ -1022,3 +1022,114 @@ it("replaces only the requested agent's token after verifying the same bot", asy
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("starts and confirms stopping the selected agent while showing observed runtime state", async () => {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  let running = false;
+  let operation: import("./agent-registry.js").ContainerOperation | undefined;
+  const calls: unknown[] = [];
+  const app = createPanel(
+    config,
+    () => ({ telegram: "connected" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (id, action) => {
+      calls.push({ id, action });
+      running = action === "start";
+      operation = { action, status: "completed", updatedAt: 1 };
+    },
+    undefined,
+    (id) =>
+      id === "dev"
+        ? {
+            name: "Developer",
+            botUsername: "dev_bot",
+            provisioning: "ready",
+            containerOperation: operation,
+          }
+        : undefined,
+    {
+      get: () => undefined,
+      save: () => {},
+      containerStatus: async () => (running ? "running" : "stopped"),
+      hostStatus: async () => (running ? "ready" : "unavailable"),
+    },
+  );
+  const post = (
+    path: string,
+    body: string,
+    cookie = "",
+    origin = config.origin,
+  ) =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  expect((await post("/agents/dev/container", "action=start")).status).toBe(
+    303,
+  );
+  const login = await post(
+    "/login",
+    new URLSearchParams({ password }).toString(),
+  );
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  const headers = { Cookie: cookie };
+  expect(
+    await (await app.request("/agents/dev/setup", { headers })).text(),
+  ).toContain("Contenedor detenido.");
+  expect(
+    (
+      await post(
+        "/agents/dev/container",
+        "action=start",
+        cookie,
+        "https://other.example",
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    (await post("/agents/dev/container", "action=stop", cookie)).status,
+  ).toBe(400);
+  expect(calls).toEqual([]);
+  const start = await post("/agents/dev/container", "action=start", cookie);
+  expect(start.status).toBe(303);
+  expect(start.headers.get("location")).toBe("/agents/dev/setup");
+  expect(
+    await (await app.request("/agents/dev/setup", { headers })).text(),
+  ).toContain("Contenedor disponible.");
+  const confirmation = await (
+    await app.request("/agents/dev/container/stop", { headers })
+  ).text();
+  expect(confirmation).toContain("¿Detener Developer?");
+  expect(confirmation).toMatch(/name="confirm"\s+value="dev"/);
+  expect(calls).toHaveLength(1);
+  expect(
+    (await post("/agents/dev/container", "action=stop&confirm=dev", cookie))
+      .status,
+  ).toBe(303);
+  const stopped = await (
+    await app.request("/agents/dev/setup", { headers })
+  ).text();
+  expect(stopped).toContain("Contenedor detenido.");
+  expect(stopped.replace(/\s+/g, " ")).toContain("Detención — Completada.");
+  expect(stopped.replace(/\s+/g, " ")).toContain("puede quedar interrumpida");
+  expect(calls).toEqual([
+    { id: "dev", action: "start" },
+    { id: "dev", action: "stop" },
+  ]);
+  expect(
+    (await app.request("/agents/missing/container/stop", { headers })).status,
+  ).toBe(404);
+  expect(
+    (await post("/agents/missing/container", "action=start", cookie)).status,
+  ).toBe(404);
+});

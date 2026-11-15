@@ -26,6 +26,10 @@ export interface RegisteredAgentSettings {
   get(id: string): { name: string; instructions: string } | undefined;
   save(id: string, name: string, instructions: string): void;
   saveToken?(id: string, token: string): Promise<void>;
+  containerStatus?(
+    id: string,
+  ): Promise<"running" | "stopped" | "missing" | "unavailable">;
+  hostStatus?(id: string): Promise<HostStatus>;
 }
 export interface AgentSettings {
   get(): { name: string; instructions: string };
@@ -113,10 +117,13 @@ export function createPanel(
   registerAgent?: (
     input: import("./agent-registration.js").AgentRegistrationInput,
   ) => Promise<{ agentId: string; provisioning: string }>,
-  getAgentSetup?: (
-    id: string,
-  ) =>
-    | { name: string; botUsername: string | null; provisioning: string }
+  getAgentSetup?: (id: string) =>
+    | {
+        name: string;
+        botUsername: string | null;
+        provisioning: string;
+        containerOperation?: import("./agent-registry.js").ContainerOperation;
+      }
     | undefined,
   agentSettings?: RegisteredAgentSettings,
 ) {
@@ -625,10 +632,26 @@ ${values.instructions}</textarea>
       );
     }
   });
-  app.get("/agents/:id/setup", (c) => {
+  app.get("/agents/:id/setup", async (c) => {
     const agent = getAgentSetup?.(c.req.param("id"));
     if (!agent) return c.notFound();
     const ready = agent.provisioning === "ready";
+    const id = c.req.param("id");
+    const [containerState, hostState] = await Promise.all([
+      agentSettings?.containerStatus?.(id),
+      agentSettings?.hostStatus?.(id),
+    ]);
+    const available = hostState
+      ? hostState === "ready" || hostState === "busy"
+      : ready;
+    const operation = agent.containerOperation;
+    const operationLabels = {
+      pending: "En curso",
+      completed: "Completada",
+      failed: "Fallida",
+      interrupted: "Interrumpida al reiniciar el servidor",
+    };
+
     return c.html(
       page(
         "Configuración del agente",
@@ -637,11 +660,43 @@ ${values.instructions}</textarea>
           ${agentSettings?.saveToken && agentSettings.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/token">Reemplazar token del bot</a>` : ""}
           <section class="card" aria-label="Resultado de creación">
             <h2>
-              ${ready ? "Contenedor disponible." : "Configuración incompleta."}
+              ${containerState === "stopped" ? "Contenedor detenido." : available ? "Contenedor disponible." : "Agente sin conexión."}
             </h2>
             <p role="status">
-              ${ready ? "El agente y su bot quedaron guardados y el contenedor está disponible." : "El agente y su bot quedaron guardados, pero el contenedor todavía no está disponible. No vuelvas a crear el mismo agente."}
+              ${available ? "El agente y su bot quedaron guardados y el contenedor está disponible." : "El agente y su bot quedaron guardados, pero el contenedor todavía no está disponible. No vuelvas a crear el mismo agente."}
             </p>
+            ${containerState ? html`<p>Contenedor: ${containerState === "running" ? "En ejecución" : containerState === "stopped" ? "Detenido" : containerState === "missing" ? "No encontrado" : "No disponible"}</p>` : ""}
+            ${hostState ? html`<p>Agent Host: ${hostState === "ready" ? "Disponible" : hostState === "busy" ? "Ocupado" : "Sin conexión"}</p>` : ""}
+            ${
+              operation
+                ? html`<p>
+                      Última operación:
+                      ${operation.action === "start" ? "Inicio" : "Detención"} —
+                      ${operationLabels[operation.status]}.
+                    </p>
+                    ${operation.action === "stop" ? html`<p>Una tarea activa puede quedar interrumpida. Su resultado se confirmará cuando el agente vuelva a estar disponible.</p>` : ""}`
+                : ""
+            }
+            ${
+              containerAction && ready
+                ? html`<form
+                      method="post"
+                      action="/agents/${encodeURIComponent(id)}/container"
+                    >
+                      <input type="hidden" name="action" value="start" /><button
+                        class="btn"
+                        type="submit"
+                      >
+                        Iniciar contenedor
+                      </button>
+                    </form>
+                    <a
+                      class="btn"
+                      href="/agents/${encodeURIComponent(id)}/container/stop"
+                      >Detener contenedor…</a
+                    >`
+                : ""
+            }
             <dl>
               <dt>Identificador</dt>
               <dd>${c.req.param("id")}</dd>
@@ -663,6 +718,67 @@ ${values.instructions}</textarea>
         true,
       ),
     );
+  });
+  app.get("/agents/:id/container/stop", (c) => {
+    const id = c.req.param("id");
+    const agent = getAgentSetup?.(id);
+    if (!agent || !containerAction || agent.provisioning !== "ready")
+      return c.notFound();
+    return c.html(
+      page(
+        "Detener agente",
+        html`<h1>¿Detener ${agent.name}?</h1>
+          <p>
+            Se detendrá su contenedor. Una tarea activa puede quedar
+            interrumpida; su estado se confirmará cuando el agente vuelva a
+            estar disponible. Se conservan los archivos y el historial.
+          </p>
+          <form
+            method="post"
+            action="/agents/${encodeURIComponent(id)}/container"
+          >
+            <input type="hidden" name="action" value="stop" /><input
+              type="hidden"
+              name="confirm"
+              value="${id}"
+            /><button class="btn" type="submit">Confirmar detención</button
+            ><a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
+              >Cancelar</a
+            >
+          </form>`,
+        true,
+      ),
+    );
+  });
+  app.post("/agents/:id/container", async (c) => {
+    const id = c.req.param("id");
+    if (!getAgentSetup?.(id) || !containerAction) return c.notFound();
+    const body = await c.req.parseBody({ all: true });
+    if (
+      (body.action !== "start" && body.action !== "stop") ||
+      (body.action === "stop" && body.confirm !== id)
+    )
+      return c.text("Acción no válida o falta confirmar el agente.", 400);
+    try {
+      await containerAction(id, body.action);
+    } catch {
+      return c.html(
+        page(
+          "Operación no completada",
+          html`<h1>No pude completar la operación.</h1>
+            <p>
+              Actualizá el estado del agente antes de reintentar. Sus datos se
+              conservan.
+            </p>
+            <a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
+              >Volver al agente</a
+            >`,
+          true,
+        ),
+        503,
+      );
+    }
+    return c.redirect(`/agents/${encodeURIComponent(id)}/setup`, 303);
   });
   app.post("/api/agents", async (c) => {
     if (!registerAgent) return c.notFound();
