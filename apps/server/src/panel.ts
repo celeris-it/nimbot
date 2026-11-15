@@ -195,6 +195,7 @@ export function createPanel(
     | undefined,
   agentSettings?: RegisteredAgentSettings,
   listAgentIds?: () => string[],
+  deleteAgent?: (agentId: string, deleteData: boolean) => Promise<void>,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -838,7 +839,11 @@ ${values.instructions}</textarea>
               class="btn"
               href="/agents/${encodeURIComponent(c.req.param("id"))}/setup"
               >Refresh status</a
-            ><a class="btn" href="/">Back to panel</a>
+            >${deleteAgent && agent.provisioning !== "external" ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/delete">Delete agent…</a>` : ""}<a
+              class="btn"
+              href="/"
+              >Back to panel</a
+            >
           </section>`,
         true,
       ),
@@ -1021,6 +1026,94 @@ ${values.instructions}</textarea>
       );
     }
   });
+  app.get("/agents/:id/delete", (c) => {
+    const id = c.req.param("id");
+    const agent = getAgentSetup?.(id);
+    if (!agent || !deleteAgent) return c.notFound();
+    return c.html(
+      page(
+        "Delete agent",
+        html`<h1>Delete ${agent.name}?</h1>
+          <p>
+            Its container will be stopped and removed, its Telegram polling
+            stopped, and its local bot binding and saved credentials erased.
+          </p>
+          <p>
+            This does not delete the bot in Telegram. Remove or revoke it
+            separately with BotFather if you no longer need it.
+          </p>
+          <form method="post" action="/agents/${encodeURIComponent(id)}/delete">
+            <input type="hidden" name="confirm" value="${id}" />
+            <label
+              ><input type="checkbox" name="deleteData" value="true" /> Also
+              permanently delete the persistent volume (workspace files and
+              history). Leave unchecked to keep it.</label
+            >
+            <button class="btn" type="submit">Confirm deletion</button
+            ><a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
+              >Cancel</a
+            >
+          </form>`,
+        true,
+      ),
+    );
+  });
+  app.post("/agents/:id/delete", async (c) => {
+    const id = c.req.param("id");
+    if (!getAgentSetup?.(id) || !deleteAgent) return c.notFound();
+    const body = await c.req.parseBody({ all: true });
+    if (body.confirm !== id) return c.text("Missing agent confirmation.", 400);
+    try {
+      await deleteAgent(id, body.deleteData === "true");
+    } catch {
+      return c.html(
+        page(
+          "Deletion not completed",
+          html`<h1>Could not finish deleting the agent.</h1>
+            <p>
+              Its data was not deleted unless the step completed. Refresh the
+              agent's status and retry.
+            </p>
+            <a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
+              >Back to agent</a
+            >`,
+          true,
+        ),
+        409,
+      );
+    }
+    return c.redirect("/", 303);
+  });
+  app.post("/api/agents/:id/delete", async (c) => {
+    if (!deleteAgent) return c.notFound();
+    const id = c.req.param("id");
+    const body = await c.req.parseBody({ all: true });
+    if (
+      !/^[a-z0-9][a-z0-9-]{0,47}$/.test(id) ||
+      body.confirm !== id ||
+      (body.deleteData !== "true" && body.deleteData !== "false")
+    )
+      return c.json(
+        {
+          error:
+            "Confirm the agent ID and explicitly select whether to delete data",
+        },
+        400,
+      );
+    try {
+      await deleteAgent(id, body.deleteData === "true");
+      return c.json({
+        agentId: id,
+        deleted: true,
+        dataDeleted: body.deleteData === "true",
+      });
+    } catch {
+      return c.json(
+        { error: "Deletion failed; retry after checking the agent" },
+        409,
+      );
+    }
+  });
   app.post("/api/agents/:id/container", async (c) => {
     if (!containerAction) return c.notFound();
     const id = c.req.param("id");
@@ -1155,7 +1248,7 @@ ${values.instructions}</textarea>
           })}
           <footer>
             <p>
-              ${registerAgent ? "Registered bots connect after provisioning. Full deletion is still pending." : "Configure server provisioning to create agents from the panel."}
+              ${registerAgent ? "Registered bots connect after provisioning." : "Configure server provisioning to create agents from the panel."}
             </p>
             <a class="btn" href="/">Refresh status</a>
           </footer>`,

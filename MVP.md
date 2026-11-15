@@ -433,7 +433,7 @@ The Phase 2 per-bot polling isolation task is now complete across the bootstrap 
 - [x] Starting an agent bot verifies its owner and activates its private-chat binding.
 - [x] Each agent bot has its own long-polling connection, managed by the same server; one bot’s failure does not stop the others.
 - [x] The panel lists agent and bot states and provides links to the respective agent chats.
-- [ ] Panel deletion requires confirmation, retains persistent volumes by default, and deletes data only when explicitly selected. It stops polling the bot and removes its local binding and credential. The confirmation explains that Telegram bot identity deletion is separate.
+- [x] Panel deletion requires confirmation, retains persistent volumes by default, and deletes data only when explicitly selected. It stops polling the bot and removes its local binding and credential. The confirmation explains that Telegram bot identity deletion is separate.
 - [ ] Messages go only to the agent bound to the receiving bot, with a clear reply when that agent is stopped or not ready.
 - [ ] A bot already bound to another agent, an invalid token, a non-allowlisted owner, and unauthenticated setup requests are rejected.
 

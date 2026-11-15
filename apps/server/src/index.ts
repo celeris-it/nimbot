@@ -5,6 +5,7 @@ import { createProvisioningControl } from "./provisioning-control.js";
 import { createAgentRegistration } from "./agent-registration.js";
 import { createResourceReconciliation } from "./resource-reconciliation.js";
 import { createAgentContainerAction } from "./agent-container-action.js";
+import { createAgentDeletion } from "./agent-deletion.js";
 import { createAgentResourceRemoval } from "./agent-resource-removal.js";
 import {
   readProvisioningConfig,
@@ -145,6 +146,24 @@ async function main(): Promise<void> {
   const removeResources = provisioningConfig
     ? createAgentResourceRemoval(registry, provisioningConfig)
     : undefined;
+  const deleteAgent =
+    removeResources && hostCredentials
+      ? createAgentDeletion({
+          registry,
+          protectedAgentId: config.agent.id,
+          stopBot: async (id) => registeredBots!.stop(id),
+          removeResources,
+          removeBotSecret: async (ref) => {
+            try {
+              await botSecrets.remove(ref);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+                throw error;
+            }
+          },
+          removeHostSecret: (ref) => hostCredentials.remove(ref),
+        })
+      : undefined;
   const containerAction = provisioningConfig
     ? createAgentContainerAction(
         registry,
@@ -318,6 +337,14 @@ async function main(): Promise<void> {
         }
       : undefined,
     () => registry.listIds(),
+    deleteAgent
+      ? async (id, deleteData) => {
+          const agent = registry.get(id);
+          if (!agent || !config.allowedUserIds.has(agent.ownerId))
+            throw new Error("Agent owner is not authorized");
+          await deleteAgent(id, deleteData);
+        }
+      : undefined,
   );
   const server = serve({
     fetch: panel.fetch,

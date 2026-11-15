@@ -1597,3 +1597,112 @@ it("lists registered agents with bot state and chat links behind login", async (
   expect(body).toContain("Not connected yet");
   expect(body.match(/https:\/\/t\.me\//g)).toHaveLength(1);
 });
+
+describe("agent deletion routes", () => {
+  async function deletionApp() {
+    const calls: [string, boolean][] = [];
+    const app = createPanel(
+      readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
+      () => ({ telegram: "connected", agentId: "dev" }),
+      Date.now,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (id) =>
+        id === "a1"
+          ? { name: "Alpha", botUsername: "alpha_bot", provisioning: "ready" }
+          : undefined,
+      undefined,
+      () => ["a1"],
+      async (id, deleteData) => void calls.push([id, deleteData]),
+    );
+    const post = (
+      path: string,
+      values: Record<string, string>,
+      cookie = "",
+      origin = "http://localhost:3000",
+    ) =>
+      app.request(path, {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          Cookie: cookie,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams(values).toString(),
+      });
+    const login = await post("/login", { password });
+    return {
+      app,
+      post,
+      calls,
+      cookie: login.headers.get("set-cookie")!.split(";")[0]!,
+    };
+  }
+
+  it("rejects unauthenticated and forged requests", async () => {
+    const { app, post, calls, cookie } = await deletionApp();
+    expect((await app.request("/agents/a1/delete")).status).toBe(303);
+    expect((await post("/agents/a1/delete", { confirm: "a1" })).status).toBe(
+      303,
+    );
+    expect(
+      (
+        await post(
+          "/agents/a1/delete",
+          { confirm: "a1" },
+          cookie,
+          "http://evil.example",
+        )
+      ).status,
+    ).toBe(403);
+    expect(calls).toEqual([]);
+  });
+
+  it("explains retention and Telegram bot identity, and requires confirmation", async () => {
+    const { app, post, calls, cookie } = await deletionApp();
+    const page = await (
+      await app.request("/agents/a1/delete", { headers: { Cookie: cookie } })
+    ).text();
+    expect(page).toContain("does not delete the bot in Telegram");
+    expect(page).toContain("Leave unchecked to keep it");
+    expect((await post("/agents/a1/delete", {}, cookie)).status).toBe(400);
+    expect(
+      (await post("/agents/a1/delete", { confirm: "other" }, cookie)).status,
+    ).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("retains data by default and deletes it only when selected", async () => {
+    const { post, calls, cookie } = await deletionApp();
+    expect(
+      (await post("/agents/a1/delete", { confirm: "a1" }, cookie)).status,
+    ).toBe(303);
+    await post(
+      "/agents/a1/delete",
+      { confirm: "a1", deleteData: "true" },
+      cookie,
+    );
+    expect(calls).toEqual([
+      ["a1", false],
+      ["a1", true],
+    ]);
+    expect(
+      (await post("/api/agents/a1/delete", { confirm: "a1" }, cookie)).status,
+    ).toBe(400);
+    expect(
+      (
+        await post(
+          "/api/agents/a1/delete",
+          { confirm: "a1", deleteData: "false" },
+          cookie,
+        )
+      ).status,
+    ).toBe(200);
+    expect(calls.at(-1)).toEqual(["a1", false]);
+  });
+});

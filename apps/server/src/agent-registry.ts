@@ -178,6 +178,14 @@ export function openAgentRegistry(path: string) {
         PRIMARY KEY (agent_id, kind, name, operation_id)
       ); INSERT INTO registry_migrations(version) VALUES (9)`);
     }
+    if (
+      !db
+        .prepare("SELECT version FROM registry_migrations WHERE version = 10")
+        .get()
+    ) {
+      db.exec(`ALTER TABLE agents ADD COLUMN deleted_at INTEGER;
+        INSERT INTO registry_migrations(version) VALUES (10)`);
+    }
     db.prepare(
       "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
     ).run(Date.now());
@@ -654,12 +662,72 @@ export function openAgentRegistry(path: string) {
     },
     get(id: string): RegisteredAgent | undefined {
       return db
-        .prepare(`SELECT ${columns} FROM agents WHERE id = ?`)
+        .prepare(
+          `SELECT ${columns} FROM agents WHERE id = ? AND deleted_at IS NULL`,
+        )
         .get(id) as unknown as RegisteredAgent | undefined;
+    },
+    /**
+     * Retires an agent whose Docker resources were already removed. The row stays
+     * as a tombstone so a retained volume remains traceable. Bot identity,
+     * chat binding, and credential references are dropped; returns the secret
+     * references the caller must erase.
+     */
+    finishAgentDeletion(id: string): {
+      botCredentialRef: string | null;
+      hostCredentialRef: string | null;
+    } {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const agent = db
+          .prepare(
+            "SELECT credential_ref FROM agents WHERE id = ? AND deleted_at IS NULL",
+          )
+          .get(id);
+        const setup = db
+          .prepare(
+            "SELECT status, network_ref FROM agent_provisioning WHERE agent_id = ?",
+          )
+          .get(id);
+        if (!agent || setup?.status !== "pending" || setup.network_ref)
+          throw new Error("Agent resources must be removed before deletion");
+        const hostRef = db
+          .prepare(
+            "SELECT credential_ref FROM agent_host_credentials WHERE agent_id = ?",
+          )
+          .get(id);
+        if (
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_bindings'",
+            )
+            .get()
+        )
+          db.prepare("DELETE FROM chat_bindings WHERE agent_id = ?").run(id);
+        db.prepare("DELETE FROM agent_host_credentials WHERE agent_id = ?").run(
+          id,
+        );
+        db.prepare(
+          "UPDATE agents SET bot_id = NULL, bot_username = NULL, credential_ref = NULL, container_ref = NULL, deleted_at = ? WHERE id = ?",
+        ).run(Date.now(), id);
+        db.exec("COMMIT");
+        return {
+          botCredentialRef: (agent.credential_ref as string | null) ?? null,
+          hostCredentialRef:
+            (hostRef?.credential_ref as string | undefined) ?? null,
+        };
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
     listIds(): string[] {
       return (
-        db.prepare("SELECT id FROM agents ORDER BY rowid").all() as unknown as {
+        db
+          .prepare(
+            "SELECT id FROM agents WHERE deleted_at IS NULL ORDER BY rowid",
+          )
+          .all() as unknown as {
           id: string;
         }[]
       ).map((row) => row.id);

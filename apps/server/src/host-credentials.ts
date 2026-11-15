@@ -39,6 +39,14 @@ export async function openHostCredentials(
   }
   return {
     read,
+    /** Erases a credential file after its registry reference was dropped. */
+    async remove(ref: string) {
+      try {
+        await unlink(path(ref));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    },
     /** Called only while the registry's provisioning transition holds the per-agent lock. */
     async prepare(agentId: string) {
       const origin = url(agentId);

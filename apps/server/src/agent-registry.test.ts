@@ -36,7 +36,7 @@ it("migrates once and restores metadata without storing tokens", async () => {
       expect(
         db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
           ?.total,
-      ).toBe(9);
+      ).toBe(10);
     } finally {
       db.close();
     }
@@ -187,7 +187,7 @@ it("migrates existing configured agents without treating them as provisioned", a
     registry.close();
     const legacy = new DatabaseSync(path);
     legacy.exec(
-      "DROP TABLE provisioning_resource_intents; DROP TABLE container_stop_observations; DROP TABLE agent_host_credentials; DROP TABLE agent_provisioning; DELETE FROM registry_migrations WHERE version >= 3",
+      "DROP TABLE provisioning_resource_intents; DROP TABLE container_stop_observations; DROP TABLE agent_host_credentials; DROP TABLE agent_provisioning; ALTER TABLE agents DROP COLUMN deleted_at; DELETE FROM registry_migrations WHERE version >= 3",
     );
     legacy.close();
     const migrated = openAgentRegistry(path);
@@ -349,7 +349,7 @@ it("migrates version-6 provisioning rows without changing references or complete
       volume_ref TEXT, network_ref TEXT, updated_at INTEGER NOT NULL
     ); INSERT INTO provisioning_v6 SELECT agent_id, status, volume_ref, network_ref, updated_at FROM agent_provisioning;
     DROP TABLE agent_provisioning; ALTER TABLE provisioning_v6 RENAME TO agent_provisioning;
-    DROP TABLE provisioning_resource_intents; DELETE FROM registry_migrations WHERE version >= 7;`);
+    DROP TABLE provisioning_resource_intents; ALTER TABLE agents DROP COLUMN deleted_at; DELETE FROM registry_migrations WHERE version >= 7;`);
     legacy.close();
     const migrated = openAgentRegistry(path);
     try {
