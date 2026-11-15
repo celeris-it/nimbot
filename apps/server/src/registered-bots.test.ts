@@ -7,6 +7,7 @@ import { openTaskStore } from "./task-queue.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";
 
+let nextUpdateId = 0;
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-registered-bots-"));
   const statePath = join(dir, "state.sqlite");
@@ -172,7 +173,7 @@ async function fixture() {
     await vi.waitFor(() => expect(pending.has(id)).toBe(true));
     pending.get(id)!([
       {
-        update_id: 1,
+        update_id: ++nextUpdateId,
         message: {
           message_id: 1,
           date: 0,

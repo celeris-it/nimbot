@@ -112,13 +112,14 @@ function setup(
   };
 }
 
+let nextUpdateId = 0;
 function message(
   text: string,
   userId = 42,
   type: "private" | "group" = "private",
 ) {
   return {
-    update_id: 1,
+    update_id: ++nextUpdateId,
     message: {
       message_id: 1,
       date: 0,
@@ -606,5 +607,21 @@ describe("task queue through Telegram", () => {
         ),
       );
     });
+  });
+
+  it("ignores a Telegram update delivered again, but not a new message with the same text", async () => {
+    const execute = vi.fn(async (prompt: string) => `done ${prompt}`);
+    const { bot, sent, idle } = setup(execute, undefined, async () => "ready");
+    await bot.handleUpdate(message("/start"));
+    const original = message("work");
+    await bot.handleUpdate(original);
+    await bot.handleUpdate(original);
+    await bot.handleUpdate(structuredClone(original));
+    await idle();
+    expect(execute).toHaveBeenCalledOnce();
+    expect(sent.filter((text) => text === "done work")).toHaveLength(1);
+    await bot.handleUpdate(message("work"));
+    await idle();
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 });

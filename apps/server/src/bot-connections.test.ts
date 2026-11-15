@@ -9,6 +9,8 @@ import { openAgentRegistry } from "./agent-registry.js";
 import { openChatBinding } from "./chat-binding.js";
 import { openTaskStore } from "./task-queue.js";
 
+let nextUpdateId = 0;
+
 async function fixture(knownBootstrap = true) {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-connections-"));
   const path = join(dir, "state.sqlite");
@@ -156,7 +158,7 @@ async function fixture(knownBootstrap = true) {
     });
     polls.get(id)!([
       {
-        update_id: 1,
+        update_id: ++nextUpdateId,
         message: {
           message_id: 1,
           date: 0,

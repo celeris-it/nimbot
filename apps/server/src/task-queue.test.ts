@@ -321,3 +321,105 @@ it("lets queued tasks run after a task times out", async () => {
   ]);
   expect(store.get(slow.id)?.status).toBe("failed");
 });
+
+describe("duplicate Telegram updates", () => {
+  it("creates one task per bot and update ID, however often it is redelivered", async () => {
+    const store = openTaskStore(":memory:");
+    const execute = vi.fn(async (task: QueuedTask) => `ran ${task.prompt}`);
+    const { queue, delivered } = setup(execute, store);
+    const first = queue.submit(1, 10, "hello", 500);
+    const again = queue.submit(1, 10, "hello", 500);
+    const thrice = queue.submit(1, 10, "hello", 500);
+    expect(first.duplicate).toBe(false);
+    expect(again).toMatchObject({ id: first.id, duplicate: true });
+    expect(thrice).toMatchObject({ id: first.id, duplicate: true });
+    await queue.idle();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(delivered).toHaveLength(1);
+    // The same redelivery after the task already finished is still ignored.
+    expect(queue.submit(1, 10, "hello", 500).duplicate).toBe(true);
+    await queue.idle();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat the same update ID from another bot, or a new ID, as a duplicate", async () => {
+    const store = openTaskStore(":memory:");
+    const { queue } = setup(async (task) => task.prompt, store);
+    expect(queue.submit(1, 10, "a", 7).duplicate).toBe(false);
+    expect(queue.submit(2, 20, "b", 7).duplicate).toBe(false);
+    expect(queue.submit(1, 10, "c", 8).duplicate).toBe(false);
+    expect(queue.submit(1, 10, "no id").duplicate).toBe(false);
+    expect(queue.submit(1, 10, "no id either").duplicate).toBe(false);
+    await queue.idle();
+  });
+
+  it("still recognises a redelivered update after a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nimbot-dedup-"));
+    const path = join(dir, "server.sqlite");
+    try {
+      const first = openTaskStore(path);
+      const saved = first.enqueue({
+        agentId: "a",
+        botId: 1,
+        chatId: 10,
+        prompt: "hello",
+        updateId: 42,
+      });
+      first.close();
+      const restarted = openTaskStore(path);
+      expect(
+        restarted.enqueue({
+          agentId: "a",
+          botId: 1,
+          chatId: 10,
+          prompt: "hello",
+          updateId: 42,
+        }),
+      ).toMatchObject({ id: saved.id, duplicate: true });
+      restarted.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adds the update ID to an existing task table without losing tasks", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nimbot-dedup-migration-"));
+    const path = join(dir, "server.sqlite");
+    try {
+      const { DatabaseSync } = await import("node:sqlite");
+      const old = new DatabaseSync(path);
+      old.exec(`CREATE TABLE tasks (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+        agent_id TEXT NOT NULL, bot_id INTEGER NOT NULL, chat_id INTEGER NOT NULL,
+        prompt TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted', 'cancelled')),
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+        INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at)
+        VALUES ('old', 'a', 1, 10, 'kept', 'queued', 1, 1)`);
+      old.close();
+      const store = openTaskStore(path);
+      expect(store.get("old")).toMatchObject({ prompt: "kept" });
+      const added = store.enqueue({
+        agentId: "a",
+        botId: 1,
+        chatId: 10,
+        prompt: "new",
+        updateId: 9,
+      });
+      expect(added.duplicate).toBe(false);
+      expect(
+        store.enqueue({
+          agentId: "a",
+          botId: 1,
+          chatId: 10,
+          prompt: "new",
+          updateId: 9,
+        }).duplicate,
+      ).toBe(true);
+      store.close();
+      openTaskStore(path).close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

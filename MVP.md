@@ -490,7 +490,7 @@ Agent creation, configuration, container start/stop, token linking, and deletion
 
 - [ ] After a server restart, agents, owners, bot credentials and bindings, polling connections, and container states are restored, and missing or stopped containers are detected.
 - [ ] After an Agent Host restart, the conversation continues, and in-flight tasks are resumed or marked interrupted and reported to the user.
-- [ ] Duplicate Telegram updates do not create duplicate tasks; deduplication uses bot ID and update ID, since update IDs are not shared across bots.
+- [x] Duplicate Telegram updates do not create duplicate tasks; deduplication uses bot ID and update ID, since update IDs are not shared across bots.
 - [ ] Telegram, Docker, and OpenCode failures are retried a bounded number of times and then reported, without leaving the system stuck. A revoked or invalid agent bot token is shown in the panel and does not stop other agents.
 - [ ] The server and Agent Hosts expose health checks and write structured logs with agent and task IDs, with secrets redacted.
 - [ ] Automated checks confirm that agent containers keep their dropped capabilities, resource limits, and per-agent networks after recreation and server restart, and that internal APIs are not exposed outside their Docker networks.

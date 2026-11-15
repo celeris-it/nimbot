@@ -35,19 +35,30 @@ export function openTaskStore(path: string) {
       prompt TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted', 'cancelled')),
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      update_id INTEGER
     )`;
     db.exec("BEGIN IMMEDIATE");
     if (!tableSql) db.exec(table("tasks"));
     else if (!tableSql.includes("'cancelled'")) {
       // Earlier schema lacked the cancelled status; SQLite cannot alter a CHECK.
       db.exec(`${table("tasks_new")};
-        INSERT INTO tasks_new SELECT * FROM tasks;
+        INSERT INTO tasks_new (seq, id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at)
+          SELECT seq, id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at FROM tasks;
         DROP TABLE tasks;
         ALTER TABLE tasks_new RENAME TO tasks`);
     }
+    // Tables created before duplicate detection lack the Telegram update ID.
+    const hasUpdateId = (
+      db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]
+    ).some((column) => column.name === "update_id");
+    if (!hasUpdateId) db.exec("ALTER TABLE tasks ADD COLUMN update_id INTEGER");
     db.exec(
       "CREATE INDEX IF NOT EXISTS tasks_conversation ON tasks (bot_id, chat_id, status, seq)",
+    );
+    // Update IDs are only unique per bot, so the pair identifies one message.
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS tasks_update ON tasks (bot_id, update_id) WHERE update_id IS NOT NULL",
     );
     db.exec("COMMIT");
   } catch (error) {
@@ -62,12 +73,29 @@ export function openTaskStore(path: string) {
   const columns =
     "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt";
   return {
-    /** Saves the message before any execution; returns how many tasks are ahead of it. */
-    enqueue(task: Omit<QueuedTask, "id">): { id: string; ahead: number } {
+    /**
+     * Saves the message before any execution; returns how many tasks are ahead
+     * of it. A Telegram update already saved for this bot is reported as a
+     * duplicate and creates nothing.
+     */
+    enqueue(task: Omit<QueuedTask, "id"> & { updateId?: number }): {
+      id: string;
+      ahead: number;
+      duplicate: boolean;
+    } {
       const id = randomUUID();
       const now = Date.now();
       db.exec("BEGIN IMMEDIATE");
       try {
+        if (task.updateId !== undefined) {
+          const existing = db
+            .prepare("SELECT id FROM tasks WHERE bot_id = ? AND update_id = ?")
+            .get(task.botId, task.updateId) as { id: string } | undefined;
+          if (existing) {
+            db.exec("COMMIT");
+            return { id: existing.id, ahead: 0, duplicate: true };
+          }
+        }
         const ahead = Number(
           db
             .prepare(
@@ -76,10 +104,19 @@ export function openTaskStore(path: string) {
             .get(task.botId, task.chatId)!.n,
         );
         db.prepare(
-          "INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)",
-        ).run(id, task.agentId, task.botId, task.chatId, task.prompt, now, now);
+          "INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at, update_id) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
+        ).run(
+          id,
+          task.agentId,
+          task.botId,
+          task.chatId,
+          task.prompt,
+          now,
+          now,
+          task.updateId ?? null,
+        );
         db.exec("COMMIT");
-        return { id, ahead };
+        return { id, ahead, duplicate: false };
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
@@ -259,12 +296,13 @@ export function createTaskQueue(config: {
   }
   return {
     /** Persists first, then starts draining; never waits for the task itself. */
-    submit(botId: number, chatId: number, prompt: string) {
+    submit(botId: number, chatId: number, prompt: string, updateId?: number) {
       const saved = config.store.enqueue({
         agentId: config.agentId,
         botId,
         chatId,
         prompt,
+        ...(updateId === undefined ? {} : { updateId }),
       });
       kick(botId, chatId);
       return saved;

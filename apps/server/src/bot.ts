@@ -36,12 +36,16 @@ export async function sendTaskOutcome(
     await api.sendMessage(chatId, part);
 }
 
-/** Saves a message as a queued task and returns how many tasks are ahead of it. */
+/**
+ * Saves a message as a queued task and returns how many tasks are ahead of it.
+ * `duplicate` means this bot already saved that Telegram update.
+ */
 export type SubmitTask = (
   botId: number,
   chatId: number,
   prompt: string,
-) => { ahead: number };
+  updateId: number,
+) => { ahead: number; duplicate?: boolean };
 
 export function createBot(
   config: ServerConfig,
@@ -204,19 +208,27 @@ export function createBot(
       return;
     }
     let ahead: number;
+    let duplicate: boolean | undefined;
     try {
       // Health inspection awaited network I/O; setup may have changed meanwhile.
       if (!configured()) {
         await ctx.reply(incomplete);
         return;
       }
-      ({ ahead } = execute(ctx.me.id, ctx.chat.id, ctx.message.text));
+      ({ ahead, duplicate } = execute(
+        ctx.me.id,
+        ctx.chat.id,
+        ctx.message.text,
+        ctx.update.update_id,
+      ));
     } catch {
       await ctx.reply(
         "I could not save your message, so it was not sent. Try again.",
       );
       return;
     }
+    // Telegram redelivered an update that was already saved: nothing new to do.
+    if (duplicate) return;
     if (ahead > 0)
       await ctx.reply(
         `Queued: ${ahead} earlier task${ahead === 1 ? "" : "s"} will finish first.`,
