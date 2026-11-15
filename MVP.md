@@ -435,7 +435,7 @@ The Phase 2 per-bot polling isolation task is now complete across the bootstrap 
 - [x] The panel lists agent and bot states and provides links to the respective agent chats.
 - [x] Panel deletion requires confirmation, retains persistent volumes by default, and deletes data only when explicitly selected. It stops polling the bot and removes its local binding and credential. The confirmation explains that Telegram bot identity deletion is separate.
 - [x] Messages go only to the agent bound to the receiving bot, with a clear reply when that agent is stopped or not ready.
-- [ ] A bot already bound to another agent, an invalid token, a non-allowlisted owner, and unauthenticated setup requests are rejected.
+- [x] A bot already bound to another agent, an invalid token, a non-allowlisted owner, and unauthenticated setup requests are rejected.
 
 ### Telegram Commands
 

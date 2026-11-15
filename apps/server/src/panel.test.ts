@@ -1706,3 +1706,56 @@ describe("agent deletion routes", () => {
     expect(calls.at(-1)).toEqual(["a1", false]);
   });
 });
+
+it("rejects every unauthenticated request to setup and state-changing routes", async () => {
+  const noop = async () => {};
+  const app = createPanel(
+    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
+    () => ({ telegram: "connected" }),
+    Date.now,
+    { get: () => ({ name: "A", instructions: "" }) as never, save: () => {} },
+    noop,
+    undefined,
+    noop,
+    noop,
+    noop,
+    async () => ({ agentId: "agent-x", provisioning: "ready" }),
+    () => ({ name: "A", botUsername: "a_bot", provisioning: "ready" }),
+    undefined,
+    () => ["a1"],
+    noop,
+  );
+  const routes: [string, string][] = [
+    ["GET", "/"],
+    ["GET", "/api/status"],
+    ["GET", "/agents/new"],
+    ["GET", "/agents/a1/setup"],
+    ["GET", "/agents/a1/delete"],
+    ["GET", "/agents/a1/settings"],
+    ["GET", "/agents/a1/token"],
+    ["GET", "/agents/a1/container/stop"],
+    ["POST", "/agents/new"],
+    ["POST", "/api/agents"],
+    ["POST", "/api/agents/a1/provision"],
+    ["POST", "/api/agents/a1/provision/cancel"],
+    ["POST", "/api/agents/a1/resources/remove"],
+    ["POST", "/api/agents/a1/container"],
+    ["POST", "/api/agents/a1/delete"],
+    ["POST", "/agents/a1/delete"],
+    ["POST", "/agents/a1/container"],
+    ["POST", "/agents/a1/setup/cancel"],
+    ["POST", "/agents/a1/settings"],
+    ["POST", "/agents/a1/token"],
+  ];
+  for (const [method, path] of routes) {
+    const response = await app.request(path, {
+      method,
+      headers: {
+        Origin: "http://localhost:3000",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      ...(method === "POST" ? { body: "confirm=a1" } : {}),
+    });
+    expect([303, 401], `${method} ${path}`).toContain(response.status);
+  }
+});

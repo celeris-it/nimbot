@@ -179,3 +179,22 @@ it("returns the saved agent while background setup is still active so the panel 
     await f.close();
   }
 });
+
+it("rejects a bot already bound to another agent without touching the first agent", async () => {
+  const f = await fixture();
+  try {
+    const first = await f.register(input);
+    await expect(
+      f.register({ ...input, name: "Second", token: "123:other-token" }),
+    ).rejects.toThrow();
+    expect(f.registry.listResourceReferences()).toHaveLength(1);
+    expect(f.registry.get(first.agentId)).toMatchObject({
+      name: "Developer",
+      botId: 123,
+    });
+    expect(await f.files()).toHaveLength(1);
+    expect(f.provision).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.close();
+  }
+});
