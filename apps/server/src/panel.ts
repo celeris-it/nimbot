@@ -1,7 +1,7 @@
 import type { ContainerControl } from "./container-control.js";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { html } from "hono/html";
 import { bodyLimit } from "hono/body-limit";
@@ -21,6 +21,10 @@ export interface AgentStatus {
   chatActivated?: boolean;
   botUsername?: string;
   telegram: "connecting" | "connected" | "disconnected";
+}
+export interface RegisteredAgentSettings {
+  get(id: string): { name: string; instructions: string } | undefined;
+  save(id: string, name: string, instructions: string): void;
 }
 export interface AgentSettings {
   get(): { name: string; instructions: string };
@@ -113,6 +117,7 @@ export function createPanel(
   ) =>
     | { name: string; botUsername: string | null; provisioning: string }
     | undefined,
+  agentSettings?: RegisteredAgentSettings,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -219,6 +224,8 @@ export function createPanel(
     values: { name: string; instructions: string },
     error?: string,
     saved = false,
+    target = "/agent/settings",
+    back = "/",
   ) =>
     page(
       "Editar agente",
@@ -230,7 +237,7 @@ export function createPanel(
         ${saved ? html`<p role="status">Cambios guardados.</p>` : ""}
         <section class="card" aria-label="Configuración del agente">
           ${error ? html`<p role="alert" id="settings-error" tabindex="-1" autofocus>${error}</p>` : ""}
-          <form method="post" action="/agent/settings">
+          <form method="post" action="${target}">
             <label for="name">Nombre</label
             ><input
               class="input"
@@ -254,7 +261,9 @@ ${values.instructions}</textarea>
               tarea. No incluyas contraseñas ni tokens.
             </p>
             <button class="btn" type="submit">Guardar cambios</button
-            ><a class="btn" href="/">Volver al panel</a>
+            ><a class="btn" href="${back}"
+              >${back === "/" ? "Volver al panel" : "Volver al agente"}</a
+            >
           </form>
         </section>`,
       true,
@@ -266,8 +275,12 @@ ${values.instructions}</textarea>
         )
       : c.notFound(),
   );
-  app.post("/agent/settings", async (c) => {
-    if (!settings) return c.notFound();
+  const saveSettings = async (
+    c: Context,
+    store: AgentSettings,
+    target = "/agent/settings",
+    back = "/",
+  ) => {
     const body = await c.req.parseBody({ all: true });
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const instructions =
@@ -283,21 +296,60 @@ ${values.instructions}</textarea>
         settingsPage(
           values,
           "Ingresá un nombre de hasta 128 caracteres e instrucciones de hasta 4000 caracteres.",
+          false,
+          target,
+          back,
         ),
         400,
       );
     try {
-      settings.save(name, instructions);
+      store.save(name, instructions);
     } catch {
       return c.html(
         settingsPage(
           values,
           "No pude guardar los cambios. Intentá nuevamente.",
+          false,
+          target,
+          back,
         ),
         500,
       );
     }
-    return c.redirect("/agent/settings?saved=1", 303);
+    return c.redirect(`${target}?saved=1`, 303);
+  };
+  app.post("/agent/settings", (c) =>
+    settings ? saveSettings(c, settings) : c.notFound(),
+  );
+  app.get("/agents/:id/settings", (c) => {
+    const id = c.req.param("id");
+    const values = agentSettings?.get(id);
+    return values
+      ? c.html(
+          settingsPage(
+            values,
+            undefined,
+            c.req.query("saved") === "1",
+            `/agents/${encodeURIComponent(id)}/settings`,
+            `/agents/${encodeURIComponent(id)}/setup`,
+          ),
+        )
+      : c.notFound();
+  });
+  app.post("/agents/:id/settings", (c) => {
+    const id = c.req.param("id");
+    const values = agentSettings?.get(id);
+    if (!values || !agentSettings) return c.notFound();
+    return saveSettings(
+      c,
+      {
+        get: () => values,
+        save: (name, instructions) =>
+          agentSettings.save(id, name, instructions),
+      },
+      `/agents/${encodeURIComponent(id)}/settings`,
+      `/agents/${encodeURIComponent(id)}/setup`,
+    );
   });
   app.get("/agent/token", (c) =>
     saveBotToken
@@ -541,6 +593,7 @@ ${values.instructions}</textarea>
       page(
         "Configuración del agente",
         html`<h1>${agent.name}</h1>
+          ${agentSettings?.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/settings">Editar agente</a>` : ""}
           <section class="card" aria-label="Resultado de creación">
             <h2>
               ${ready ? "Contenedor disponible." : "Configuración incompleta."}

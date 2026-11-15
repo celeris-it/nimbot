@@ -173,6 +173,23 @@ async function main(): Promise<void> {
             : undefined;
         }
       : undefined,
+    provision
+      ? {
+          get: (id) => {
+            const agent = registry.get(id);
+            return agent && config.allowedUserIds.has(agent.ownerId)
+              ? { name: agent.name, instructions: agent.instructions }
+              : undefined;
+          },
+          save: (id, name, instructions) => {
+            const agent = registry.get(id);
+            if (!agent || !config.allowedUserIds.has(agent.ownerId))
+              throw new Error("Agent owner is not authorized");
+            registry.updateSettings(id, name, instructions);
+            if (id === config.agent.id) config.agent.name = name;
+          },
+        }
+      : undefined,
   );
   const server = serve({
     fetch: panel.fetch,

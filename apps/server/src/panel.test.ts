@@ -780,3 +780,123 @@ it("creates agents through the panel form and displays saved setup state without
   );
   expect(calls).toHaveLength(2);
 });
+
+it("edits the requested registered agent without changing another agent", async () => {
+  const { openAgentRegistry } = await import("./agent-registry.js");
+  const registry = openAgentRegistry(":memory:");
+  registry.createPending({ id: "first", name: "First", ownerId: 42 });
+  registry.createPending({ id: "second", name: "Second", ownerId: 42 });
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const app = createPanel(
+    config,
+    () => ({ telegram: "connected" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    (id) => {
+      const agent = registry.get(id);
+      return agent
+        ? { name: agent.name, botUsername: null, provisioning: "pending" }
+        : undefined;
+    },
+    {
+      get: (id) => registry.get(id),
+      save: (id, name, instructions) =>
+        registry.updateSettings(id, name, instructions),
+    },
+  );
+  const post = (
+    path: string,
+    body: string,
+    cookie = "",
+    origin = config.origin,
+  ) =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  try {
+    expect((await app.request("/agents/first/settings")).status).toBe(303);
+    expect(
+      (await post("/agents/first/settings", "name=Edited&instructions=New"))
+        .status,
+    ).toBe(303);
+    const login = await post(
+      "/login",
+      new URLSearchParams({ password }).toString(),
+    );
+    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    const headers = { Cookie: cookie };
+    expect(
+      (
+        await post(
+          "/agents/first/settings",
+          "name=Edited&instructions=New",
+          cookie,
+          "https://other.example",
+        )
+      ).status,
+    ).toBe(403);
+    const invalid = await post(
+      "/agents/first/settings",
+      new URLSearchParams({
+        name: "",
+        instructions: "<script>test</script>",
+      }).toString(),
+      cookie,
+    );
+    expect(invalid.status).toBe(400);
+    const error = await invalid.text();
+    expect(error).not.toContain("<script>");
+    expect(error).toContain('action="/agents/first/settings"');
+    const saved = await post(
+      "/agents/first/settings",
+      "name=Edited&instructions=New",
+      cookie,
+    );
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe(
+      "/agents/first/settings?saved=1",
+    );
+    expect(registry.get("first")).toMatchObject({
+      name: "Edited",
+      instructions: "New",
+    });
+    expect(registry.get("second")).toMatchObject({
+      name: "Second",
+      instructions: "",
+    });
+    const refreshed = await (
+      await app.request("/agents/first/settings?saved=1", { headers })
+    ).text();
+    expect(refreshed).toContain("Cambios guardados.");
+    expect(refreshed).toContain('value="Edited"');
+    expect(
+      await (await app.request("/agents/first/setup", { headers })).text(),
+    ).toContain('href="/agents/first/settings"');
+    expect(
+      (
+        await post(
+          "/agents/missing/settings",
+          "name=Edited&instructions=New",
+          cookie,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (await app.request("/agents/missing/settings", { headers })).status,
+    ).toBe(404);
+  } finally {
+    registry.close();
+  }
+});
