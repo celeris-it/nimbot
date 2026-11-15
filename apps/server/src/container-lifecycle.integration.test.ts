@@ -94,9 +94,24 @@ it.skipIf(!image)(
         expect(inspection.HostConfig.MemorySwap).toBe(
           inspection.HostConfig.Memory,
         );
+        expect(inspection.HostConfig.Memory).toBe(1_073_741_824);
         expect(inspection.HostConfig.NanoCpus).toBe(1_000_000_000);
         expect(inspection.HostConfig.PidsLimit).toBe(256);
         expect(inspection.HostConfig.Privileged).toBe(false);
+        expect(inspection.HostConfig.CapAdd ?? []).toEqual([]);
+        expect(inspection.HostConfig.Binds ?? []).toEqual([]);
+        expect(inspection.HostConfig.Devices ?? []).toEqual([]);
+        expect(
+          inspection.Mounts.map(
+            (m: { Destination: string }) => m.Destination,
+          ).sort(),
+        ).toEqual(
+          [
+            "/workspace",
+            "/home/node/.local/share/opencode",
+            "/home/node/.local/share/nimbot",
+          ].sort(),
+        );
         expect(
           inspection.Mounts.every((m: { Type: string }) => m.Type === "volume"),
         ).toBe(true);
@@ -124,6 +139,47 @@ it.skipIf(!image)(
           }
         }
         if (!ready) throw lastError;
+        // Check kernel-enforced state inside the running container, not only Docker's spec.
+        const security = JSON.parse(
+          exec(
+            refs.containerRef,
+            `
+          import {readFileSync, existsSync} from 'node:fs';
+          const read = (p) => readFileSync(p, 'utf8').trim();
+          const status = Object.fromEntries(read('/proc/1/status').split('\\n').map(line => { const i = line.indexOf(':'); return [line.slice(0, i), line.slice(i + 1).trim()]; }));
+          const v2 = existsSync('/sys/fs/cgroup/cgroup.controllers');
+          const cpu = v2 ? read('/sys/fs/cgroup/cpu.max').split(/\\s+/).map(Number) : [Number(read('/sys/fs/cgroup/cpu/cpu.cfs_quota_us')), Number(read('/sys/fs/cgroup/cpu/cpu.cfs_period_us'))];
+          const memory = Number(read(v2 ? '/sys/fs/cgroup/memory.max' : '/sys/fs/cgroup/memory/memory.limit_in_bytes'));
+          const swap = v2 ? Number(read('/sys/fs/cgroup/memory.swap.max')) : Number(read('/sys/fs/cgroup/memory/memory.memsw.limit_in_bytes')) - memory;
+          const pids = Number(read(v2 ? '/sys/fs/cgroup/pids.max' : '/sys/fs/cgroup/pids/pids.max'));
+          console.log(JSON.stringify({ uid: process.getuid(), status, cpu: cpu[0] / cpu[1], memory, swap, pids,
+            sockets: ['/var/run/docker.sock', '/run/docker.sock'].filter(existsSync),
+            serverKeys: Object.keys(process.env).filter(k => /^(TELEGRAM_|PANEL_|DOCKER_|SERVER_)/.test(k)) }));
+        `,
+          ),
+        );
+        expect(security.uid).toBe(1000);
+        expect(security.status.Uid.split(/\s+/)).toEqual([
+          "1000",
+          "1000",
+          "1000",
+          "1000",
+        ]);
+        for (const capability of [
+          "CapInh",
+          "CapPrm",
+          "CapEff",
+          "CapBnd",
+          "CapAmb",
+        ])
+          expect(BigInt(`0x${security.status[capability]}`)).toBe(0n);
+        expect(security.status.NoNewPrivs).toBe("1");
+        expect(security.cpu).toBe(1);
+        expect(security.memory).toBe(1_073_741_824);
+        expect(security.swap).toBe(0);
+        expect(security.pids).toBe(256);
+        expect(security.sockets).toEqual([]);
+        expect(security.serverKeys).toEqual([]);
         // This separate container stands in for the Server: only Docker networking
         // connects it to the new Agent Host, with no published host port.
         expect(
