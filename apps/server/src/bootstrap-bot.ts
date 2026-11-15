@@ -84,13 +84,14 @@ export function createBootstrapBot(
         tasks.approvals,
       );
       // The installed grammY client accepts native signals; its declarations use a legacy shim.
+      const identityBot = bot;
       const info = await retryTransient(
         () =>
-          bot!.api.getMe(
+          identityBot.api.getMe(
             AbortSignal.any([
               controller.signal,
               AbortSignal.timeout(5000),
-            ]) as unknown as Parameters<typeof bot.api.getMe>[0],
+            ]) as unknown as Parameters<typeof identityBot.api.getMe>[0],
           ),
         controller.signal,
         retryDelaysMs,
