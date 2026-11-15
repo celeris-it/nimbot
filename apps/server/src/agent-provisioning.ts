@@ -35,6 +35,7 @@ export function createAgentProvisioning(
   config: { socketPath: string; image: string; serverContainerRef?: string },
   call: DockerApi = createDockerApi(config.socketPath),
   request: typeof fetch = fetch,
+  signal?: AbortSignal,
 ) {
   const resources = createContainerResources(config, call);
   return async (agentId: string) => {
@@ -44,9 +45,14 @@ export function createAgentProvisioning(
     // This atomic transition also refuses concurrent attempts and externally managed agents.
     registry.beginProvisioning(agentId);
     try {
+      signal?.throwIfAborted();
       const host = await credentials.prepare(agentId);
-      const refs = await resources.create(agentId, host.token, (refs) =>
-        registry.recordProvisioningResources(agentId, refs),
+      signal?.throwIfAborted();
+      const refs = await resources.create(
+        agentId,
+        host.token,
+        (refs) => registry.recordProvisioningResources(agentId, refs),
+        signal,
       );
       const control = createContainerControl(
         { socketPath: config.socketPath, target: refs.containerRef, agentId },
@@ -54,20 +60,33 @@ export function createAgentProvisioning(
         (action, status) =>
           registry.recordContainerOperation(agentId, action, status),
         call,
+        async () => {
+          signal?.throwIfAborted();
+        },
       );
+      signal?.throwIfAborted();
       await control.action("start");
       for (let attempt = 0; attempt < 10; attempt++) {
+        signal?.throwIfAborted();
         const status = await getHostStatus(host, request);
+        signal?.throwIfAborted();
         if (status === "ready" || status === "busy") {
           registry.finishProvisioning(agentId, "ready");
           return refs;
         }
-        if (attempt < 9) await setTimeout(200);
+        if (attempt < 9) await setTimeout(200, undefined, { signal });
       }
       throw new Error("Agent Host did not become ready");
     } catch {
       // Keep all known references and data. Never retry uncertain Docker mutations here.
-      registry.finishProvisioning(agentId, "failed");
+      registry.finishProvisioning(
+        agentId,
+        signal?.aborted ? "cancelled" : "failed",
+      );
+      if (signal?.aborted)
+        throw new Error(
+          "Agent provisioning cancelled; retained resources require inspection",
+        );
       throw new Error(
         "Agent provisioning failed; retained resources require inspection",
       );

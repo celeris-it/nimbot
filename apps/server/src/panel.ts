@@ -668,6 +668,15 @@ ${values.instructions}</textarea>
     const agent = getAgentSetup?.(c.req.param("id"));
     if (!agent) return c.notFound();
     const ready = agent.provisioning === "ready";
+    const setupLabels: Record<string, string> = {
+      external: "Administrada fuera del aprovisionamiento automático",
+      pending: "Pendiente",
+      provisioning: "En curso",
+      ready: "Completada",
+      failed: "Fallida; los recursos creados se conservan para revisión",
+      interrupted: "Interrumpida al reiniciar el servidor; requiere revisión",
+      cancelled: "Cancelada; los recursos creados se conservan para revisión",
+    };
     const id = c.req.param("id");
     const [containerState, hostState, stopObservation] = await Promise.all([
       agentSettings?.containerStatus?.(id),
@@ -697,6 +706,10 @@ ${values.instructions}</textarea>
             </h2>
             <p role="status">
               ${available ? "El agente y su bot quedaron guardados y el contenedor está disponible." : "El agente y su bot quedaron guardados, pero el contenedor todavía no está disponible. No vuelvas a crear el mismo agente."}
+            </p>
+            <p>
+              Configuración:
+              ${setupLabels[agent.provisioning] ?? "Estado desconocido"}.
             </p>
             ${containerState ? html`<p>Contenedor: ${containerState === "running" ? "En ejecución" : containerState === "stopped" ? "Detenido" : containerState === "missing" ? "No encontrado" : "No disponible"}</p>` : ""}
             ${hostState ? html`<p>Agent Host: ${hostState === "ready" ? "Disponible" : hostState === "busy" ? "Ocupado" : "Sin conexión"}</p>` : ""}

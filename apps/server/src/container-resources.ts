@@ -80,18 +80,24 @@ export function createContainerResources(
     return data.Id as string;
   }
   return {
-    /** Creates a stopped container. Save each reference before proceeding; failures preserve resources for explicit retry/cleanup. */
+    /** Creates a stopped container. Save each reference before proceeding; failures preserve resources for explicit retry/cleanup.
+     * Cancellation is checked between steps, never passed to an in-flight mutation:
+     * its result must be inspected and recorded even after shutdown is requested.
+     */
     async create(
       agentId: string,
       apiToken: string,
       record: (refs: ResourceReferences) => void,
+      signal?: AbortSignal,
     ) {
       const resource = agentResourceNames(agentId);
       if (!/^[a-f0-9]{64}$/.test(apiToken))
         throw new Error("Invalid internal API token");
       const labels = { [label]: agentId };
       for (const volume of resource.volumes) {
+        signal?.throwIfAborted();
         if (!(await inspect("volumes", volume, agentId))) {
+          signal?.throwIfAborted();
           await checked("/volumes/create", "POST", {
             Name: volume,
             Driver: "local",
@@ -101,7 +107,9 @@ export function createContainerResources(
         }
         record({ volumeRef: resource.volumes[0] });
       }
+      signal?.throwIfAborted();
       if (!(await inspect("networks", resource.network, agentId))) {
+        signal?.throwIfAborted();
         await checked("/networks/create", "POST", {
           Name: resource.network,
           Driver: "bridge",
@@ -115,18 +123,22 @@ export function createContainerResources(
         agentId,
       );
       record({ networkRef: network.Id });
+      signal?.throwIfAborted();
       if (config.serverContainerRef) {
         const server = await serverId();
+        signal?.throwIfAborted();
         if (!Object.hasOwn(network.Containers ?? {}, server))
           await checked(`/networks/${network.Id}/connect`, "POST", {
             Container: server,
           });
       }
+      signal?.throwIfAborted();
       // Do not silently adopt a container: its settings/token may differ from this attempt.
       if (await inspect("containers", resource.container, agentId))
         throw new Error(
           "Agent container already exists; reconcile before retrying",
         );
+      signal?.throwIfAborted();
       await checked(`/containers/create?name=${resource.container}`, "POST", {
         Image: config.image,
         User: "1000:1000",

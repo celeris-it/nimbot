@@ -1276,3 +1276,56 @@ it("shows persisted stop results for the configured agent even while it is offli
     await (await app.request("/api/status", { headers })).json(),
   ).toMatchObject({ stopObservation: { finalStatus: "interrupted" } });
 });
+
+it.each([
+  ["pending", "Configuración: Pendiente."],
+  ["provisioning", "Configuración: En curso."],
+  [
+    "failed",
+    "Configuración: Fallida; los recursos creados se conservan para revisión.",
+  ],
+  [
+    "interrupted",
+    "Configuración: Interrumpida al reiniciar el servidor; requiere revisión.",
+  ],
+  [
+    "cancelled",
+    "Configuración: Cancelada; los recursos creados se conservan para revisión.",
+  ],
+] as const)(
+  "shows the persisted %s setup state without offering container actions",
+  async (provisioning, message) => {
+    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+    const app = createPanel(
+      config,
+      () => ({ telegram: "connected" }),
+      Date.now,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => {},
+      undefined,
+      (id) =>
+        id === "dev"
+          ? { name: "Developer", botUsername: "dev_bot", provisioning }
+          : undefined,
+    );
+    const login = await app.request("/login", {
+      method: "POST",
+      headers: {
+        Origin: config.origin,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ password }).toString(),
+    });
+    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
+    const response = await app.request("/agents/dev/setup", { headers });
+    const body = (await response.text()).replace(/\s+/g, " ");
+    expect(body).toContain(message);
+    expect(body).not.toContain("Iniciar contenedor");
+    expect(body).not.toContain("Detener contenedor…");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  },
+);

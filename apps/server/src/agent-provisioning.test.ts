@@ -3,7 +3,11 @@ import { openAgentRegistry } from "./agent-registry.js";
 import { createAgentProvisioning } from "./agent-provisioning.js";
 import type { DockerApi } from "./docker-api.js";
 
-function fixture(failStart = false) {
+function fixture(
+  failStart = false,
+  signal?: AbortSignal,
+  afterMutation?: (path: string) => void,
+) {
   const registry = openAgentRegistry(":memory:");
   registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
@@ -32,8 +36,10 @@ function fixture(failStart = false) {
     } else if (path.endsWith("/start")) {
       expect(registry.get("dev")?.containerRef).toBe("d".repeat(64));
       expect(registry.getContainerOperation("dev")?.status).toBe("pending");
+      afterMutation?.(path);
       return { code: failStart ? 500 : 204, body: "" };
     } else throw new Error("Unexpected Docker mutation");
+    afterMutation?.(path);
     return { code: 201, body: "{}" };
   };
   const health = vi.fn<typeof fetch>(async () => {
@@ -58,6 +64,7 @@ function fixture(failStart = false) {
     { socketPath: "/unused", image: `sha256:${"a".repeat(64)}` },
     call,
     health,
+    signal,
   );
   return { registry, provision, mutations, health, credentials };
 }
@@ -176,4 +183,117 @@ it("validates opt-in server provisioning configuration", async () => {
     { ...env, AGENT_HOST_IMAGE: "" },
   ])
     expect(() => readProvisioningConfig(invalid)).toThrow();
+});
+
+it("records cancellation without preparing credentials or touching Docker when shutdown already started", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const f = fixture(false, controller.signal);
+  try {
+    await expect(f.provision("dev")).rejects.toThrow("provisioning cancelled");
+    expect(f.registry.getProvisioning("dev")?.status).toBe("cancelled");
+    expect(f.credentials.prepare).not.toHaveBeenCalled();
+    expect(f.mutations).toEqual([]);
+  } finally {
+    f.registry.close();
+  }
+});
+
+it.each([
+  "/volumes/create",
+  "/networks/create",
+  "/containers/create?name=nimbot-dev",
+  `/containers/${"d".repeat(64)}/start`,
+])(
+  "settles and tracks an in-flight Docker mutation before cancelling at %s",
+  async (cancelAt) => {
+    const controller = new AbortController();
+    const f = fixture(false, controller.signal, (path) => {
+      if (path === cancelAt)
+        controller.abort(new Error("private shutdown reason"));
+    });
+    try {
+      await expect(f.provision("dev")).rejects.toThrow(
+        "Agent provisioning cancelled; retained resources require inspection",
+      );
+      expect(f.mutations.at(-1)).toBe(cancelAt);
+      const state = f.registry.getProvisioning("dev")!;
+      expect(state.status).toBe("cancelled");
+      expect(state.volumeRef).toBe("nimbot-dev-workspace");
+      if (cancelAt !== "/volumes/create")
+        expect(state.networkRef).toBe("c".repeat(64));
+      if (cancelAt.includes("containers"))
+        expect(f.registry.get("dev")?.containerRef).toBe("d".repeat(64));
+      expect(f.health).not.toHaveBeenCalled();
+      expect(f.mutations.some((path) => path.includes("delete"))).toBe(false);
+      // Cancellation is not permission to start tasks or repeat uncertain creation.
+      expect(() => f.registry.beginContainerAction("dev", "start")).toThrow();
+      f.registry.beginResourceRemoval("dev");
+      expect(f.registry.getProvisioning("dev")?.status).toBe("provisioning");
+    } finally {
+      f.registry.close();
+    }
+  },
+);
+
+it("observes shutdown after credential preparation before creating resources", async () => {
+  const controller = new AbortController();
+  const f = fixture(false, controller.signal);
+  const prepare = f.credentials.prepare.getMockImplementation()!;
+  f.credentials.prepare.mockImplementation(async () => {
+    const config = await prepare();
+    controller.abort();
+    return config;
+  });
+  try {
+    await expect(f.provision("dev")).rejects.toThrow("provisioning cancelled");
+    expect(f.registry.getHostCredentialRef("dev")).toBe("file:host-saved");
+    expect(f.mutations).toEqual([]);
+    expect(f.registry.getProvisioning("dev")?.status).toBe("cancelled");
+  } finally {
+    f.registry.close();
+  }
+});
+
+it("does not mark a Host ready when shutdown happens during its health response", async () => {
+  const controller = new AbortController();
+  const f = fixture(false, controller.signal);
+  f.health.mockImplementation(async () => {
+    controller.abort();
+    return Response.json({
+      status: "ok",
+      workspace: "writable",
+      engine: "not_started",
+    });
+  });
+  try {
+    await expect(f.provision("dev")).rejects.toThrow("provisioning cancelled");
+    expect(f.registry.getProvisioning("dev")?.status).toBe("cancelled");
+    expect(f.registry.getContainerOperation("dev")?.status).toBe("completed");
+    expect(f.health).toHaveBeenCalledTimes(1);
+  } finally {
+    f.registry.close();
+  }
+});
+
+it("interrupts readiness backoff promptly instead of issuing further health requests", async () => {
+  vi.useFakeTimers();
+  const controller = new AbortController();
+  const f = fixture(false, controller.signal);
+  f.health.mockImplementation(async () => {
+    setTimeout(() => controller.abort(), 50);
+    return new Response("", { status: 503 });
+  });
+  try {
+    const result = expect(f.provision("dev")).rejects.toThrow(
+      "provisioning cancelled",
+    );
+    await vi.runAllTimersAsync();
+    await result;
+    expect(f.health).toHaveBeenCalledTimes(1);
+    expect(f.registry.getProvisioning("dev")?.status).toBe("cancelled");
+  } finally {
+    f.registry.close();
+    vi.useRealTimers();
+  }
 });

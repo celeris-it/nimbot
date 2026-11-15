@@ -110,9 +110,17 @@ async function main(): Promise<void> {
         },
       )
     : undefined;
+  const provisioningShutdown = new AbortController();
   const provision =
     provisioningConfig && hostCredentials
-      ? createAgentProvisioning(registry, hostCredentials, provisioningConfig)
+      ? createAgentProvisioning(
+          registry,
+          hostCredentials,
+          provisioningConfig,
+          undefined,
+          undefined,
+          provisioningShutdown.signal,
+        )
       : undefined;
   const removeResources = provisioningConfig
     ? createAgentResourceRemoval(registry, provisioningConfig)
@@ -282,6 +290,7 @@ async function main(): Promise<void> {
   let stopping = false;
   const stop = () => {
     stopping = true;
+    provisioningShutdown.abort();
     server.close();
     if ("closeIdleConnections" in server) server.closeIdleConnections();
     if (bot.isRunning()) {

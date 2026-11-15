@@ -36,7 +36,7 @@ it("migrates once and restores metadata without storing tokens", async () => {
       expect(
         db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
           ?.total,
-      ).toBe(6);
+      ).toBe(7);
     } finally {
       db.close();
     }
@@ -277,6 +277,89 @@ it("upgrades saved version-5 stop snapshots without inventing final outcomes", a
         finalStatus: null,
       });
       expect(migrated.getStopObservation("dev")!.observationId).not.toBe("");
+    } finally {
+      migrated.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("preserves cancelled setup and resource references across restart and permits explicit recovery", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-cancelled-setup-"));
+  const path = join(dir, "server.sqlite");
+  try {
+    const first = openAgentRegistry(path);
+    first.createPending({ id: "dev", name: "Dev", ownerId: 42 });
+    first.beginProvisioning("dev");
+    first.recordProvisioningResources("dev", {
+      volumeRef: "workspace",
+      networkRef: "network",
+      containerRef: "container",
+    });
+    first.finishProvisioning("dev", "cancelled");
+    const saved = first.getProvisioning("dev");
+    first.close();
+    const restored = openAgentRegistry(path);
+    try {
+      expect(restored.getProvisioning("dev")).toEqual(saved);
+      expect(restored.get("dev")?.containerRef).toBe("container");
+      expect(() => restored.beginContainerAction("dev", "start")).toThrow();
+      restored.beginProvisioning("dev");
+      expect(restored.getProvisioning("dev")?.volumeRef).toBe("workspace");
+      restored.finishProvisioning("dev", "cancelled");
+      restored.beginResourceRemoval("dev");
+      restored.finishResourceRemoval("dev", false);
+      expect(restored.getProvisioning("dev")).toMatchObject({
+        status: "pending",
+        volumeRef: "workspace",
+        networkRef: null,
+      });
+      expect(restored.get("dev")?.containerRef).toBeNull();
+      expect(() => restored.finishProvisioning("dev", "cancelled")).toThrow();
+    } finally {
+      restored.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("migrates version-6 provisioning rows without changing references or completed states", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-provisioning-v7-"));
+  const path = join(dir, "server.sqlite");
+  try {
+    const first = openAgentRegistry(path);
+    first.syncConfigured({ id: "external", name: "External", ownerId: 42 });
+    first.createPending({ id: "dev", name: "Dev", ownerId: 42 });
+    first.beginProvisioning("dev");
+    first.recordProvisioningResources("dev", {
+      volumeRef: "workspace",
+      networkRef: "network",
+      containerRef: "container",
+    });
+    first.finishProvisioning("dev", "failed");
+    const saved = first.getProvisioning("dev");
+    const external = first.getProvisioning("external");
+    first.close();
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`CREATE TABLE provisioning_v6 (
+      agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+      status TEXT NOT NULL CHECK(status IN ('external','pending','provisioning','ready','failed','interrupted')),
+      volume_ref TEXT, network_ref TEXT, updated_at INTEGER NOT NULL
+    ); INSERT INTO provisioning_v6 SELECT * FROM agent_provisioning;
+    DROP TABLE agent_provisioning; ALTER TABLE provisioning_v6 RENAME TO agent_provisioning;
+    DELETE FROM registry_migrations WHERE version = 7;`);
+    legacy.close();
+    const migrated = openAgentRegistry(path);
+    try {
+      expect(migrated.getProvisioning("dev")).toEqual(saved);
+      expect(migrated.getProvisioning("external")).toEqual(external);
+      expect(migrated.get("dev")?.containerRef).toBe("container");
+      migrated.beginProvisioning("dev");
+      migrated.finishProvisioning("dev", "cancelled");
+      expect(migrated.getProvisioning("dev")?.status).toBe("cancelled");
+      expect(() => migrated.beginProvisioning("external")).toThrow();
     } finally {
       migrated.close();
     }

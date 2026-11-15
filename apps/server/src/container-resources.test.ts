@@ -249,3 +249,47 @@ it("keeps the network tracked and never creates a container if server attachment
   );
   expect(f.requests.some((r) => r.method === "DELETE")).toBe(false);
 });
+
+it.each(["inspect", "connect"])(
+  "cancels safely during server network %s without creating an agent container",
+  async (stage) => {
+    const f = fixture();
+    const controller = new AbortController();
+    const server = "e".repeat(64);
+    f.resources.set("/containers/nimbot-server/json", { Id: server });
+    const recorded: ResourceReferences[] = [];
+    let connected = false;
+    const transport: DockerApi = async (path, method = "GET", body) => {
+      if (path.endsWith("/connect")) {
+        expect(recorded.at(-1)).toEqual({ networkRef: "c".repeat(64) });
+        connected = true;
+        controller.abort();
+        return { code: 200, body: "" };
+      }
+      const response = await f.call(path, method, body);
+      if (path === "/containers/nimbot-server/json" && stage === "inspect")
+        controller.abort();
+      return response;
+    };
+    const manager = createContainerResources(
+      { socketPath: "/unused", image, serverContainerRef: "nimbot-server" },
+      transport,
+    );
+    await expect(
+      manager.create(
+        "dev",
+        token,
+        (refs) => {
+          recorded.push(refs);
+        },
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(connected).toBe(stage === "connect");
+    expect(recorded.at(-1)).toEqual({ networkRef: "c".repeat(64) });
+    expect(
+      f.requests.some((r) => r.path.startsWith("/containers/create")),
+    ).toBe(false);
+    expect(f.requests.some((r) => r.method === "DELETE")).toBe(false);
+  },
+);
