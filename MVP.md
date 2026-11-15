@@ -466,8 +466,8 @@ Agent creation, configuration, container start/stop, token linking, and deletion
 
 ### Tasks
 
-- [ ] Each agent conversation, identified by bot ID and private chat ID, has a persistent FIFO task queue and runs one turn at a time.
-- [ ] Incoming messages and task state changes are saved before execution.
+- [x] Each agent conversation, identified by bot ID and private chat ID, has a persistent FIFO task queue and runs one turn at a time.
+- [x] Incoming messages and task state changes are saved before execution.
 - [ ] Progress updates are sent through the originating agent bot to its owner’s bound chat while a task runs.
 - [ ] `/stop` in an agent bot cancels only that agent’s running task, and the agent accepts a new task afterwards.
 - [ ] Tasks have a timeout, and a failed task does not block the tasks behind it.

@@ -1,15 +1,51 @@
 import type { HostStatus } from "./agent-host.js";
 import type { ChatBinding } from "./chat-binding.js";
-import { HostTaskError } from "./host-tasks.js";
 import { splitTelegramText } from "./telegram-text.js";
-import { Bot } from "grammy";
+import type { TaskOutcome } from "./task-queue.js";
+import { Bot, type Api } from "grammy";
 import type { ServerConfig } from "./config.js";
 import type { BotAccess } from "./agent-access.js";
+
+const failureMessages = {
+  busy: "The agent is busy. Try again when the current task finishes.",
+  failed:
+    "The task failed or exceeded the time limit. You can send another task.",
+  interrupted: "The task was interrupted by an Agent Host restart.",
+  timeout:
+    "I stopped waiting for the result. The task may still be running; check the panel before sending it again.",
+  unavailable:
+    "I could not confirm the task's status on the Agent Host. It may have started; check the panel before sending it again.",
+  not_ready:
+    "The agent's setup changed before this task could start, so it was not run. Check the panel before trying again.",
+};
+
+/** Sends a task's result, split to Telegram's limit, through the bot that received it. */
+export async function sendTaskOutcome(
+  api: Pick<Api, "sendMessage">,
+  chatId: number,
+  outcome: TaskOutcome,
+) {
+  if (!outcome.ok) {
+    await api.sendMessage(chatId, failureMessages[outcome.kind]);
+    return;
+  }
+  for (const part of splitTelegramText(
+    outcome.output || "The task finished without a text response.",
+  ))
+    await api.sendMessage(chatId, part);
+}
+
+/** Saves a message as a queued task and returns how many tasks are ahead of it. */
+export type SubmitTask = (
+  botId: number,
+  chatId: number,
+  prompt: string,
+) => { ahead: number };
 
 export function createBot(
   config: ServerConfig,
   onActivation: (chatId: number) => void = () => {},
-  execute?: (prompt: string) => Promise<string>,
+  execute?: SubmitTask,
   binding?: ChatBinding,
   hostStatus?: () => Promise<HostStatus>,
   access?: BotAccess,
@@ -106,35 +142,24 @@ export function createBot(
       );
       return;
     }
-    let output: string;
+    let ahead: number;
     try {
       // Health inspection awaited network I/O; setup may have changed meanwhile.
       if (!configured()) {
         await ctx.reply(incomplete);
         return;
       }
-      output = await execute(ctx.message.text);
-    } catch (error) {
-      const messages = {
-        busy: "The agent is busy. Try again when the current task finishes.",
-        failed:
-          "The task failed or exceeded the time limit. You can send another task.",
-        interrupted: "The task was interrupted by an Agent Host restart.",
-        timeout:
-          "I stopped waiting for the result. The task may still be running; check the panel before sending it again.",
-        unavailable:
-          "I could not confirm the task's status on the Agent Host. It may have started; check the panel before sending it again.",
-      };
+      ({ ahead } = execute(ctx.me.id, ctx.chat.id, ctx.message.text));
+    } catch {
       await ctx.reply(
-        messages[error instanceof HostTaskError ? error.kind : "unavailable"],
+        "I could not save your message, so it was not sent. Try again.",
       );
       return;
     }
-    for (const part of splitTelegramText(
-      output || "The task finished without a text response.",
-    )) {
-      await ctx.reply(part);
-    }
+    if (ahead > 0)
+      await ctx.reply(
+        `Queued: ${ahead} earlier task${ahead === 1 ? "" : "s"} will finish first.`,
+      );
   });
 
   // Never log Telegram errors verbatim: they may contain tokens or message text.

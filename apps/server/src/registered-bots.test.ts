@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { openAgentRegistry } from "./agent-registry.js";
+import { openTaskStore } from "./task-queue.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";
 
@@ -153,9 +154,15 @@ async function fixture() {
       token: id.repeat(64),
     })),
   };
+  const taskStore = openTaskStore(statePath);
   const manager = createRegisteredBots(
     registry,
-    { bootstrapId: "bootstrap", allowedOwners: new Set([42, 73]), statePath },
+    {
+      bootstrapId: "bootstrap",
+      allowedOwners: new Set([42, 73]),
+      statePath,
+      taskStore,
+    },
     secrets,
     hosts,
     request,
@@ -201,6 +208,7 @@ async function fixture() {
     send,
     close: async () => {
       await manager.close();
+      taskStore.close();
       registry.close();
       await rm(dir, { recursive: true, force: true });
     },

@@ -1,6 +1,8 @@
 import { openChatBinding, type ChatBinding } from "./chat-binding.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBot } from "./bot.js";
+import { createBotTasks } from "./bot-tasks.js";
+import { openTaskStore } from "./task-queue.js";
 import type { BotAccess } from "./agent-access.js";
 import type { HostStatus } from "./agent-host.js";
 
@@ -11,6 +13,15 @@ function setup(
   access?: BotAccess,
 ) {
   const activations: number[] = [];
+  const tasks = execute
+    ? createBotTasks({
+        store: openTaskStore(":memory:"),
+        agentId: "test",
+        ownerId: () => 42,
+        run: execute,
+        access,
+      })
+    : undefined;
   const bot = createBot(
     {
       telegramBotToken: "123:fake_test_token",
@@ -18,7 +29,7 @@ function setup(
       agent: { id: "test", name: "Test agent", ownerId: 42 },
     },
     (chatId) => activations.push(chatId),
-    execute,
+    tasks?.submit,
     binding,
     hostStatus,
     access,
@@ -38,6 +49,7 @@ function setup(
     can_manage_bots: false,
     supports_join_request_queries: false,
   };
+  tasks?.attach(bot);
   const sent: string[] = [];
   const destinations: number[] = [];
   bot.api.config.use(async (_prev, method, payload) => {
@@ -61,7 +73,13 @@ function setup(
       },
     } as Awaited<ReturnType<typeof _prev>>;
   });
-  return { bot, sent, activations, destinations };
+  return {
+    bot,
+    sent,
+    activations,
+    destinations,
+    idle: () => tasks?.idle() ?? Promise.resolve(),
+  };
 }
 
 function message(
@@ -130,7 +148,7 @@ describe("Telegram access", () => {
   it("routes only activated owner text and returns split plain text", async () => {
     const output = "<code> & *plain* " + "😀".repeat(3000);
     const execute = vi.fn().mockResolvedValue(output);
-    const { bot, sent, destinations } = setup(execute);
+    const { bot, sent, destinations, idle } = setup(execute);
     await bot.handleUpdate(message("before start"));
     await bot.handleUpdate(message("hello", 99));
     await bot.handleUpdate(message("hello", 73));
@@ -141,6 +159,7 @@ describe("Telegram access", () => {
     expect(execute).not.toHaveBeenCalled();
     const count = sent.length;
     await bot.handleUpdate(message("create a file"));
+    await idle();
     expect(execute).toHaveBeenCalledExactlyOnceWith("create a file");
     expect(sent.slice(count).join("")).toBe(output);
     expect(destinations.slice(count)).toEqual([42, 42]);
@@ -151,18 +170,20 @@ describe("Telegram access", () => {
       .fn()
       .mockRejectedValueOnce(new Error("secret"))
       .mockResolvedValueOnce("Recovered");
-    const { bot, sent } = setup(execute);
+    const { bot, sent, idle } = setup(execute);
     await bot.handleUpdate(message("/start"));
     await bot.handleUpdate(message("first"));
+    await idle();
     expect(sent.at(-1)).toContain("I could not confirm");
     expect(sent.join("")).not.toContain("secret");
     await bot.handleUpdate(message("second"));
+    await idle();
     expect(sent.at(-1)).toBe("Recovered");
   });
   it("does not submit tasks while the agent is stopped and reports its status", async () => {
     const execute = vi.fn().mockResolvedValue("Done");
     let host: HostStatus = "unavailable";
-    const { bot, sent } = setup(execute, undefined, async () => host);
+    const { bot, sent, idle } = setup(execute, undefined, async () => host);
     await bot.handleUpdate(message("/start"));
     await bot.handleUpdate(message("hello"));
     expect(execute).not.toHaveBeenCalled();
@@ -176,6 +197,7 @@ describe("Telegram access", () => {
     await bot.handleUpdate(message("/status"));
     expect(sent.at(-1)).toContain("available");
     await bot.handleUpdate(message("hello"));
+    await idle();
     expect(sent.at(-1)).toBe("Done");
   });
   it.each(["/start", "/help"])(
@@ -275,7 +297,7 @@ it("rechecks persisted setup after Host health and never executes incomplete age
     return "ready" as const;
   });
   const execute = vi.fn(async () => "Done");
-  const { bot, sent } = setup(execute, binding, health, access);
+  const { bot, sent, idle } = setup(execute, binding, health, access);
   try {
     await bot.handleUpdate(message("/start"));
     expect(registry.getOwnerChat("test")).toBe(42);
@@ -291,6 +313,7 @@ it("rechecks persisted setup after Host health and never executes incomplete age
     registry.recordContainerOperation("test", "stop", "failed");
     changeDuringHealth = false;
     await bot.handleUpdate(message("third"));
+    await idle();
     expect(execute).toHaveBeenCalledExactlyOnceWith("third");
     registry.beginResourceRemoval("test");
     registry.finishProvisioning("test", "cancelled");
@@ -303,4 +326,43 @@ it("rechecks persisted setup after Host health and never executes incomplete age
     registry.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+describe("task queue through Telegram", () => {
+  it("queues messages sent in a row and answers in order while a task runs", async () => {
+    let release!: () => void;
+    const first = new Promise<string>((resolve) => {
+      release = () => resolve("first done");
+    });
+    const execute = vi
+      .fn()
+      .mockReturnValueOnce(first)
+      .mockResolvedValueOnce("second done")
+      .mockResolvedValueOnce("third done");
+    const { bot, sent, idle } = setup(execute, undefined, async () => "ready");
+    await bot.handleUpdate(message("/start"));
+    await bot.handleUpdate(message("one"));
+    await bot.handleUpdate(message("two"));
+    await bot.handleUpdate(message("three"));
+    expect(sent.filter((text) => text.startsWith("Queued"))).toEqual([
+      "Queued: 1 earlier task will finish first.",
+      "Queued: 2 earlier tasks will finish first.",
+    ]);
+    // The bot stays responsive while the first task is still running.
+    await bot.handleUpdate(message("/status"));
+    expect(sent.at(-1)).toContain("Chat: activated");
+    expect(execute).toHaveBeenCalledTimes(1);
+    release();
+    await idle();
+    expect(sent.filter((text) => text.endsWith("done"))).toEqual([
+      "first done",
+      "second done",
+      "third done",
+    ]);
+    expect(execute.mock.calls.map(([prompt]) => prompt)).toEqual([
+      "one",
+      "two",
+      "three",
+    ]);
+  });
 });

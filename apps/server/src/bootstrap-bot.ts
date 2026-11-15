@@ -6,6 +6,8 @@ import type { AgentHostConfig } from "./agent-host.js";
 import { getHostStatus } from "./agent-host.js";
 import { createAgentAccess } from "./agent-access.js";
 import { createBot } from "./bot.js";
+import { createBotTasks } from "./bot-tasks.js";
+import type { TaskStore } from "./task-queue.js";
 import { createHostTasks } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 
@@ -23,11 +25,13 @@ export function createBootstrapBot(
   binding: ChatBinding,
   host: AgentHostConfig,
   status: BootstrapStatus,
+  taskStore: TaskStore,
   request: typeof fetch = fetch,
   makeBot: typeof createBot = createBot,
 ) {
   const controller = new AbortController();
   let bot: ReturnType<typeof createBot> | undefined;
+  let tasks: ReturnType<typeof createBotTasks> | undefined;
   let done: Promise<void> | undefined;
   async function run() {
     status.telegram = "connecting";
@@ -47,15 +51,22 @@ export function createBootstrapBot(
         config.allowedUserIds,
         true,
       );
+      tasks = createBotTasks({
+        store: taskStore,
+        agentId: config.agent.id,
+        ownerId: () => config.agent.ownerId,
+        run: withAgentInstructions(
+          createHostTasks(host, request),
+          () => registry.get(config.agent.id)?.instructions ?? "",
+        ),
+        access,
+      });
       bot = makeBot(
         { ...config, telegramBotToken: token },
         () => {
           status.chatActivated = true;
         },
-        withAgentInstructions(
-          createHostTasks(host, request),
-          () => registry.get(config.agent.id)?.instructions ?? "",
-        ),
+        tasks.submit,
         binding,
         () => getHostStatus(host, request),
         access,
@@ -78,6 +89,7 @@ export function createBootstrapBot(
         throw new Error("Bootstrap bot identity mismatch");
       registry.bindBot(config.agent.id, info.id, info.username);
       bot.botInfo = info;
+      tasks.attach(bot);
       await bot.start({
         allowed_updates: ["message"],
         onStart: async () => {
@@ -86,6 +98,7 @@ export function createBootstrapBot(
             return;
           }
           status.chatActivated = access.getSetup().owner === "verified";
+          tasks?.resume();
           status.telegram = "connected";
           status.botUsername = info.username;
           console.log("Nimbot Server started with Telegram long polling.");
@@ -97,6 +110,7 @@ export function createBootstrapBot(
           "Bootstrap Telegram connection failed. Check the saved credential, token, network, and whether another instance is running.",
         );
     } finally {
+      tasks?.close();
       status.telegram = "disconnected";
     }
   }

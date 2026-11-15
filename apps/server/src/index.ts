@@ -5,6 +5,7 @@ import { createProvisioningControl } from "./provisioning-control.js";
 import { createAgentRegistration } from "./agent-registration.js";
 import { createResourceReconciliation } from "./resource-reconciliation.js";
 import { createAgentContainerAction } from "./agent-container-action.js";
+import { openTaskStore } from "./task-queue.js";
 import { createAgentDeletion } from "./agent-deletion.js";
 import { createAgentResourceRemoval } from "./agent-resource-removal.js";
 import {
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
   }
   let statePath;
   let binding;
+  let taskStore;
   let registry;
   let botSecrets;
   let hostCredentials;
@@ -70,6 +72,9 @@ async function main(): Promise<void> {
         registry,
       );
     binding = openChatBinding(statePath, config.agent);
+    taskStore = openTaskStore(statePath);
+    // A task left running by the previous process cannot be proven finished.
+    taskStore.markRunningInterrupted();
   } catch {
     registry?.close();
     console.error(
@@ -80,6 +85,7 @@ async function main(): Promise<void> {
   }
   process.once("exit", () => {
     binding.close();
+    taskStore.close();
     registry.close();
   });
   config.agent.name = registry.get(config.agent.id)!.name;
@@ -118,6 +124,7 @@ async function main(): Promise<void> {
           bootstrapId: config.agent.id,
           allowedOwners: config.allowedUserIds,
           statePath,
+          taskStore,
         },
         botSecrets,
         hostCredentials,
@@ -366,6 +373,7 @@ async function main(): Promise<void> {
     binding,
     hostConfig,
     status,
+    taskStore,
   );
   const stop = () => {
     provisioningShutdown.abort();

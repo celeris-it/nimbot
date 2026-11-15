@@ -7,6 +7,7 @@ import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";
 import { openAgentRegistry } from "./agent-registry.js";
 import { openChatBinding } from "./chat-binding.js";
+import { openTaskStore } from "./task-queue.js";
 
 async function fixture(knownBootstrap = true) {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-connections-"));
@@ -119,6 +120,7 @@ async function fixture(knownBootstrap = true) {
   } = { telegram: "connecting" };
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const taskStore = openTaskStore(path);
   const bootstrap = createBootstrapBot(
     registry,
     {
@@ -130,12 +132,18 @@ async function fixture(knownBootstrap = true) {
     binding,
     { url: "http://agent-host:3001", token: "a".repeat(64) },
     status,
+    taskStore,
     request,
     makeBot,
   );
   const registered = createRegisteredBots(
     registry,
-    { bootstrapId: agent.id, allowedOwners: allowed, statePath: path },
+    {
+      bootstrapId: agent.id,
+      allowedOwners: allowed,
+      statePath: path,
+      taskStore,
+    },
     secrets,
     hosts,
     request,
@@ -192,6 +200,7 @@ async function fixture(knownBootstrap = true) {
         log.mockRestore();
         error.mockRestore();
         binding.close();
+        taskStore.close();
         registry.close();
         await rm(dir, { recursive: true, force: true });
       }

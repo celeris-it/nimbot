@@ -6,6 +6,8 @@ import { openChatBinding } from "./chat-binding.js";
 import { createAgentAccess } from "./agent-access.js";
 import { createBot } from "./bot.js";
 import { createHostTasks } from "./host-tasks.js";
+import { createBotTasks } from "./bot-tasks.js";
+import type { TaskStore } from "./task-queue.js";
 import { getHostStatus } from "./agent-host.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 
@@ -24,6 +26,7 @@ interface Connection {
   state: RegisteredBotState;
   controller: AbortController;
   bot?: ReturnType<typeof createBot>;
+  tasks?: ReturnType<typeof createBotTasks>;
   done?: Promise<void>;
   finished: boolean;
 }
@@ -35,6 +38,7 @@ export function createRegisteredBots(
     bootstrapId: string;
     allowedOwners: ReadonlySet<number>;
     statePath: string;
+    taskStore: TaskStore;
   },
   secrets: Pick<Awaited<ReturnType<typeof openBotSecrets>>, "read">,
   hosts: Pick<Awaited<ReturnType<typeof openHostCredentials>>, "read">,
@@ -74,6 +78,17 @@ export function createRegisteredBots(
       if (connection.controller.signal.aborted) return;
       binding = openChatBinding(config.statePath, agent);
       const access = createAgentAccess(registry, id, config.allowedOwners);
+      const tasks = createBotTasks({
+        store: config.taskStore,
+        agentId: id,
+        ownerId: () => registry.get(id)?.ownerId ?? agent.ownerId,
+        run: withAgentInstructions(
+          createHostTasks(host, request),
+          () => registry.get(id)?.instructions ?? "",
+        ),
+        access,
+      });
+      connection.tasks = tasks;
       const bot = makeBot(
         {
           telegramBotToken: token,
@@ -87,10 +102,7 @@ export function createRegisteredBots(
           },
         },
         () => {},
-        withAgentInstructions(
-          createHostTasks(host, request),
-          () => registry.get(id)?.instructions ?? "",
-        ),
+        tasks.submit,
         binding,
         () => getHostStatus(host, request),
         access,
@@ -117,6 +129,7 @@ export function createRegisteredBots(
       }
       registry.bindBot(id, info.id, info.username);
       bot.botInfo = info;
+      tasks.attach(bot);
       await bot.start({
         allowed_updates: ["message"],
         onStart: async () => {
@@ -125,6 +138,7 @@ export function createRegisteredBots(
             return;
           }
           connection.state = { status: "polling" };
+          tasks.resume();
         },
       });
       if (!connection.controller.signal.aborted)
@@ -143,6 +157,7 @@ export function createRegisteredBots(
               : "telegram_unavailable",
         };
     } finally {
+      connection.tasks?.close();
       try {
         binding?.close();
       } catch {
