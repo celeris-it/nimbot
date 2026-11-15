@@ -1,3 +1,4 @@
+import { openTelegramAccess } from "./telegram-access.js";
 import { log } from "./logger.js";
 import { createBootstrapBot } from "./bootstrap-bot.js";
 import { createRegisteredBots } from "./registered-bots.js";
@@ -30,7 +31,7 @@ import { createStopObservation } from "./stop-observation.js";
 import { serve } from "@hono/node-server";
 import { createPanel, type AgentStatus } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";
-import { readConfig } from "./config.js";
+import { readBootstrapConfig } from "./config.js";
 import { readTaskTimeoutSeconds, taskWaitMs } from "./task-timeout.js";
 
 async function main(): Promise<void> {
@@ -41,14 +42,15 @@ async function main(): Promise<void> {
   let provisioningConfig;
   let taskTimeoutSeconds: number;
   try {
-    config = readConfig(process.env);
+    config = readBootstrapConfig(process.env);
     provisioningConfig = readProvisioningConfig(process.env);
     taskTimeoutSeconds = readTaskTimeoutSeconds(process.env);
     containerConfig =
-      provisioningConfig && !process.env.AGENT_CONTAINER_NAME?.trim()
+      !config ||
+      (provisioningConfig && !process.env.AGENT_CONTAINER_NAME?.trim())
         ? undefined
-        : readContainerConfig(process.env, config.agent.id);
-    hostConfig = readAgentHostConfig(process.env);
+        : readContainerConfig(process.env, config!.agent.id);
+    hostConfig = config ? readAgentHostConfig(process.env) : undefined;
     panelConfig = readPanelConfig(process.env);
   } catch (error) {
     log.error("server.config_invalid", {
@@ -62,6 +64,7 @@ async function main(): Promise<void> {
   }
   let statePath;
   let binding;
+  let telegramAccess;
   let taskStore;
   let registry;
   let botSecrets;
@@ -71,18 +74,20 @@ async function main(): Promise<void> {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     statePath = resolve(stateDir, "server.sqlite");
     registry = openAgentRegistry(statePath);
-    registry.syncConfigured(config.agent);
+    if (config) registry.syncConfigured(config.agent);
+    telegramAccess = openTelegramAccess(statePath, config?.allowedUserIds);
     botSecrets = await openBotSecrets(resolve(stateDir, "bot-secrets"));
     if (provisioningConfig)
       hostCredentials = await openHostCredentials(
         resolve(stateDir, "host-secrets"),
         registry,
       );
-    binding = openChatBinding(statePath, config.agent);
+    binding = config ? openChatBinding(statePath, config.agent) : undefined;
     taskStore = openTaskStore(statePath);
     // A task left running by the previous process cannot be proven finished.
     taskStore.markRunningInterrupted();
   } catch {
+    telegramAccess?.close();
     registry?.close();
     log.error("server.state_init_failed", {
       hint: "Check SERVER_STATE_DIR and writable storage.",
@@ -91,45 +96,49 @@ async function main(): Promise<void> {
     return;
   }
   process.once("exit", () => {
-    binding.close();
+    binding?.close();
+    telegramAccess.close();
     taskStore.close();
     registry.close();
   });
-  config.agent.name = registry.get(config.agent.id)!.name;
+  if (config) config!.agent.name = registry.get(config!.agent.id)!.name;
+  const allowedOwners = telegramAccess.users;
+  if (config) config.allowedUserIds = allowedOwners;
   const status: AgentStatus = {
-    telegram: "connecting",
-    agentId: config.agent.id,
-    agentName: config.agent.name,
-    ownerId: config.agent.ownerId,
+    telegram: config ? "connecting" : "disconnected",
+    agentId: config?.agent.id,
+    agentName: config?.agent.name,
+    ownerId: config?.agent.ownerId,
     chatActivated: false,
   };
-  const container = containerConfig
-    ? createContainerControl(
-        containerConfig,
-        (id) => registry.setContainerRef(config.agent.id, id),
-        (action, state) => {
-          registry.recordContainerOperation(config.agent.id, action, state);
-          if (action === "stop" && state === "pending")
-            registry.recordStopObservation(config.agent.id, {
-              availability: "unavailable",
-            });
-        },
-        undefined,
-        async (action) => {
-          if (action === "stop")
-            registry.recordStopObservation(
-              config.agent.id,
-              await getCurrentHostTask(hostConfig),
-            );
-        },
-      )
-    : undefined;
+  const container =
+    containerConfig && config && hostConfig
+      ? createContainerControl(
+          containerConfig,
+          (id) => registry.setContainerRef(config!.agent.id, id),
+          (action, state) => {
+            registry.recordContainerOperation(config!.agent.id, action, state);
+            if (action === "stop" && state === "pending")
+              registry.recordStopObservation(config!.agent.id, {
+                availability: "unavailable",
+              });
+          },
+          undefined,
+          async (action) => {
+            if (action === "stop")
+              registry.recordStopObservation(
+                config!.agent.id,
+                await getCurrentHostTask(hostConfig!),
+              );
+          },
+        )
+      : undefined;
   const registeredBots = hostCredentials
     ? createRegisteredBots(
         registry,
         {
-          bootstrapId: config.agent.id,
-          allowedOwners: config.allowedUserIds,
+          bootstrapId: config?.agent.id,
+          allowedOwners: allowedOwners,
           statePath,
           taskStore,
           taskWaitMs: taskWaitMs(taskTimeoutSeconds),
@@ -165,7 +174,7 @@ async function main(): Promise<void> {
     removeResources && hostCredentials
       ? createAgentDeletion({
           registry,
-          protectedAgentId: config.agent.id,
+          protectedAgentId: config?.agent.id,
           stopBot: async (id) => registeredBots!.stop(id),
           removeResources,
           removeBotSecret: async (ref) => {
@@ -197,41 +206,48 @@ async function main(): Promise<void> {
     ? createResourceReconciliation(registry, provisioningConfig.socketPath)
     : undefined;
   const observeStop = createStopObservation(registry, async (id) =>
-    id === config.agent.id ? hostConfig : hostCredentials!.read(id),
+    id === config?.agent.id ? hostConfig! : hostCredentials!.read(id),
   );
-  const configuredAccess = createAgentAccess(
-    registry,
-    config.agent.id,
-    config.allowedUserIds,
-    true,
-  );
+  const configuredAccess = config
+    ? createAgentAccess(registry, config!.agent.id, allowedOwners, true)
+    : undefined;
   const panel = createPanel(
     panelConfig,
-    async () => ({
-      ...status,
-      chatActivated: configuredAccess.getSetup().owner === "verified",
-      ...(reconcile ? { resources: await reconcile() } : {}),
-      agentName: registry.get(config.agent.id)!.name,
-      host: await getHostStatus(hostConfig),
-      containerOperation: registry.getContainerOperation(config.agent.id),
-      stopObservation: await observeStop(config.agent.id),
-      provisioning: registry.getProvisioning(config.agent.id),
-      setupAccess: configuredAccess.getSetup(),
-    }),
+    async () =>
+      config
+        ? {
+            ...status,
+            chatActivated: configuredAccess!.getSetup().owner === "verified",
+            ...(reconcile ? { resources: await reconcile() } : {}),
+            agentName: registry.get(config.agent.id)!.name,
+            host: await getHostStatus(hostConfig!),
+            containerOperation: registry.getContainerOperation(config.agent.id),
+            stopObservation: await observeStop(config.agent.id),
+            provisioning: registry.getProvisioning(config.agent.id),
+            setupAccess: configuredAccess!.getSetup(),
+          }
+        : {
+            telegram: "disconnected",
+            ...(reconcile ? { resources: await reconcile() } : {}),
+          },
     Date.now,
-    {
-      get: () => registry.get(config.agent.id)!,
-      save: (name, instructions) => {
-        registry.updateSettings(config.agent.id, name, instructions);
-        config.agent.name = name;
-      },
-    },
-    createBotTokenUpdate(config.agent.id, registry, botSecrets),
+    config
+      ? {
+          get: () => registry.get(config!.agent.id)!,
+          save: (name, instructions) => {
+            registry.updateSettings(config!.agent.id, name, instructions);
+            config!.agent.name = name;
+          },
+        }
+      : undefined,
+    config
+      ? createBotTokenUpdate(config.agent.id, registry, botSecrets)
+      : undefined,
     container,
     provision
       ? async (id) => {
           const agent = registry.get(id);
-          if (!agent || !config.allowedUserIds.has(agent.ownerId))
+          if (!agent || !allowedOwners.has(agent.ownerId))
             throw new Error("Agent owner is not authorized");
           await provision(id);
         }
@@ -239,15 +255,14 @@ async function main(): Promise<void> {
     removeResources
       ? async (id, deleteData) => {
           const agent = registry.get(id);
-          if (!agent || !config.allowedUserIds.has(agent.ownerId))
-            throw new Error("Agent owner is not authorized");
+          if (!agent) throw new Error("Agent owner is not authorized");
           await removeResources(id, deleteData);
         }
       : undefined,
     containerAction
       ? async (id, action) => {
           const agent = registry.get(id);
-          if (!agent || !config.allowedUserIds.has(agent.ownerId))
+          if (!agent || !allowedOwners.has(agent.ownerId))
             throw new Error("Agent owner is not authorized");
           await containerAction(id, action);
         }
@@ -256,7 +271,7 @@ async function main(): Promise<void> {
       ? createAgentRegistration(
           registry,
           botSecrets,
-          config.allowedUserIds,
+          allowedOwners,
           async (id) => {
             provisioning!.start(id);
           },
@@ -272,7 +287,7 @@ async function main(): Promise<void> {
                 botUsername: agent.botUsername,
                 provisioning: setup.status,
                 botConnection:
-                  id === config.agent.id
+                  id === config?.agent.id
                     ? {
                         status:
                           status.telegram === "connected"
@@ -285,8 +300,8 @@ async function main(): Promise<void> {
                 setupAccess: createAgentAccess(
                   registry,
                   id,
-                  config.allowedUserIds,
-                  id === config.agent.id,
+                  allowedOwners,
+                  id === config?.agent.id,
                 ).getSetup(),
                 cancellationRequested:
                   registry.getProvisioningCancellation(id) !== undefined,
@@ -300,7 +315,7 @@ async function main(): Promise<void> {
       ? {
           get: (id) => {
             const agent = registry.get(id);
-            return agent && config.allowedUserIds.has(agent.ownerId)
+            return agent
               ? { name: agent.name, instructions: agent.instructions }
               : undefined;
           },
@@ -316,8 +331,8 @@ async function main(): Promise<void> {
           hostStatus: async (id) => {
             try {
               return await getHostStatus(
-                id === config.agent.id
-                  ? hostConfig
+                id === config?.agent.id
+                  ? hostConfig!
                   : await hostCredentials!.read(id),
               );
             } catch {
@@ -326,28 +341,25 @@ async function main(): Promise<void> {
           },
           stopObservation: async (id) => {
             const agent = registry.get(id);
-            if (!agent || !config.allowedUserIds.has(agent.ownerId))
-              return undefined;
+            if (!agent || !allowedOwners.has(agent.ownerId)) return undefined;
             return observeStop?.(id);
           },
           cancelProvisioning: (id) => {
             const agent = registry.get(id);
-            if (!agent || !config.allowedUserIds.has(agent.ownerId))
+            if (!agent || !allowedOwners.has(agent.ownerId))
               throw new Error("Agent owner is not authorized");
             provisioning!.cancel(id);
           },
           saveToken: async (id, token) => {
             const agent = registry.get(id);
-            if (!agent || !config.allowedUserIds.has(agent.ownerId))
-              throw new Error("Agent owner is not authorized");
+            if (!agent) throw new Error("Agent owner is not authorized");
             await createBotTokenUpdate(id, registry, botSecrets)(token);
           },
           save: (id, name, instructions) => {
             const agent = registry.get(id);
-            if (!agent || !config.allowedUserIds.has(agent.ownerId))
-              throw new Error("Agent owner is not authorized");
+            if (!agent) throw new Error("Agent owner is not authorized");
             registry.updateSettings(id, name, instructions);
-            if (id === config.agent.id) config.agent.name = name;
+            if (id === config?.agent.id) config!.agent.name = name;
           },
         }
       : undefined,
@@ -355,11 +367,17 @@ async function main(): Promise<void> {
     deleteAgent
       ? async (id, deleteData) => {
           const agent = registry.get(id);
-          if (!agent || !config.allowedUserIds.has(agent.ownerId))
-            throw new Error("Agent owner is not authorized");
+          if (!agent) throw new Error("Agent owner is not authorized");
           await deleteAgent(id, deleteData);
         }
       : undefined,
+    {
+      get: () => [...allowedOwners],
+      save: (text) => {
+        telegramAccess.save(text);
+        for (const id of registry.listIds()) registeredBots?.start(id);
+      },
+    },
   );
   const server = serve({
     fetch: panel.fetch,
@@ -374,18 +392,21 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   });
   log.info("server.panel_listening", { origin: panelConfig.origin });
-  const bootstrap = createBootstrapBot(
-    registry,
-    config,
-    botSecrets,
-    binding,
-    hostConfig,
-    status,
-    taskStore,
-    undefined,
-    undefined,
-    taskWaitMs(taskTimeoutSeconds),
-  );
+  const bootstrap =
+    config && binding && hostConfig
+      ? createBootstrapBot(
+          registry,
+          config,
+          botSecrets,
+          binding,
+          hostConfig,
+          status,
+          taskStore,
+          undefined,
+          undefined,
+          taskWaitMs(taskTimeoutSeconds),
+        )
+      : undefined;
   const stop = () => {
     provisioningShutdown.abort();
     void registeredBots?.close().catch(() => {
@@ -394,7 +415,7 @@ async function main(): Promise<void> {
     });
     server.close();
     if ("closeIdleConnections" in server) server.closeIdleConnections();
-    void bootstrap.stop().catch(() => {
+    void bootstrap?.stop().catch(() => {
       log.error("server.bootstrap_stop_failed");
       process.exitCode = 1;
     });
@@ -403,7 +424,7 @@ async function main(): Promise<void> {
   process.once("SIGTERM", stop);
   for (const agent of registry.listResourceReferences())
     registeredBots?.start(agent.id);
-  await bootstrap.start();
+  await bootstrap?.start();
 }
 
 await main();

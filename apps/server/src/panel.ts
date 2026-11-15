@@ -197,6 +197,10 @@ export function createPanel(
   agentSettings?: RegisteredAgentSettings,
   listAgentIds?: () => string[],
   deleteAgent?: (agentId: string, deleteData: boolean) => Promise<void>,
+  telegramAccess?: {
+    get(): number[];
+    save(text: string): void | Promise<void>;
+  },
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -290,6 +294,49 @@ export function createPanel(
         : c.redirect("/login", 303);
     }
     await next();
+  });
+  app.get("/settings/telegram", (c) => {
+    if (!telegramAccess) return c.notFound();
+    return c.html(
+      page(
+        "Telegram access",
+        html`<h1>Telegram access</h1>
+          <p>
+            Only listed users can own and use agents. An empty list blocks all
+            Telegram access. Changes apply immediately.
+          </p>
+          ${c.req.query("saved") === "1" ? html`<p role="status">Access settings saved.</p>` : ""}
+          <form method="post" action="/settings/telegram">
+            <label for="users">Allowed Telegram user IDs</label>
+            <textarea
+              class="textarea"
+              id="users"
+              name="users"
+              maxlength="16000"
+            >
+${telegramAccess.get().join(", ")}</textarea>
+            <p>Enter numeric user IDs separated by commas or spaces.</p>
+            <button class="btn" type="submit">Save access settings</button>
+          </form>
+          <a href="/">Back to agents</a>`,
+        true,
+      ),
+    );
+  });
+  app.post("/settings/telegram", async (c) => {
+    if (!telegramAccess) return c.notFound();
+    const body = await c.req.parseBody();
+    if (typeof body.users !== "string" || body.users.length > 16000)
+      return c.text("Enter valid Telegram user IDs.", 400);
+    try {
+      await telegramAccess.save(body.users);
+    } catch {
+      return c.text(
+        "Could not save access settings. Enter positive numeric user IDs and check storage.",
+        400,
+      );
+    }
+    return c.redirect("/settings/telegram?saved=1", 303);
   });
   app.post("/logout", (c) => {
     sessions.delete(getCookie(c, cookieName)!);
@@ -1168,75 +1215,83 @@ ${values.instructions}</textarea>
     return c.html(
       page(
         "Agents",
-        html`<small>LOCAL INSTALLATION / PHASE 1</small>
+        html`<small>LOCAL INSTALLATION</small>
           <h1>Your agents.</h1>
+          ${telegramAccess ? html`<a class="btn" href="/settings/telegram">Telegram access</a>` : ""}
+          ${telegramAccess && !status.agentId && registered.length === 0 ? html`<p>No agents yet. Configure Telegram access, then create your first agent.</p>` : ""}
           ${registerAgent ? html`<a class="btn" href="/agents/new">Create agent</a>` : ""}
           ${c.req.query("containerChanged") === "1" ? html`<p role="status">Operation sent to Docker. The Agent Host may take a few seconds to become available.</p>` : ""}
           <p>One Telegram bot per agent. Every conversation in its place.</p>
-          <article class="card">
-            ${settings ? html`<a class="btn" href="/agent/settings">Edit agent</a>` : ""}
-            ${saveBotToken ? html`<a class="btn" href="/agent/token">Replace bot token</a>` : ""}
-            ${
-              container
-                ? html`<p>
-                      Container:
-                      ${containerState === "running" ? "Running" : containerState === "stopped" ? "Stopped" : "Unavailable"}
-                    </p>
-                    <form method="post" action="/agent/container">
-                      <input type="hidden" name="action" value="start" /><button
-                        class="btn"
-                        type="submit"
-                      >
-                        Start container
-                      </button>
-                    </form>
-                    <a class="btn" href="/agent/container/stop"
-                      >Stop container…</a
-                    >`
-                : ""
-            }
-            <h2>${status.agentName ?? "Configured agent"}</h2>
-            <p class="badge">Initial setup</p>
-            <dl>
-              <dt>Identifier</dt>
-              <dd>${status.agentId ?? "Not configured"}</dd>
-              <dt>Telegram owner</dt>
-              <dd>${status.ownerId ?? "Not configured"}</dd>
-              <dt>Telegram</dt>
-              <dd>${labels[status.telegram]}</dd>
-              ${
-                status.telegram === "disconnected" && status.telegramFailure
-                  ? html`<dt>Telegram problem</dt>
-                      <dd>
-                        ${
-                          status.telegramFailure === "invalid_token"
-                            ? "Telegram rejected the bot token. Replace it and restart the server."
-                            : "Could not reach Telegram after several attempts. Check connectivity and whether another instance is polling this bot."
-                        }
-                      </dd>`
-                  : ""
-              }
-              <dt>Bot</dt>
-              <dd>
-                ${status.botUsername ? `@${status.botUsername}` : "Waiting for connection"}
-              </dd>
-              <dt>Agent Host</dt>
-              <dd>
-                ${status.host === "ready" ? "Available" : status.host === "busy" ? "Busy" : "Offline"}
-              </dd>
-              <dt>Task execution through Telegram</dt>
-              <dd>
-                ${status.setupAccess?.owner === "not_allowlisted" ? "Blocked: owner not authorized" : "Requires complete setup and an activated chat"}
-              </dd>
-              <dt>Chat activation</dt>
-              <dd>
-                ${status.chatActivated ? "Activated by the owner" : "Pending: send /start to the bot"}
-              </dd>
-            </dl>
-            ${setupAccessDetails(status.setupAccess)}
-            ${stopTaskSection(status.stopObservation)}
-            ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Open bot in Telegram</a>` : html`<p>The link will appear once Telegram confirms the connection.</p>`}
-          </article>
+          ${
+            !telegramAccess || status.agentId
+              ? html`<article class="card">
+                  ${settings ? html`<a class="btn" href="/agent/settings">Edit agent</a>` : ""}
+                  ${saveBotToken ? html`<a class="btn" href="/agent/token">Replace bot token</a>` : ""}
+                  ${
+                    container
+                      ? html`<p>
+                            Container:
+                            ${containerState === "running" ? "Running" : containerState === "stopped" ? "Stopped" : "Unavailable"}
+                          </p>
+                          <form method="post" action="/agent/container">
+                            <input
+                              type="hidden"
+                              name="action"
+                              value="start"
+                            /><button class="btn" type="submit">
+                              Start container
+                            </button>
+                          </form>
+                          <a class="btn" href="/agent/container/stop"
+                            >Stop container…</a
+                          >`
+                      : ""
+                  }
+                  <h2>${status.agentName ?? "Configured agent"}</h2>
+                  <p class="badge">Initial setup</p>
+                  <dl>
+                    <dt>Identifier</dt>
+                    <dd>${status.agentId ?? "Not configured"}</dd>
+                    <dt>Telegram owner</dt>
+                    <dd>${status.ownerId ?? "Not configured"}</dd>
+                    <dt>Telegram</dt>
+                    <dd>${labels[status.telegram]}</dd>
+                    ${
+                      status.telegram === "disconnected" &&
+                      status.telegramFailure
+                        ? html`<dt>Telegram problem</dt>
+                            <dd>
+                              ${
+                                status.telegramFailure === "invalid_token"
+                                  ? "Telegram rejected the bot token. Replace it and restart the server."
+                                  : "Could not reach Telegram after several attempts. Check connectivity and whether another instance is polling this bot."
+                              }
+                            </dd>`
+                        : ""
+                    }
+                    <dt>Bot</dt>
+                    <dd>
+                      ${status.botUsername ? `@${status.botUsername}` : "Waiting for connection"}
+                    </dd>
+                    <dt>Agent Host</dt>
+                    <dd>
+                      ${status.host === "ready" ? "Available" : status.host === "busy" ? "Busy" : "Offline"}
+                    </dd>
+                    <dt>Task execution through Telegram</dt>
+                    <dd>
+                      ${status.setupAccess?.owner === "not_allowlisted" ? "Blocked: owner not authorized" : "Requires complete setup and an activated chat"}
+                    </dd>
+                    <dt>Chat activation</dt>
+                    <dd>
+                      ${status.chatActivated ? "Activated by the owner" : "Pending: send /start to the bot"}
+                    </dd>
+                  </dl>
+                  ${setupAccessDetails(status.setupAccess)}
+                  ${stopTaskSection(status.stopObservation)}
+                  ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Open bot in Telegram</a>` : html`<p>The link will appear once Telegram confirms the connection.</p>`}
+                </article>`
+              : ""
+          }
           ${registered.map((agent) => {
             const bot = agent.botConnection
               ? connectionLabels[agent.botConnection.status]

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readConfig } from "./config.js";
+import { readConfig, readBootstrapConfig } from "./config.js";
 
 const valid = {
   TELEGRAM_BOT_TOKEN: "123:fake_test_token",
@@ -63,4 +63,15 @@ describe("server configuration", () => {
       );
     },
   );
+});
+
+it("allows an empty installation without Telegram or Host credentials", () => {
+  expect(readBootstrapConfig({})).toBeUndefined();
+  expect(
+    readBootstrapConfig({ TELEGRAM_ALLOWED_USER_IDS: "" }),
+  ).toBeUndefined();
+  expect(readBootstrapConfig(valid)?.agent.ownerId).toBe(42);
+  expect(() =>
+    readBootstrapConfig({ TELEGRAM_BOT_TOKEN: "invalid" }),
+  ).toThrow();
 });

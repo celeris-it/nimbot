@@ -37,7 +37,7 @@ interface Connection {
 export function createRegisteredBots(
   registry: ReturnType<typeof openAgentRegistry>,
   config: {
-    bootstrapId: string;
+    bootstrapId?: string;
     allowedOwners: ReadonlySet<number>;
     statePath: string;
     taskStore: TaskStore;

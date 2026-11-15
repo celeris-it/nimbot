@@ -1,7 +1,8 @@
 # Nimbot — MVP Specification
 
 **Version:** 0.1.0  
-**Status:** Phase 1 in progress  
+**Status:** Release validation pending
+
 **License:** Apache License 2.0  
 **Deployment:** Self-hosted  
 **Interfaces:** Web panel for administration; Telegram for agent conversations  
@@ -539,17 +540,20 @@ Agent containers have unrestricted outbound network access in the MVP, including
 ### Tasks
 
 - [x] Dockerfiles for both apps, `compose.yaml`, and `.env.example` exist, with restart policies and health checks.
-- [ ] A fresh install on a clean Linux server works by following the documentation alone.
-- [ ] Remove the mandatory pre-configured-agent bootstrap: start the panel with zero agents and no Telegram or per-agent environment variables; create the first agent through the same workflow as every later agent.
-- [ ] Add authenticated panel management of the persisted Telegram allowlist, with immediate authorization enforcement and no server restart.
-- [ ] Update Compose, configuration validation, `.env.example`, and installation documentation for panel-based initial setup. Generate internal Host credentials automatically and test empty startup, first-agent creation, access changes, and restart persistence.
+- [x] A fresh Docker Compose installation works by following the documentation (maintainer-confirmed on macOS with Docker Desktop).
+- [ ] Repeat the documented installation on a clean Linux server.
+- [x] Remove the mandatory pre-configured-agent bootstrap: start the panel with zero agents and no Telegram or per-agent environment variables; create the first agent through the same workflow as every later agent.
+- [x] Add authenticated panel management of the persisted Telegram allowlist, with immediate authorization enforcement and no server restart.
+- [x] Update Compose, configuration validation, `.env.example`, and installation documentation for panel-based initial setup. Generate internal Host credentials automatically and test empty startup, first-agent creation, access changes, and restart persistence.
 - [x] The documentation covers installation, panel administrator setup, HTTPS access, per-agent BotFather token linking and chat activation, token replacement, AI provider authentication, environment variables, and commands.
 - [x] The documentation covers backup and restore, troubleshooting, and security limitations.
 - [x] The repo has an Apache 2.0 `LICENSE`, `CONTRIBUTING.md`, and `.gitignore`.
 - [x] CI runs linting, type checking, and tests.
 - [ ] The end-to-end test in section 12 passes, versioned Docker images are built, and `v0.1.0` is tagged with release notes.
 
-Packaging status: `infrastructure/docker/server.Dockerfile` and `agent-host.Dockerfile` build both images (verified with `docker compose build`), and `compose.yaml` sets `restart: unless-stopped`, health checks, non-root users, dropped capabilities, and resource limits for both services; `.env.example` lists every setting including `TASK_TIMEOUT_SECONDS`. `LICENSE` (Apache 2.0), `CONTRIBUTING.md`, and `.gitignore` are present. `.github/workflows/ci.yml` runs `pnpm install --frozen-lockfile`, lint, typecheck, build, and tests on pushes to `main` and pull requests; the root `packageManager` field pins pnpm for it. The same commands pass locally, but the workflow has not run on GitHub yet. `docs/INSTALL.md` covers requirements, build, administrator password hash (generated with `docker run -it nimbot-server node apps/server/dist/password.js`, checked in a real pseudo-terminal), configuration, HTTPS through a reverse proxy, per-agent BotFather linking and chat activation, token replacement, per-agent AI provider authentication with `opencode auth login` inside each agent's container, optional panel provisioning, environment variables, Telegram commands, and everyday operations. `docs/OPERATIONS.md` covers what data lives where, backup and restore with volume archives (the commands were exercised against throwaway volumes, including ownership preservation), troubleshooting by symptom, and the security limitations. It states a known limitation: after restoring on a different host, panel-created agents keep their volumes and registry entries, but the panel has no action to recreate their containers (only the provisioning and cleanup APIs exist, without panel buttons), so restoring on the same host is recommended. The clean-server walkthrough and the release steps remain open.
+Packaging status: `infrastructure/docker/server.Dockerfile` and `agent-host.Dockerfile` build both images (verified with `docker compose build`), and `compose.yaml` configures the server with `restart: unless-stopped`, a health check, non-root execution, dropped capabilities, and resource limits; the fixed provisioning template applies these protections to each Agent Host; `.env.example` lists every setting including `TASK_TIMEOUT_SECONDS`. `LICENSE` (Apache 2.0), `CONTRIBUTING.md`, and `.gitignore` are present. `.github/workflows/ci.yml` runs `pnpm install --frozen-lockfile`, lint, typecheck, build, and tests on pushes to `main` and pull requests; the root `packageManager` field pins pnpm for it. The same commands pass locally, but the workflow has not run on GitHub yet. `docs/INSTALL.md` covers requirements, build, administrator password hash (generated with `docker run -it nimbot-server node apps/server/dist/password.js`, checked in a real pseudo-terminal), configuration, HTTPS through a reverse proxy, per-agent BotFather linking and chat activation, token replacement, per-agent AI provider authentication with `opencode auth login` inside each agent's container, panel provisioning, deployment environment variables, Telegram commands, and everyday operations. `docs/OPERATIONS.md` covers what data lives where, backup and restore with volume archives (the commands were exercised against throwaway volumes, including ownership preservation), troubleshooting by symptom, and the security limitations. It states a known limitation: after restoring on a different host, panel-created agents keep their volumes and registry entries, but the panel has no action to recreate their containers (only the provisioning and cleanup APIs exist, without panel buttons), so restoring on the same host is recommended. The maintainer confirmed a successful fresh installation on macOS with Docker Desktop after correcting the build order and portable socket-group command. The clean-Linux walkthrough and release steps remain open.
+
+Panel-first setup is implemented: a fresh server starts without Telegram or per-agent environment variables and without a bootstrap Agent Host. The authenticated panel persists Telegram access in SQLite; bot middleware, task admission, and approval checks use the same live allowlist, so changes apply without restart. New agents, including the first, use the existing registration and provisioning flow with generated private Host credentials. The default Compose file enables provisioning; only deployment settings and administrator authentication remain in `.env.example`. Existing bootstrap installations may retain their Compose service and volumes through `compose.legacy.yaml`; the legacy environment allowlist seeds panel settings only on first initialization. Automated coverage checks empty configuration, protected panel setup, allowlist persistence and validation, and access changes on a running bot. The maintainer confirmed installation on macOS with Docker Desktop. Clean-Linux installation and live Telegram/provider acceptance remain pending.
 
 ### Acceptance Criteria
 
@@ -635,7 +639,7 @@ Attempt to access panel pages and administration API endpoints without a session
 
 Nimbot `v0.1.0` is complete when all of the following are true:
 
-- [ ] Installation works through Docker Compose.
+- [x] Installation works through Docker Compose (maintainer-confirmed on macOS with Docker Desktop; clean-Linux verification remains a release task).
 - [ ] A fresh installation needs no Telegram or per-agent environment variables; the authenticated panel configures access and creates the first agent.
 - [ ] Telegram integration works.
 - [ ] Telegram authorization works.
@@ -660,7 +664,7 @@ Nimbot `v0.1.0` is complete when all of the following are true:
 - [x] Installation and troubleshooting documentation are complete.
 - [x] The project is released under Apache License 2.0.
 
-Definition of Done status: the checked items are backed by automated tests (panel authentication and CSRF, token linking and replacement, owner-bound per-bot bindings, queue cancellation and interruption, update deduplication, no `/use` command) or by the opt-in real-Docker tests (one container, named volumes, and private network per agent; isolation between agents). The unchecked items need live validation that has not been done against real Telegram bots, a real AI provider, and a clean server: installation through Docker Compose, Telegram integration and authorization, task and approval delivery, OpenCode with terminal, files, and browser through the full path, and conversation persistence across restarts. They close with the section 12 scenario, which needs the maintainer's BotFather tokens, Telegram user ID, and AI provider credentials.
+Definition of Done status: installation through Docker Compose was confirmed by the maintainer on macOS with Docker Desktop; clean-Linux verification remains pending. Other checked items are backed by automated tests (panel authentication and CSRF, token linking and replacement, owner-bound per-bot bindings, queue cancellation and interruption, update deduplication, no `/use` command) or by the opt-in real-Docker tests (one container, named volumes, and private network per agent; isolation between agents). The unchecked items need live validation that has not been done against real Telegram bots, a real AI provider, and a clean server: Telegram integration and authorization, task and approval delivery, OpenCode with terminal, files, and browser through the full path, and conversation persistence across restarts. They close with the section 12 scenario, which needs the maintainer's BotFather tokens, Telegram user ID, and AI provider credentials.
 
 ---
 

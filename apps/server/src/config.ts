@@ -48,3 +48,10 @@ export function readConfig(env: NodeJS.ProcessEnv): ServerConfig {
   }
   return { telegramBotToken, allowedUserIds, agent: { id, name, ownerId } };
 }
+
+/** The legacy bootstrap is optional; new installations configure agents in the panel. */
+export function readBootstrapConfig(
+  env: NodeJS.ProcessEnv,
+): ServerConfig | undefined {
+  return env.TELEGRAM_BOT_TOKEN?.trim() ? readConfig(env) : undefined;
+}

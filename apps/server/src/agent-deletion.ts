@@ -8,7 +8,7 @@ import type { openAgentRegistry } from "./agent-registry.js";
  */
 export function createAgentDeletion(deps: {
   registry: Pick<ReturnType<typeof openAgentRegistry>, "finishAgentDeletion">;
-  protectedAgentId: string;
+  protectedAgentId?: string;
   stopBot: (id: string) => Promise<void>;
   removeResources: (id: string, deleteData: boolean) => Promise<void>;
   removeBotSecret: (ref: string) => Promise<void>;

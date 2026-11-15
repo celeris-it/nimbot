@@ -6,7 +6,7 @@ Nimbot is a self-hosted platform for creating and managing persistent AI agents 
 
 You install Nimbot on a Linux server with Docker Compose, sign in to a minimal administration panel, link a bot created in BotFather for each agent, and talk to each agent through its own distinct Telegram bot and private chat. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-> **Project status:** Phase 1 in progress. Docker/ACP validation is complete. The initial Telegram server supports configuration validation, a user allowlist, and `/start` and `/help`; a password-protected status panel is available; the pre-configured agent has an owner-bound bot and chat activation; text tasks now route to the Agent Host and return split results to the owner’s activated chat; chat activation survives server restarts; live end-to-end validation remains pending. This README describes the intended `v0.1.0`; the full plan is in [MVP.md](MVP.md).
+> **Project status:** MVP implementation and automated checks are in place, including panel-based setup from an empty installation. Installation through Docker Compose is maintainer-validated on macOS with Docker Desktop. Clean-Linux installation and live Telegram-to-OpenCode acceptance remain pending before `v0.1.0`. The full plan is in [MVP.md](MVP.md).
 
 ## What the MVP does
 
@@ -19,9 +19,11 @@ You install Nimbot on a Linux server with Docker Compose, sign in to a minimal a
 - Cancel a running task
 - Keep conversations, files, and pending tasks across restarts
 - Restrict access to an allowlist of Telegram user IDs
-- Start with zero agents and configure the Telegram allowlist, bot tokens, owners, and agent settings through the authenticated panel, without Telegram or per-agent environment variables (pending MVP requirement; the current installation still requires the bootstrap configuration)
+- Start with zero agents and configure the Telegram allowlist, bot tokens, owners, and agent settings through the authenticated panel, without Telegram or per-agent environment variables
 
 Out of scope for the MVP: advanced dashboards, web chat, management bots, other messaging channels, other AI engines, multi-server deployments, and hosted multi-tenant use. See the [post-MVP backlog](MVP.md#14-post-mvp-backlog).
+
+Fresh installations now start with zero agents. After signing in, configure **Telegram access** and create the first agent through the panel. Telegram access settings persist in SQLite and take effect without restart. `.env` contains administrator authentication and trusted deployment settings; Telegram tokens, owners, and agent settings belong in the panel. Internal Host tokens are generated automatically. Existing bootstrap installations can use `compose.legacy.yaml` to retain their service and volumes. The installation guide describes both paths; clean-server and live end-to-end validation remain pending.
 
 ## Architecture
 
