@@ -1484,3 +1484,68 @@ it.each([
     ).toMatchObject({ setupAccess });
   },
 );
+
+it.each([
+  [{ status: "not_started" }, "Not started"],
+  [{ status: "connecting" }, "Verifying credentials and starting polling"],
+  [{ status: "polling" }, "Polling started"],
+  [
+    { status: "blocked", failure: "setup_incomplete" },
+    "Complete agent provisioning before connecting this bot.",
+  ],
+  [
+    { status: "failed", failure: "invalid_token" },
+    "Telegram rejected the bot token.",
+  ],
+  [
+    { status: "failed", failure: "identity_mismatch" },
+    "The token does not match this agent's registered bot or owner.",
+  ],
+  [
+    { status: "failed", failure: "credentials_unavailable" },
+    "Saved bot or Agent Host credentials are unavailable.",
+  ],
+  [{ status: "stopped" }, "Stopped"],
+] as const)(
+  "shows registered bot connection state separately from container readiness: %j",
+  async (botConnection, label) => {
+    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+    const app = createPanel(
+      config,
+      () => ({ telegram: "connected" }),
+      Date.now,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (id) =>
+        id === "dev"
+          ? {
+              name: "Developer",
+              botUsername: "dev_bot",
+              provisioning: "ready",
+              botConnection,
+            }
+          : undefined,
+    );
+    const login = await app.request("/login", {
+      method: "POST",
+      headers: {
+        Origin: config.origin,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ password }).toString(),
+    });
+    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
+    const response = await app.request("/agents/dev/setup", { headers });
+    const body = (await response.text()).replace(/\s+/g, " ");
+    expect(body).toContain(label.replaceAll("'", "&#39;"));
+    expect(body).not.toContain(
+      "Connecting this bot to Telegram is still pending",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  },
+);

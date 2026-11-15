@@ -1,3 +1,4 @@
+import { createRegisteredBots } from "./registered-bots.js";
 import { createAgentAccess } from "./agent-access.js";
 import { createProvisioningControl } from "./provisioning-control.js";
 import { createAgentRegistration } from "./agent-registration.js";
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  let statePath;
   let binding;
   let registry;
   let botSecrets;
@@ -59,7 +61,8 @@ async function main(): Promise<void> {
   try {
     const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
-    registry = openAgentRegistry(resolve(stateDir, "server.sqlite"));
+    statePath = resolve(stateDir, "server.sqlite");
+    registry = openAgentRegistry(statePath);
     registry.syncConfigured(config.agent);
     botSecrets = await openBotSecrets(resolve(stateDir, "bot-secrets"));
     if (provisioningConfig)
@@ -70,7 +73,7 @@ async function main(): Promise<void> {
     const credential = registry.get(config.agent.id)?.credentialRef;
     if (credential?.startsWith("file:"))
       config.telegramBotToken = await botSecrets.read(credential);
-    binding = openChatBinding(resolve(stateDir, "server.sqlite"), config.agent);
+    binding = openChatBinding(statePath, config.agent);
   } catch {
     registry?.close();
     console.error(
@@ -112,6 +115,18 @@ async function main(): Promise<void> {
         },
       )
     : undefined;
+  const registeredBots = hostCredentials
+    ? createRegisteredBots(
+        registry,
+        {
+          bootstrapId: config.agent.id,
+          allowedOwners: config.allowedUserIds,
+          statePath,
+        },
+        botSecrets,
+        hostCredentials,
+      )
+    : undefined;
   const provisioningShutdown = new AbortController();
   const provisionTask =
     provisioningConfig && hostCredentials
@@ -125,7 +140,11 @@ async function main(): Promise<void> {
         )
       : undefined;
   const provisioning = provisionTask
-    ? createProvisioningControl(registry, provisionTask)
+    ? createProvisioningControl(registry, async (id, signal) => {
+        const refs = await provisionTask(id, signal);
+        registeredBots!.start(id);
+        return refs;
+      })
     : undefined;
   const provision = provisioning?.run;
   const removeResources = provisioningConfig
@@ -223,6 +242,17 @@ async function main(): Promise<void> {
                 name: agent.name,
                 botUsername: agent.botUsername,
                 provisioning: setup.status,
+                botConnection:
+                  id === config.agent.id
+                    ? {
+                        status:
+                          status.telegram === "connected"
+                            ? ("polling" as const)
+                            : status.telegram === "connecting"
+                              ? ("connecting" as const)
+                              : ("failed" as const),
+                      }
+                    : registeredBots?.getState(id),
                 setupAccess: createAgentAccess(
                   registry,
                   id,
@@ -323,6 +353,10 @@ async function main(): Promise<void> {
   const stop = () => {
     stopping = true;
     provisioningShutdown.abort();
+    void registeredBots?.close().catch(() => {
+      console.error("Could not stop registered bot connections.");
+      process.exitCode = 1;
+    });
     server.close();
     if ("closeIdleConnections" in server) server.closeIdleConnections();
     if (bot.isRunning()) {
@@ -334,6 +368,8 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+  for (const agent of registry.listResourceReferences())
+    registeredBots?.start(agent.id);
   try {
     await bot.init();
     registry.bindBot(config.agent.id, bot.botInfo.id, bot.botInfo.username);

@@ -177,6 +177,7 @@ export function createPanel(
         name: string;
         botUsername: string | null;
         provisioning: string;
+        botConnection?: import("./registered-bots.js").RegisteredBotState;
         setupAccess?: import("./agent-access.js").AgentSetupAccess;
         cancellationRequested?: boolean;
         canCancelProvisioning?: boolean;
@@ -626,8 +627,8 @@ ${values.instructions}</textarea>
             </p>
             <p>
               On creation, the bot is verified and its container is prepared.
-              This can take a few seconds. Connecting new bots to Telegram is
-              still pending.
+              This can take a few seconds. The server connects the bot after
+              provisioning completes; the owner must then send /start.
             </p>
             <button class="btn" type="submit">Create agent</button
             ><a class="btn" href="/">Cancel</a>
@@ -691,6 +692,27 @@ ${values.instructions}</textarea>
     const agent = getAgentSetup?.(c.req.param("id"));
     if (!agent) return c.notFound();
     const ready = agent.provisioning === "ready";
+    const connectionLabels = {
+      not_started: "Not started",
+      connecting: "Verifying credentials and starting polling",
+      polling: "Polling started",
+      blocked: "Blocked by incomplete setup or owner authorization",
+      failed: "Connection failed",
+      stopped: "Stopped",
+    };
+    const failureLabels = {
+      setup_incomplete:
+        "Complete agent provisioning before connecting this bot.",
+      owner_not_allowed: "The owner is not allowlisted.",
+      credentials_unavailable:
+        "Saved bot or Agent Host credentials are unavailable.",
+      identity_mismatch:
+        "The token does not match this agent's registered bot or owner.",
+      invalid_token:
+        "Telegram rejected the bot token. Replace it and restart the server.",
+      telegram_unavailable:
+        "Telegram polling could not continue. Check connectivity and whether another instance is polling this bot.",
+    };
     const setupLabels: Record<string, string> = {
       external: "Managed outside automatic provisioning",
       pending: "Pending",
@@ -798,10 +820,18 @@ ${values.instructions}</textarea>
                 ${agent.botUsername ? `@${agent.botUsername}` : "Pending"}
               </dd>
             </dl>
-            <p>
-              Connecting this bot to Telegram is still pending. It cannot
-              receive tasks yet.
-            </p>
+            ${
+              agent.botConnection
+                ? html`<p role="status">
+                      Telegram bot:
+                      ${connectionLabels[agent.botConnection.status]}.
+                    </p>
+                    ${agent.botConnection.failure ? html`<p>${failureLabels[agent.botConnection.failure]}</p>` : ""}${agent.botConnection.status === "polling" ? html`<p>The owner must activate this bot with /start. Tasks require completed setup and an available Agent Host.</p>` : ""}`
+                : html`<p>
+                    Connecting this bot to Telegram is still pending. It cannot
+                    receive tasks yet.
+                  </p>`
+            }
             <a
               class="btn"
               href="/agents/${encodeURIComponent(c.req.param("id"))}/setup"
@@ -1095,7 +1125,7 @@ ${values.instructions}</textarea>
           </article>
           <footer>
             <p>
-              ${registerAgent ? "Agent creation is available. Connecting new bots and full deletion are still pending." : "Configure server provisioning to create agents from the panel."}
+              ${registerAgent ? "Registered bots connect after provisioning. Full deletion is still pending." : "Configure server provisioning to create agents from the panel."}
             </p>
             <a class="btn" href="/">Refresh status</a>
           </footer>`,

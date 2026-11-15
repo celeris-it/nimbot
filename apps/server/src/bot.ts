@@ -15,7 +15,9 @@ export function createBot(
   access?: BotAccess,
 ): Bot {
   let activeChatId: number | undefined;
-  const bot = new Bot(config.telegramBotToken);
+  const bot = new Bot(config.telegramBotToken, {
+    client: { timeoutSeconds: 40 },
+  });
 
   // Reject before any handler. Group chats are outside the MVP's scope.
   bot.use(async (ctx, next) => {
