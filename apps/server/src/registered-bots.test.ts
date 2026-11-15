@@ -112,9 +112,11 @@ async function fixture() {
     authorization: string | null;
     prompt?: string;
   }[] = [];
+  const down = new Set<string>();
   const request: typeof fetch = async (input, init) => {
     const url = String(input);
     const id = new URL(url).hostname.split("-")[1]!;
+    if (down.has(id)) throw new TypeError("connection refused");
     calls.push({
       url,
       authorization: new Headers(init?.headers).get("Authorization"),
@@ -189,6 +191,7 @@ async function fixture() {
     hosts,
     pending,
     failures,
+    down,
     holdIdentity,
     checkingIdentity,
     identities,
@@ -366,6 +369,35 @@ it("cancels native-signal identity verification without starting polling or stop
     expect(f.manager.getState("a").status).toBe("stopped");
     expect(f.pending.has("a")).toBe(false);
     expect(f.manager.getState("b").status).toBe("polling");
+  } finally {
+    await f.close();
+  }
+});
+
+it("tells the owner a stopped agent is unavailable without submitting the task or affecting another agent", async () => {
+  const f = await fixture();
+  try {
+    f.manager.start("a");
+    f.manager.start("b");
+    await vi.waitFor(() => {
+      expect(f.manager.getState("a").status).toBe("polling");
+      expect(f.manager.getState("b").status).toBe("polling");
+    });
+    await f.send("a", "/start", 42);
+    await f.send("b", "/start", 73);
+    f.down.add("b");
+    await f.send("b", "Task B", 73);
+    expect(f.sent.at(-1)).toMatchObject({ bot: "b", chat: 73 });
+    expect(f.sent.at(-1)?.text).toContain("stopped or not ready yet");
+    expect(f.sent.at(-1)?.text).toContain("not sent");
+    expect(f.calls.filter((call) => call.prompt)).toEqual([]);
+    await f.send("a", "Task A", 42);
+    expect(f.sent.at(-1)).toEqual({
+      bot: "a",
+      chat: 42,
+      text: "Result for a",
+    });
+    expect(f.calls.filter((call) => call.prompt)).toHaveLength(1);
   } finally {
     await f.close();
   }
