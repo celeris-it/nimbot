@@ -11,7 +11,7 @@ let nextUpdateId = 0;
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-registered-bots-"));
   const statePath = join(dir, "state.sqlite");
-  const registry = openAgentRegistry(statePath);
+  let registry = openAgentRegistry(statePath);
   for (const [id, ownerId, botId] of [
     ["a", 42, 123],
     ["b", 73, 456],
@@ -155,20 +155,22 @@ async function fixture() {
       token: id.repeat(64),
     })),
   };
-  const taskStore = openTaskStore(statePath);
-  const manager = createRegisteredBots(
-    registry,
-    {
-      bootstrapId: "bootstrap",
-      allowedOwners: new Set([42, 73]),
-      statePath,
-      taskStore,
-    },
-    secrets,
-    hosts,
-    request,
-    makeBot,
-  );
+  let taskStore = openTaskStore(statePath);
+  const open = () =>
+    createRegisteredBots(
+      registry,
+      {
+        bootstrapId: "bootstrap",
+        allowedOwners: new Set([42, 73]),
+        statePath,
+        taskStore,
+      },
+      secrets,
+      hosts,
+      request,
+      makeBot,
+    );
+  let manager = open();
   const send = async (id: string, text: string, ownerId: number) => {
     await vi.waitFor(() => expect(pending.has(id)).toBe(true));
     pending.get(id)!([
@@ -193,8 +195,21 @@ async function fixture() {
     await vi.waitFor(() => expect(pending.has(id)).toBe(true));
   };
   return {
-    registry,
-    manager,
+    get registry() {
+      return registry;
+    },
+    get manager() {
+      return manager;
+    },
+    /** Simulates a server restart: only on-disk state survives. */
+    async restart() {
+      await manager.close();
+      taskStore.close();
+      registry.close();
+      registry = openAgentRegistry(statePath);
+      taskStore = openTaskStore(statePath);
+      manager = open();
+    },
     secrets,
     hosts,
     pending,
@@ -407,6 +422,44 @@ it("tells the owner a stopped agent is unavailable without submitting the task o
       text: "Result for a",
     });
     expect(f.calls.filter((call) => call.prompt)).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+it("restores both bots after a server restart with their owners and chat bindings, and detects a stopped Host", async () => {
+  const f = await fixture();
+  try {
+    for (const id of ["a", "b"]) f.manager.start(id);
+    await vi.waitFor(() => {
+      expect(f.manager.getState("a").status).toBe("polling");
+      expect(f.manager.getState("b").status).toBe("polling");
+    });
+    await f.send("a", "/start", 42);
+    await f.send("b", "/start", 73);
+    await f.restart();
+    expect(f.manager.getState("a").status).toBe("not_started");
+    for (const agent of f.registry.listResourceReferences())
+      f.manager.start(agent.id);
+    await vi.waitFor(() => {
+      expect(f.manager.getState("a").status).toBe("polling");
+      expect(f.manager.getState("b").status).toBe("polling");
+    });
+    expect(f.registry.get("a")).toMatchObject({ botId: 123, ownerId: 42 });
+    expect(f.registry.getOwnerChat("a")).toBe(42);
+    expect(f.registry.getOwnerChat("b")).toBe(73);
+    // No new /start: persisted bindings let each owner submit tasks.
+    await f.send("a", "After restart A", 42);
+    await f.send("b", "After restart B", 73);
+    expect(f.sent.filter((item) => item.text.startsWith("Result"))).toEqual([
+      { bot: "a", chat: 42, text: "Result for a" },
+      { bot: "b", chat: 73, text: "Result for b" },
+    ]);
+    f.down.add("a");
+    await f.send("a", "While stopped", 42);
+    expect(f.sent.at(-1)).toMatchObject({ bot: "a", chat: 42 });
+    expect(f.sent.at(-1)?.text).not.toContain("Result");
+    expect(f.registry.getProvisioning("a")?.status).toBe("ready");
   } finally {
     await f.close();
   }

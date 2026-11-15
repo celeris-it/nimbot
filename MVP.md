@@ -488,13 +488,15 @@ Agent creation, configuration, container start/stop, token linking, and deletion
 
 ### Tasks
 
-- [ ] After a server restart, agents, owners, bot credentials and bindings, polling connections, and container states are restored, and missing or stopped containers are detected.
+- [x] After a server restart, agents, owners, bot credentials and bindings, polling connections, and container states are restored, and missing or stopped containers are detected.
 - [ ] After an Agent Host restart, the conversation continues, and in-flight tasks are resumed or marked interrupted and reported to the user.
 - [x] Duplicate Telegram updates do not create duplicate tasks; deduplication uses bot ID and update ID, since update IDs are not shared across bots.
 - [ ] Telegram, Docker, and OpenCode failures are retried a bounded number of times and then reported, without leaving the system stuck. A revoked or invalid agent bot token is shown in the panel and does not stop other agents.
 - [ ] The server and Agent Hosts expose health checks and write structured logs with agent and task IDs, with secrets redacted.
 - [ ] Automated checks confirm that agent containers keep their dropped capabilities, resource limits, and per-agent networks after recreation and server restart, and that internal APIs are not exposed outside their Docker networks.
 - [ ] Automated tests cover panel authentication, session expiry, CSRF protection, bot linking, owner authorization, message routing, task state transitions, restart recovery, cancellation, and multi-agent isolation.
+
+Server restart recovery: agents, owners, bot identities, credential references, chat bindings, and provisioning state live in SQLite and private files. On startup the server marks unfinished tasks and provisioning attempts interrupted and restarts polling for every saved agent without a new `/start`. Container state is not cached: the status API and setup pages inspect Docker on each refresh and report `stopped`, `missing`, or `unavailable`, and the bot tells the owner when a stopped Host cannot take tasks. A restart test closes the registry, task store, and bot manager, reopens them from disk, and verifies both bots poll again, keep their owners and bindings, accept tasks in their own chats, and answer plainly when a Host is down. Live Docker/Telegram restart acceptance stays with the section 12 test.
 
 **Security limitation:** The MVP is intended for trusted self-hosted deployments. Docker containers alone do not provide sufficient isolation for hostile multi-tenant workloads.
 
