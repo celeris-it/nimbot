@@ -1,0 +1,88 @@
+# Operating Nimbot: backup, restore, troubleshooting, and security limits
+
+See [INSTALL.md](INSTALL.md) for installation. Commands below assume you run them in the directory that holds `compose.yaml` (add `-f compose.docker.yaml` if you use panel provisioning).
+
+## What holds your data
+
+| Data | Where |
+|---|---|
+| Agents, owners, instructions, bot identities, chat bindings, provisioning state, task metadata | SQLite in the server state volume |
+| Telegram bot tokens (replacement tokens) and Agent Host API tokens | Private files in the same server state volume (`bot-secrets`, `host-secrets`) |
+| Agent files | Per-agent workspace volume |
+| OpenCode sessions, history, and AI provider credentials | Per-agent engine-state volume |
+| Task records and results | Per-agent task-state volume |
+
+Compose names the first agent's volumes `<project>_server-state`, `<project>_agent-workspace`, `<project>_agent-engine-state`, and `<project>_agent-task-state` (the project defaults to the directory name; list them with `docker volume ls`). Agents created in the panel use `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks`.
+
+Treat backups as secrets: they contain bot tokens, Agent Host tokens, and AI provider credentials. The panel password hash and other settings live in `.env`, which is not in a volume; back it up separately and keep it private.
+
+## Backup
+
+Stop everything first so SQLite and the agents' files are consistent:
+
+```sh
+docker compose stop            # or: docker stop nimbot-<agent-id> for panel-created agents
+mkdir -p backup
+for v in $(docker volume ls -q | grep -E 'server-state|agent-workspace|agent-engine-state|agent-task-state|^nimbot-.*-(workspace|engine|tasks)$'); do
+  docker run --rm -v "$v":/data:ro -v "$PWD/backup":/backup node:22-bookworm-slim \
+    tar -czf "/backup/$v.tar.gz" -C /data .
+done
+cp .env backup/env.backup && chmod 600 backup/env.backup
+chmod -R go-rwx backup
+docker compose start
+```
+
+Restart panel-created agent containers from the panel, or with `docker start nimbot-<agent-id>`. Copy `backup/` off the server.
+
+## Restore
+
+On a host where Nimbot is installed and stopped (`docker compose down`, without `-v`):
+
+```sh
+for f in backup/*.tar.gz; do
+  v=$(basename "$f" .tar.gz)
+  docker volume create "$v"
+  docker run --rm -v "$v":/data -v "$PWD/backup":/backup:ro node:22-bookworm-slim \
+    tar -xzpf "/backup/$v.tar.gz" -C /data
+done
+cp backup/env.backup .env
+docker compose up -d
+```
+
+Extraction preserves file owners (the containers run as UID 1000). Restoring into volumes that already hold data merges files; restore into new, empty volumes unless you intend to overwrite. After startup, each registered bot reconnects with its original owner and chat binding without pressing Start again.
+
+Limits of restoring on a different host: the first agent and the server state come back completely. Agents created in the panel keep their volumes and registry entries, but their containers and networks do not exist on the new host, and the panel cannot yet recreate them (it can start and stop existing containers, but it has no recreate action). Prefer restoring on the same Docker host, or keep the volumes and recreate those agents. Do not delete data from the panel while recovering.
+
+## Troubleshooting
+
+Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Logs are JSON lines with `event`, `agentId`, and `taskId`; secrets are redacted and prompts and results are never logged.
+
+**The server exits at startup.** The log shows `server.config_invalid` or `server.state_init_failed`. Check that `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `PANEL_PASSWORD_HASH`, and `AGENT_HOST_TOKEN` (at least 32 characters) are set, that `TELEGRAM_OWNER_USER_ID` is set when several users are allowed, and that the state volume is writable. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value.
+
+**The panel rejects my login or forms.** Five failed logins within fifteen minutes block further attempts until the window passes. Sessions last eight hours and end when the server restarts. If sign-in works but actions fail, `PANEL_URL` does not match the address in your browser (scheme, host, and port must match); fix it and recreate the server (`docker compose up -d`).
+
+**The bot does not answer.**
+
+1. Open the agent's setup page. *Bot polling* shows the reason when it failed: a rejected token (replace it, then restart the server), a token that does not match the registered bot or owner, unavailable credentials, or Telegram unreachable. Telegram also refuses polling when another process uses the same token; stop the other instance.
+2. The owner must press **Start** in that bot's chat. Only the owner, and only if allowlisted, can activate it. Other users receive no reply.
+3. Replies such as "stopped" or "not ready" mean the Agent Host is down or unhealthy: check `docker ps` and `docker logs <agent container>`.
+
+**Tasks fail or never finish.** If every task fails, authenticate the provider (`opencode auth list`, `opencode auth login` in the agent's container); readiness does not check provider access. A task longer than `TASK_TIMEOUT_SECONDS` is stopped. After a Host restart, a task that was running is reported as interrupted; send it again. Use `/stop` to cancel a running task; queued messages behind it still run. If an approval message got no answer, the action was denied.
+
+**Creating an agent fails.** The creation form appears only when provisioning is configured (INSTALL.md section 8). Typical causes: the bot token is already bound to another agent, the owner ID is not in `TELEGRAM_ALLOWED_USER_IDS`, `AGENT_HOST_IMAGE` no longer matches (rebuilding the image changes its ID), `SERVER_CONTAINER_NAME` is wrong, or the server cannot read the Docker socket (`DOCKER_SOCKET_GID`). The setup page shows pending, in progress, failed, interrupted, or cancelled; a failed setup keeps its resources and volumes. Interrupted work, for example after a server restart, is never retried automatically.
+
+**A container is reported missing or stopped.** The panel inspects Docker on each refresh. Start a stopped container from the agent's page. A missing container is never recreated silently, and its volumes stay in place.
+
+**Browser tasks fail.** Agents drive headless Chromium through the terminal inside their own container. Confirm the container has outbound network access and enough memory (1 GiB limit).
+
+**Unexpected state.** Resources the server did not create, or that disagree with its registry, appear as *untracked* or *missing* in the status inventory. Nimbot never adopts or deletes them automatically; inspect them with `docker ps -a --filter label=io.nimbot.agent-id`.
+
+## Security limitations
+
+- Nimbot is intended for trusted, self-hosted deployments. Docker containers alone do not isolate hostile multi-tenant workloads.
+- Managing containers gives the server access to the Docker Engine API, which is equivalent to root on the host. A compromise of the server or panel is a compromise of the host. The fixed container template limits what the server asks Docker to do, not what an attacker controlling the server could do. Rootless Docker reduces the exposure and is recommended where practical. Without panel provisioning, the server needs no Docker access.
+- Agent containers run as a non-root user with all capabilities dropped, `no-new-privileges`, CPU, memory, and process limits, no Docker socket, no server credentials, no published ports, and a private network shared only with the server. Agents cannot reach each other's API or workspace.
+- Agent containers have unrestricted outbound network access, including to private addresses reachable from the host's network. Disk usage of agent volumes is not limited. Apply either restriction on the host if you need it.
+- Panel access is protected by one local password, an eight-hour session, same-origin checks, and login rate limiting. Always put the panel behind HTTPS before exposing it beyond localhost.
+- Telegram messages and AI provider traffic leave your server. Anything an agent is told or reads can reach those services.
+- Agent actions that need your permission arrive as Approve/Deny buttons, and only a single action is granted at a time. Approve only what you recognize.

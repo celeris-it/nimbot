@@ -135,7 +135,7 @@ Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly
 
 ## Installation
 
-See [docs/INSTALL.md](docs/INSTALL.md) for the Docker Compose installation, panel administrator setup, HTTPS, BotFather linking, and AI provider authentication.
+See [docs/INSTALL.md](docs/INSTALL.md) for the Docker Compose installation, panel administrator setup, HTTPS, BotFather linking, and AI provider authentication. [docs/OPERATIONS.md](docs/OPERATIONS.md) covers backup and restore, troubleshooting, and security limitations.
 
 ## Contributing
 
