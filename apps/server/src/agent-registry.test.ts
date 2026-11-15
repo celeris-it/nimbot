@@ -13,15 +13,16 @@ it("migrates once and restores metadata without storing tokens", async () => {
     const first = openAgentRegistry(path);
     first.syncConfigured({ id: "dev", name: "Developer", ownerId: 42 });
     first.bindBot("dev", 123, "developer_bot");
+    first.updateSettings("dev", "Edited", "Answer briefly");
     first.close();
     const restored = openAgentRegistry(path);
     try {
       restored.syncConfigured({ id: "dev", name: "Updated", ownerId: 42 });
       expect(restored.get("dev")).toEqual({
         id: "dev",
-        name: "Updated",
+        name: "Edited",
         ownerId: 42,
-        instructions: "",
+        instructions: "Answer briefly",
         botId: 123,
         botUsername: "developer_bot",
         credentialRef: "env:TELEGRAM_BOT_TOKEN",

@@ -219,3 +219,86 @@ describe("panel access", () => {
     );
   });
 });
+
+it("protects settings, validates input, escapes values and persists updates", async () => {
+  const { openAgentRegistry } = await import("./agent-registry.js");
+  const registry = openAgentRegistry(":memory:");
+  registry.syncConfigured({ id: "dev", name: "Developer", ownerId: 42 });
+  const app = createPanel(
+    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
+    () => ({ telegram: "disconnected" }),
+    Date.now,
+    {
+      get: () => registry.get("dev")!,
+      save: (name, instructions) =>
+        registry.updateSettings("dev", name, instructions),
+    },
+  );
+  const post = (
+    path: string,
+    values: Record<string, string>,
+    cookie = "",
+    origin = "http://localhost:3000",
+  ) =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(values).toString(),
+    });
+  try {
+    expect((await app.request("/agent/settings")).status).toBe(303);
+    expect(
+      (await post("/agent/settings", { name: "Not saved", instructions: "" }))
+        .status,
+    ).toBe(303);
+    const login = await post("/login", { password });
+    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    expect(
+      (
+        await post(
+          "/agent/settings",
+          { name: "Not saved", instructions: "" },
+          cookie,
+          "https://evil.example",
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await post(
+          "/agent/settings",
+          { name: " ", instructions: "Keep me" },
+          cookie,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await post(
+          "/agent/settings",
+          { name: "Valid", instructions: "x".repeat(4001) },
+          cookie,
+        )
+      ).status,
+    ).toBe(400);
+    expect(registry.get("dev")?.name).toBe("Developer");
+    const values = {
+      name: '<script>alert("x")</script>',
+      instructions: "</textarea><script>evil()</script>",
+    };
+    expect((await post("/agent/settings", values, cookie)).status).toBe(303);
+    expect(registry.get("dev")?.instructions).toBe(values.instructions);
+    const form = await (
+      await app.request("/agent/settings", { headers: { Cookie: cookie } })
+    ).text();
+    expect(form).not.toContain("<script>");
+    expect(form).toContain("&lt;script&gt;");
+    expect(form).toContain('name="instructions"');
+  } finally {
+    registry.close();
+  }
+});

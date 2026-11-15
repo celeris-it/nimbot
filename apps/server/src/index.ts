@@ -1,3 +1,4 @@
+import { withAgentInstructions } from "./agent-instructions.js";
 import { openAgentRegistry } from "./agent-registry.js";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
     binding.close();
     registry.close();
   });
+  config.agent.name = registry.get(config.agent.id)!.name;
   const status: AgentStatus = {
     telegram: "connecting",
     agentId: config.agent.id,
@@ -52,10 +54,22 @@ async function main(): Promise<void> {
     ownerId: config.agent.ownerId,
     chatActivated: false,
   };
-  const panel = createPanel(panelConfig, async () => ({
-    ...status,
-    host: await getHostStatus(hostConfig),
-  }));
+  const panel = createPanel(
+    panelConfig,
+    async () => ({
+      ...status,
+      agentName: registry.get(config.agent.id)!.name,
+      host: await getHostStatus(hostConfig),
+    }),
+    Date.now,
+    {
+      get: () => registry.get(config.agent.id)!,
+      save: (name, instructions) => {
+        registry.updateSettings(config.agent.id, name, instructions);
+        config.agent.name = name;
+      },
+    },
+  );
   const server = serve({
     fetch: panel.fetch,
     hostname: panelConfig.hostname,
@@ -74,7 +88,10 @@ async function main(): Promise<void> {
     () => {
       status.chatActivated = true;
     },
-    createHostTasks(hostConfig),
+    withAgentInstructions(
+      createHostTasks(hostConfig),
+      () => registry.get(config.agent.id)!.instructions,
+    ),
     binding,
   );
   let stopping = false;

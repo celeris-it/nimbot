@@ -50,8 +50,17 @@ export function openAgentRegistry(path: string) {
   return {
     syncConfigured(agent: { id: string; name: string; ownerId: number }) {
       db.prepare(
-        "INSERT INTO agents (id, name, owner_id) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, owner_id = excluded.owner_id",
+        "INSERT INTO agents (id, name, owner_id) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET owner_id = excluded.owner_id",
       ).run(agent.id, agent.name, agent.ownerId);
+    },
+    updateSettings(id: string, name: string, instructions: string) {
+      const normalized = name.trim();
+      if (!normalized || normalized.length > 128 || instructions.length > 4000)
+        throw new Error("Invalid agent settings");
+      const result = db
+        .prepare("UPDATE agents SET name = ?, instructions = ? WHERE id = ?")
+        .run(normalized, instructions, id);
+      if (!result.changes) throw new Error("Agent is not registered");
     },
     bindBot(id: string, botId: number, botUsername: string) {
       // Refuse accidental bot reuse, including bindings created before this registry.
