@@ -629,25 +629,27 @@ Nimbot `v0.1.0` is complete when all of the following are true:
 - [ ] Telegram integration works.
 - [ ] Telegram authorization works.
 - [ ] The authenticated panel can create, configure, start, stop, and delete agents.
-- [ ] Panel credentials and sessions are protected, and unauthorized API requests are rejected.
-- [ ] Bot tokens can be linked and replaced securely through the panel.
-- [ ] Each agent has a distinct Telegram bot and owner-bound private chat.
+- [x] Panel credentials and sessions are protected, and unauthorized API requests are rejected.
+- [x] Bot tokens can be linked and replaced securely through the panel.
+- [x] Each agent has a distinct Telegram bot and owner-bound private chat.
 - [ ] Tasks, progress, approvals, and results remain in the correct agent chat.
-- [ ] There is no shared active-agent selection or `/use` workflow.
-- [ ] Each agent runs in its own Docker container.
-- [ ] Each agent has persistent storage.
+- [x] There is no shared active-agent selection or `/use` workflow.
+- [x] Each agent runs in its own Docker container.
+- [x] Each agent has persistent storage.
 - [ ] OpenCode works through ACP.
 - [ ] Agents can execute terminal commands.
 - [ ] Agents can read and write files.
 - [ ] Agents can use a browser.
 - [ ] Conversations persist across restarts.
-- [ ] Tasks can be cancelled.
-- [ ] Interrupted tasks are handled safely.
-- [ ] Duplicate incoming messages do not execute tasks twice.
-- [ ] Agent workspaces are isolated under the documented threat model.
-- [ ] Automated tests cover critical workflows.
-- [ ] Installation and troubleshooting documentation are complete.
-- [ ] The project is released under Apache License 2.0.
+- [x] Tasks can be cancelled.
+- [x] Interrupted tasks are handled safely.
+- [x] Duplicate incoming messages do not execute tasks twice.
+- [x] Agent workspaces are isolated under the documented threat model.
+- [x] Automated tests cover critical workflows.
+- [x] Installation and troubleshooting documentation are complete.
+- [x] The project is released under Apache License 2.0.
+
+Definition of Done status: the checked items are backed by automated tests (panel authentication and CSRF, token linking and replacement, owner-bound per-bot bindings, queue cancellation and interruption, update deduplication, no `/use` command) or by the opt-in real-Docker tests (one container, named volumes, and private network per agent; isolation between agents). The unchecked items need live validation that has not been done against real Telegram bots, a real AI provider, and a clean server: installation through Docker Compose, Telegram integration and authorization, task and approval delivery, OpenCode with terminal, files, and browser through the full path, and conversation persistence across restarts. They close with the section 12 scenario, which needs the maintainer's BotFather tokens, Telegram user ID, and AI provider credentials.
 
 ---
 
