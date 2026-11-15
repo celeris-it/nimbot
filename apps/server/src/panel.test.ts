@@ -1549,3 +1549,51 @@ it.each([
     expect(response.headers.get("cache-control")).toBe("no-store");
   },
 );
+
+it("lists registered agents with bot state and chat links behind login", async () => {
+  const app = createPanel(
+    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
+    () => ({ telegram: "connected", agentId: "dev" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    (id) =>
+      id === "dev"
+        ? undefined
+        : {
+            name: id === "a1" ? "Alpha <b>" : "Beta",
+            botUsername: id === "a1" ? "alpha_bot" : null,
+            provisioning: id === "a1" ? "ready" : "pending",
+            ...(id === "a1"
+              ? { botConnection: { status: "polling" as const } }
+              : {}),
+          },
+    undefined,
+    () => ["dev", "a1", "b2"],
+  );
+  expect((await app.request("/")).status).toBe(303);
+  const login = await app.request("/login", {
+    method: "POST",
+    headers: {
+      Origin: "http://localhost:3000",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ password }).toString(),
+  });
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  const body = await (
+    await app.request("/", { headers: { Cookie: cookie } })
+  ).text();
+  expect(body).toContain("Alpha &lt;b&gt;");
+  expect(body).toContain("https://t.me/alpha_bot");
+  expect(body).toContain("Polling started");
+  expect(body).toContain("/agents/a1/setup");
+  expect(body).toContain("Beta");
+  expect(body).toContain("Not connected yet");
+  expect(body.match(/https:\/\/t\.me\//g)).toHaveLength(1);
+});

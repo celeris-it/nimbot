@@ -657,6 +657,13 @@ export function openAgentRegistry(path: string) {
         .prepare(`SELECT ${columns} FROM agents WHERE id = ?`)
         .get(id) as unknown as RegisteredAgent | undefined;
     },
+    listIds(): string[] {
+      return (
+        db.prepare("SELECT id FROM agents ORDER BY rowid").all() as unknown as {
+          id: string;
+        }[]
+      ).map((row) => row.id);
+    },
     close() {
       db.close();
     },

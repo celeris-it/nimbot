@@ -317,6 +317,7 @@ async function main(): Promise<void> {
           },
         }
       : undefined,
+    () => registry.listIds(),
   );
   const server = serve({
     fetch: panel.fetch,

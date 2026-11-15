@@ -156,6 +156,15 @@ function login(error?: string) {
   );
 }
 
+const connectionLabels = {
+  not_started: "Not started",
+  connecting: "Verifying credentials and starting polling",
+  polling: "Polling started",
+  blocked: "Blocked by incomplete setup or owner authorization",
+  failed: "Connection failed",
+  stopped: "Stopped",
+};
+
 export function createPanel(
   config: PanelConfig,
   getStatus: () => AgentStatus | Promise<AgentStatus>,
@@ -185,6 +194,7 @@ export function createPanel(
       }
     | undefined,
   agentSettings?: RegisteredAgentSettings,
+  listAgentIds?: () => string[],
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -692,14 +702,6 @@ ${values.instructions}</textarea>
     const agent = getAgentSetup?.(c.req.param("id"));
     if (!agent) return c.notFound();
     const ready = agent.provisioning === "ready";
-    const connectionLabels = {
-      not_started: "Not started",
-      connecting: "Verifying credentials and starting polling",
-      polling: "Polling started",
-      blocked: "Blocked by incomplete setup or owner authorization",
-      failed: "Connection failed",
-      stopped: "Stopped",
-    };
     const failureLabels = {
       setup_incomplete:
         "Complete agent provisioning before connecting this bot.",
@@ -1058,6 +1060,12 @@ ${values.instructions}</textarea>
   app.get("/", async (c) => {
     const status = await getStatus();
     const containerState = container ? await container.status() : undefined;
+    const registered = (listAgentIds?.() ?? [])
+      .filter((id) => id !== status.agentId)
+      .flatMap((id) => {
+        const setup = getAgentSetup?.(id);
+        return setup ? [{ id, ...setup }] : [];
+      });
     const labels = {
       connecting: "Connecting",
       connected: "Connected",
@@ -1123,6 +1131,28 @@ ${values.instructions}</textarea>
             ${stopTaskSection(status.stopObservation)}
             ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Open bot in Telegram</a>` : html`<p>The link will appear once Telegram confirms the connection.</p>`}
           </article>
+          ${registered.map((agent) => {
+            const bot = agent.botConnection
+              ? connectionLabels[agent.botConnection.status]
+              : "Not connected yet";
+            return html`<article class="card">
+              <h2>${agent.name}</h2>
+              <p class="badge">Setup: ${agent.provisioning}</p>
+              <dl>
+                <dt>Bot</dt>
+                <dd>
+                  ${agent.botUsername ? `@${agent.botUsername}` : "Pending"}
+                </dd>
+                <dt>Telegram bot</dt>
+                <dd>${bot}</dd>
+              </dl>
+              <a
+                class="btn"
+                href="/agents/${encodeURIComponent(agent.id)}/setup"
+                >Manage</a
+              >${agent.botUsername ? html`<a class="btn" href="https://t.me/${agent.botUsername}">Open chat in Telegram</a>` : ""}
+            </article>`;
+          })}
           <footer>
             <p>
               ${registerAgent ? "Registered bots connect after provisioning. Full deletion is still pending." : "Configure server provisioning to create agents from the panel."}
