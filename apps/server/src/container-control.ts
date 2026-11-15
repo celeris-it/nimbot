@@ -1,4 +1,4 @@
-import { request } from "node:http";
+import { createDockerApi } from "./docker-api.js";
 import { isAbsolute } from "node:path";
 
 export interface ContainerConfig {
@@ -33,32 +33,7 @@ export function createContainerControl(
   ) => void = () => {},
 ) {
   let busy = false;
-  function call(
-    path: string,
-    method = "GET",
-  ): Promise<{ code: number; body: string }> {
-    return new Promise((resolve, reject) => {
-      const req = request(
-        { socketPath: config.socketPath, path: `/v1.47${path}`, method },
-        (res) => {
-          let body = "";
-          res.setEncoding("utf8");
-          res.on("data", (chunk: string) => {
-            body += chunk;
-            if (body.length > 65536)
-              req.destroy(new Error("Docker response too large"));
-          });
-          res.on("end", () => resolve({ code: res.statusCode ?? 500, body }));
-          res.on("error", reject);
-        },
-      );
-      req.setTimeout(15000, () =>
-        req.destroy(new Error("Docker request timed out")),
-      );
-      req.on("error", reject);
-      req.end();
-    });
-  }
+  const call = createDockerApi(config.socketPath);
   async function inspect() {
     const response = await call(
       `/containers/${encodeURIComponent(config.target)}/json`,
