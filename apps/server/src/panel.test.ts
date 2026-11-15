@@ -357,3 +357,55 @@ it("protects token replacement and never echoes or prepopulates the credential",
   expect(form).toContain("Reiniciá el servidor");
   expect(form).toContain('type="password"');
 });
+
+it("protects container operations and requires a POST after stop confirmation", async () => {
+  const actions: string[] = [];
+  const app = createPanel(
+    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
+    () => ({ telegram: "disconnected" }),
+    Date.now,
+    undefined,
+    undefined,
+    {
+      status: async () => "running",
+      action: async (action) => {
+        actions.push(action);
+      },
+    },
+  );
+  const post = (body: string, cookie = "", origin = "http://localhost:3000") =>
+    app.request("/agent/container", {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  expect((await post("action=stop")).status).toBe(303);
+  const login = await app.request("/login", {
+    method: "POST",
+    headers: {
+      Origin: "http://localhost:3000",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ password }).toString(),
+  });
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  expect(
+    (await post("action=stop", cookie, "https://evil.example")).status,
+  ).toBe(403);
+  expect((await post("action=delete", cookie)).status).toBe(400);
+  expect(
+    (
+      await app.request("/agent/container/stop", {
+        headers: { Cookie: cookie },
+      })
+    ).status,
+  ).toBe(200);
+  expect(actions).toEqual([]);
+  expect((await post("action=start", cookie)).status).toBe(303);
+  expect((await post("action=stop", cookie)).status).toBe(303);
+  expect(actions).toEqual(["start", "stop"]);
+});

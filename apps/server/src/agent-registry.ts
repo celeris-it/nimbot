@@ -89,6 +89,12 @@ export function openAgentRegistry(path: string) {
         .run(botId, botUsername, id);
       if (!result.changes) throw new Error("Agent is not registered");
     },
+    setContainerRef(id: string, containerId: string) {
+      const result = db
+        .prepare("UPDATE agents SET container_ref = ? WHERE id = ?")
+        .run(containerId, id);
+      if (!result.changes) throw new Error("Agent is not registered");
+    },
     setCredentialRef(id: string, ref: string) {
       const result = db
         .prepare("UPDATE agents SET credential_ref = ? WHERE id = ?")

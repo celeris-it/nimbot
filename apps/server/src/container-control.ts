@@ -1,0 +1,97 @@
+import { request } from "node:http";
+import { isAbsolute } from "node:path";
+
+export interface ContainerConfig {
+  socketPath: string;
+  target: string;
+  agentId: string;
+}
+export function readContainerConfig(
+  env: NodeJS.ProcessEnv,
+  agentId: string,
+): ContainerConfig | undefined {
+  const socketPath = env.DOCKER_SOCKET_PATH?.trim();
+  const target = env.AGENT_CONTAINER_NAME?.trim();
+  if (!socketPath && !target) return;
+  if (
+    !socketPath ||
+    !isAbsolute(socketPath) ||
+    !target ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(target)
+  )
+    throw new Error(
+      "Set both DOCKER_SOCKET_PATH (absolute path) and AGENT_CONTAINER_NAME to enable container controls.",
+    );
+  return { socketPath, target, agentId };
+}
+export function createContainerControl(
+  config: ContainerConfig,
+  onVerified: (id: string) => void = () => {},
+) {
+  let busy = false;
+  function call(
+    path: string,
+    method = "GET",
+  ): Promise<{ code: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = request(
+        { socketPath: config.socketPath, path: `/v1.47${path}`, method },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => {
+            body += chunk;
+            if (body.length > 65536)
+              req.destroy(new Error("Docker response too large"));
+          });
+          res.on("end", () => resolve({ code: res.statusCode ?? 500, body }));
+          res.on("error", reject);
+        },
+      );
+      req.setTimeout(15000, () =>
+        req.destroy(new Error("Docker request timed out")),
+      );
+      req.on("error", reject);
+      req.end();
+    });
+  }
+  async function inspect() {
+    const response = await call(
+      `/containers/${encodeURIComponent(config.target)}/json`,
+    );
+    if (response.code !== 200) throw new Error("Container unavailable");
+    const data = JSON.parse(response.body);
+    if (
+      !/^[a-f0-9]{64}$/.test(data.Id) ||
+      data.Config?.Labels?.["io.nimbot.agent-id"] !== config.agentId
+    )
+      throw new Error("Container is not assigned to this agent");
+    return { id: data.Id as string, running: data.State?.Running === true };
+  }
+  return {
+    async status(): Promise<"running" | "stopped" | "unavailable"> {
+      try {
+        return (await inspect()).running ? "running" : "stopped";
+      } catch {
+        return "unavailable";
+      }
+    },
+    async action(action: "start" | "stop") {
+      if (busy) throw new Error("Container operation already running");
+      busy = true;
+      try {
+        const container = await inspect();
+        onVerified(container.id);
+        const response = await call(
+          `/containers/${container.id}/${action}${action === "stop" ? "?t=10" : ""}`,
+          "POST",
+        );
+        if (![204, 304].includes(response.code))
+          throw new Error("Container operation failed");
+      } finally {
+        busy = false;
+      }
+    },
+  };
+}
+export type ContainerControl = ReturnType<typeof createContainerControl>;

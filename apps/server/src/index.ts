@@ -1,3 +1,7 @@
+import {
+  readContainerConfig,
+  createContainerControl,
+} from "./container-control.js";
 import { openBotSecrets } from "./bot-secret.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
 import { withAgentInstructions } from "./agent-instructions.js";
@@ -17,8 +21,10 @@ async function main(): Promise<void> {
   let config;
   let panelConfig;
   let hostConfig;
+  let containerConfig;
   try {
     config = readConfig(process.env);
+    containerConfig = readContainerConfig(process.env, config.agent.id);
     hostConfig = readAgentHostConfig(process.env);
     panelConfig = readPanelConfig(process.env);
   } catch (error) {
@@ -61,6 +67,11 @@ async function main(): Promise<void> {
     ownerId: config.agent.ownerId,
     chatActivated: false,
   };
+  const container = containerConfig
+    ? createContainerControl(containerConfig, (id) =>
+        registry.setContainerRef(config.agent.id, id),
+      )
+    : undefined;
   const panel = createPanel(
     panelConfig,
     async () => ({
@@ -77,6 +88,7 @@ async function main(): Promise<void> {
       },
     },
     createBotTokenUpdate(config.agent.id, registry, botSecrets),
+    container,
   );
   const server = serve({
     fetch: panel.fetch,

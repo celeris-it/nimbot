@@ -38,6 +38,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
   agent-host:
+    labels:
+      io.nimbot.agent-id: ${AGENT_ID:-default}
     build:
       context: .
       dockerfile: infrastructure/docker/agent-host.Dockerfile

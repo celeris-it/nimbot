@@ -1,3 +1,4 @@
+import type { ContainerControl } from "./container-control.js";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Hono } from "hono";
@@ -94,6 +95,7 @@ export function createPanel(
   now = Date.now,
   settings?: AgentSettings,
   saveBotToken?: (token: string) => Promise<void>,
+  container?: ContainerControl,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -336,9 +338,58 @@ ${values.instructions}</textarea>
     }
     return c.redirect("/agent/token?saved=1", 303);
   });
+  app.get("/agent/container/stop", (c) =>
+    container
+      ? c.html(
+          page(
+            "Detener agente",
+            html`<h1>¿Detener el agente?</h1>
+              <p>
+                Se detendrá su contenedor. Una tarea activa será interrumpida y
+                el resultado puede quedar pendiente hasta que vuelva a arrancar.
+                Se conservan los archivos y el historial.
+              </p>
+              <form method="post" action="/agent/container">
+                <input type="hidden" name="action" value="stop" /><button
+                  class="btn"
+                  type="submit"
+                >
+                  Confirmar detención</button
+                ><a class="btn" href="/">Cancelar</a>
+              </form>`,
+            true,
+          ),
+        )
+      : c.notFound(),
+  );
+  app.post("/agent/container", async (c) => {
+    if (!container) return c.notFound();
+    const body = await c.req.parseBody({ all: true });
+    if (body.action !== "start" && body.action !== "stop")
+      return c.text("Acción no válida.", 400);
+    try {
+      await container.action(body.action);
+    } catch {
+      return c.html(
+        page(
+          "Operación no completada",
+          html`<h1>No pude completar la operación.</h1>
+            <p>
+              Comprobá el acceso a Docker, el contenedor configurado y su
+              etiqueta de agente. Actualizá el panel antes de reintentar.
+            </p>
+            <a class="btn" href="/">Volver al panel</a>`,
+          true,
+        ),
+        503,
+      );
+    }
+    return c.redirect("/?containerChanged=1", 303);
+  });
   app.get("/api/status", async (c) => c.json(await getStatus()));
   app.get("/", async (c) => {
     const status = await getStatus();
+    const containerState = container ? await container.status() : undefined;
     const labels = {
       connecting: "Conectando",
       connected: "Conectado",
@@ -349,10 +400,30 @@ ${values.instructions}</textarea>
         "Agentes",
         html`<small>INSTALACIÓN LOCAL / FASE 1</small>
           <h1>Tus agentes.</h1>
+          ${c.req.query("containerChanged") === "1" ? html`<p role="status">Operación enviada a Docker. El Agent Host puede tardar unos segundos en estar disponible.</p>` : ""}
           <p>Un bot de Telegram por agente. Cada conversación, en su lugar.</p>
           <article class="card">
             ${settings ? html`<a class="btn" href="/agent/settings">Editar agente</a>` : ""}
             ${saveBotToken ? html`<a class="btn" href="/agent/token">Reemplazar token del bot</a>` : ""}
+            ${
+              container
+                ? html`<p>
+                      Contenedor:
+                      ${containerState === "running" ? "En ejecución" : containerState === "stopped" ? "Detenido" : "No disponible"}
+                    </p>
+                    <form method="post" action="/agent/container">
+                      <input type="hidden" name="action" value="start" /><button
+                        class="btn"
+                        type="submit"
+                      >
+                        Iniciar contenedor
+                      </button>
+                    </form>
+                    <a class="btn" href="/agent/container/stop"
+                      >Detener contenedor…</a
+                    >`
+                : ""
+            }
             <h2>${status.agentName ?? "Agente configurado"}</h2>
             <p class="badge">Configuración inicial</p>
             <dl>
@@ -381,8 +452,8 @@ ${values.instructions}</textarea>
           </article>
           <footer>
             <p>
-              La creación de agentes y los controles de ejecución estarán
-              disponibles en la siguiente fase.
+              La creación y eliminación de agentes estarán disponibles en la
+              siguiente fase.
             </p>
             <a class="btn" href="/">Actualizar estado</a>
           </footer>`,
