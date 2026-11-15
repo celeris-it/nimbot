@@ -19,6 +19,7 @@ You install Nimbot on a Linux server with Docker Compose, sign in to a minimal a
 - Cancel a running task
 - Keep conversations, files, and pending tasks across restarts
 - Restrict access to an allowlist of Telegram user IDs
+- Start with zero agents and configure the Telegram allowlist, bot tokens, owners, and agent settings through the authenticated panel, without Telegram or per-agent environment variables (pending MVP requirement; the current installation still requires the bootstrap configuration)
 
 Out of scope for the MVP: advanced dashboards, web chat, management bots, other messaging channels, other AI engines, multi-server deployments, and hosted multi-tenant use. See the [post-MVP backlog](MVP.md#14-post-mvp-backlog).
 

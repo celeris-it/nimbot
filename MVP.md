@@ -81,6 +81,7 @@ The MVP is complete when:
 - SQLite persistence
 - Basic logging and diagnostics
 - Local configuration and secrets management
+- Panel-based initial setup and Telegram access configuration, with no environment variables required for agents or bots
 
 ### 2.2 Excluded from MVP
 
@@ -191,6 +192,8 @@ The MVP has one administrator account per self-hosted installation. Credentials 
 The panel supports only:
 
 - Sign in and sign out.
+- Start from an empty installation with no agents or linked bots, and configure Telegram access through the authenticated panel.
+- Manage the installation's Telegram user allowlist. Changes are persisted and enforced for activation, task submission, and approval callbacks; removing access invalidates existing authorization without requiring a server restart.
 - List agents, their runtime and bot connection states, and links to open their Telegram chats.
 - Create an agent with a name, optional instructions, the owner's numeric Telegram user ID, and a bot token created in BotFather.
 - Edit the name and instructions, and replace a revoked bot token. Instruction changes apply on the next task, without rewriting a running task.
@@ -202,6 +205,10 @@ Authentication and authorization protect every administration page and API endpo
 Web task chat, terminal access, file browsing, analytics, and additional panel accounts are deferred. Telegram remains the interface for tasks, progress, results, and approvals.
 
 ### 4.1.2 Telegram routing
+
+The final MVP must start and serve the authenticated panel without `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_OWNER_USER_ID`, `AGENT_ID`, `AGENT_NAME`, or a manually configured `AGENT_HOST_TOKEN`. The administrator configures the allowlist and creates the first and subsequent agents through the same panel workflow. Internal Host tokens are generated and stored by the server. An empty allowlist denies all Telegram access but does not prevent panel startup. Agent settings and credentials survive restart without environment-variable copies. Environment variables remain for trusted deployment configuration and administrator authentication; they are not required for agent or Telegram setup.
+
+This requirement supersedes the pre-configured-agent bootstrap used during Phase 1. That implementation remains historical validation work, not a prerequisite for a fresh MVP installation. The default Compose deployment must start without a pre-created Agent Host and support creating the first agent through the panel using its fixed Docker template.
 
 - Each agent has exactly one distinct Telegram bot. A bot cannot be bound to multiple agents.
 - A single Nimbot Server maintains a grammY long-polling connection for each bot; agent containers do not connect to Telegram.
@@ -533,6 +540,9 @@ Agent containers have unrestricted outbound network access in the MVP, including
 
 - [x] Dockerfiles for both apps, `compose.yaml`, and `.env.example` exist, with restart policies and health checks.
 - [ ] A fresh install on a clean Linux server works by following the documentation alone.
+- [ ] Remove the mandatory pre-configured-agent bootstrap: start the panel with zero agents and no Telegram or per-agent environment variables; create the first agent through the same workflow as every later agent.
+- [ ] Add authenticated panel management of the persisted Telegram allowlist, with immediate authorization enforcement and no server restart.
+- [ ] Update Compose, configuration validation, `.env.example`, and installation documentation for panel-based initial setup. Generate internal Host credentials automatically and test empty startup, first-agent creation, access changes, and restart persistence.
 - [x] The documentation covers installation, panel administrator setup, HTTPS access, per-agent BotFather token linking and chat activation, token replacement, AI provider authentication, environment variables, and commands.
 - [x] The documentation covers backup and restore, troubleshooting, and security limitations.
 - [x] The repo has an Apache 2.0 `LICENSE`, `CONTRIBUTING.md`, and `.gitignore`.
@@ -555,9 +565,9 @@ The following scenario must work before releasing `v0.1.0`.
 
 **Step 1 — Installation**
 
-Install Nimbot on a Linux server using Docker Compose.
+Install Nimbot on a Linux server using Docker Compose, without configuring Telegram or per-agent environment variables.
 
-**Expected:** The Nimbot Server starts successfully and serves the panel. Unauthenticated access is rejected; the configured administrator can sign in.
+**Expected:** The Nimbot Server starts successfully with zero agents and serves the panel. Unauthenticated access is rejected; the configured administrator can sign in and save the Telegram user allowlist through the panel. No pre-created Agent Host is required.
 
 **Step 2 — Create Agent A**
 
@@ -626,6 +636,7 @@ Attempt to access panel pages and administration API endpoints without a session
 Nimbot `v0.1.0` is complete when all of the following are true:
 
 - [ ] Installation works through Docker Compose.
+- [ ] A fresh installation needs no Telegram or per-agent environment variables; the authenticated panel configures access and creates the first agent.
 - [ ] Telegram integration works.
 - [ ] Telegram authorization works.
 - [ ] The authenticated panel can create, configure, start, stop, and delete agents.

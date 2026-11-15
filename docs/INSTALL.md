@@ -16,15 +16,11 @@ Before you start, read the security limits in [MVP.md](../MVP.md) section 10: Ni
 ```sh
 git clone https://github.com/<your-fork-or-org>/nimbot.git
 cd nimbot
-docker compose build
-```
-
-This builds the server image and the Agent Host image. (Compose names them `<directory>-server` and `<directory>-agent-host`; the commands below use the explicit tags `nimbot-server` and `nimbot-agent-host`.)
-
-```sh
 docker build -f infrastructure/docker/server.Dockerfile -t nimbot-server .
 docker build -f infrastructure/docker/agent-host.Dockerfile -t nimbot-agent-host .
 ```
+
+These commands build both images without requiring a configured `.env`. The server image is used to generate the administrator password hash in section 3, and the Agent Host image is used for panel provisioning in section 8. Run Compose only after completing section 4: it validates required runtime variables even for `docker compose build`.
 
 ## 3. Panel administrator
 
