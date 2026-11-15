@@ -1,4 +1,11 @@
 import { createDockerApi, type DockerApi } from "./docker-api.js";
+import { randomUUID } from "node:crypto";
+
+export type ResourceKind = "container" | "network" | "volume";
+export interface ResourceCreationTracker {
+  begin(kind: ResourceKind, name: string, operationId: string): void;
+  complete(kind: ResourceKind, name: string): void;
+}
 
 const label = "io.nimbot.agent-id";
 const destinations = [
@@ -42,6 +49,7 @@ export function createContainerResources(
     kind: "containers" | "volumes" | "networks",
     ref: string,
     agentId: string,
+    operationId?: string,
   ) {
     const response = await call(
       `/${kind}/${encodeURIComponent(ref)}${kind === "containers" ? "/json" : ""}`,
@@ -53,14 +61,26 @@ export function createContainerResources(
     const labels = kind === "containers" ? data?.Config?.Labels : data?.Labels;
     if (labels?.[label] !== agentId)
       throw new Error("Docker resource belongs to another agent");
+    if (
+      operationId &&
+      labels?.["io.nimbot.provisioning-operation"] !== operationId
+    )
+      throw new Error("Docker resource does not match this creation operation");
     if (kind !== "volumes" && !/^[a-f0-9]{64}$/.test(data?.Id))
       throw new Error("Invalid Docker resource ID");
     if (kind === "volumes" && data?.Name !== ref)
       throw new Error("Invalid Docker volume name");
-    return data as {
+    return {
+      ...data,
+      creationOperation:
+        typeof labels["io.nimbot.provisioning-operation"] === "string"
+          ? labels["io.nimbot.provisioning-operation"]
+          : undefined,
+    } as {
       Id: string;
       Name: string;
       Containers?: Record<string, unknown>;
+      creationOperation?: string;
     };
   }
   async function checked(path: string, method: string, body?: unknown) {
@@ -89,40 +109,52 @@ export function createContainerResources(
       apiToken: string,
       record: (refs: ResourceReferences) => void,
       signal?: AbortSignal,
+      tracker?: ResourceCreationTracker,
     ) {
       const resource = agentResourceNames(agentId);
       if (!/^[a-f0-9]{64}$/.test(apiToken))
         throw new Error("Invalid internal API token");
-      const labels = { [label]: agentId };
+      const operationId = randomUUID();
+      const labels = {
+        [label]: agentId,
+        "io.nimbot.provisioning-operation": operationId,
+      };
       for (const volume of resource.volumes) {
         signal?.throwIfAborted();
         if (!(await inspect("volumes", volume, agentId))) {
           signal?.throwIfAborted();
+          tracker?.begin("volume", volume, operationId);
           await checked("/volumes/create", "POST", {
             Name: volume,
             Driver: "local",
             Labels: labels,
           });
-          await inspectRequired("volumes", volume, agentId);
+          await inspectRequired("volumes", volume, agentId, operationId);
         }
         record({ volumeRef: resource.volumes[0] });
+        tracker?.complete("volume", volume);
       }
       signal?.throwIfAborted();
+      let networkCreated = false;
       if (!(await inspect("networks", resource.network, agentId))) {
         signal?.throwIfAborted();
+        tracker?.begin("network", resource.network, operationId);
         await checked("/networks/create", "POST", {
           Name: resource.network,
           Driver: "bridge",
           CheckDuplicate: true,
           Labels: labels,
         });
+        networkCreated = true;
       }
       const network = await inspectRequired(
         "networks",
         resource.network,
         agentId,
+        networkCreated ? operationId : undefined,
       );
       record({ networkRef: network.Id });
+      tracker?.complete("network", resource.network);
       signal?.throwIfAborted();
       if (config.serverContainerRef) {
         const server = await serverId();
@@ -139,6 +171,7 @@ export function createContainerResources(
           "Agent container already exists; reconcile before retrying",
         );
       signal?.throwIfAborted();
+      tracker?.begin("container", resource.container, operationId);
       await checked(`/containers/create?name=${resource.container}`, "POST", {
         Image: config.image,
         User: "1000:1000",
@@ -171,8 +204,10 @@ export function createContainerResources(
         "containers",
         resource.container,
         agentId,
+        operationId,
       );
       record({ containerRef: container.Id });
+      tracker?.complete("container", resource.container);
       return {
         containerRef: container.Id,
         volumeRef: resource.volumes[0]!,
@@ -180,18 +215,28 @@ export function createContainerResources(
       };
     },
     /** No force removal; the caller must stop the container first. Persistent data is retained by default. */
-    async remove(agentId: string, deleteData = false) {
+    async remove(
+      agentId: string,
+      deleteData = false,
+      removed?: (
+        kind: ResourceKind,
+        name: string,
+        operationId?: string,
+      ) => void,
+    ) {
       const resource = agentResourceNames(agentId);
       const container = await inspect(
         "containers",
         resource.container,
         agentId,
       );
-      if (container)
+      if (container) {
         await checked(
           `/containers/${container.Id}?force=false&v=false`,
           "DELETE",
         );
+        removed?.("container", resource.container, container.creationOperation);
+      }
       const network = await inspect("networks", resource.network, agentId);
       if (network) {
         if (config.serverContainerRef) {
@@ -203,11 +248,15 @@ export function createContainerResources(
             });
         }
         await checked(`/networks/${network.Id}`, "DELETE");
+        removed?.("network", resource.network, network.creationOperation);
       }
       if (deleteData) {
         for (const volume of resource.volumes) {
-          if (await inspect("volumes", volume, agentId))
+          const existing = await inspect("volumes", volume, agentId);
+          if (existing) {
             await checked(`/volumes/${volume}?force=false`, "DELETE");
+            removed?.("volume", volume, existing.creationOperation);
+          }
         }
       }
     },
@@ -216,8 +265,9 @@ export function createContainerResources(
     kind: "containers" | "volumes" | "networks",
     ref: string,
     agentId: string,
+    operationId?: string,
   ) {
-    const data = await inspect(kind, ref, agentId);
+    const data = await inspect(kind, ref, agentId, operationId);
     if (!data) throw new Error("Created Docker resource is missing");
     return data;
   }

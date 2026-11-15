@@ -1,6 +1,18 @@
 import { DatabaseSync } from "node:sqlite";
 import type { CurrentHostTask } from "./host-current-task.js";
 import { randomUUID } from "node:crypto";
+import {
+  agentResourceNames,
+  type ResourceKind,
+} from "./container-resources.js";
+
+export interface ProvisioningIntent {
+  agentId: string;
+  kind: ResourceKind;
+  name: string;
+  operationId: string;
+  createdAt: number;
+}
 import type { FinalTaskStatus } from "./host-task-status.js";
 
 export type StopObservation = CurrentHostTask & {
@@ -152,6 +164,20 @@ export function openAgentRegistry(path: string) {
       db.exec(`ALTER TABLE agent_provisioning ADD COLUMN cancel_requested_at INTEGER;
         INSERT INTO registry_migrations(version) VALUES (8)`);
     }
+    if (
+      !db
+        .prepare("SELECT version FROM registry_migrations WHERE version = 9")
+        .get()
+    ) {
+      db.exec(`CREATE TABLE provisioning_resource_intents (
+        agent_id TEXT NOT NULL REFERENCES agents(id),
+        kind TEXT NOT NULL CHECK(kind IN ('container', 'volume', 'network')),
+        name TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (agent_id, kind, name, operation_id)
+      ); INSERT INTO registry_migrations(version) VALUES (9)`);
+    }
     db.prepare(
       "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
     ).run(Date.now());
@@ -195,6 +221,47 @@ export function openAgentRegistry(path: string) {
     if (other) throw new Error("Bot is already assigned to another agent");
   }
   return {
+    recordProvisioningIntent(
+      id: string,
+      kind: ResourceKind,
+      name: string,
+      operationId: string,
+    ) {
+      const names = agentResourceNames(id);
+      const expected = kind === "volume" ? names.volumes : [names[kind]];
+      if (
+        !expected.includes(name) ||
+        !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(operationId)
+      )
+        throw new Error("Invalid provisioning intent");
+      const result = db
+        .prepare(
+          `INSERT OR IGNORE INTO provisioning_resource_intents
+        (agent_id, kind, name, operation_id, created_at)
+        SELECT agent_id, ?, ?, ?, ? FROM agent_provisioning WHERE agent_id = ? AND status = 'provisioning'`,
+        )
+        .run(kind, name, operationId, Date.now(), id);
+      if (!result.changes)
+        throw new Error("Could not persist provisioning intent");
+    },
+    completeProvisioningIntent(
+      id: string,
+      kind: ResourceKind,
+      name: string,
+      operationId?: string,
+    ) {
+      db.prepare(
+        "DELETE FROM provisioning_resource_intents WHERE agent_id = ? AND kind = ? AND name = ? AND (? IS NULL OR operation_id = ?)",
+      ).run(id, kind, name, operationId ?? null, operationId ?? null);
+    },
+    listProvisioningIntents(): ProvisioningIntent[] {
+      return db
+        .prepare(
+          `SELECT agent_id AS agentId, kind, name, operation_id AS operationId,
+        created_at AS createdAt FROM provisioning_resource_intents ORDER BY agent_id, kind, name, operation_id`,
+        )
+        .all() as unknown as ProvisioningIntent[];
+    },
     getOwnerChat(id: string): number | undefined {
       if (
         !db
@@ -355,9 +422,10 @@ export function openAgentRegistry(path: string) {
         WHERE agent_id = ? AND status = 'provisioning'
         AND (? <> 'ready' OR (volume_ref IS NOT NULL AND network_ref IS NOT NULL
           AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND container_ref IS NOT NULL AND bot_id IS NOT NULL AND credential_ref IS NOT NULL)
-          AND EXISTS (SELECT 1 FROM agent_host_credentials WHERE agent_id = ?)))`,
+          AND EXISTS (SELECT 1 FROM agent_host_credentials WHERE agent_id = ?)
+          AND NOT EXISTS (SELECT 1 FROM provisioning_resource_intents WHERE agent_id = ?)))`,
         )
-        .run(status, Date.now(), id, status, id, id);
+        .run(status, Date.now(), id, status, id, id, id);
       if (!result.changes) throw new Error("Agent cannot finish provisioning");
     },
     registerLinkedAgent(

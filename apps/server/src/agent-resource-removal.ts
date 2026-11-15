@@ -25,7 +25,12 @@ export function createAgentResourceRemoval(
       const state = await control.status();
       if (state === "unavailable") throw new Error("Container unavailable");
       if (state === "running") await control.action("stop");
-      await resources.remove(agentId, deleteData);
+      await resources.remove(agentId, deleteData, (kind, name, operationId) => {
+        // A 404 cannot prove that a timed-out creation will never finish.
+        // Resolve only an operation whose actual resource was observed and removed.
+        if (operationId)
+          registry.completeProvisioningIntent(agentId, kind, name, operationId);
+      });
       registry.finishResourceRemoval(agentId, deleteData);
     } catch {
       registry.finishProvisioning(agentId, "failed");

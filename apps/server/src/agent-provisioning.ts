@@ -57,6 +57,12 @@ export function createAgentProvisioning(
         host.token,
         (refs) => registry.recordProvisioningResources(agentId, refs),
         signal,
+        {
+          begin: (kind, name, operationId) =>
+            registry.recordProvisioningIntent(agentId, kind, name, operationId),
+          complete: (kind, name) =>
+            registry.completeProvisioningIntent(agentId, kind, name),
+        },
       );
       const control = createContainerControl(
         { socketPath: config.socketPath, target: refs.containerRef, agentId },

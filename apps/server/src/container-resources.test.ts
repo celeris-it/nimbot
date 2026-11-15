@@ -63,7 +63,10 @@ it("creates labeled resources with a fixed hardened template and records them in
     Cmd: [],
     WorkingDir: "/workspace",
     Env: ["WORKSPACE=/workspace", `AGENT_HOST_TOKEN=${token}`],
-    Labels: { "io.nimbot.agent-id": "dev" },
+    Labels: {
+      "io.nimbot.agent-id": "dev",
+      "io.nimbot.provisioning-operation": expect.any(String),
+    },
     HostConfig: {
       Init: true,
       Privileged: false,
@@ -293,3 +296,31 @@ it.each(["inspect", "connect"])(
     expect(f.requests.some((r) => r.method === "DELETE")).toBe(false);
   },
 );
+
+it("does not record a newly created container with a mismatched operation label", async () => {
+  const f = fixture();
+  const recorded: ResourceReferences[] = [];
+  const manager = createContainerResources(
+    { socketPath: "/unused", image },
+    async (path, method, body) => {
+      const response = await f.call(path, method, body);
+      if (
+        (method ?? "GET") === "GET" &&
+        path === "/containers/nimbot-dev/json" &&
+        response.code === 200
+      ) {
+        const data = JSON.parse(response.body);
+        data.Config.Labels["io.nimbot.provisioning-operation"] =
+          "other-operation";
+        return { code: 200, body: JSON.stringify(data) };
+      }
+      return response;
+    },
+  );
+  await expect(
+    manager.create("dev", token, (refs) => {
+      recorded.push(refs);
+    }),
+  ).rejects.toThrow("does not match this creation operation");
+  expect(recorded.some((refs) => refs.containerRef)).toBe(false);
+});

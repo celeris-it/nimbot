@@ -51,6 +51,7 @@ it("matches all fixed-template volumes and immutable resources without leaking D
       status: "ok",
       missing: [],
       untracked: [],
+      uncertain: [],
     });
     expect(f.paths).toHaveLength(3);
     expect(f.paths[0]).toContain("all=true");

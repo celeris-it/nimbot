@@ -1,6 +1,9 @@
 import { agentResourceNames } from "./container-resources.js";
 import { createDockerApi, type DockerApi } from "./docker-api.js";
-import type { openAgentRegistry } from "./agent-registry.js";
+import type {
+  openAgentRegistry,
+  ProvisioningIntent,
+} from "./agent-registry.js";
 
 type Resource = {
   agentId: string;
@@ -8,7 +11,12 @@ type Resource = {
   ref: string;
 };
 export type ResourceInventory =
-  | { status: "ok"; missing: Resource[]; untracked: Resource[] }
+  | {
+      status: "ok";
+      missing: Resource[];
+      untracked: Resource[];
+      uncertain: ProvisioningIntent[];
+    }
   | { status: "unavailable" };
 const label = "io.nimbot.agent-id";
 
@@ -17,13 +25,19 @@ export function createResourceReconciliation(
   registry: Pick<
     ReturnType<typeof openAgentRegistry>,
     "listResourceReferences"
-  >,
+  > &
+    Partial<
+      Pick<ReturnType<typeof openAgentRegistry>, "listProvisioningIntents">
+    >,
   socketPath: string,
   call: DockerApi = createDockerApi(socketPath),
 ) {
   return async (): Promise<ResourceInventory> => {
     try {
       const expected: Resource[] = [];
+      const uncertain = registry.listProvisioningIntents?.() ?? [];
+      const key = (r: Resource) => JSON.stringify([r.agentId, r.kind, r.ref]);
+      const coveredByIntent = new Set<string>();
       for (const agent of registry.listResourceReferences()) {
         if (agent.containerRef)
           expected.push({
@@ -84,18 +98,39 @@ export function createResourceReconciliation(
               ).test(ref)
             )
               throw new Error("Invalid Docker inventory");
-            actual.push({ agentId, kind, ref });
+            const resource = { agentId, kind, ref };
+            actual.push(resource);
+            // Names alone are not ownership proof. Require this attempt's label
+            // as well as the agent label before accounting for an uncertain resource.
+            const names: unknown =
+              kind === "container" ? item.Names : [item.Name];
+            if (
+              Array.isArray(names) &&
+              uncertain.some(
+                (intent) =>
+                  intent.agentId === agentId &&
+                  intent.kind === kind &&
+                  item.Labels["io.nimbot.provisioning-operation"] ===
+                    intent.operationId &&
+                  names.includes(
+                    kind === "container" ? `/${intent.name}` : intent.name,
+                  ),
+              )
+            )
+              coveredByIntent.add(key(resource));
           }
         }),
       );
-      const key = (r: Resource) => JSON.stringify([r.agentId, r.kind, r.ref]);
       const wanted = new Set(expected.map(key));
       const observed = new Set(actual.map(key));
       const sort = (a: Resource, b: Resource) => key(a).localeCompare(key(b));
       return {
         status: "ok",
         missing: expected.filter((r) => !observed.has(key(r))).sort(sort),
-        untracked: actual.filter((r) => !wanted.has(key(r))).sort(sort),
+        untracked: actual
+          .filter((r) => !wanted.has(key(r)) && !coveredByIntent.has(key(r)))
+          .sort(sort),
+        uncertain,
       };
     } catch {
       // A failed or malformed listing cannot establish that a resource is missing.
