@@ -1,6 +1,7 @@
 import { spawnOpenCode } from "./acp-client.js";
 import { stopEngine } from "./stop-engine.js";
 import type { Engine } from "./engine.js";
+import { withEnvironmentNotes } from "./engine-notes.js";
 
 /** Single-line, bounded text for a tool step shown to the user. */
 export function progressLabel(title: string) {
@@ -32,7 +33,10 @@ export function createOpenCodeEngine(workspace: string): Engine {
       try {
         await engine.client.initialize();
         const session = await engine.client.newSession(workspace);
-        return await engine.client.prompt(session, prompt);
+        return await engine.client.prompt(
+          session,
+          withEnvironmentNotes(prompt),
+        );
       } finally {
         engine.client.close();
         if (engine.process.pid) await stopEngine(engine.process);
