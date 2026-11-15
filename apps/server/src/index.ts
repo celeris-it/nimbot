@@ -1,3 +1,4 @@
+import { createResourceReconciliation } from "./resource-reconciliation.js";
 import { createAgentContainerAction } from "./agent-container-action.js";
 import { createAgentResourceRemoval } from "./agent-resource-removal.js";
 import {
@@ -103,10 +104,14 @@ async function main(): Promise<void> {
   const containerAction = provisioningConfig
     ? createAgentContainerAction(registry, provisioningConfig.socketPath)
     : undefined;
+  const reconcile = provisioningConfig
+    ? createResourceReconciliation(registry, provisioningConfig.socketPath)
+    : undefined;
   const panel = createPanel(
     panelConfig,
     async () => ({
       ...status,
+      ...(reconcile ? { resources: await reconcile() } : {}),
       agentName: registry.get(config.agent.id)!.name,
       host: await getHostStatus(hostConfig),
       containerOperation: registry.getContainerOperation(config.agent.id),

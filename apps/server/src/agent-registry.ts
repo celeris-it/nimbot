@@ -114,6 +114,24 @@ export function openAgentRegistry(path: string) {
   const provisioningColumns =
     "status, volume_ref AS volumeRef, network_ref AS networkRef, updated_at AS updatedAt";
   return {
+    listResourceReferences(): {
+      id: string;
+      containerRef: string | null;
+      volumeRef: string | null;
+      networkRef: string | null;
+    }[] {
+      return db
+        .prepare(
+          `SELECT a.id, a.container_ref AS containerRef, p.volume_ref AS volumeRef, p.network_ref AS networkRef
+        FROM agents a JOIN agent_provisioning p ON p.agent_id = a.id ORDER BY a.id`,
+        )
+        .all() as unknown as {
+        id: string;
+        containerRef: string | null;
+        volumeRef: string | null;
+        networkRef: string | null;
+      }[];
+    },
     getHostCredentialRef(id: string): string | undefined {
       return db
         .prepare(

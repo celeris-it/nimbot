@@ -7,7 +7,7 @@ const destinations = [
   "/home/node/.local/share/nimbot",
 ];
 
-function names(agentId: string) {
+export function agentResourceNames(agentId: string) {
   // IDs become resource names; panel names and instructions never enter Docker specs.
   if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(agentId))
     throw new Error("Invalid agent ID");
@@ -86,7 +86,7 @@ export function createContainerResources(
       apiToken: string,
       record: (refs: ResourceReferences) => void,
     ) {
-      const resource = names(agentId);
+      const resource = agentResourceNames(agentId);
       if (!/^[a-f0-9]{64}$/.test(apiToken))
         throw new Error("Invalid internal API token");
       const labels = { [label]: agentId };
@@ -169,7 +169,7 @@ export function createContainerResources(
     },
     /** No force removal; the caller must stop the container first. Persistent data is retained by default. */
     async remove(agentId: string, deleteData = false) {
-      const resource = names(agentId);
+      const resource = agentResourceNames(agentId);
       const container = await inspect(
         "containers",
         resource.container,

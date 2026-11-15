@@ -1,3 +1,4 @@
+import { createResourceReconciliation } from "./resource-reconciliation.js";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
@@ -60,6 +61,25 @@ it.skipIf(!image)(
       await serverControl.action("start");
       for (const recreate of [false, true]) {
         const refs = await resources.create(agentId, token, () => {});
+        const reconcile = createResourceReconciliation(
+          {
+            listResourceReferences: () => [
+              { id: agentId, ...refs },
+              { id: serverAgentId, ...server },
+            ],
+          },
+          socketPath,
+        );
+        const inventory = await reconcile();
+        expect(inventory.status).toBe("ok");
+        if (inventory.status === "ok") {
+          expect(inventory.missing).toEqual([]);
+          expect(
+            inventory.untracked.filter(
+              (r) => r.agentId === agentId || r.agentId === serverAgentId,
+            ),
+          ).toEqual([]);
+        }
         expect(await control.status()).toBe("stopped");
         await control.action("start");
         expect(await control.status()).toBe("running");
