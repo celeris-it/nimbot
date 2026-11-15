@@ -46,7 +46,9 @@ it("removes Telegram tokens, bearer credentials, Host tokens, and secret-named f
     password: "[redacted]",
     agentId: "x",
   });
-  expect(redact("scrypt$16384$salt$hash")).toBe("[redacted]");
+  expect(redact(`hash scrypt:${"ab".repeat(16)}:${"cd".repeat(64)}`)).toBe(
+    "hash [redacted]",
+  );
 });
 
 it("routes levels to the sink and bounds long values", () => {

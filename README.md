@@ -133,6 +133,10 @@ Details and acceptance criteria for each phase are in [MVP.md](MVP.md).
 
 Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly-labs/openbot). It is an independent project and does not reuse OpenBot's source code, which is distributed under the PolyForm Noncommercial License 1.0.0.
 
+## Installation
+
+See [docs/INSTALL.md](docs/INSTALL.md) for the Docker Compose installation, panel administrator setup, HTTPS, BotFather linking, and AI provider authentication.
+
 ## Contributing
 
 Use Node.js 22.13 or newer. Run `pnpm install`, then `pnpm build`. Before submitting changes, run `pnpm lint`, `pnpm typecheck`, and `pnpm test`.

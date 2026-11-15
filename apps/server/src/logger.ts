@@ -14,7 +14,7 @@ const PATTERNS: [RegExp, string][] = [
   [/\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g, "[redacted]"],
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]"],
   [/\b[a-f0-9]{64}\b/gi, "[redacted]"],
-  [/\bscrypt\$[^\s"']+/g, "[redacted]"],
+  [/\bscrypt:[0-9a-f]+:[0-9a-f]+/gi, "[redacted]"],
 ];
 
 export function redact(text: string): string {
