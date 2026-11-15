@@ -1,25 +1,28 @@
+import type { openHostCredentials } from "./host-credentials.js";
 import { setTimeout } from "node:timers/promises";
 import type { openAgentRegistry } from "./agent-registry.js";
-import { getHostStatus, type AgentHostConfig } from "./agent-host.js";
+import { getHostStatus } from "./agent-host.js";
 import { createContainerResources } from "./container-resources.js";
 import { createContainerControl } from "./container-control.js";
 import { createDockerApi, type DockerApi } from "./docker-api.js";
 
-/** Internal workflow: the caller supplies a private, reachable Host endpoint and its saved token. */
+/** Internal workflow: caller connects the Server to the private agent network. */
 export function createAgentProvisioning(
   registry: ReturnType<typeof openAgentRegistry>,
+  credentials: Pick<Awaited<ReturnType<typeof openHostCredentials>>, "prepare">,
   config: { socketPath: string; image: string; serverContainerRef?: string },
   call: DockerApi = createDockerApi(config.socketPath),
   request: typeof fetch = fetch,
 ) {
   const resources = createContainerResources(config, call);
-  return async (agentId: string, host: AgentHostConfig) => {
+  return async (agentId: string) => {
     const agent = registry.get(agentId);
     if (!agent?.botId || !agent.credentialRef)
       throw new Error("Link an agent bot before provisioning");
     // This atomic transition also refuses concurrent attempts and externally managed agents.
     registry.beginProvisioning(agentId);
     try {
+      const host = await credentials.prepare(agentId);
       const refs = await resources.create(agentId, host.token, (refs) =>
         registry.recordProvisioningResources(agentId, refs),
       );

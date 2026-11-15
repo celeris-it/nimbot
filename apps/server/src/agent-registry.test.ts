@@ -36,7 +36,7 @@ it("migrates once and restores metadata without storing tokens", async () => {
       expect(
         db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
           ?.total,
-      ).toBe(3);
+      ).toBe(4);
     } finally {
       db.close();
     }
@@ -151,6 +151,8 @@ it("preserves provisioning resources across interruption and explicit retry", as
       restored.bindBot("new", 321, "new_bot");
       restored.finishProvisioning("new", "failed");
       restored.beginProvisioning("new");
+      expect(() => restored.finishProvisioning("new", "ready")).toThrow();
+      restored.setHostCredentialRef("new", "file:host-saved");
       restored.finishProvisioning("new", "ready");
       expect(restored.getProvisioning("new")).toMatchObject({
         status: "ready",
@@ -185,7 +187,7 @@ it("migrates existing configured agents without treating them as provisioned", a
     registry.close();
     const legacy = new DatabaseSync(path);
     legacy.exec(
-      "DROP TABLE agent_provisioning; DELETE FROM registry_migrations WHERE version = 3",
+      "DROP TABLE agent_host_credentials; DROP TABLE agent_provisioning; DELETE FROM registry_migrations WHERE version >= 3",
     );
     legacy.close();
     const migrated = openAgentRegistry(path);

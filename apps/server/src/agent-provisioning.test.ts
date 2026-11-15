@@ -45,20 +45,28 @@ function fixture(failStart = false) {
       engine: "not_started",
     });
   });
+  const credentials = {
+    prepare: vi.fn(async () => {
+      if (!registry.getHostCredentialRef("dev"))
+        registry.setHostCredentialRef("dev", "file:host-saved");
+      return host;
+    }),
+  };
   const provision = createAgentProvisioning(
     registry,
+    credentials,
     { socketPath: "/unused", image: `sha256:${"a".repeat(64)}` },
     call,
     health,
   );
-  return { registry, provision, mutations, health };
+  return { registry, provision, mutations, health, credentials };
 }
 const host = { url: "http://nimbot-dev:3001", token: "b".repeat(64) };
 
 it("persists resource references before starting and requires authenticated health before ready", async () => {
   const f = fixture();
   try {
-    await f.provision("dev", host);
+    await f.provision("dev");
     expect(f.registry.getProvisioning("dev")).toMatchObject({
       status: "ready",
       volumeRef: "nimbot-dev-workspace",
@@ -72,7 +80,7 @@ it("persists resource references before starting and requires authenticated heal
       }),
     );
     const count = f.mutations.length;
-    await expect(f.provision("dev", host)).rejects.toThrow("cannot begin");
+    await expect(f.provision("dev")).rejects.toThrow("cannot begin");
     expect(f.mutations).toHaveLength(count);
   } finally {
     f.registry.close();
@@ -82,9 +90,7 @@ it("persists resource references before starting and requires authenticated heal
 it("records failed startup and retains all resources without probing or deleting", async () => {
   const f = fixture(true);
   try {
-    await expect(f.provision("dev", host)).rejects.toThrow(
-      "provisioning failed",
-    );
+    await expect(f.provision("dev")).rejects.toThrow("provisioning failed");
     expect(f.registry.getProvisioning("dev")).toMatchObject({
       status: "failed",
       volumeRef: "nimbot-dev-workspace",
@@ -103,12 +109,10 @@ it("rejects unlinked and simultaneous attempts before Docker mutations", async (
   const f = fixture();
   try {
     f.registry.createPending({ id: "unlinked", name: "New", ownerId: 42 });
-    await expect(f.provision("unlinked", host)).rejects.toThrow(
-      "Link an agent bot",
-    );
+    await expect(f.provision("unlinked")).rejects.toThrow("Link an agent bot");
     expect(f.mutations).toEqual([]);
-    const pending = f.provision("dev", host);
-    await expect(f.provision("dev", host)).rejects.toThrow("cannot begin");
+    const pending = f.provision("dev");
+    await expect(f.provision("dev")).rejects.toThrow("cannot begin");
     await pending;
   } finally {
     f.registry.close();
@@ -122,7 +126,7 @@ it("bounds readiness attempts and leaves an unready container tracked as failed"
     Response.json({ status: "unavailable" }, { status: 503 }),
   );
   try {
-    const result = expect(f.provision("dev", host)).rejects.toThrow(
+    const result = expect(f.provision("dev")).rejects.toThrow(
       "provisioning failed",
     );
     await vi.runAllTimersAsync();
@@ -133,5 +137,20 @@ it("bounds readiness attempts and leaves an unready container tracked as failed"
   } finally {
     f.registry.close();
     vi.useRealTimers();
+  }
+});
+
+it("does not mutate Docker when Host credential preparation fails", async () => {
+  const f = fixture();
+  f.credentials.prepare.mockRejectedValue(
+    new Error("Secret storage unavailable"),
+  );
+  try {
+    await expect(f.provision("dev")).rejects.toThrow("provisioning failed");
+    expect(f.registry.getProvisioning("dev")?.status).toBe("failed");
+    expect(f.mutations).toEqual([]);
+    expect(f.health).not.toHaveBeenCalled();
+  } finally {
+    f.registry.close();
   }
 });

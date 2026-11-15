@@ -82,6 +82,16 @@ export function openAgentRegistry(path: string) {
         SELECT id, 'external', 0 FROM agents;
       INSERT INTO registry_migrations(version) VALUES (3)`);
     }
+    if (
+      !db
+        .prepare("SELECT version FROM registry_migrations WHERE version = 4")
+        .get()
+    ) {
+      db.exec(`CREATE TABLE agent_host_credentials (
+        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+        credential_ref TEXT NOT NULL UNIQUE
+      ); INSERT INTO registry_migrations(version) VALUES (4)`);
+    }
     db.prepare(
       "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
     ).run(Date.now());
@@ -104,6 +114,26 @@ export function openAgentRegistry(path: string) {
   const provisioningColumns =
     "status, volume_ref AS volumeRef, network_ref AS networkRef, updated_at AS updatedAt";
   return {
+    getHostCredentialRef(id: string): string | undefined {
+      return db
+        .prepare(
+          "SELECT credential_ref FROM agent_host_credentials WHERE agent_id = ?",
+        )
+        .get(id)?.credential_ref as string | undefined;
+    },
+    setHostCredentialRef(id: string, ref: string) {
+      if (
+        !db
+          .prepare(
+            "SELECT agent_id FROM agent_provisioning WHERE agent_id = ? AND status = 'provisioning'",
+          )
+          .get(id)
+      )
+        throw new Error("Agent is not provisioning");
+      db.prepare(
+        "INSERT INTO agent_host_credentials (agent_id, credential_ref) VALUES (?, ?)",
+      ).run(id, ref);
+    },
     getProvisioning(id: string): ProvisioningState | undefined {
       return db
         .prepare(
@@ -157,9 +187,10 @@ export function openAgentRegistry(path: string) {
           `UPDATE agent_provisioning SET status = ?, updated_at = ?
         WHERE agent_id = ? AND status = 'provisioning'
         AND (? = 'failed' OR (volume_ref IS NOT NULL AND network_ref IS NOT NULL
-          AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND container_ref IS NOT NULL AND bot_id IS NOT NULL AND credential_ref IS NOT NULL)))`,
+          AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND container_ref IS NOT NULL AND bot_id IS NOT NULL AND credential_ref IS NOT NULL)
+          AND EXISTS (SELECT 1 FROM agent_host_credentials WHERE agent_id = ?)))`,
         )
-        .run(status, Date.now(), id, status, id);
+        .run(status, Date.now(), id, status, id, id);
       if (!result.changes) throw new Error("Agent cannot finish provisioning");
     },
     createPending(agent: {
