@@ -63,6 +63,7 @@ export function createTaskRunner(
       void running.catch(() => console.error("Could not finalize task state."));
       return id;
     },
+    getCurrent: store.getCurrent,
     get: store.get,
     getEvents: store.getEvents,
     isBusy: () => busy,

@@ -135,6 +135,7 @@ it("retains completed records and marks unfinished work interrupted after reopen
   try {
     expect((await reopened.get("done"))?.output).toBe("saved");
     expect((await reopened.get("pending"))?.status).toBe("interrupted");
+    expect(await reopened.getCurrent()).toBeNull();
   } finally {
     reopened.close();
     await rm(dir, { recursive: true, force: true });
@@ -248,4 +249,37 @@ it("migrates existing tasks and rolls back state when its event cannot be saved"
     store.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+it("exposes only persisted active-task metadata and fails closed for ambiguous state", async () => {
+  const { store, request } = await setup({
+    async run() {
+      return "end_turn";
+    },
+    async stop() {},
+  });
+  expect((await request("/tasks/current", undefined, "wrong")).status).toBe(
+    401,
+  );
+  expect(await (await request("/tasks/current")).json()).toEqual({
+    task: null,
+  });
+  const id = "a0000000-0000-4000-8000-000000000001";
+  await store.insert(id, "secret prompt");
+  expect(await (await request("/tasks/current")).json()).toEqual({
+    task: { id, status: "accepted" },
+  });
+  await store.update(id, { status: "running", output: "secret output" });
+  const active = await request("/tasks/current");
+  expect(active.headers.get("cache-control")).toBe("no-store");
+  expect(await active.json()).toEqual({ task: { id, status: "running" } });
+  await store.insert("second", "other secret");
+  const ambiguous = await request("/tasks/current");
+  expect(ambiguous.status).toBe(503);
+  expect(await ambiguous.text()).not.toContain("secret");
+  await store.update("second", { status: "failed" });
+  await store.update(id, { status: "interrupted" });
+  expect(await (await request("/tasks/current")).json()).toEqual({
+    task: null,
+  });
 });

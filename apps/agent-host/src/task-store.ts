@@ -1,6 +1,6 @@
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { eq, gt, and, asc } from "drizzle-orm";
+import { eq, gt, and, asc, inArray } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 const tasks = sqliteTable("tasks", {
@@ -68,6 +68,18 @@ export async function openTaskStore(url: string) {
           stopReason: values.stopReason,
         }),
       ]);
+    },
+    async getCurrent() {
+      const active = await db
+        .select({ id: tasks.id, status: tasks.status })
+        .from(tasks)
+        .where(inArray(tasks.status, ["accepted", "running"]))
+        .limit(2);
+      if (active.length > 1)
+        throw new Error(
+          "Multiple active tasks violate the single-turn invariant",
+        );
+      return active[0] ?? null;
     },
     async get(id: string) {
       return (await db.select().from(tasks).where(eq(tasks.id, id)))[0];
