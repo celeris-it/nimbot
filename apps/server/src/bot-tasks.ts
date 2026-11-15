@@ -32,7 +32,13 @@ export function createBotTasks(config: {
     approval: HostApproval,
   ) {
     try {
-      if (!bot || !config.decide) throw new Error("No approver");
+      if (
+        !bot ||
+        !config.decide ||
+        (config.access &&
+          !config.access.canExecute(task.botId, config.ownerId(), task.chatId))
+      )
+        throw new Error("No approver");
       const key = book.add({
         botId: task.botId,
         chatId: task.chatId,
@@ -84,6 +90,11 @@ export function createBotTasks(config: {
         allow: boolean,
         who: { botId: number; chatId: number },
       ): Promise<"ok" | "expired"> {
+        if (
+          config.access &&
+          !config.access.canExecute(who.botId, config.ownerId(), who.chatId)
+        )
+          return "expired";
         const entry = book.take(key, who);
         if (!entry || !config.decide) return "expired";
         return (await config.decide(entry.hostTaskId, entry.approvalId, allow))

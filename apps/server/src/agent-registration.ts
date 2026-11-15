@@ -43,9 +43,13 @@ export function createAgentRegistration(
       bot.id <= 0
     )
       throw new Error("Invalid Telegram bot identity");
+    if (!allowedOwners.has(input.ownerId))
+      throw new Error("Agent owner is no longer authorized");
     const id = `agent-${randomBytes(16).toString("hex")}`;
     const ref = await secrets.save(token);
     try {
+      if (!allowedOwners.has(input.ownerId))
+        throw new Error("Agent owner is no longer authorized");
       registry.registerLinkedAgent(
         { id, name, ownerId: input.ownerId, instructions: input.instructions },
         { id: bot.id, username: bot.username },

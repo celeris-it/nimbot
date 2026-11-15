@@ -155,13 +155,14 @@ async function fixture() {
       token: id.repeat(64),
     })),
   };
+  const allowedOwners = new Set([42, 73]);
   let taskStore = openTaskStore(statePath);
   const open = () =>
     createRegisteredBots(
       registry,
       {
         bootstrapId: "bootstrap",
-        allowedOwners: new Set([42, 73]),
+        allowedOwners,
         statePath,
         taskStore,
       },
@@ -212,6 +213,7 @@ async function fixture() {
     },
     secrets,
     hosts,
+    allowedOwners,
     pending,
     failures,
     down,
@@ -460,6 +462,28 @@ it("restores both bots after a server restart with their owners and chat binding
     expect(f.sent.at(-1)).toMatchObject({ bot: "a", chat: 42 });
     expect(f.sent.at(-1)?.text).not.toContain("Result");
     expect(f.registry.getProvisioning("a")?.status).toBe("ready");
+  } finally {
+    await f.close();
+  }
+});
+
+it("enforces live allowlist changes on an already polling bot without restarting", async () => {
+  const f = await fixture();
+  try {
+    f.manager.start("a");
+    await f.send("a", "/start", 42);
+    expect(f.sent.length).toBeGreaterThan(0);
+    f.allowedOwners.delete(42);
+    const count = f.sent.length;
+    await f.send("a", "Do not execute this", 42);
+    await f.send("a", "/start", 42);
+    expect(f.sent).toHaveLength(count);
+    expect(f.calls.some((call) => call.prompt)).toBe(false);
+    f.allowedOwners.add(42);
+    await f.send("a", "Execute after restoring access", 42);
+    await vi.waitFor(() =>
+      expect(f.calls.some((call) => call.prompt)).toBe(true),
+    );
   } finally {
     await f.close();
   }
