@@ -144,9 +144,9 @@ export function openAgentRegistry(path: string) {
     beginResourceRemoval(id: string) {
       const result = db
         .prepare(
-          "UPDATE agent_provisioning SET status = 'provisioning', updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'ready', 'failed', 'interrupted')",
+          "UPDATE agent_provisioning SET status = 'provisioning', updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'ready', 'failed', 'interrupted') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending')",
         )
-        .run(Date.now(), id);
+        .run(Date.now(), id, id);
       if (!result.changes) throw new Error("Agent resources cannot be removed");
     },
     finishResourceRemoval(id: string, deleteData: boolean) {
@@ -171,9 +171,9 @@ export function openAgentRegistry(path: string) {
     beginProvisioning(id: string) {
       const result = db
         .prepare(
-          "UPDATE agent_provisioning SET status = 'provisioning', updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'failed', 'interrupted')",
+          "UPDATE agent_provisioning SET status = 'provisioning', updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'failed', 'interrupted') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending')",
         )
-        .run(Date.now(), id);
+        .run(Date.now(), id, id);
       if (!result.changes) throw new Error("Agent cannot begin provisioning");
     },
     recordProvisioningResources(
@@ -294,6 +294,19 @@ export function openAgentRegistry(path: string) {
         )
         .run(botId, botUsername, id);
       if (!result.changes) throw new Error("Agent is not registered");
+    },
+    beginContainerAction(id: string, action: "start" | "stop") {
+      const result = db
+        .prepare(
+          `INSERT INTO container_operations (agent_id, action, status, updated_at)
+        SELECT agent_id, ?, 'pending', ? FROM agent_provisioning
+        WHERE agent_id = ? AND status = 'ready'
+        ON CONFLICT(agent_id) DO UPDATE SET action = excluded.action, status = 'pending', updated_at = excluded.updated_at
+        WHERE container_operations.status <> 'pending'`,
+        )
+        .run(action, Date.now(), id);
+      if (!result.changes)
+        throw new Error("Agent container action is not available");
     },
     recordContainerOperation(
       id: string,

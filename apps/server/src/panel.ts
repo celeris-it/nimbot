@@ -100,6 +100,10 @@ export function createPanel(
   container?: ContainerControl,
   provisionAgent?: (agentId: string) => Promise<void>,
   removeResources?: (agentId: string, deleteData: boolean) => Promise<void>,
+  containerAction?: (
+    agentId: string,
+    action: "start" | "stop",
+  ) => Promise<void>,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -438,6 +442,35 @@ ${values.instructions}</textarea>
         {
           error:
             "Resource removal failed; inspect the agent state before retrying",
+        },
+        409,
+      );
+    }
+  });
+  app.post("/api/agents/:id/container", async (c) => {
+    if (!containerAction) return c.notFound();
+    const id = c.req.param("id");
+    const body = await c.req.parseBody({ all: true });
+    if (
+      !/^[a-z0-9][a-z0-9-]{0,47}$/.test(id) ||
+      (body.action !== "start" && body.action !== "stop") ||
+      (body.action === "stop" && body.confirm !== id)
+    )
+      return c.json(
+        {
+          error:
+            "Select start or stop; stopping requires confirmation of the agent ID",
+        },
+        400,
+      );
+    try {
+      await containerAction(id, body.action);
+      return c.json({ agentId: id, action: body.action, status: "completed" });
+    } catch {
+      return c.json(
+        {
+          error:
+            "Container action failed; inspect the agent state before retrying",
         },
         409,
       );

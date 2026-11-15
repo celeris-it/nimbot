@@ -548,3 +548,62 @@ it("requires authentication, origin, and explicit confirmation for resource remo
     { id: "dev", deleteData: true },
   ]);
 });
+
+it("protects per-agent container actions and requires confirmation before stopping", async () => {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const calls: unknown[] = [];
+  const app = createPanel(
+    config,
+    () => ({ telegram: "connected" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (id, action) => {
+      calls.push({ id, action });
+    },
+  );
+  const path = "/api/agents/dev/container";
+  const post = (
+    url: string,
+    body: string,
+    cookie = "",
+    origin = config.origin,
+  ) =>
+    app.request(url, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  expect((await post(path, "action=start")).status).toBe(401);
+  const login = await post(
+    "/login",
+    new URLSearchParams({ password }).toString(),
+  );
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  expect(
+    (await post(path, "action=start", cookie, "https://other.example")).status,
+  ).toBe(403);
+  for (const body of [
+    "action=stop",
+    "action=stop&confirm=other",
+    "action=delete",
+    "action=start&action=stop",
+  ])
+    expect((await post(path, body, cookie)).status).toBe(400);
+  expect(calls).toEqual([]);
+  expect((await post(path, "action=start", cookie)).status).toBe(200);
+  expect((await post(path, "action=stop&confirm=dev", cookie)).status).toBe(
+    200,
+  );
+  expect(calls).toEqual([
+    { id: "dev", action: "start" },
+    { id: "dev", action: "stop" },
+  ]);
+});

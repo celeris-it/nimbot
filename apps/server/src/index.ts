@@ -1,3 +1,4 @@
+import { createAgentContainerAction } from "./agent-container-action.js";
 import { createAgentResourceRemoval } from "./agent-resource-removal.js";
 import {
   readProvisioningConfig,
@@ -99,6 +100,9 @@ async function main(): Promise<void> {
   const removeResources = provisioningConfig
     ? createAgentResourceRemoval(registry, provisioningConfig)
     : undefined;
+  const containerAction = provisioningConfig
+    ? createAgentContainerAction(registry, provisioningConfig.socketPath)
+    : undefined;
   const panel = createPanel(
     panelConfig,
     async () => ({
@@ -132,6 +136,14 @@ async function main(): Promise<void> {
           if (!agent || !config.allowedUserIds.has(agent.ownerId))
             throw new Error("Agent owner is not authorized");
           await removeResources(id, deleteData);
+        }
+      : undefined,
+    containerAction
+      ? async (id, action) => {
+          const agent = registry.get(id);
+          if (!agent || !config.allowedUserIds.has(agent.ownerId))
+            throw new Error("Agent owner is not authorized");
+          await containerAction(id, action);
         }
       : undefined,
   );
