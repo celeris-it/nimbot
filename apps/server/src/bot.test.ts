@@ -6,15 +6,23 @@ import { createBotTasks } from "./bot-tasks.js";
 import { openTaskStore } from "./task-queue.js";
 import type { BotAccess } from "./agent-access.js";
 import type { HostStatus } from "./agent-host.js";
+import type { HostApproval } from "./host-tasks.js";
 
 function setup(
   execute?: (
     prompt: string,
     onProgress?: (message: string) => void,
+    cancelSignal?: AbortSignal,
+    onApproval?: (approval: HostApproval) => void,
   ) => Promise<string>,
   binding?: ChatBinding,
   hostStatus?: () => Promise<HostStatus>,
   access?: BotAccess,
+  decide?: (
+    hostTaskId: string,
+    approvalId: string,
+    allow: boolean,
+  ) => Promise<boolean>,
 ) {
   const activations: number[] = [];
   const tasks = execute
@@ -23,6 +31,7 @@ function setup(
         agentId: "test",
         ownerId: () => 42,
         run: execute,
+        ...(decide ? { decide } : {}),
         access,
       })
     : undefined;
@@ -38,6 +47,7 @@ function setup(
     hostStatus,
     access,
     tasks?.control,
+    tasks?.approvals,
   );
   bot.botInfo = {
     id: 123,
@@ -57,7 +67,18 @@ function setup(
   tasks?.attach(bot);
   const sent: string[] = [];
   const destinations: number[] = [];
+  const markups: unknown[] = [];
+  const callbackAnswers: { text?: string; show_alert?: boolean }[] = [];
+  const edits: string[] = [];
   bot.api.config.use(async (_prev, method, payload) => {
+    if (method === "answerCallbackQuery") {
+      callbackAnswers.push(payload as { text?: string });
+      return { ok: true, result: true } as Awaited<ReturnType<typeof _prev>>;
+    }
+    if (method === "editMessageText" && "text" in payload) {
+      edits.push(String(payload.text));
+      return { ok: true, result: true } as Awaited<ReturnType<typeof _prev>>;
+    }
     if (
       method !== "sendMessage" ||
       !("text" in payload) ||
@@ -66,6 +87,7 @@ function setup(
     )
       throw new Error("Unexpected API call");
     sent.push(payload.text);
+    markups.push("reply_markup" in payload ? payload.reply_markup : undefined);
     destinations.push(Number(payload.chat_id));
     expect("parse_mode" in payload).toBe(false);
     return {
@@ -83,6 +105,9 @@ function setup(
     sent,
     activations,
     destinations,
+    markups,
+    callbackAnswers,
+    edits,
     idle: () => tasks?.idle() ?? Promise.resolve(),
   };
 }
@@ -429,5 +454,157 @@ describe("task queue through Telegram", () => {
     await bot.handleUpdate(message("next"));
     await idle();
     expect(sent.at(-1)).toBe("done next");
+  });
+
+  describe("approvals", () => {
+    const approvalId = "11111111-2222-3333-4444-555555555555";
+    function callback(data: string, userId = 42, chatId = userId) {
+      return {
+        update_id: 2,
+        callback_query: {
+          id: "cb",
+          from: { id: userId, is_bot: false as const, first_name: "T" },
+          chat_instance: "x",
+          data,
+          message: {
+            message_id: 7,
+            date: 0,
+            chat: { id: chatId, type: "private" as const, first_name: "T" },
+            text: "Approval needed: read file",
+          },
+        },
+      };
+    }
+    async function pending() {
+      let release!: () => void;
+      const finished = new Promise<void>((resolve) => (release = resolve));
+      const decide = vi.fn(async () => {
+        release();
+        return true;
+      });
+      const execute = vi.fn(
+        async (
+          _prompt: string,
+          _progress?: (message: string) => void,
+          _signal?: AbortSignal,
+          onApproval?: (approval: HostApproval) => void,
+        ) => {
+          onApproval?.({
+            taskId: "host-task",
+            id: approvalId,
+            title: "read file",
+          });
+          await finished;
+          return "done";
+        },
+      );
+      const f = setup(
+        execute,
+        undefined,
+        async () => "ready",
+        undefined,
+        decide,
+      );
+      await f.bot.handleUpdate(message("/start"));
+      await f.bot.handleUpdate(message("work"));
+      await vi.waitFor(() =>
+        expect(f.sent.some((t) => t.startsWith("Approval needed"))).toBe(true),
+      );
+      const index = f.sent.findIndex((t) => t.startsWith("Approval needed"));
+      const keyboard = (
+        f.markups[index] as {
+          inline_keyboard: { text: string; callback_data: string }[][];
+        }
+      ).inline_keyboard[0]!;
+      return { ...f, decide, approve: keyboard[0]!, deny: keyboard[1]! };
+    }
+
+    it("asks the owner in the task's chat with buttons bound to that approval", async () => {
+      const f = await pending();
+      const index = f.sent.findIndex((t) => t.startsWith("Approval needed"));
+      expect(f.destinations[index]).toBe(42);
+      expect(f.sent[index]).toContain("read file");
+      expect(f.approve.text).toBe("Approve");
+      expect(f.deny.text).toBe("Deny");
+      expect(f.approve.callback_data).toMatch(/^ap:[A-Za-z0-9_-]{12}:y$/);
+      expect(f.approve.callback_data).not.toContain("host-task");
+      expect(f.approve.callback_data).not.toContain(approvalId);
+      await f.bot.handleUpdate(callback(f.approve.callback_data));
+      await f.idle();
+    });
+
+    it("lets only the authorized owner answer, once, from the bound chat", async () => {
+      const f = await pending();
+      const data = f.approve.callback_data;
+      // Another allowlisted user, and an owner message from a different chat.
+      await f.bot.handleUpdate(callback(data, 73));
+      expect(f.callbackAnswers.at(-1)).toMatchObject({
+        text: "Not authorized.",
+        show_alert: true,
+      });
+      await f.bot.handleUpdate(callback(data, 42, 43));
+      expect(f.decide).not.toHaveBeenCalled();
+      // Garbage and foreign keys never reach the Host.
+      await f.bot.handleUpdate(callback("ap:AAAAAAAAAAAA:y"));
+      await f.bot.handleUpdate(callback("something-else"));
+      expect(f.decide).not.toHaveBeenCalled();
+      expect(f.callbackAnswers.at(-1)?.text).toBe("Unknown action.");
+      await f.bot.handleUpdate(callback(data));
+      expect(f.decide).toHaveBeenCalledExactlyOnceWith(
+        "host-task",
+        approvalId,
+        true,
+      );
+      expect(f.edits.at(-1)).toContain("Approved.");
+      await f.idle();
+      expect(f.sent.at(-1)).toBe("done");
+      // The same button cannot be used again, nor can the deny button.
+      await f.bot.handleUpdate(callback(data));
+      await f.bot.handleUpdate(callback(f.deny.callback_data));
+      expect(f.decide).toHaveBeenCalledTimes(1);
+      expect(f.callbackAnswers.at(-1)?.text).toContain("expired");
+    });
+
+    it("sends a denial to the Host when the owner presses Deny", async () => {
+      const f = await pending();
+      await f.bot.handleUpdate(callback(f.deny.callback_data));
+      expect(f.decide).toHaveBeenCalledExactlyOnceWith(
+        "host-task",
+        approvalId,
+        false,
+      );
+      expect(f.edits.at(-1)).toContain("Denied.");
+      await f.idle();
+    });
+
+    it("denies at the Host when the request cannot be delivered", async () => {
+      const decide = vi.fn(async () => true);
+      const f = setup(
+        async (_p, _g, _s, onApproval) => {
+          onApproval?.({ taskId: "host-task", id: approvalId, title: "x" });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return "done";
+        },
+        undefined,
+        async () => "ready",
+        undefined,
+        decide,
+      );
+      f.bot.api.config.use(async (prev, method, payload) =>
+        "reply_markup" in payload
+          ? ({ ok: false, error_code: 500, description: "down" } as never)
+          : prev(method, payload),
+      );
+      await f.bot.handleUpdate(message("/start"));
+      await f.bot.handleUpdate(message("work"));
+      await f.idle();
+      await vi.waitFor(() =>
+        expect(decide).toHaveBeenCalledExactlyOnceWith(
+          "host-task",
+          approvalId,
+          false,
+        ),
+      );
+    });
   });
 });

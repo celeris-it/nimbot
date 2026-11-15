@@ -55,6 +55,14 @@ export function createBot(
     isRunning(botId: number, chatId: number): boolean;
     stop(botId: number, chatId: number): boolean;
   },
+  /** Applies the owner's answer to a pending approval request. */
+  approvals?: {
+    answer(
+      key: string,
+      allow: boolean,
+      who: { botId: number; chatId: number },
+    ): Promise<"ok" | "expired">;
+  },
 ): Bot {
   let activeChatId: number | undefined;
   const bot = new Bot(config.telegramBotToken, {
@@ -68,10 +76,46 @@ export function createBot(
       !ctx.from ||
       !config.allowedUserIds.has(ctx.from.id) ||
       ctx.from.id !== config.agent.ownerId
-    )
+    ) {
+      // Never let anyone else answer an approval prompt, and say so.
+      if (ctx.callbackQuery)
+        await ctx
+          .answerCallbackQuery({ text: "Not authorized.", show_alert: true })
+          .catch(() => {});
       return;
+    }
     await next();
   });
+
+  bot.callbackQuery(/^ap:([A-Za-z0-9_-]{8,32}):([yn])$/, async (ctx) => {
+    const [, key, choice] = ctx.match as unknown as [string, string, string];
+    const allow = choice === "y";
+    const result =
+      (await approvals?.answer(key!, allow, {
+        botId: ctx.me.id,
+        chatId: ctx.chat!.id,
+      })) ?? "expired";
+    await ctx
+      .answerCallbackQuery({
+        text:
+          result === "ok"
+            ? allow
+              ? "Approved."
+              : "Denied."
+            : "This request has expired or was already answered.",
+      })
+      .catch(() => {});
+    // Remove the buttons so the same request cannot be answered twice.
+    const original = ctx.callbackQuery.message?.text ?? "Approval request";
+    await ctx
+      .editMessageText(
+        `${original}\n\n${result === "ok" ? (allow ? "Approved." : "Denied.") : "Expired or already answered."}`,
+      )
+      .catch(() => {});
+  });
+  bot.on("callback_query:data", (ctx) =>
+    ctx.answerCallbackQuery({ text: "Unknown action." }).catch(() => {}),
+  );
 
   bot.command("start", async (ctx) => {
     if (access && !access.canActivate(ctx.me.id, ctx.from!.id)) {

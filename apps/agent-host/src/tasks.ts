@@ -8,7 +8,13 @@ export function createTaskRunner(
   store: TaskStore,
   engine: Engine,
   timeoutMs = 120_000,
+  /** An unanswered approval request is denied after this long. */
+  approvalTimeoutMs = 300_000,
 ) {
+  const approvals = new Map<
+    string,
+    { taskId: string; settle: (allow: boolean, reason: string) => void }
+  >();
   let busy = false;
   let closing = false;
   let inserting: Promise<void> = Promise.resolve();
@@ -29,9 +35,58 @@ export function createTaskRunner(
       }
       currentId = id;
       let cancelRequested = false;
+      let approvalCount = 0;
+      let progressWrites: Promise<unknown> = Promise.resolve();
+      const denyPending = (reason: string) => {
+        for (const entry of [...approvals.values()])
+          if (entry.taskId === id) entry.settle(false, reason);
+      };
+      const requestApproval = (title: string) =>
+        new Promise<boolean>((resolve) => {
+          // Bounded, and never granted once the task is ending.
+          if (cancelRequested || closing || approvalCount >= 20) {
+            resolve(false);
+            return;
+          }
+          approvalCount++;
+          const approvalId = randomUUID();
+          let settled = false;
+          const timer = setTimeout(
+            () => settle(false, "timed out"),
+            approvalTimeoutMs,
+          );
+          const settle = (allow: boolean, reason: string) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            approvals.delete(approvalId);
+            progressWrites = progressWrites
+              .then(() =>
+                store.progress(
+                  id,
+                  `Approval ${allow ? "granted" : `denied (${reason})`}: ${title}`.slice(
+                    0,
+                    300,
+                  ),
+                ),
+              )
+              .catch(() => {});
+            resolve(allow);
+          };
+          approvals.set(approvalId, { taskId: id, settle });
+          progressWrites = progressWrites
+            .then(() =>
+              store.approval(
+                id,
+                JSON.stringify({ id: approvalId, title: title.slice(0, 300) }),
+              ),
+            )
+            .catch(() => settle(false, "could not be requested"));
+        });
       const cancelled = new Promise<never>((_, reject) => {
         cancelNow = () => {
           cancelRequested = true;
+          denyPending("task cancelled");
           reject(new Error("Task cancelled"));
         };
       });
@@ -40,7 +95,6 @@ export function createTaskRunner(
         let timer: ReturnType<typeof setTimeout> | undefined;
         let output = "";
         let progressCount = 0;
-        let progressWrites: Promise<unknown> = Promise.resolve();
         try {
           await store.update(id, { status: "running" });
           if (closing) throw new Error("Host is stopping");
@@ -59,6 +113,7 @@ export function createTaskRunner(
                   .then(() => store.progress(id, message.slice(0, 300)))
                   .catch(() => {});
               },
+              requestApproval,
             ),
             cancelled,
             new Promise<never>((_, reject) => {
@@ -68,6 +123,7 @@ export function createTaskRunner(
               );
             }),
           ]);
+          denyPending("task ended");
           await progressWrites;
           await store.update(id, {
             status: closing ? "interrupted" : "completed",
@@ -75,6 +131,7 @@ export function createTaskRunner(
             stopReason: reason,
           });
         } catch {
+          denyPending("task ended");
           await progressWrites;
           await store.update(id, {
             status: closing
@@ -105,12 +162,21 @@ export function createTaskRunner(
       cancelNow();
       return true;
     },
+    /** Answers one pending approval; the approval must belong to that task. */
+    decide(taskId: string, approvalId: string, allow: boolean): boolean {
+      const entry = approvals.get(approvalId);
+      if (!entry || entry.taskId !== taskId) return false;
+      entry.settle(allow, "by the owner");
+      return true;
+    },
     getCurrent: store.getCurrent,
     get: store.get,
     getEvents: store.getEvents,
     isBusy: () => busy,
     async close() {
       closing = true;
+      for (const entry of [...approvals.values()])
+        entry.settle(false, "host stopping");
       await inserting.catch(() => {});
       await engine.stop();
       await running;

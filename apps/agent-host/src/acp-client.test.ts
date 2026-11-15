@@ -87,6 +87,49 @@ describe("AcpClient", () => {
     });
   });
 
+  it.each([
+    ["waits for an asynchronous decision", async () => "later", "later"],
+    [
+      "cancels when the handler rejects",
+      async () => {
+        throw new Error("approver unavailable");
+      },
+      undefined,
+    ],
+  ])("%s", async (_name, onPermission, expected) => {
+    let outcome: unknown;
+    let request: unknown;
+    const { input, output } = fakeAgent((msg, send) => {
+      if (msg.method === "session/prompt") {
+        send({
+          id: 99,
+          method: "session/request_permission",
+          params: {
+            sessionId: "s1",
+            toolCall: { title: "Read /etc/hostname", kind: "read" },
+            options: [{ optionId: "ok", name: "Allow", kind: "allow_once" }],
+          },
+        });
+      } else if (msg.id === 99) {
+        outcome = msg.result;
+        send({ id: 1, result: { stopReason: "end_turn" } });
+      }
+    });
+    const client = new AcpClient(input, output, {
+      onPermission: (_options, info) => {
+        request = info;
+        return onPermission();
+      },
+    });
+    await client.prompt("s1", "hi");
+    expect(request).toEqual({ title: "Read /etc/hostname", kind: "read" });
+    expect(outcome).toEqual({
+      outcome: expected
+        ? { outcome: "selected", optionId: expected }
+        : { outcome: "cancelled" },
+    });
+  });
+
   it("sends cancel as a notification", async () => {
     const seen: Rpc[] = [];
     const { input, output } = fakeAgent((msg) => seen.push(msg));

@@ -9,6 +9,12 @@ export interface SessionUpdate {
   [key: string]: unknown;
 }
 
+/** What the engine wants to do, as described by the engine itself. */
+export interface PermissionRequest {
+  title?: string;
+  kind?: string;
+}
+
 export interface PermissionOption {
   optionId: string;
   name: string;
@@ -18,8 +24,14 @@ export interface PermissionOption {
 export interface AcpClientOptions {
   /** Called for every `session/update` notification (message chunks, tool calls, ...). */
   onUpdate?: (sessionId: string, update: SessionUpdate) => void;
-  /** Picks an option for `session/request_permission`. Return undefined to cancel. */
-  onPermission?: (options: PermissionOption[]) => string | undefined;
+  /**
+   * Picks an option for `session/request_permission`, possibly after waiting
+   * for a person. Return undefined (or reject) to cancel.
+   */
+  onPermission?: (
+    options: PermissionOption[],
+    request: PermissionRequest,
+  ) => string | undefined | Promise<string | undefined>;
 }
 
 interface Pending {
@@ -156,18 +168,33 @@ export class AcpClient {
         params.update as SessionUpdate,
       );
     } else if (message.method === "session/request_permission") {
-      const optionId = this.options.onPermission?.(
-        params.options as PermissionOption[],
-      );
-      this.send({
-        jsonrpc: "2.0",
-        id: message.id,
-        result: {
-          outcome: optionId
-            ? { outcome: "selected", optionId }
-            : { outcome: "cancelled" },
-        },
-      });
+      const toolCall = (params.toolCall ?? {}) as Record<string, unknown>;
+      const request: PermissionRequest = {
+        ...(typeof toolCall.title === "string"
+          ? { title: toolCall.title }
+          : {}),
+        ...(typeof toolCall.kind === "string" ? { kind: toolCall.kind } : {}),
+      };
+      // A failing or missing handler cancels the request, never approves it.
+      void Promise.resolve()
+        .then(() =>
+          this.options.onPermission?.(
+            params.options as PermissionOption[],
+            request,
+          ),
+        )
+        .catch(() => undefined)
+        .then((optionId) =>
+          this.send({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              outcome: optionId
+                ? { outcome: "selected", optionId }
+                : { outcome: "cancelled" },
+            },
+          }),
+        );
     } else if (message.id !== undefined) {
       this.send({
         jsonrpc: "2.0",

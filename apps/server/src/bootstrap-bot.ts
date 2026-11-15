@@ -8,7 +8,7 @@ import { createAgentAccess } from "./agent-access.js";
 import { createBot } from "./bot.js";
 import { createBotTasks } from "./bot-tasks.js";
 import type { TaskStore } from "./task-queue.js";
-import { createHostTasks } from "./host-tasks.js";
+import { createHostApprovals, createHostTasks } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 
 interface BootstrapStatus {
@@ -60,6 +60,7 @@ export function createBootstrapBot(
           createHostTasks(host, request, undefined, taskWait),
           () => registry.get(config.agent.id)?.instructions ?? "",
         ),
+        decide: createHostApprovals(host, request),
         access,
       });
       bot = makeBot(
@@ -72,6 +73,7 @@ export function createBootstrapBot(
         () => getHostStatus(host, request),
         access,
         tasks.control,
+        tasks.approvals,
       );
       // The installed grammY client accepts native signals; its declarations use a legacy shim.
       const info = await bot.api.getMe(
@@ -93,7 +95,7 @@ export function createBootstrapBot(
       bot.botInfo = info;
       tasks.attach(bot);
       await bot.start({
-        allowed_updates: ["message"],
+        allowed_updates: ["message", "callback_query"],
         onStart: async () => {
           if (controller.signal.aborted) {
             await bot!.stop();

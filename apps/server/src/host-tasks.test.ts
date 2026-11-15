@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createHostTasks, HostTaskError } from "./host-tasks.js";
+import {
+  createHostApprovals,
+  createHostTasks,
+  HostTaskError,
+} from "./host-tasks.js";
 
 const config = { url: "http://agent-host:3001", token: "x".repeat(32) };
 const accepted = () =>
@@ -226,4 +230,98 @@ it("gives up after its wait limit, tells the Host to cancel that task, and repor
   );
   await expect(run("hang")).rejects.toMatchObject({ kind: "timeout" });
   expect(requests).toContain("POST http://host:3001/tasks/t9/cancel");
+});
+
+describe("approvals", () => {
+  const host = { url: "http://host:3001", token: "a".repeat(64) };
+  const approvalId = "11111111-2222-3333-4444-555555555555";
+
+  it("hands approval requests to the callback and still returns the result", async () => {
+    const request = (async (input: string | URL | Request) =>
+      String(input).endsWith("/tasks")
+        ? Response.json({ id: "t1", status: "accepted" }, { status: 202 })
+        : Response.json({
+            id: "t1",
+            events: [
+              {
+                sequence: 1,
+                status: "approval",
+                output: JSON.stringify({
+                  id: approvalId,
+                  title: "read /etc/hostname",
+                }),
+              },
+              { sequence: 2, status: "completed", output: "done" },
+            ],
+          })) as typeof fetch;
+    const seen: unknown[] = [];
+    expect(
+      await createHostTasks(host, request, async () => {})(
+        "go",
+        undefined,
+        undefined,
+        (a) => seen.push(a),
+      ),
+    ).toBe("done");
+    expect(seen).toEqual([
+      { taskId: "t1", id: approvalId, title: "read /etc/hostname" },
+    ]);
+  });
+
+  it("rejects a malformed approval event instead of guessing", async () => {
+    const request = (async (input: string | URL | Request) =>
+      String(input).endsWith("/tasks")
+        ? Response.json({ id: "t1", status: "accepted" }, { status: 202 })
+        : Response.json({
+            id: "t1",
+            events: [{ sequence: 1, status: "approval", output: "not json" }],
+          })) as typeof fetch;
+    await expect(
+      createHostTasks(host, request, async () => {})("go"),
+    ).rejects.toMatchObject({ kind: "unavailable" });
+  });
+
+  it("sends the decision to the exact task and approval, authenticated", async () => {
+    const calls: {
+      url: string;
+      method?: string;
+      auth: string | null;
+      body: unknown;
+    }[] = [];
+    const request = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        auth: new Headers(init?.headers).get("Authorization"),
+        body: JSON.parse(String(init?.body)),
+      });
+      return Response.json({ status: "recorded" });
+    }) as typeof fetch;
+    const decide = createHostApprovals(host, request);
+    expect(await decide("t1", approvalId, true)).toBe(true);
+    expect(await decide("t1", approvalId, false)).toBe(true);
+    expect(calls).toEqual([
+      {
+        url: `http://host:3001/tasks/t1/approvals/${approvalId}`,
+        method: "POST",
+        auth: `Bearer ${host.token}`,
+        body: { decision: "allow" },
+      },
+      expect.objectContaining({ body: { decision: "deny" } }),
+    ]);
+    const failing = (async () =>
+      Response.json({}, { status: 404 })) as typeof fetch;
+    expect(
+      await createHostApprovals(host, failing)("t1", approvalId, true),
+    ).toBe(false);
+    const down = (async () => {
+      throw new TypeError("down");
+    }) as typeof fetch;
+    expect(await createHostApprovals(host, down)("t1", approvalId, true)).toBe(
+      false,
+    );
+  });
 });

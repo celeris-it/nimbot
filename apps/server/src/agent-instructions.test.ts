@@ -15,5 +15,10 @@ it("snapshots instructions per task and leaves bare prompts unchanged", async ()
   expect(execute.mock.calls[1]?.[0]).toContain("New instructions");
   instructions = "";
   await run("plain");
-  expect(execute).toHaveBeenLastCalledWith("plain", undefined, undefined);
+  expect(execute).toHaveBeenLastCalledWith(
+    "plain",
+    undefined,
+    undefined,
+    undefined,
+  );
 });

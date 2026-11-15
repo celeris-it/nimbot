@@ -1,9 +1,12 @@
+import type { HostApproval } from "./host-tasks.js";
+
 /** Snapshot settings at submission so edits cannot change an in-flight task. */
 export function withAgentInstructions(
   execute: (
     prompt: string,
     onProgress?: (message: string) => void,
     cancelSignal?: AbortSignal,
+    onApproval?: (approval: HostApproval) => void,
   ) => Promise<string>,
   getInstructions: () => string,
 ) {
@@ -11,6 +14,7 @@ export function withAgentInstructions(
     prompt: string,
     onProgress?: (message: string) => void,
     cancelSignal?: AbortSignal,
+    onApproval?: (approval: HostApproval) => void,
   ) => {
     const instructions = getInstructions();
     return execute(
@@ -19,6 +23,7 @@ export function withAgentInstructions(
         : prompt,
       onProgress,
       cancelSignal,
+      onApproval,
     );
   };
 }

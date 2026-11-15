@@ -5,7 +5,7 @@ import type { openHostCredentials } from "./host-credentials.js";
 import { openChatBinding } from "./chat-binding.js";
 import { createAgentAccess } from "./agent-access.js";
 import { createBot } from "./bot.js";
-import { createHostTasks } from "./host-tasks.js";
+import { createHostApprovals, createHostTasks } from "./host-tasks.js";
 import { createBotTasks } from "./bot-tasks.js";
 import type { TaskStore } from "./task-queue.js";
 import { getHostStatus } from "./agent-host.js";
@@ -88,6 +88,7 @@ export function createRegisteredBots(
           createHostTasks(host, request, undefined, config.taskWaitMs),
           () => registry.get(id)?.instructions ?? "",
         ),
+        decide: createHostApprovals(host, request),
         access,
       });
       connection.tasks = tasks;
@@ -109,6 +110,7 @@ export function createRegisteredBots(
         () => getHostStatus(host, request),
         access,
         tasks.control,
+        tasks.approvals,
       );
       connection.bot = bot;
       // Avoid init's automatic retries: one bounded identity check, without starting polling.
@@ -134,7 +136,7 @@ export function createRegisteredBots(
       bot.botInfo = info;
       tasks.attach(bot);
       await bot.start({
-        allowed_updates: ["message"],
+        allowed_updates: ["message", "callback_query"],
         onStart: async () => {
           if (connection.controller.signal.aborted) {
             await bot.stop();

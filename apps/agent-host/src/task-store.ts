@@ -25,7 +25,9 @@ const events = sqliteTable("task_events", {
   taskId: text("task_id")
     .notNull()
     .references(() => tasks.id),
-  status: text("status").$type<Task["status"] | "progress">().notNull(),
+  status: text("status")
+    .$type<Task["status"] | "progress" | "approval">()
+    .notNull(),
   output: text("output").notNull().default(""),
   stopReason: text("stop_reason"),
 });
@@ -81,6 +83,12 @@ export async function openTaskStore(url: string) {
       await db
         .insert(events)
         .values({ taskId: id, status: "progress", output: message });
+    },
+    /** An approval request for the owner; `output` carries JSON {id, title}. */
+    async approval(id: string, payload: string) {
+      await db
+        .insert(events)
+        .values({ taskId: id, status: "approval", output: payload });
     },
     async getCurrent() {
       const active = await db

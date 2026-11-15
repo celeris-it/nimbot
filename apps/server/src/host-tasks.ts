@@ -15,6 +15,56 @@ export class HostTaskError extends Error {
   }
 }
 
+export interface HostApproval {
+  taskId: string;
+  id: string;
+  title: string;
+}
+
+function parseApproval(taskId: string, output: unknown): HostApproval | null {
+  try {
+    const data = JSON.parse(String(output)) as Record<string, unknown>;
+    return typeof data.id === "string" &&
+      /^[a-f0-9-]{36}$/.test(data.id) &&
+      typeof data.title === "string"
+      ? { taskId, id: data.id, title: data.title.slice(0, 300) }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Sends the owner's decision for one approval to the Host that asked for it. */
+export function createHostApprovals(
+  config: AgentHostConfig,
+  request: typeof fetch = fetch,
+) {
+  return async (
+    taskId: string,
+    approvalId: string,
+    allow: boolean,
+  ): Promise<boolean> => {
+    try {
+      const response = await request(
+        `${config.url}/tasks/${encodeURIComponent(taskId)}/approvals/${encodeURIComponent(approvalId)}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ decision: allow ? "allow" : "deny" }),
+          signal: AbortSignal.timeout(5000),
+          redirect: "error",
+        },
+      );
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
+}
+
 /** Submit once, then observe persisted state. Never retry an ambiguous submission. */
 export function createHostTasks(
   config: AgentHostConfig,
@@ -28,6 +78,8 @@ export function createHostTasks(
     onProgress?: (message: string) => void,
     /** Aborting asks the Host to cancel this exact task; its final state still arrives as an event. */
     cancelSignal?: AbortSignal,
+    /** The agent wants the owner's permission for one action; decide via createHostApprovals. */
+    onApproval?: (approval: HostApproval) => void,
   ): Promise<string> => {
     if (cancelSignal?.aborted) throw new HostTaskError("cancelled");
     const deadline = AbortSignal.timeout(waitMs);
@@ -103,6 +155,16 @@ export function createHostTasks(
             if (typeof event.output !== "string")
               throw new HostTaskError("unavailable");
             return event.output;
+          }
+          if (event.status === "approval") {
+            const approval = parseApproval(accepted.id as string, event.output);
+            if (!approval) throw new HostTaskError("unavailable");
+            try {
+              onApproval?.(approval);
+            } catch {
+              /* The Host denies an unanswered request on its own. */
+            }
+            continue;
           }
           if (event.status === "progress") {
             if (typeof event.output !== "string")

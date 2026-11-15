@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openTaskStore, type TaskStore } from "./task-store.js";
 import { createTaskRunner } from "./tasks.js";
 import { createHostApi } from "./http.js";
@@ -14,11 +14,15 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
-async function setup(engine: Engine, timeout = 1000) {
+async function setup(
+  engine: Engine,
+  timeout = 1000,
+  approvalTimeout = 300_000,
+) {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-tasks-"));
   const url = pathToFileURL(join(dir, "tasks.sqlite")).href;
   const store = await openTaskStore(url);
-  const runner = createTaskRunner(store, engine, timeout);
+  const runner = createTaskRunner(store, engine, timeout, approvalTimeout);
   cleanups.push(async () => {
     await runner.close();
     store.close();
@@ -433,4 +437,116 @@ it("fails a task that exceeds its timeout, stops the engine, and accepts the nex
   expect((await store.getEvents(first)).at(-1)?.status).toBe("failed");
   const next = (await runner.submit("after the timeout"))!;
   expect((await settled(store, next)).status).toBe("completed");
+});
+
+describe("approvals", () => {
+  async function pendingApproval(
+    store: TaskStore,
+    id: string,
+  ): Promise<{ id: string; title: string }> {
+    let found: { id: string; title: string } | undefined;
+    await vi.waitFor(async () => {
+      const event = (await store.getEvents(id)).find(
+        (e) => e.status === "approval",
+      );
+      expect(event).toBeDefined();
+      found = JSON.parse(event!.output);
+    });
+    return found!;
+  }
+  const askingEngine = (answers: boolean[]): Engine => ({
+    async run(_prompt, onText, _onProgress, requestApproval) {
+      answers.push((await requestApproval?.("read /etc/hostname")) ?? false);
+      onText("finished");
+      return "end_turn";
+    },
+    async stop() {},
+  });
+
+  it("pauses the engine until the owner allows exactly that action", async () => {
+    const answers: boolean[] = [];
+    const { runner, store, request } = await setup(askingEngine(answers));
+    const id = (await runner.submit("needs approval"))!;
+    const approval = await pendingApproval(store, id);
+    expect(approval.title).toBe("read /etc/hostname");
+    expect(answers).toEqual([]);
+    expect((await store.get(id))?.status).toBe("running");
+    const path = `/tasks/${id}/approvals/${approval.id}`;
+    expect((await request(path, { decision: "allow" }, "wrong")).status).toBe(
+      401,
+    );
+    expect((await request(path, { decision: "maybe" })).status).toBe(400);
+    expect(
+      (
+        await request(`/tasks/other/approvals/${approval.id}`, {
+          decision: "allow",
+        })
+      ).status,
+    ).toBe(404);
+    expect(answers).toEqual([]);
+    expect((await request(path, { decision: "allow" })).status).toBe(200);
+    expect((await settled(store, id)).status).toBe("completed");
+    expect(answers).toEqual([true]);
+    // A decision can be recorded once only.
+    expect((await request(path, { decision: "deny" })).status).toBe(404);
+    expect(
+      (await store.getEvents(id)).some((e) =>
+        e.output.startsWith("Approval granted: read /etc/hostname"),
+      ),
+    ).toBe(true);
+  });
+
+  it("denies when the owner denies", async () => {
+    const answers: boolean[] = [];
+    const { runner, store, request } = await setup(askingEngine(answers));
+    const id = (await runner.submit("needs approval"))!;
+    const approval = await pendingApproval(store, id);
+    await request(`/tasks/${id}/approvals/${approval.id}`, {
+      decision: "deny",
+    });
+    await settled(store, id);
+    expect(answers).toEqual([false]);
+  });
+
+  it("denies an unanswered request after its timeout", async () => {
+    const answers: boolean[] = [];
+    const { runner, store } = await setup(askingEngine(answers), 5000, 30);
+    const id = (await runner.submit("needs approval"))!;
+    await settled(store, id);
+    expect(answers).toEqual([false]);
+    expect(
+      (await store.getEvents(id)).some((e) =>
+        e.output.includes("denied (timed out)"),
+      ),
+    ).toBe(true);
+  });
+
+  it("denies pending approvals when the task is cancelled and cannot be approved afterwards", async () => {
+    const answers: boolean[] = [];
+    const { runner, store } = await setup(askingEngine(answers), 60_000);
+    const id = (await runner.submit("needs approval"))!;
+    const approval = await pendingApproval(store, id);
+    expect(runner.cancel(id)).toBe(true);
+    await settled(store, id);
+    expect(answers).toEqual([false]);
+    expect(runner.decide(id, approval.id, true)).toBe(false);
+  });
+
+  it("denies when no approver is available to the engine", async () => {
+    const answers: boolean[] = [];
+    const { runner, store } = await setup({
+      async run(_p, _t, _g, requestApproval) {
+        answers.push((await requestApproval?.("x")) ?? false);
+        return "end_turn";
+      },
+      async stop() {},
+    });
+    const id = (await runner.submit("task"))!;
+    await vi.waitFor(async () =>
+      expect(
+        (await store.getEvents(id)).some((e) => e.status === "approval"),
+      ).toBe(true),
+    );
+    expect(runner.decide(id, "unknown", true)).toBe(false);
+  });
 });

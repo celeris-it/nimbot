@@ -36,6 +36,13 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );
+  app.use(
+    "/tasks/:id/approvals/:approvalId",
+    bodyLimit({
+      maxSize: 1024,
+      onError: (c) => c.json({ error: "Request too large" }, 413),
+    }),
+  );
   app.post("/tasks", async (c) => {
     if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
     let body: unknown;
@@ -67,6 +74,28 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
     } catch {
       return c.json({ error: "Task state unavailable" }, 503);
     }
+  });
+  app.post("/tasks/:id/approvals/:approvalId", async (c) => {
+    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
+    const decision =
+      typeof body === "object" && body !== null && "decision" in body
+        ? body.decision
+        : undefined;
+    if (decision !== "allow" && decision !== "deny")
+      return c.json({ error: "decision must be allow or deny" }, 400);
+    return runner.decide(
+      c.req.param("id"),
+      c.req.param("approvalId"),
+      decision === "allow",
+    )
+      ? c.json({ status: "recorded" })
+      : c.json({ error: "No such pending approval" }, 404);
   });
   app.get("/tasks/current", async (c) => {
     if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
