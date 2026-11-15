@@ -529,13 +529,15 @@ Agent containers have unrestricted outbound network access in the MVP, including
 
 ### Tasks
 
-- [ ] Dockerfiles for both apps, `compose.yaml`, and `.env.example` exist, with restart policies and health checks.
+- [x] Dockerfiles for both apps, `compose.yaml`, and `.env.example` exist, with restart policies and health checks.
 - [ ] A fresh install on a clean Linux server works by following the documentation alone.
 - [ ] The documentation covers installation, panel administrator setup, HTTPS access, per-agent BotFather token linking and chat activation, token replacement, AI provider authentication, environment variables, and commands.
 - [ ] The documentation covers backup and restore, troubleshooting, and security limitations.
-- [ ] The repo has an Apache 2.0 `LICENSE`, `CONTRIBUTING.md`, and `.gitignore`.
-- [ ] CI runs linting, type checking, and tests.
+- [x] The repo has an Apache 2.0 `LICENSE`, `CONTRIBUTING.md`, and `.gitignore`.
+- [x] CI runs linting, type checking, and tests.
 - [ ] The end-to-end test in section 12 passes, versioned Docker images are built, and `v0.1.0` is tagged with release notes.
+
+Packaging status: `infrastructure/docker/server.Dockerfile` and `agent-host.Dockerfile` build both images (verified with `docker compose build`), and `compose.yaml` sets `restart: unless-stopped`, health checks, non-root users, dropped capabilities, and resource limits for both services; `.env.example` lists every setting including `TASK_TIMEOUT_SECONDS`. `LICENSE` (Apache 2.0), `CONTRIBUTING.md`, and `.gitignore` are present. `.github/workflows/ci.yml` runs `pnpm install --frozen-lockfile`, lint, typecheck, build, and tests on pushes to `main` and pull requests; the root `packageManager` field pins pnpm for it. The same commands pass locally, but the workflow has not run on GitHub yet. Installation documentation, the clean-server walkthrough, and the release steps remain open.
 
 ### Acceptance Criteria
 
