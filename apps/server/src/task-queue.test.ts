@@ -423,3 +423,40 @@ describe("duplicate Telegram updates", () => {
     }
   });
 });
+
+it("logs task start and finish with agent and task IDs but never the prompt", async () => {
+  const { createLogger } = await import("./logger.js");
+  const lines: Record<string, unknown>[] = [];
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-queue-log-"));
+  const store = openTaskStore(join(dir, "state.sqlite"));
+  try {
+    const queue = createTaskQueue({
+      agentId: "developer",
+      store,
+      execute: async (task) => {
+        if (task.prompt.includes("fail")) throw new Error("secret detail");
+        return "ok";
+      },
+      deliver: async () => {},
+      log: createLogger((_level, line) => lines.push(JSON.parse(line))),
+    });
+    const first = queue.submit(1, 1, "do the secret thing");
+    queue.submit(1, 1, "please fail");
+    await queue.idle();
+    const events = lines.map((l) => `${l.event}:${l.status ?? ""}`);
+    expect(events).toEqual([
+      "task.started:",
+      "task.finished:completed",
+      "task.started:",
+      "task.finished:failed",
+    ]);
+    expect(lines.every((l) => l.agentId === "developer" && l.taskId)).toBe(
+      true,
+    );
+    expect(lines[0]!.taskId).toBe(first.id);
+    expect(JSON.stringify(lines)).not.toMatch(/secret/);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

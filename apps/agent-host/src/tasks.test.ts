@@ -550,3 +550,37 @@ describe("approvals", () => {
     expect(runner.decide(id, "unknown", true)).toBe(false);
   });
 });
+
+it("logs the task lifecycle with the task ID and without prompt or output", async () => {
+  const { createLogger } = await import("./logger.js");
+  const lines: Record<string, unknown>[] = [];
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-tasks-log-"));
+  const store = await openTaskStore(pathToFileURL(join(dir, "t.sqlite")).href);
+  const runner = createTaskRunner(
+    store,
+    {
+      run: async (_prompt, onText) => {
+        onText("private output");
+        return "end_turn";
+      },
+      stop: async () => {},
+    },
+    1000,
+    1000,
+    createLogger((_level, line) => lines.push(JSON.parse(line))),
+  );
+  try {
+    const id = await runner.submit("private prompt");
+    await vi.waitFor(() => expect(runner.isBusy()).toBe(false));
+    expect(lines.map((l) => `${l.event}:${l.status ?? ""}`)).toEqual([
+      "task.accepted:",
+      "task.finished:completed",
+    ]);
+    expect(lines.every((l) => l.taskId === id)).toBe(true);
+    expect(JSON.stringify(lines)).not.toContain("private");
+  } finally {
+    await runner.close();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -6,6 +6,7 @@ import { createTaskRunner } from "./tasks.js";
 import { createOpenCodeEngine, createSessionFile } from "./opencode-engine.js";
 import { serve } from "@hono/node-server";
 import { createHostApi, readHostConfig } from "./http.js";
+import { log } from "./logger.js";
 import { readTaskTimeoutMs } from "./task-timeout.js";
 
 try {
@@ -27,7 +28,7 @@ try {
   const app = createHostApi(config, runner);
   const server = serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 3001 });
   server.on("error", () => {
-    console.error("Could not start Agent Host HTTP server.");
+    log.error("host.http_start_failed");
     process.exitCode = 1;
     void stop();
   });
@@ -40,7 +41,7 @@ try {
     try {
       await runner.close();
     } catch {
-      console.error("Could not finalize running task during shutdown.");
+      log.error("host.shutdown_finalize_failed");
       process.exitCode = 1;
     } finally {
       store.close();
@@ -48,10 +49,10 @@ try {
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  console.log("Agent Host API listening on port 3001.");
+  log.info("host.listening", { port: 3001 });
 } catch {
-  console.error(
-    "Could not initialize Agent Host. Check AGENT_HOST_TOKEN, TASK_TIMEOUT_SECONDS and writable state storage.",
-  );
+  log.error("host.init_failed", {
+    hint: "Check AGENT_HOST_TOKEN, TASK_TIMEOUT_SECONDS and writable state storage.",
+  });
   process.exitCode = 1;
 }

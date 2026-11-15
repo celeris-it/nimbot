@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { HostTaskError } from "./host-tasks.js";
+import { log as defaultLog, type Logger } from "./logger.js";
 
 export type TaskStatus =
   "queued" | "running" | "completed" | "failed" | "interrupted";
@@ -211,7 +212,9 @@ export function createTaskQueue(config: {
   /** Re-checks persisted setup right before a task starts. */
   admit?: (task: QueuedTask) => boolean;
   deliver: (task: QueuedTask, outcome: TaskOutcome) => Promise<void>;
+  log?: Logger;
 }) {
+  const log = (config.log ?? defaultLog).child({ agentId: config.agentId });
   let closed = false;
   const draining = new Map<string, Promise<void>>();
   const active = new Map<string, AbortController>();
@@ -228,6 +231,7 @@ export function createTaskQueue(config: {
           return;
         }
         if (!task) return;
+        log.info("task.started", { taskId: task.id });
         let outcome: TaskOutcome;
         const controller = new AbortController();
         active.set(key, controller);
@@ -266,22 +270,25 @@ export function createTaskQueue(config: {
         active.delete(key);
         // Progress must reach the chat before the final result does.
         await Promise.allSettled(sending);
+        const finalStatus = outcome.ok
+          ? "completed"
+          : outcome.kind === "interrupted" || outcome.kind === "cancelled"
+            ? outcome.kind
+            : "failed";
+        log[outcome.ok ? "info" : "warn"]("task.finished", {
+          taskId: task.id,
+          status: finalStatus,
+          ...(outcome.ok ? {} : { reason: outcome.kind }),
+        });
         try {
-          config.store.finish(
-            task.id,
-            outcome.ok
-              ? "completed"
-              : outcome.kind === "interrupted" || outcome.kind === "cancelled"
-                ? outcome.kind
-                : "failed",
-          );
+          config.store.finish(task.id, finalStatus);
         } catch {
           /* The store may be closed during shutdown. */
         }
         try {
           await config.deliver(task, outcome);
         } catch {
-          /* Telegram delivery failures must not block the queue. */
+          log.warn("task.delivery_failed", { taskId: task.id });
         }
       }
     } finally {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Engine } from "./engine.js";
 import type { TaskStore } from "./task-store.js";
+import { log as defaultLog, type Logger } from "./logger.js";
 
 const MAX_PROGRESS_EVENTS = 100;
 
@@ -10,6 +11,7 @@ export function createTaskRunner(
   timeoutMs = 120_000,
   /** An unanswered approval request is denied after this long. */
   approvalTimeoutMs = 300_000,
+  log: Logger = defaultLog,
 ) {
   const approvals = new Map<
     string,
@@ -34,6 +36,7 @@ export function createTaskRunner(
         throw error;
       }
       currentId = id;
+      log.info("task.accepted", { taskId: id });
       let cancelRequested = false;
       let approvalCount = 0;
       let progressWrites: Promise<unknown> = Promise.resolve();
@@ -125,22 +128,19 @@ export function createTaskRunner(
           ]);
           denyPending("task ended");
           await progressWrites;
-          await store.update(id, {
-            status: closing ? "interrupted" : "completed",
-            output,
-            stopReason: reason,
-          });
+          const status = closing ? "interrupted" : "completed";
+          log.info("task.finished", { taskId: id, status, stopReason: reason });
+          await store.update(id, { status, output, stopReason: reason });
         } catch {
           denyPending("task ended");
           await progressWrites;
-          await store.update(id, {
-            status: closing
-              ? "interrupted"
-              : cancelRequested
-                ? "cancelled"
-                : "failed",
-            output,
-          });
+          const status = closing
+            ? "interrupted"
+            : cancelRequested
+              ? "cancelled"
+              : "failed";
+          log.warn("task.finished", { taskId: id, status });
+          await store.update(id, { status, output });
         } finally {
           if (timer) clearTimeout(timer);
           currentId = undefined;
@@ -153,7 +153,9 @@ export function createTaskRunner(
         }
       })();
       // Storage failures remain failures; never crash the host through an unhandled rejection.
-      void running.catch(() => console.error("Could not finalize task state."));
+      void running.catch(() =>
+        log.error("task.finalize_failed", { taskId: id }),
+      );
       return id;
     },
     /** Cancels only the named task, and only while it is the one running. */

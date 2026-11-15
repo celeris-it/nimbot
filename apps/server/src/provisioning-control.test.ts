@@ -64,6 +64,7 @@ it("does not signal cancellation if persistence fails and catches background fai
     registry.finishProvisioning(id, "failed");
     throw new Error("private provider details");
   });
+  vi.stubEnv("NIMBOT_LOG", "");
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
     control.start("a");
@@ -78,9 +79,16 @@ it("does not signal cancellation if persistence fails and catches background fai
     save.mockRestore();
     release();
     await vi.waitFor(() => expect(control.canCancel("a")).toBe(false));
-    expect(log).toHaveBeenCalledWith("Agent provisioning did not complete.");
+    expect(log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(log.mock.calls[0]![0]))).toMatchObject({
+      level: "error",
+      event: "provisioning.failed",
+      agentId: "a",
+    });
+    expect(String(log.mock.calls[0]![0])).not.toContain("private provider");
   } finally {
     log.mockRestore();
+    vi.unstubAllEnvs();
     registry.close();
   }
 });

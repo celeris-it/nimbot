@@ -1,3 +1,4 @@
+import { log } from "./logger.js";
 import type { HostStatus } from "./agent-host.js";
 import type { ChatBinding } from "./chat-binding.js";
 import { splitTelegramText } from "./telegram-text.js";
@@ -236,6 +237,8 @@ export function createBot(
   });
 
   // Never log Telegram errors verbatim: they may contain tokens or message text.
-  bot.catch(() => console.error("Telegram update failed."));
+  bot.catch(() =>
+    log.error("telegram.update_failed", { agentId: config.agent.id }),
+  );
   return bot;
 }

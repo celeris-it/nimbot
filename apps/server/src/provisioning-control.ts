@@ -1,3 +1,4 @@
+import { log } from "./logger.js";
 import type { openAgentRegistry } from "./agent-registry.js";
 
 /** Owns only live provisioning attempts, never cleanup operations or ready containers. */
@@ -25,7 +26,7 @@ export function createProvisioningControl(
       // The coordinator persists terminal states. Never leak provider errors or
       // leave a rejected background attempt unhandled after the panel redirects.
       void run(id).catch(() =>
-        console.error("Agent provisioning did not complete."),
+        log.error("provisioning.failed", { agentId: id }),
       );
     },
     canCancel: (id: string) => attempts.has(id),

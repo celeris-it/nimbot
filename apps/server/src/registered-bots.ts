@@ -1,3 +1,4 @@
+import { log } from "./logger.js";
 import { GrammyError } from "grammy";
 import type { openAgentRegistry } from "./agent-registry.js";
 import type { openBotSecrets } from "./bot-secret.js";
@@ -150,6 +151,7 @@ export function createRegisteredBots(
             return;
           }
           connection.state = { status: "polling" };
+          log.info("bot.polling", { agentId: id });
           tasks.resume();
         },
       });
@@ -169,6 +171,14 @@ export function createRegisteredBots(
               : "telegram_unavailable",
         };
     } finally {
+      if (
+        connection.state.status === "failed" ||
+        connection.state.status === "blocked"
+      )
+        log.error("bot.connection_failed", {
+          agentId: id,
+          reason: connection.state.failure,
+        });
       connection.tasks?.close();
       try {
         binding?.close();

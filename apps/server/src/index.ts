@@ -1,3 +1,4 @@
+import { log } from "./logger.js";
 import { createBootstrapBot } from "./bootstrap-bot.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createAgentAccess } from "./agent-access.js";
@@ -50,9 +51,12 @@ async function main(): Promise<void> {
     hostConfig = readAgentHostConfig(process.env);
     panelConfig = readPanelConfig(process.env);
   } catch (error) {
-    console.error(
-      error instanceof Error ? error.message : "Invalid server configuration.",
-    );
+    log.error("server.config_invalid", {
+      message:
+        error instanceof Error
+          ? error.message
+          : "Invalid server configuration.",
+    });
     process.exitCode = 1;
     return;
   }
@@ -80,9 +84,9 @@ async function main(): Promise<void> {
     taskStore.markRunningInterrupted();
   } catch {
     registry?.close();
-    console.error(
-      "Could not initialize server state. Check SERVER_STATE_DIR and writable storage.",
-    );
+    log.error("server.state_init_failed", {
+      hint: "Check SERVER_STATE_DIR and writable storage.",
+    });
     process.exitCode = 1;
     return;
   }
@@ -363,13 +367,13 @@ async function main(): Promise<void> {
     port: panelConfig.port,
   });
   server.on("error", () => {
-    console.error(
-      "Could not start the panel HTTP server. Check PANEL_HOST and PANEL_PORT.",
-    );
+    log.error("server.panel_start_failed", {
+      hint: "Check PANEL_HOST and PANEL_PORT.",
+    });
     stop();
     process.exitCode = 1;
   });
-  console.log(`Nimbot panel: ${panelConfig.origin}`);
+  log.info("server.panel_listening", { origin: panelConfig.origin });
   const bootstrap = createBootstrapBot(
     registry,
     config,
@@ -385,13 +389,13 @@ async function main(): Promise<void> {
   const stop = () => {
     provisioningShutdown.abort();
     void registeredBots?.close().catch(() => {
-      console.error("Could not stop registered bot connections.");
+      log.error("server.registered_bots_stop_failed");
       process.exitCode = 1;
     });
     server.close();
     if ("closeIdleConnections" in server) server.closeIdleConnections();
     void bootstrap.stop().catch(() => {
-      console.error("Could not stop bootstrap Telegram polling.");
+      log.error("server.bootstrap_stop_failed");
       process.exitCode = 1;
     });
   };

@@ -1,3 +1,4 @@
+import { log } from "./logger.js";
 import type { openAgentRegistry } from "./agent-registry.js";
 import type { openBotSecrets } from "./bot-secret.js";
 import type { ChatBinding } from "./chat-binding.js";
@@ -120,7 +121,10 @@ export function createBootstrapBot(
           status.telegram = "connected";
           delete status.telegramFailure;
           status.botUsername = info.username;
-          console.log("Nimbot Server started with Telegram long polling.");
+          log.info("bot.polling", {
+            agentId: config.agent.id,
+            bot: info.username,
+          });
         },
       });
     } catch (error) {
@@ -130,9 +134,11 @@ export function createBootstrapBot(
           (error as { error_code: number }).error_code === 401
             ? "invalid_token"
             : "unavailable";
-        console.error(
-          "Bootstrap Telegram connection failed. Check the saved credential, token, network, and whether another instance is running.",
-        );
+        log.error("bot.connection_failed", {
+          agentId: config.agent.id,
+          reason: status.telegramFailure,
+          hint: "Check the saved credential, token, network, and whether another instance is running.",
+        });
       }
     } finally {
       tasks?.close();

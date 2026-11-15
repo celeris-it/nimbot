@@ -415,6 +415,7 @@ it("retries transient identity-check failures a bounded number of times, then re
 });
 
 it("shows a revoked bootstrap token without retrying it or stopping other bots", async () => {
+  vi.stubEnv("NIMBOT_LOG", "");
   const f = await fixture();
   try {
     f.errors.set("bootstrap:getMe", 401);
