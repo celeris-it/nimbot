@@ -27,6 +27,10 @@ export function readContainerConfig(
 export function createContainerControl(
   config: ContainerConfig,
   onVerified: (id: string) => void = () => {},
+  recordOperation: (
+    action: "start" | "stop",
+    status: "pending" | "completed" | "failed",
+  ) => void = () => {},
 ) {
   let busy = false;
   function call(
@@ -82,12 +86,17 @@ export function createContainerControl(
       try {
         const container = await inspect();
         onVerified(container.id);
+        recordOperation(action, "pending");
         const response = await call(
           `/containers/${container.id}/${action}${action === "stop" ? "?t=10" : ""}`,
           "POST",
         );
         if (![204, 304].includes(response.code))
           throw new Error("Container operation failed");
+        recordOperation(action, "completed");
+      } catch (error) {
+        recordOperation(action, "failed");
+        throw error;
       } finally {
         busy = false;
       }

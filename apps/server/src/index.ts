@@ -68,8 +68,11 @@ async function main(): Promise<void> {
     chatActivated: false,
   };
   const container = containerConfig
-    ? createContainerControl(containerConfig, (id) =>
-        registry.setContainerRef(config.agent.id, id),
+    ? createContainerControl(
+        containerConfig,
+        (id) => registry.setContainerRef(config.agent.id, id),
+        (action, state) =>
+          registry.recordContainerOperation(config.agent.id, action, state),
       )
     : undefined;
   const panel = createPanel(
@@ -78,6 +81,7 @@ async function main(): Promise<void> {
       ...status,
       agentName: registry.get(config.agent.id)!.name,
       host: await getHostStatus(hostConfig),
+      containerOperation: registry.getContainerOperation(config.agent.id),
     }),
     Date.now,
     {

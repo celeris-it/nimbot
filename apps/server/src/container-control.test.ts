@@ -14,6 +14,7 @@ it("inspects the configured label and uses the immutable container ID for start/
   const id = "a".repeat(64);
   let label = "dev";
   let running = false;
+  let fail = false;
   const posts: string[] = [];
   const server = createServer((req, res) => {
     if (req.method === "GET") {
@@ -29,14 +30,16 @@ it("inspects the configured label and uses the immutable container ID for start/
     }
     posts.push(req.url!);
     running = req.url!.endsWith("/start");
-    res.statusCode = 204;
+    res.statusCode = fail ? 500 : 204;
     res.end();
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   const refs: string[] = [];
+  const operations: string[] = [];
   const control = createContainerControl(
     { socketPath, target: "configured-host", agentId: "dev" },
     (value) => refs.push(value),
+    (action, status) => operations.push(`${action}:${status}`),
   );
   try {
     expect(await control.status()).toBe("stopped");
@@ -49,9 +52,30 @@ it("inspects the configured label and uses the immutable container ID for start/
       `/v1.47/containers/${id}/stop?t=10`,
     ]);
     expect(refs).toEqual([id, id]);
+    expect(operations).toEqual([
+      "start:pending",
+      "start:completed",
+      "stop:pending",
+      "stop:completed",
+    ]);
+    fail = true;
+    await expect(control.action("start")).rejects.toThrow("operation failed");
+    expect(operations.slice(-2)).toEqual(["start:pending", "start:failed"]);
+    const refused = createContainerControl(
+      { socketPath, target: "configured-host", agentId: "dev" },
+      () => {},
+      (_action, status) => {
+        if (status === "pending") throw new Error("Storage unavailable");
+      },
+    );
+    await expect(refused.action("start")).rejects.toThrow(
+      "Storage unavailable",
+    );
+    expect(posts).toHaveLength(3);
     label = "other-agent";
     await expect(control.action("start")).rejects.toThrow("not assigned");
-    expect(posts).toHaveLength(2);
+    expect(posts).toHaveLength(3);
+    expect(operations.at(-1)).toBe("start:failed");
     expect(await control.status()).toBe("unavailable");
   } finally {
     await new Promise<void>((resolve, reject) =>

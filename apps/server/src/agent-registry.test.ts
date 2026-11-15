@@ -36,7 +36,7 @@ it("migrates once and restores metadata without storing tokens", async () => {
       expect(
         db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
           ?.total,
-      ).toBe(1);
+      ).toBe(2);
     } finally {
       db.close();
     }
@@ -81,6 +81,38 @@ it("preserves existing activation and refuses reuse of a legacy bot", async () =
     }
   } finally {
     binding.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("persists lifecycle outcomes and marks only pending operations interrupted on restart", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-operations-"));
+  const path = join(dir, "server.sqlite");
+  try {
+    const registry = openAgentRegistry(path);
+    registry.syncConfigured({ id: "a", name: "A", ownerId: 42 });
+    registry.syncConfigured({ id: "b", name: "B", ownerId: 42 });
+    registry.recordContainerOperation("a", "start", "pending");
+    registry.recordContainerOperation("b", "stop", "completed");
+    expect(() =>
+      registry.recordContainerOperation("missing", "start", "pending"),
+    ).toThrow("not registered");
+    registry.close();
+    const restored = openAgentRegistry(path);
+    try {
+      expect(restored.getContainerOperation("a")).toEqual({
+        action: "start",
+        status: "interrupted",
+        updatedAt: expect.any(Number),
+      });
+      expect(restored.getContainerOperation("b")?.status).toBe("completed");
+      restored.recordContainerOperation("a", "start", "failed");
+      expect(restored.getContainerOperation("a")?.status).toBe("failed");
+      expect(restored.getContainerOperation("missing")).toBeUndefined();
+    } finally {
+      restored.close();
+    }
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

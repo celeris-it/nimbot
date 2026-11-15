@@ -11,6 +11,12 @@ export interface RegisteredAgent {
   containerRef: string | null;
 }
 
+export interface ContainerOperation {
+  action: "start" | "stop";
+  status: "pending" | "completed" | "failed" | "interrupted";
+  updatedAt: number;
+}
+
 /** Metadata only; provider and Telegram tokens never enter the registry. */
 export function openAgentRegistry(path: string) {
   const db = new DatabaseSync(path);
@@ -35,6 +41,22 @@ export function openAgentRegistry(path: string) {
         container_ref TEXT
       ); INSERT INTO registry_migrations(version) VALUES (1)`);
     }
+    if (
+      !db
+        .prepare("SELECT version FROM registry_migrations WHERE version = 2")
+        .get()
+    ) {
+      db.exec(`CREATE TABLE container_operations (
+        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+        action TEXT NOT NULL CHECK(action IN ('start', 'stop')),
+        status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'failed', 'interrupted')),
+        updated_at INTEGER NOT NULL
+      ); INSERT INTO registry_migrations(version) VALUES (2)`);
+    }
+    // A lost response cannot establish whether Docker completed the operation.
+    db.prepare(
+      "UPDATE container_operations SET status = 'interrupted', updated_at = ? WHERE status = 'pending'",
+    ).run(Date.now());
     db.exec("COMMIT");
   } catch (error) {
     try {
@@ -88,6 +110,26 @@ export function openAgentRegistry(path: string) {
         )
         .run(botId, botUsername, id);
       if (!result.changes) throw new Error("Agent is not registered");
+    },
+    recordContainerOperation(
+      id: string,
+      action: ContainerOperation["action"],
+      status: ContainerOperation["status"],
+    ) {
+      if (!db.prepare("SELECT id FROM agents WHERE id = ?").get(id))
+        throw new Error("Agent is not registered");
+      db.prepare(
+        `INSERT INTO container_operations (agent_id, action, status, updated_at)
+        VALUES (?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET
+        action = excluded.action, status = excluded.status, updated_at = excluded.updated_at`,
+      ).run(id, action, status, Date.now());
+    },
+    getContainerOperation(id: string): ContainerOperation | undefined {
+      return db
+        .prepare(
+          "SELECT action, status, updated_at AS updatedAt FROM container_operations WHERE agent_id = ?",
+        )
+        .get(id) as unknown as ContainerOperation | undefined;
     },
     setContainerRef(id: string, containerId: string) {
       const result = db
