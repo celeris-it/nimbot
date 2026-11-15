@@ -63,19 +63,24 @@ export function createContainerControl(
     const response = await call(
       `/containers/${encodeURIComponent(config.target)}/json`,
     );
+    if (response.code === 404) return undefined;
     if (response.code !== 200) throw new Error("Container unavailable");
     const data = JSON.parse(response.body);
     if (
+      typeof data?.Id !== "string" ||
       !/^[a-f0-9]{64}$/.test(data.Id) ||
+      typeof data.State?.Running !== "boolean" ||
       data.Config?.Labels?.["io.nimbot.agent-id"] !== config.agentId
     )
       throw new Error("Container is not assigned to this agent");
     return { id: data.Id as string, running: data.State?.Running === true };
   }
   return {
-    async status(): Promise<"running" | "stopped" | "unavailable"> {
+    async status(): Promise<"running" | "stopped" | "missing" | "unavailable"> {
       try {
-        return (await inspect()).running ? "running" : "stopped";
+        const container = await inspect();
+        if (!container) return "missing";
+        return container.running ? "running" : "stopped";
       } catch {
         return "unavailable";
       }
@@ -85,6 +90,7 @@ export function createContainerControl(
       busy = true;
       try {
         const container = await inspect();
+        if (!container) throw new Error("Container missing");
         onVerified(container.id);
         recordOperation(action, "pending");
         const response = await call(

@@ -15,15 +15,18 @@ it("inspects the configured label and uses the immutable container ID for start/
   let label = "dev";
   let running = false;
   let fail = false;
+  let inspectionCode = 200;
+  let malformed = false;
   const posts: string[] = [];
   const server = createServer((req, res) => {
     if (req.method === "GET") {
+      res.statusCode = inspectionCode;
       res.setHeader("Content-Type", "application/json");
       res.end(
         JSON.stringify({
           Id: id,
           Config: { Labels: { "io.nimbot.agent-id": label } },
-          State: { Running: running },
+          State: malformed ? {} : { Running: running },
         }),
       );
       return;
@@ -72,6 +75,18 @@ it("inspects the configured label and uses the immutable container ID for start/
       "Storage unavailable",
     );
     expect(posts).toHaveLength(3);
+    inspectionCode = 404;
+    expect(await control.status()).toBe("missing");
+    await expect(control.action("start")).rejects.toThrow("Container missing");
+    expect(posts).toHaveLength(3);
+    inspectionCode = 500;
+    expect(await control.status()).toBe("unavailable");
+    inspectionCode = 200;
+    malformed = true;
+    expect(await control.status()).toBe("unavailable");
+    await expect(control.action("start")).rejects.toThrow();
+    expect(posts).toHaveLength(3);
+    malformed = false;
     label = "other-agent";
     await expect(control.action("start")).rejects.toThrow("not assigned");
     expect(posts).toHaveLength(3);

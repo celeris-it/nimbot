@@ -404,6 +404,14 @@ it("protects container operations and requires a POST after stop confirmation", 
       })
     ).status,
   ).toBe(200);
+  expect((await app.request("/api/status")).status).toBe(401);
+  expect(
+    await (
+      await app.request("/api/status", {
+        headers: { Cookie: cookie },
+      })
+    ).json(),
+  ).toMatchObject({ container: "running" });
   expect(actions).toEqual([]);
   expect((await post("action=start", cookie)).status).toBe(303);
   expect((await post("action=stop", cookie)).status).toBe(303);

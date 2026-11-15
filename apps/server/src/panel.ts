@@ -387,7 +387,13 @@ ${values.instructions}</textarea>
     }
     return c.redirect("/?containerChanged=1", 303);
   });
-  app.get("/api/status", async (c) => c.json(await getStatus()));
+  app.get("/api/status", async (c) => {
+    const [status, containerState] = await Promise.all([
+      getStatus(),
+      container?.status(),
+    ]);
+    return c.json({ ...status, container: containerState });
+  });
   app.get("/", async (c) => {
     const status = await getStatus();
     const containerState = container ? await container.status() : undefined;
