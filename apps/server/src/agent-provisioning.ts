@@ -8,7 +8,7 @@ import { createDockerApi, type DockerApi } from "./docker-api.js";
 /** Internal workflow: the caller supplies a private, reachable Host endpoint and its saved token. */
 export function createAgentProvisioning(
   registry: ReturnType<typeof openAgentRegistry>,
-  config: { socketPath: string; image: string },
+  config: { socketPath: string; image: string; serverContainerRef?: string },
   call: DockerApi = createDockerApi(config.socketPath),
   request: typeof fetch = fetch,
 ) {

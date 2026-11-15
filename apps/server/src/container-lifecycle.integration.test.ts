@@ -16,7 +16,21 @@ it.skipIf(!image)(
     const agentId = `test-${randomBytes(8).toString("hex")}`;
     const token = randomBytes(32).toString("hex");
     const call = createDockerApi(socketPath);
-    const resources = createContainerResources({ socketPath, image: image! });
+    const serverAgentId = `${agentId}-server`;
+    const serverResources = createContainerResources({
+      socketPath,
+      image: image!,
+    });
+    const serverControl = createContainerControl({
+      socketPath,
+      agentId: serverAgentId,
+      target: `nimbot-${serverAgentId}`,
+    });
+    const resources = createContainerResources({
+      socketPath,
+      image: image!,
+      serverContainerRef: `nimbot-${serverAgentId}`,
+    });
     const control = createContainerControl({
       socketPath,
       agentId,
@@ -38,6 +52,12 @@ it.skipIf(!image)(
         { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"] },
       ).trim();
     try {
+      const server = await serverResources.create(
+        serverAgentId,
+        randomBytes(32).toString("hex"),
+        () => {},
+      );
+      await serverControl.action("start");
       for (const recreate of [false, true]) {
         const refs = await resources.create(agentId, token, () => {});
         expect(await control.status()).toBe("stopped");
@@ -84,6 +104,20 @@ it.skipIf(!image)(
           }
         }
         if (!ready) throw lastError;
+        // This separate container stands in for the Server: only Docker networking
+        // connects it to the new Agent Host, with no published host port.
+        expect(
+          exec(
+            server.containerRef,
+            `const r = await fetch('http://nimbot-${agentId}:3001/health', {headers: {authorization: 'Bearer ${token}'}}); console.log(r.status);`,
+          ),
+        ).toBe("200");
+        const network = JSON.parse(
+          (await call(`/networks/${refs.networkRef}`)).body,
+        );
+        expect(Object.keys(network.Containers).sort()).toEqual(
+          [server.containerRef, refs.containerRef].sort(),
+        );
         expect(
           exec(
             refs.containerRef,
@@ -111,7 +145,13 @@ it.skipIf(!image)(
       }
     } finally {
       if ((await control.status()) === "running") await control.action("stop");
-      await resources.remove(agentId, true);
+      try {
+        await resources.remove(agentId, true);
+      } finally {
+        if ((await serverControl.status()) === "running")
+          await serverControl.action("stop");
+        await serverResources.remove(serverAgentId, true);
+      }
     }
     for (const suffix of ["workspace", "engine", "tasks"])
       expect((await call(`/volumes/nimbot-${agentId}-${suffix}`)).code).toBe(

@@ -27,7 +27,7 @@ export interface ResourceReferences {
 
 /** Internal server service only. Image and token come from trusted server configuration, never panel input. */
 export function createContainerResources(
-  config: { socketPath: string; image: string },
+  config: { socketPath: string; image: string; serverContainerRef?: string },
   call: DockerApi = createDockerApi(config.socketPath),
 ) {
   // Require an immutable local image ID or registry digest; mutable tags are rejected.
@@ -57,12 +57,27 @@ export function createContainerResources(
       throw new Error("Invalid Docker resource ID");
     if (kind === "volumes" && data?.Name !== ref)
       throw new Error("Invalid Docker volume name");
-    return data as { Id: string; Name: string };
+    return data as {
+      Id: string;
+      Name: string;
+      Containers?: Record<string, unknown>;
+    };
   }
   async function checked(path: string, method: string, body?: unknown) {
     const result = await call(path, method, body);
     if (![200, 201, 204].includes(result.code))
       throw new Error("Docker resource operation failed");
+  }
+  async function serverId() {
+    const response = await call(
+      `/containers/${encodeURIComponent(config.serverContainerRef!)}/json`,
+    );
+    if (response.code !== 200)
+      throw new Error("Nimbot Server container is unavailable");
+    const data = JSON.parse(response.body);
+    if (!/^[a-f0-9]{64}$/.test(data?.Id))
+      throw new Error("Invalid Nimbot Server container ID");
+    return data.Id as string;
   }
   return {
     /** Creates a stopped container. Save each reference before proceeding; failures preserve resources for explicit retry/cleanup. */
@@ -100,6 +115,13 @@ export function createContainerResources(
         agentId,
       );
       record({ networkRef: network.Id });
+      if (config.serverContainerRef) {
+        const server = await serverId();
+        if (!Object.hasOwn(network.Containers ?? {}, server))
+          await checked(`/networks/${network.Id}/connect`, "POST", {
+            Container: server,
+          });
+      }
       // Do not silently adopt a container: its settings/token may differ from this attempt.
       if (await inspect("containers", resource.container, agentId))
         throw new Error(
@@ -159,7 +181,17 @@ export function createContainerResources(
           "DELETE",
         );
       const network = await inspect("networks", resource.network, agentId);
-      if (network) await checked(`/networks/${network.Id}`, "DELETE");
+      if (network) {
+        if (config.serverContainerRef) {
+          const server = await serverId();
+          if (Object.hasOwn(network.Containers ?? {}, server))
+            await checked(`/networks/${network.Id}/disconnect`, "POST", {
+              Container: server,
+              Force: false,
+            });
+        }
+        await checked(`/networks/${network.Id}`, "DELETE");
+      }
       if (deleteData) {
         for (const volume of resource.volumes) {
           if (await inspect("volumes", volume, agentId))

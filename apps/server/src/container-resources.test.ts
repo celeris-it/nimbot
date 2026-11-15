@@ -34,6 +34,7 @@ function fixture() {
   };
   return {
     resources,
+    call,
     requests,
     manager: createContainerResources({ socketPath: "/unused", image }, call),
     fail: () => {
@@ -196,4 +197,55 @@ it("does not delete a foreign container or clean up data after a failed containe
     "/containers/nimbot-dev/json",
     `/containers/${"d".repeat(64)}?force=false&v=false`,
   ]);
+});
+
+it("attaches and disconnects only the configured server using its immutable ID", async () => {
+  const f = fixture();
+  const server = "e".repeat(64);
+  f.resources.set("/containers/nimbot-server/json", { Id: server });
+  const connections: { path: string; body: unknown }[] = [];
+  const transport: DockerApi = async (path, method, body) => {
+    if (path.endsWith("/connect") || path.endsWith("/disconnect")) {
+      connections.push({ path, body });
+      const network = f.resources.get("/networks/nimbot-dev-network")!;
+      network.Containers = path.endsWith("/connect") ? { [server]: {} } : {};
+      return { code: 200, body: "" };
+    }
+    return f.call(path, method, body);
+  };
+  const manager = createContainerResources(
+    { socketPath: "/unused", image, serverContainerRef: "nimbot-server" },
+    transport,
+  );
+  const refs: ResourceReferences[] = [];
+  await manager.create("dev", token, (r) => refs.push(r));
+  expect(refs).toContainEqual({ networkRef: "c".repeat(64) });
+  await manager.remove("dev");
+  expect(connections).toEqual([
+    {
+      path: `/networks/${"c".repeat(64)}/connect`,
+      body: { Container: server },
+    },
+    {
+      path: `/networks/${"c".repeat(64)}/disconnect`,
+      body: { Container: server, Force: false },
+    },
+  ]);
+});
+
+it("keeps the network tracked and never creates a container if server attachment fails", async () => {
+  const f = fixture();
+  const manager = createContainerResources(
+    { socketPath: "/unused", image, serverContainerRef: "missing-server" },
+    f.call,
+  );
+  const refs: ResourceReferences[] = [];
+  await expect(
+    manager.create("dev", token, (r) => refs.push(r)),
+  ).rejects.toThrow("Server container is unavailable");
+  expect(refs.at(-1)).toEqual({ networkRef: "c".repeat(64) });
+  expect(f.requests.some((r) => r.path.startsWith("/containers/create"))).toBe(
+    false,
+  );
+  expect(f.requests.some((r) => r.method === "DELETE")).toBe(false);
 });
