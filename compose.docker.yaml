@@ -1,9 +1,11 @@
-# Optional server-only Docker access for starting/stopping the configured Agent Host.
+# Optional server-only Docker access for container controls and provisioning.
 services:
   server:
     environment:
       DOCKER_SOCKET_PATH: /var/run/docker.sock
-      AGENT_CONTAINER_NAME: ${AGENT_CONTAINER_NAME:?Set AGENT_CONTAINER_NAME to the Agent Host container name or ID}
+      AGENT_CONTAINER_NAME: ${AGENT_CONTAINER_NAME:-}
+      AGENT_HOST_IMAGE: ${AGENT_HOST_IMAGE:-}
+      SERVER_CONTAINER_NAME: ${SERVER_CONTAINER_NAME:-}
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     group_add:

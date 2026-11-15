@@ -1,4 +1,9 @@
 import {
+  readProvisioningConfig,
+  createAgentProvisioning,
+} from "./agent-provisioning.js";
+import { openHostCredentials } from "./host-credentials.js";
+import {
   readContainerConfig,
   createContainerControl,
 } from "./container-control.js";
@@ -22,9 +27,14 @@ async function main(): Promise<void> {
   let panelConfig;
   let hostConfig;
   let containerConfig;
+  let provisioningConfig;
   try {
     config = readConfig(process.env);
-    containerConfig = readContainerConfig(process.env, config.agent.id);
+    provisioningConfig = readProvisioningConfig(process.env);
+    containerConfig =
+      provisioningConfig && !process.env.AGENT_CONTAINER_NAME?.trim()
+        ? undefined
+        : readContainerConfig(process.env, config.agent.id);
     hostConfig = readAgentHostConfig(process.env);
     panelConfig = readPanelConfig(process.env);
   } catch (error) {
@@ -37,12 +47,18 @@ async function main(): Promise<void> {
   let binding;
   let registry;
   let botSecrets;
+  let hostCredentials;
   try {
     const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     registry = openAgentRegistry(resolve(stateDir, "server.sqlite"));
     registry.syncConfigured(config.agent);
     botSecrets = await openBotSecrets(resolve(stateDir, "bot-secrets"));
+    if (provisioningConfig)
+      hostCredentials = await openHostCredentials(
+        resolve(stateDir, "host-secrets"),
+        registry,
+      );
     const credential = registry.get(config.agent.id)?.credentialRef;
     if (credential?.startsWith("file:"))
       config.telegramBotToken = await botSecrets.read(credential);
@@ -75,6 +91,10 @@ async function main(): Promise<void> {
           registry.recordContainerOperation(config.agent.id, action, state),
       )
     : undefined;
+  const provision =
+    provisioningConfig && hostCredentials
+      ? createAgentProvisioning(registry, hostCredentials, provisioningConfig)
+      : undefined;
   const panel = createPanel(
     panelConfig,
     async () => ({
@@ -94,6 +114,14 @@ async function main(): Promise<void> {
     },
     createBotTokenUpdate(config.agent.id, registry, botSecrets),
     container,
+    provision
+      ? async (id) => {
+          const agent = registry.get(id);
+          if (!agent || !config.allowedUserIds.has(agent.ownerId))
+            throw new Error("Agent owner is not authorized");
+          await provision(id);
+        }
+      : undefined,
   );
   const server = serve({
     fetch: panel.fetch,

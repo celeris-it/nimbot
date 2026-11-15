@@ -154,3 +154,26 @@ it("does not mutate Docker when Host credential preparation fails", async () => 
     f.registry.close();
   }
 });
+
+it("validates opt-in server provisioning configuration", async () => {
+  const { readProvisioningConfig } = await import("./agent-provisioning.js");
+  expect(readProvisioningConfig({})).toBeUndefined();
+  const env = {
+    AGENT_HOST_IMAGE: `sha256:${"a".repeat(64)}`,
+    SERVER_CONTAINER_NAME: "nimbot-server",
+    DOCKER_SOCKET_PATH: "/var/run/docker.sock",
+  };
+  expect(readProvisioningConfig(env)).toEqual({
+    image: env.AGENT_HOST_IMAGE,
+    serverContainerRef: "nimbot-server",
+    socketPath: env.DOCKER_SOCKET_PATH,
+  });
+  for (const invalid of [
+    { ...env, AGENT_HOST_IMAGE: "nimbot:latest" },
+    { ...env, SERVER_CONTAINER_NAME: "" },
+    { ...env, SERVER_CONTAINER_NAME: "../server" },
+    { ...env, DOCKER_SOCKET_PATH: "relative.sock" },
+    { ...env, AGENT_HOST_IMAGE: "" },
+  ])
+    expect(() => readProvisioningConfig(invalid)).toThrow();
+});

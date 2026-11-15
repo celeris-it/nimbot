@@ -98,6 +98,7 @@ export function createPanel(
   settings?: AgentSettings,
   saveBotToken?: (token: string) => Promise<void>,
   container?: ContainerControl,
+  provisionAgent?: (agentId: string) => Promise<void>,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -387,6 +388,23 @@ ${values.instructions}</textarea>
       );
     }
     return c.redirect("/?containerChanged=1", 303);
+  });
+  app.post("/api/agents/:id/provision", async (c) => {
+    if (!provisionAgent) return c.notFound();
+    const id = c.req.param("id");
+    if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id))
+      return c.json({ error: "Invalid agent ID" }, 400);
+    try {
+      await provisionAgent(id);
+      return c.json({ agentId: id, provisioning: "ready" });
+    } catch {
+      return c.json(
+        {
+          error: "Provisioning failed; inspect the agent state before retrying",
+        },
+        409,
+      );
+    }
   });
   app.get("/api/status", async (c) => {
     const [status, containerState] = await Promise.all([

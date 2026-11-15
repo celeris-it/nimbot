@@ -417,3 +417,76 @@ it("protects container operations and requires a POST after stop confirmation", 
   expect((await post("action=stop", cookie)).status).toBe(303);
   expect(actions).toEqual(["start", "stop"]);
 });
+
+it("protects agent provisioning with sessions and same-origin checks", async () => {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const calls: string[] = [];
+  const app = createPanel(
+    config,
+    () => ({ telegram: "connected" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    async (id) => {
+      calls.push(id);
+      if (id === "failed") throw new Error("secret-docker-response");
+    },
+  );
+  const post = (path: string, cookie = "", origin = config.origin, body = "") =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  expect((await post("/api/agents/dev/provision")).status).toBe(401);
+  const login = await post(
+    "/login",
+    "",
+    config.origin,
+    new URLSearchParams({ password }).toString(),
+  );
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  expect(
+    (await post("/api/agents/dev/provision", cookie, "https://other.example"))
+      .status,
+  ).toBe(403);
+  expect((await post("/api/agents/INVALID/provision", cookie)).status).toBe(
+    400,
+  );
+  expect(calls).toEqual([]);
+  const response = await post("/api/agents/dev/provision", cookie);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    agentId: "dev",
+    provisioning: "ready",
+  });
+  const failed = await post("/api/agents/failed/provision", cookie);
+  expect(failed.status).toBe(409);
+  expect(await failed.text()).not.toContain("secret-docker-response");
+  expect(calls).toEqual(["dev", "failed"]);
+  const disabled = createPanel(config, () => ({ telegram: "connected" }));
+  const disabledLogin = await disabled.request("/login", {
+    method: "POST",
+    headers: {
+      Origin: config.origin,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ password }).toString(),
+  });
+  expect(
+    (
+      await disabled.request("/api/agents/dev/provision", {
+        method: "POST",
+        headers: {
+          Origin: config.origin,
+          Cookie: disabledLogin.headers.get("set-cookie")!.split(";")[0]!,
+        },
+      })
+    ).status,
+  ).toBe(404);
+});

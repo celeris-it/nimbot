@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import type { openHostCredentials } from "./host-credentials.js";
 import { setTimeout } from "node:timers/promises";
 import type { openAgentRegistry } from "./agent-registry.js";
@@ -5,6 +6,27 @@ import { getHostStatus } from "./agent-host.js";
 import { createContainerResources } from "./container-resources.js";
 import { createContainerControl } from "./container-control.js";
 import { createDockerApi, type DockerApi } from "./docker-api.js";
+
+export function readProvisioningConfig(env: NodeJS.ProcessEnv) {
+  const image = env.AGENT_HOST_IMAGE?.trim();
+  const serverContainerRef = env.SERVER_CONTAINER_NAME?.trim();
+  if (!image && !serverContainerRef) return undefined;
+  const socketPath = env.DOCKER_SOCKET_PATH?.trim();
+  if (
+    !image ||
+    !serverContainerRef ||
+    !socketPath ||
+    !isAbsolute(socketPath) ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(serverContainerRef)
+  )
+    throw new Error(
+      "Provisioning requires AGENT_HOST_IMAGE, SERVER_CONTAINER_NAME, and an absolute DOCKER_SOCKET_PATH.",
+    );
+  const config = { image, serverContainerRef, socketPath };
+  // Validate the immutable image before starting the HTTP server or Telegram.
+  createContainerResources(config);
+  return config;
+}
 
 /** Internal workflow: caller connects the Server to the private agent network. */
 export function createAgentProvisioning(
