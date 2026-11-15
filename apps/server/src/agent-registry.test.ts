@@ -36,7 +36,7 @@ it("migrates once and restores metadata without storing tokens", async () => {
       expect(
         db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
           ?.total,
-      ).toBe(7);
+      ).toBe(8);
     } finally {
       db.close();
     }
@@ -347,9 +347,9 @@ it("migrates version-6 provisioning rows without changing references or complete
       agent_id TEXT PRIMARY KEY REFERENCES agents(id),
       status TEXT NOT NULL CHECK(status IN ('external','pending','provisioning','ready','failed','interrupted')),
       volume_ref TEXT, network_ref TEXT, updated_at INTEGER NOT NULL
-    ); INSERT INTO provisioning_v6 SELECT * FROM agent_provisioning;
+    ); INSERT INTO provisioning_v6 SELECT agent_id, status, volume_ref, network_ref, updated_at FROM agent_provisioning;
     DROP TABLE agent_provisioning; ALTER TABLE provisioning_v6 RENAME TO agent_provisioning;
-    DELETE FROM registry_migrations WHERE version = 7;`);
+    DELETE FROM registry_migrations WHERE version >= 7;`);
     legacy.close();
     const migrated = openAgentRegistry(path);
     try {

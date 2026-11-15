@@ -1329,3 +1329,104 @@ it.each([
     expect(response.headers.get("cache-control")).toBe("no-store");
   },
 );
+
+it.each(["/agents/dev/setup/cancel", "/api/agents/dev/provision/cancel"])(
+  "protects setup cancellation and reports a request without claiming completion: %s",
+  async (path) => {
+    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+    let requested = false;
+    let active = true;
+    const calls: string[] = [];
+    const app = createPanel(
+      config,
+      () => ({ telegram: "connected" }),
+      Date.now,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (id) =>
+        id === "dev"
+          ? {
+              name: "Developer",
+              botUsername: "dev_bot",
+              provisioning: "provisioning",
+              canCancelProvisioning: active,
+              cancellationRequested: requested,
+            }
+          : undefined,
+      {
+        get: () => undefined,
+        save: () => {},
+        cancelProvisioning: (id) => {
+          if (!active) throw new Error("private details");
+          calls.push(id);
+          requested = true;
+        },
+      },
+    );
+    const post = (
+      target: string,
+      body: string,
+      cookie = "",
+      origin = config.origin,
+    ) =>
+      app.request(target, {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          Cookie: cookie,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body,
+      });
+    expect((await post(path, "confirm=dev")).status).toBe(
+      path.startsWith("/api/") ? 401 : 303,
+    );
+    const login = await post(
+      "/login",
+      new URLSearchParams({ password }).toString(),
+    );
+    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    const headers = { Cookie: cookie };
+    expect((await app.request(path, { headers })).status).toBe(404);
+    expect(
+      (await post(path, "confirm=dev", cookie, "https://foreign.test")).status,
+    ).toBe(403);
+    expect((await post(path, "", cookie)).status).toBe(400);
+    expect((await post(path, "confirm=other", cookie)).status).toBe(400);
+    expect(calls).toEqual([]);
+    const before = await (
+      await app.request("/agents/dev/setup", { headers })
+    ).text();
+    expect(before).toContain("Cancelar configuración");
+    expect(before.replace(/\s+/g, " ")).toContain(
+      "Los recursos creados se conservan",
+    );
+    const response = await post(path, "confirm=dev", cookie);
+    expect(response.status).toBe(path.startsWith("/api/") ? 202 : 303);
+    if (path.startsWith("/api/"))
+      expect(await response.json()).toEqual({
+        agentId: "dev",
+        cancellation: "requested",
+      });
+    expect(calls).toEqual(["dev"]);
+    const after = await (
+      await app.request("/agents/dev/setup", { headers })
+    ).text();
+    expect(after).toContain("Cancelación solicitada");
+    expect(after).not.toContain("Cancelar configuración");
+    expect(after).not.toContain("Configuración: Cancelada");
+    active = false;
+    const failed = await post(path, "confirm=dev", cookie);
+    expect(failed.status).toBe(409);
+    expect(await failed.text()).not.toContain("private details");
+    expect(
+      (await post(path.replace("dev", "missing"), "confirm=missing", cookie))
+        .status,
+    ).toBe(404);
+  },
+);

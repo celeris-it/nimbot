@@ -1,3 +1,4 @@
+import { createProvisioningControl } from "./provisioning-control.js";
 import { createAgentRegistration } from "./agent-registration.js";
 import { createResourceReconciliation } from "./resource-reconciliation.js";
 import { createAgentContainerAction } from "./agent-container-action.js";
@@ -111,7 +112,7 @@ async function main(): Promise<void> {
       )
     : undefined;
   const provisioningShutdown = new AbortController();
-  const provision =
+  const provisionTask =
     provisioningConfig && hostCredentials
       ? createAgentProvisioning(
           registry,
@@ -122,6 +123,10 @@ async function main(): Promise<void> {
           provisioningShutdown.signal,
         )
       : undefined;
+  const provisioning = provisionTask
+    ? createProvisioningControl(registry, provisionTask)
+    : undefined;
+  const provision = provisioning?.run;
   const removeResources = provisioningConfig
     ? createAgentResourceRemoval(registry, provisioningConfig)
     : undefined;
@@ -195,7 +200,9 @@ async function main(): Promise<void> {
           registry,
           botSecrets,
           config.allowedUserIds,
-          provision,
+          async (id) => {
+            provisioning!.start(id);
+          },
         )
       : undefined,
     provision
@@ -207,6 +214,9 @@ async function main(): Promise<void> {
                 name: agent.name,
                 botUsername: agent.botUsername,
                 provisioning: setup.status,
+                cancellationRequested:
+                  registry.getProvisioningCancellation(id) !== undefined,
+                canCancelProvisioning: provisioning!.canCancel(id),
                 containerOperation: registry.getContainerOperation(id),
               }
             : undefined;
@@ -245,6 +255,12 @@ async function main(): Promise<void> {
             if (!agent || !config.allowedUserIds.has(agent.ownerId))
               return undefined;
             return observeStop?.(id);
+          },
+          cancelProvisioning: (id) => {
+            const agent = registry.get(id);
+            if (!agent || !config.allowedUserIds.has(agent.ownerId))
+              throw new Error("Agent owner is not authorized");
+            provisioning!.cancel(id);
           },
           saveToken: async (id, token) => {
             const agent = registry.get(id);

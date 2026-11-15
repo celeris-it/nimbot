@@ -297,3 +297,26 @@ it("interrupts readiness backoff promptly instead of issuing further health requ
     vi.useRealTimers();
   }
 });
+
+it("cancels an individual attempt through the control while retaining created Docker references", async () => {
+  const { createProvisioningControl } =
+    await import("./provisioning-control.js");
+  const f = fixture(false, undefined, (path) => {
+    if (path === "/networks/create") control.cancel("dev");
+  });
+  const control = createProvisioningControl(f.registry, f.provision);
+  try {
+    await expect(control.run("dev")).rejects.toThrow("provisioning cancelled");
+    expect(f.registry.getProvisioning("dev")).toMatchObject({
+      status: "cancelled",
+      networkRef: "c".repeat(64),
+    });
+    expect(f.registry.getProvisioningCancellation("dev")).toEqual(
+      expect.any(Number),
+    );
+    expect(f.health).not.toHaveBeenCalled();
+    expect(f.mutations.at(-1)).toBe("/networks/create");
+  } finally {
+    f.registry.close();
+  }
+});

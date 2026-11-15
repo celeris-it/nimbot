@@ -141,3 +141,41 @@ it("does not register or save credentials when Telegram verification fails", asy
     await f.close();
   }
 });
+
+it("returns the saved agent while background setup is still active so the panel can cancel it", async () => {
+  const { createProvisioningControl } =
+    await import("./provisioning-control.js");
+  const f = await fixture();
+  let release!: () => void;
+  const control = createProvisioningControl(f.registry, async (id, signal) => {
+    f.registry.beginProvisioning(id);
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.registry.finishProvisioning(id, signal.aborted ? "cancelled" : "failed");
+  });
+  f.provision.mockImplementation(async (id) => {
+    control.start(id);
+  });
+  try {
+    const result = await f.register(input);
+    expect(result.provisioning).toBe("provisioning");
+    expect(control.canCancel(result.agentId)).toBe(true);
+    expect(
+      await f.secrets.read(f.registry.get(result.agentId)!.credentialRef!),
+    ).toBe(input.token);
+    control.cancel(result.agentId);
+    expect(f.registry.getProvisioningCancellation(result.agentId)).toEqual(
+      expect.any(Number),
+    );
+    release();
+    await vi.waitFor(() =>
+      expect(control.canCancel(result.agentId)).toBe(false),
+    );
+    expect(f.registry.getProvisioning(result.agentId)?.status).toBe(
+      "cancelled",
+    );
+  } finally {
+    await f.close();
+  }
+});

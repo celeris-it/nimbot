@@ -144,6 +144,14 @@ export function openAgentRegistry(path: string) {
       ALTER TABLE agent_provisioning_v7 RENAME TO agent_provisioning;
       INSERT INTO registry_migrations(version) VALUES (7)`);
     }
+    if (
+      !db
+        .prepare("SELECT version FROM registry_migrations WHERE version = 8")
+        .get()
+    ) {
+      db.exec(`ALTER TABLE agent_provisioning ADD COLUMN cancel_requested_at INTEGER;
+        INSERT INTO registry_migrations(version) VALUES (8)`);
+    }
     db.prepare(
       "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
     ).run(Date.now());
@@ -235,7 +243,7 @@ export function openAgentRegistry(path: string) {
     beginResourceRemoval(id: string) {
       const result = db
         .prepare(
-          "UPDATE agent_provisioning SET status = 'provisioning', updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'ready', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending')",
+          "UPDATE agent_provisioning SET status = 'provisioning', cancel_requested_at = NULL, updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'ready', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending')",
         )
         .run(Date.now(), id, id);
       if (!result.changes) throw new Error("Agent resources cannot be removed");
@@ -262,10 +270,28 @@ export function openAgentRegistry(path: string) {
     beginProvisioning(id: string) {
       const result = db
         .prepare(
-          "UPDATE agent_provisioning SET status = 'provisioning', updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending')",
+          "UPDATE agent_provisioning SET status = 'provisioning', cancel_requested_at = NULL, updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending')",
         )
         .run(Date.now(), id, id);
       if (!result.changes) throw new Error("Agent cannot begin provisioning");
+    },
+    requestProvisioningCancellation(id: string) {
+      const result = db
+        .prepare(
+          `UPDATE agent_provisioning
+        SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
+        WHERE agent_id = ? AND status = 'provisioning'`,
+        )
+        .run(Date.now(), id);
+      if (!result.changes) throw new Error("Agent is not provisioning");
+    },
+    getProvisioningCancellation(id: string): number | undefined {
+      const value = db
+        .prepare(
+          "SELECT cancel_requested_at FROM agent_provisioning WHERE agent_id = ?",
+        )
+        .get(id)?.cancel_requested_at;
+      return typeof value === "number" ? value : undefined;
     },
     recordProvisioningResources(
       id: string,

@@ -35,10 +35,14 @@ export function createAgentProvisioning(
   config: { socketPath: string; image: string; serverContainerRef?: string },
   call: DockerApi = createDockerApi(config.socketPath),
   request: typeof fetch = fetch,
-  signal?: AbortSignal,
+  shutdownSignal?: AbortSignal,
 ) {
   const resources = createContainerResources(config, call);
-  return async (agentId: string) => {
+  return async (agentId: string, attemptSignal?: AbortSignal) => {
+    const signal =
+      shutdownSignal && attemptSignal
+        ? AbortSignal.any([shutdownSignal, attemptSignal])
+        : (shutdownSignal ?? attemptSignal);
     const agent = registry.get(agentId);
     if (!agent?.botId || !agent.credentialRef)
       throw new Error("Link an agent bot before provisioning");

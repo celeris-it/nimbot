@@ -24,6 +24,7 @@ export interface AgentStatus {
   telegram: "connecting" | "connected" | "disconnected";
 }
 export interface RegisteredAgentSettings {
+  cancelProvisioning?(id: string): void;
   get(id: string): { name: string; instructions: string } | undefined;
   save(id: string, name: string, instructions: string): void;
   saveToken?(id: string, token: string): Promise<void>;
@@ -154,6 +155,8 @@ export function createPanel(
         name: string;
         botUsername: string | null;
         provisioning: string;
+        cancellationRequested?: boolean;
+        canCancelProvisioning?: boolean;
         containerOperation?: import("./agent-registry.js").ContainerOperation;
       }
     | undefined,
@@ -709,8 +712,30 @@ ${values.instructions}</textarea>
             </p>
             <p>
               Configuración:
-              ${setupLabels[agent.provisioning] ?? "Estado desconocido"}.
+              ${agent.provisioning === "provisioning" && agent.cancellationRequested ? "Cancelación solicitada; esperando que termine la operación en curso" : (setupLabels[agent.provisioning] ?? "Estado desconocido")}.
             </p>
+            ${
+              agent.canCancelProvisioning &&
+              !agent.cancellationRequested &&
+              agentSettings?.cancelProvisioning
+                ? html`<form
+                    method="post"
+                    action="/agents/${encodeURIComponent(id)}/setup/cancel"
+                  >
+                    <p>
+                      Cancelar detiene los próximos pasos de configuración. Los
+                      recursos creados se conservan; un contenedor que ya se
+                      inició puede seguir en ejecución.
+                    </p>
+                    <input type="hidden" name="confirm" value="${id}" /><button
+                      class="btn"
+                      type="submit"
+                    >
+                      Cancelar configuración
+                    </button>
+                  </form>`
+                : ""
+            }
             ${containerState ? html`<p>Contenedor: ${containerState === "running" ? "En ejecución" : containerState === "stopped" ? "Detenido" : containerState === "missing" ? "No encontrado" : "No disponible"}</p>` : ""}
             ${hostState ? html`<p>Agent Host: ${hostState === "ready" ? "Disponible" : hostState === "busy" ? "Ocupado" : "Sin conexión"}</p>` : ""}
             ${
@@ -857,6 +882,42 @@ ${values.instructions}</textarea>
       );
     }
   });
+  const cancelProvisioning = async (c: Context, api: boolean) => {
+    const id = c.req.param("id");
+    if (!id || !getAgentSetup?.(id) || !agentSettings?.cancelProvisioning)
+      return c.notFound();
+    const body = await c.req.parseBody({ all: true });
+    if (body.confirm !== id)
+      return c.text("Confirmá el agente para cancelar su configuración.", 400);
+    try {
+      agentSettings.cancelProvisioning(id);
+      return api
+        ? c.json({ agentId: id, cancellation: "requested" }, 202)
+        : c.redirect(`/agents/${encodeURIComponent(id)}/setup`, 303);
+    } catch {
+      return api
+        ? c.json({ error: "No cancellable provisioning attempt" }, 409)
+        : c.html(
+            page(
+              "No pude cancelar la configuración",
+              html`<h1>No pude cancelar la configuración.</h1>
+                <p>
+                  La operación puede haber terminado. Actualizá el estado del
+                  agente antes de volver a intentar.
+                </p>
+                <a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
+                  >Volver al agente</a
+                >`,
+              true,
+            ),
+            409,
+          );
+    }
+  };
+  app.post("/agents/:id/setup/cancel", (c) => cancelProvisioning(c, false));
+  app.post("/api/agents/:id/provision/cancel", (c) =>
+    cancelProvisioning(c, true),
+  );
   app.post("/api/agents/:id/provision", async (c) => {
     if (!provisionAgent) return c.notFound();
     const id = c.req.param("id");
