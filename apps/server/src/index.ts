@@ -1,3 +1,4 @@
+import { createBootstrapBot } from "./bootstrap-bot.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createAgentAccess } from "./agent-access.js";
 import { createProvisioningControl } from "./provisioning-control.js";
@@ -16,19 +17,16 @@ import {
 } from "./container-control.js";
 import { openBotSecrets } from "./bot-secret.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
-import { withAgentInstructions } from "./agent-instructions.js";
 import { openAgentRegistry } from "./agent-registry.js";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { openChatBinding } from "./chat-binding.js";
-import { createHostTasks } from "./host-tasks.js";
 import { getHostStatus, readAgentHostConfig } from "./agent-host.js";
 import { getCurrentHostTask } from "./host-current-task.js";
 import { createStopObservation } from "./stop-observation.js";
 import { serve } from "@hono/node-server";
 import { createPanel, type AgentStatus } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";
-import { createBot } from "./bot.js";
 import { readConfig } from "./config.js";
 
 async function main(): Promise<void> {
@@ -70,9 +68,6 @@ async function main(): Promise<void> {
         resolve(stateDir, "host-secrets"),
         registry,
       );
-    const credential = registry.get(config.agent.id)?.credentialRef;
-    if (credential?.startsWith("file:"))
-      config.telegramBotToken = await botSecrets.read(credential);
     binding = openChatBinding(statePath, config.agent);
   } catch {
     registry?.close();
@@ -336,22 +331,15 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   });
   console.log(`Nimbot panel: ${panelConfig.origin}`);
-  const bot = createBot(
+  const bootstrap = createBootstrapBot(
+    registry,
     config,
-    () => {
-      status.chatActivated = true;
-    },
-    withAgentInstructions(
-      createHostTasks(hostConfig),
-      () => registry.get(config.agent.id)!.instructions,
-    ),
+    botSecrets,
     binding,
-    () => getHostStatus(hostConfig),
-    configuredAccess,
+    hostConfig,
+    status,
   );
-  let stopping = false;
   const stop = () => {
-    stopping = true;
     provisioningShutdown.abort();
     void registeredBots?.close().catch(() => {
       console.error("Could not stop registered bot connections.");
@@ -359,42 +347,16 @@ async function main(): Promise<void> {
     });
     server.close();
     if ("closeIdleConnections" in server) server.closeIdleConnections();
-    if (bot.isRunning()) {
-      void bot.stop().catch(() => {
-        console.error("Could not stop Telegram polling.");
-        process.exitCode = 1;
-      });
-    }
+    void bootstrap.stop().catch(() => {
+      console.error("Could not stop bootstrap Telegram polling.");
+      process.exitCode = 1;
+    });
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   for (const agent of registry.listResourceReferences())
     registeredBots?.start(agent.id);
-  try {
-    await bot.init();
-    registry.bindBot(config.agent.id, bot.botInfo.id, bot.botInfo.username);
-    await bot.start({
-      allowed_updates: ["message"],
-      onStart: (info) => {
-        status.chatActivated = binding.get(info.id) !== undefined;
-        status.telegram = "connected";
-        status.botUsername = info.username;
-        if (stopping) stop();
-        else console.log("Nimbot Server started with Telegram long polling.");
-      },
-    });
-  } catch {
-    status.telegram = "disconnected";
-    console.error(
-      "Telegram connection failed. Check the bot token, network, and whether another instance is running.",
-    );
-    process.exitCode = 1;
-  } finally {
-    if (stopping) {
-      process.off("SIGINT", stop);
-      process.off("SIGTERM", stop);
-    }
-  }
+  await bootstrap.start();
 }
 
 await main();
