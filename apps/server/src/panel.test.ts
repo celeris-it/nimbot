@@ -490,3 +490,61 @@ it("protects agent provisioning with sessions and same-origin checks", async () 
     ).status,
   ).toBe(404);
 });
+
+it("requires authentication, origin, and explicit confirmation for resource removal", async () => {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const calls: unknown[] = [];
+  const app = createPanel(
+    config,
+    () => ({ telegram: "connected" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (id, deleteData) => {
+      calls.push({ id, deleteData });
+    },
+  );
+  const path = "/api/agents/dev/resources/remove";
+  const post = (
+    url: string,
+    body: string,
+    cookie = "",
+    origin = config.origin,
+  ) =>
+    app.request(url, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  expect((await post(path, "confirm=dev")).status).toBe(401);
+  const login = await post(
+    "/login",
+    new URLSearchParams({ password }).toString(),
+  );
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  expect(
+    (await post(path, "confirm=dev", cookie, "https://other.example")).status,
+  ).toBe(403);
+  for (const body of [
+    "",
+    "confirm=other",
+    "confirm=dev&deleteData=yes",
+    "confirm=dev&deleteData=true&deleteData=false",
+  ])
+    expect((await post(path, body, cookie)).status).toBe(400);
+  expect(calls).toEqual([]);
+  expect((await post(path, "confirm=dev", cookie)).status).toBe(200);
+  expect((await post(path, "confirm=dev&deleteData=true", cookie)).status).toBe(
+    200,
+  );
+  expect(calls).toEqual([
+    { id: "dev", deleteData: false },
+    { id: "dev", deleteData: true },
+  ]);
+});

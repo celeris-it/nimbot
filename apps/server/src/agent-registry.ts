@@ -141,6 +141,33 @@ export function openAgentRegistry(path: string) {
         )
         .get(id) as unknown as ProvisioningState | undefined;
     },
+    beginResourceRemoval(id: string) {
+      const result = db
+        .prepare(
+          "UPDATE agent_provisioning SET status = 'provisioning', updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'ready', 'failed', 'interrupted')",
+        )
+        .run(Date.now(), id);
+      if (!result.changes) throw new Error("Agent resources cannot be removed");
+    },
+    finishResourceRemoval(id: string, deleteData: boolean) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const result = db
+          .prepare(
+            "UPDATE agent_provisioning SET status = 'pending', network_ref = NULL, volume_ref = CASE WHEN ? THEN NULL ELSE volume_ref END, updated_at = ? WHERE agent_id = ? AND status = 'provisioning'",
+          )
+          .run(deleteData ? 1 : 0, Date.now(), id);
+        if (!result.changes)
+          throw new Error("Agent resources are not being removed");
+        db.prepare("UPDATE agents SET container_ref = NULL WHERE id = ?").run(
+          id,
+        );
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
     beginProvisioning(id: string) {
       const result = db
         .prepare(

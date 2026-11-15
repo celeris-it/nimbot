@@ -99,6 +99,7 @@ export function createPanel(
   saveBotToken?: (token: string) => Promise<void>,
   container?: ContainerControl,
   provisionAgent?: (agentId: string) => Promise<void>,
+  removeResources?: (agentId: string, deleteData: boolean) => Promise<void>,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -401,6 +402,42 @@ ${values.instructions}</textarea>
       return c.json(
         {
           error: "Provisioning failed; inspect the agent state before retrying",
+        },
+        409,
+      );
+    }
+  });
+  app.post("/api/agents/:id/resources/remove", async (c) => {
+    if (!removeResources) return c.notFound();
+    const id = c.req.param("id");
+    const body = await c.req.parseBody({ all: true });
+    if (
+      !/^[a-z0-9][a-z0-9-]{0,47}$/.test(id) ||
+      body.confirm !== id ||
+      (body.deleteData !== undefined &&
+        body.deleteData !== "true" &&
+        body.deleteData !== "false")
+    )
+      return c.json(
+        {
+          error:
+            "Confirm the agent ID and explicitly select whether to delete data",
+        },
+        400,
+      );
+    const deleteData = body.deleteData === "true";
+    try {
+      await removeResources(id, deleteData);
+      return c.json({
+        agentId: id,
+        provisioning: "pending",
+        dataDeleted: deleteData,
+      });
+    } catch {
+      return c.json(
+        {
+          error:
+            "Resource removal failed; inspect the agent state before retrying",
         },
         409,
       );
