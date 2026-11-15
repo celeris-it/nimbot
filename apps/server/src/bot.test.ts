@@ -1,10 +1,12 @@
 import { openChatBinding, type ChatBinding } from "./chat-binding.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBot } from "./bot.js";
+import type { HostStatus } from "./agent-host.js";
 
 function setup(
   execute?: (prompt: string) => Promise<string>,
   binding?: ChatBinding,
+  hostStatus?: () => Promise<HostStatus>,
 ) {
   const activations: number[] = [];
   const bot = createBot(
@@ -16,6 +18,7 @@ function setup(
     (chatId) => activations.push(chatId),
     execute,
     binding,
+    hostStatus,
   );
   bot.botInfo = {
     id: 123,
@@ -152,6 +155,25 @@ describe("Telegram access", () => {
     expect(sent.join("")).not.toContain("secret");
     await bot.handleUpdate(message("second"));
     expect(sent.at(-1)).toBe("Recovered");
+  });
+  it("does not submit tasks while the agent is stopped and reports its status", async () => {
+    const execute = vi.fn().mockResolvedValue("Done");
+    let host: HostStatus = "unavailable";
+    const { bot, sent } = setup(execute, undefined, async () => host);
+    await bot.handleUpdate(message("/start"));
+    await bot.handleUpdate(message("hello"));
+    expect(execute).not.toHaveBeenCalled();
+    expect(sent.at(-1)).toContain("detenido o todavía no está listo");
+    await bot.handleUpdate(message("/status"));
+    expect(sent.at(-1)).toContain("detenido o sin conexión");
+    host = "busy";
+    await bot.handleUpdate(message("/status"));
+    expect(sent.at(-1)).toContain("ocupado");
+    host = "ready";
+    await bot.handleUpdate(message("/status"));
+    expect(sent.at(-1)).toContain("disponible");
+    await bot.handleUpdate(message("hello"));
+    expect(sent.at(-1)).toBe("Done");
   });
   it.each(["/start", "/help"])(
     "welcomes an authorized user for %s",

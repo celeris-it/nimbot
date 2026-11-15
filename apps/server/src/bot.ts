@@ -1,3 +1,4 @@
+import type { HostStatus } from "./agent-host.js";
 import type { ChatBinding } from "./chat-binding.js";
 import { HostTaskError } from "./host-tasks.js";
 import { splitTelegramText } from "./telegram-text.js";
@@ -9,6 +10,7 @@ export function createBot(
   onActivation: (chatId: number) => void = () => {},
   execute?: (prompt: string) => Promise<string>,
   binding?: ChatBinding,
+  hostStatus?: () => Promise<HostStatus>,
 ): Bot {
   let activeChatId: number | undefined;
   const bot = new Bot(config.telegramBotToken);
@@ -46,8 +48,17 @@ export function createBot(
     );
   });
   bot.command("status", async (ctx) => {
+    const host = !execute
+      ? "Agent Host: sin conectar. No hay tareas en ejecución."
+      : !hostStatus
+        ? "Agent Host configurado. Consultá el panel para verificar disponibilidad."
+        : {
+            ready: "Agente: disponible para recibir tareas.",
+            busy: "Agente: ocupado con una tarea.",
+            unavailable: "Agente: detenido o sin conexión.",
+          }[await hostStatus()];
     await ctx.reply(
-      `${config.agent.name}\nChat: ${(binding ? binding.get(ctx.me.id) : activeChatId) === ctx.chat.id ? "activado" : "pendiente; usá /start"}\n${execute ? "Agent Host configurado. Consultá el panel para verificar disponibilidad." : "Agent Host: sin conectar. No hay tareas en ejecución."}`,
+      `${config.agent.name}\nChat: ${(binding ? binding.get(ctx.me.id) : activeChatId) === ctx.chat.id ? "activado" : "pendiente; usá /start"}\n${host}`,
     );
   });
   bot.on("message:text", async (ctx) => {
@@ -66,6 +77,13 @@ export function createBot(
     if (ctx.message.text.startsWith("/")) {
       await ctx.reply(
         "Comando no disponible. Usá /help para consultar las opciones.",
+      );
+      return;
+    }
+    // Checked before submission, so this reply is unambiguous: nothing was sent.
+    if (hostStatus && (await hostStatus()) === "unavailable") {
+      await ctx.reply(
+        "El agente está detenido o todavía no está listo. Tu mensaje no se ha enviado; intentá nuevamente cuando esté disponible.",
       );
       return;
     }

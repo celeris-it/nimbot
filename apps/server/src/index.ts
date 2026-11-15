@@ -113,6 +113,7 @@ async function main(): Promise<void> {
       () => registry.get(config.agent.id)!.instructions,
     ),
     binding,
+    () => getHostStatus(hostConfig),
   );
   let stopping = false;
   const stop = () => {
