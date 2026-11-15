@@ -1,3 +1,4 @@
+import { openAgentRegistry } from "./agent-registry.js";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { openChatBinding } from "./chat-binding.js";
@@ -25,18 +26,25 @@ async function main(): Promise<void> {
     return;
   }
   let binding;
+  let registry;
   try {
     const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
+    registry = openAgentRegistry(resolve(stateDir, "server.sqlite"));
+    registry.syncConfigured(config.agent);
     binding = openChatBinding(resolve(stateDir, "server.sqlite"), config.agent);
   } catch {
+    registry?.close();
     console.error(
       "Could not initialize server state. Check SERVER_STATE_DIR and writable storage.",
     );
     process.exitCode = 1;
     return;
   }
-  process.once("exit", () => binding.close());
+  process.once("exit", () => {
+    binding.close();
+    registry.close();
+  });
   const status: AgentStatus = {
     telegram: "connecting",
     agentId: config.agent.id,
@@ -84,6 +92,8 @@ async function main(): Promise<void> {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   try {
+    await bot.init();
+    registry.bindBot(config.agent.id, bot.botInfo.id, bot.botInfo.username);
     await bot.start({
       allowed_updates: ["message"],
       onStart: (info) => {

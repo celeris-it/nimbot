@@ -366,6 +366,8 @@ The panel uses a locally configured scrypt password hash, opaque server-side ses
 
 **Goal:** Create and manage agents from the authenticated panel, each with its own Telegram bot, private conversation, container, and persistent volume.
 
+Initial registry implementation: the server now keeps the configured agent's name and owner, verified bot ID and username, and a credential reference in the existing server SQLite database. A versioned transactional migration adds the registry without changing chat activation records. Bot identity is verified with Telegram and recorded before polling starts; duplicate bot assignments, including legacy chat bindings, are rejected. Tokens remain in the environment and are never copied into the registry. Instructions and container references have schema fields but are not configurable yet. The existing small Node SQLite identity store is reused; dynamic registration, panel editing, protected credential storage for additional bots, and container provisioning remain pending. The first Phase 2 task therefore remains open.
+
 ### Tasks
 
 - [ ] The server stores agents, owners, instructions, containers, bot identities, credential references, chat bindings, and provisioning state in SQLite, with migrations.

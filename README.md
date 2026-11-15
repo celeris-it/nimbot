@@ -64,6 +64,8 @@ One Nimbot Server serves the authenticated administration panel, maintains a dis
 - **Agent Host** is one container per agent. It runs the AI engine, executes tasks, and owns the agent's workspace and conversation state.
 - **Storage** includes bot identities, owners, chat bindings, credential references, and administrator/session state in SQLite, protected server-side bot secrets, and Docker volumes. No PostgreSQL, Redis, or message broker is required.
 
+The server also persists the configured agent’s metadata and verified bot identity in its existing SQLite state database. A versioned migration preserves chat activation, and a bot already linked to another agent is rejected before polling starts. The registry stores a credential reference, not the Telegram token. Dynamic agent creation and container management from the panel remain pending.
+
 ## Technology
 
 TypeScript on Node.js LTS, pnpm, Hono, grammY, Drizzle with SQLite, Docker, Playwright, and Vitest. The AI engine is [OpenCode](https://opencode.ai), driven through the Agent Client Protocol (ACP).
