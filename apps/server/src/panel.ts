@@ -23,6 +23,7 @@ export interface AgentStatus {
   chatActivated?: boolean;
   botUsername?: string;
   telegram: "connecting" | "connected" | "disconnected";
+  telegramFailure?: "invalid_token" | "unavailable";
 }
 export interface RegisteredAgentSettings {
   cancelProvisioning?(id: string): void;
@@ -1203,6 +1204,18 @@ ${values.instructions}</textarea>
               <dd>${status.ownerId ?? "Not configured"}</dd>
               <dt>Telegram</dt>
               <dd>${labels[status.telegram]}</dd>
+              ${
+                status.telegram === "disconnected" && status.telegramFailure
+                  ? html`<dt>Telegram problem</dt>
+                      <dd>
+                        ${
+                          status.telegramFailure === "invalid_token"
+                            ? "Telegram rejected the bot token. Replace it and restart the server."
+                            : "Could not reach Telegram after several attempts. Check connectivity and whether another instance is polling this bot."
+                        }
+                      </dd>`
+                  : ""
+              }
               <dt>Bot</dt>
               <dd>
                 ${status.botUsername ? `@${status.botUsername}` : "Waiting for connection"}

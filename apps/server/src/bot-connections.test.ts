@@ -37,6 +37,8 @@ async function fixture(knownBootstrap = true) {
   const hold = new Set<string>();
   const reached = new Set<string>();
   const errors = new Map<string, number>();
+  /** Remaining transient (502) failures per `id:method`. */
+  const transient = new Map<string, number>();
   const identities = new Map([
     ["bootstrap", 123],
     ["registered", 456],
@@ -56,6 +58,15 @@ async function fixture(knownBootstrap = true) {
           signal?.addEventListener("abort", abort, { once: true });
           if (signal?.aborted) abort();
         });
+      const left = transient.get(key) ?? 0;
+      if (left > 0) {
+        transient.set(key, left - 1);
+        return {
+          ok: false,
+          error_code: 502,
+          description: "bad gateway",
+        } as Awaited<ReturnType<typeof prev>>;
+      }
       const code = errors.get(key);
       if (code)
         return {
@@ -119,6 +130,7 @@ async function fixture(knownBootstrap = true) {
   const status: {
     telegram: "connecting" | "connected" | "disconnected";
     botUsername?: string;
+    telegramFailure?: "invalid_token" | "unavailable";
   } = { telegram: "connecting" };
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -137,6 +149,8 @@ async function fixture(knownBootstrap = true) {
     taskStore,
     request,
     makeBot,
+    undefined,
+    [0, 0],
   );
   const registered = createRegisteredBots(
     registry,
@@ -150,6 +164,7 @@ async function fixture(knownBootstrap = true) {
     hosts,
     request,
     makeBot,
+    [0, 0],
   );
   async function healthyOwnerCanStart(id = "registered") {
     const ownerId = id === "bootstrap" ? 42 : 73;
@@ -190,6 +205,7 @@ async function fixture(knownBootstrap = true) {
     hold,
     reached,
     errors,
+    transient,
     identities,
     made,
     polls,
@@ -369,6 +385,49 @@ it("links the first bootstrap identity from the environment and activates its ow
       { id: "bootstrap", token: "123:environment-token" },
     ]);
     await f.healthyOwnerCanStart("bootstrap");
+  } finally {
+    await f.close();
+  }
+});
+
+it("retries transient identity-check failures a bounded number of times, then reports the failure per bot", async () => {
+  const f = await fixture();
+  try {
+    f.transient.set("bootstrap:getMe", 2);
+    f.transient.set("registered:getMe", 3);
+    const started = f.bootstrap.start();
+    f.registered.start("registered");
+    await vi.waitFor(() => expect(f.status.telegram).toBe("connected"), {
+      timeout: 3000,
+    });
+    expect(f.status.telegramFailure).toBeUndefined();
+    await vi.waitFor(() =>
+      expect(f.registered.getState("registered")).toEqual({
+        status: "failed",
+        failure: "telegram_unavailable",
+      }),
+    );
+    await f.healthyOwnerCanStart("bootstrap");
+    void started;
+  } finally {
+    await f.close();
+  }
+});
+
+it("shows a revoked bootstrap token without retrying it or stopping other bots", async () => {
+  const f = await fixture();
+  try {
+    f.errors.set("bootstrap:getMe", 401);
+    f.registered.start("registered");
+    await f.bootstrap.start();
+    expect(f.status).toMatchObject({
+      telegram: "disconnected",
+      telegramFailure: "invalid_token",
+    });
+    expect(f.reached.has("bootstrap:getMe") && f.error.mock.calls.length).toBe(
+      1,
+    );
+    await f.healthyOwnerCanStart();
   } finally {
     await f.close();
   }

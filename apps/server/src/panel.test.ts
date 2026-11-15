@@ -1759,3 +1759,30 @@ it("rejects every unauthenticated request to setup and state-changing routes", a
     expect([303, 401], `${method} ${path}`).toContain(response.status);
   }
 });
+
+it.each([
+  ["invalid_token", "Telegram rejected the bot token."],
+  ["unavailable", "Could not reach Telegram after several attempts."],
+] as const)(
+  "explains why the configured agent's Telegram connection failed (%s)",
+  async (telegramFailure, text) => {
+    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+    const app = createPanel(
+      config,
+      async () => ({ telegram: "disconnected", telegramFailure }),
+      () => 1000,
+    );
+    const login = await app.request("/login", {
+      method: "POST",
+      headers: {
+        Origin: config.origin,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ password }).toString(),
+    });
+    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
+    const page = await (await app.request("/", { headers })).text();
+    expect(page).toContain(text);
+    expect(page).not.toContain("123:");
+  },
+);

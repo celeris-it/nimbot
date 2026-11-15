@@ -10,11 +10,18 @@ import { createBotTasks } from "./bot-tasks.js";
 import type { TaskStore } from "./task-queue.js";
 import { createHostApprovals, createHostTasks } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
+import {
+  DEFAULT_RETRY_DELAYS_MS,
+  isDefinitiveTelegramRejection,
+  retryTransient,
+} from "./retry.js";
 
 interface BootstrapStatus {
   telegram: "connecting" | "connected" | "disconnected";
   botUsername?: string;
   chatActivated?: boolean;
+  /** Why the last connection attempt ended, shown in the panel. */
+  telegramFailure?: "invalid_token" | "unavailable";
 }
 
 /** A bootstrap credential or Telegram failure must not prevent other bots from starting. */
@@ -29,6 +36,7 @@ export function createBootstrapBot(
   request: typeof fetch = fetch,
   makeBot: typeof createBot = createBot,
   taskWait?: number,
+  retryDelaysMs: readonly number[] = DEFAULT_RETRY_DELAYS_MS,
 ) {
   const controller = new AbortController();
   let bot: ReturnType<typeof createBot> | undefined;
@@ -76,11 +84,16 @@ export function createBootstrapBot(
         tasks.approvals,
       );
       // The installed grammY client accepts native signals; its declarations use a legacy shim.
-      const info = await bot.api.getMe(
-        AbortSignal.any([
-          controller.signal,
-          AbortSignal.timeout(5000),
-        ]) as unknown as Parameters<typeof bot.api.getMe>[0],
+      const info = await retryTransient(
+        () =>
+          bot!.api.getMe(
+            AbortSignal.any([
+              controller.signal,
+              AbortSignal.timeout(5000),
+            ]) as unknown as Parameters<typeof bot.api.getMe>[0],
+          ),
+        controller.signal,
+        retryDelaysMs,
       );
       if (controller.signal.aborted) return;
       if (
@@ -104,15 +117,22 @@ export function createBootstrapBot(
           status.chatActivated = access.getSetup().owner === "verified";
           tasks?.resume();
           status.telegram = "connected";
+          delete status.telegramFailure;
           status.botUsername = info.username;
           console.log("Nimbot Server started with Telegram long polling.");
         },
       });
-    } catch {
-      if (!controller.signal.aborted)
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        status.telegramFailure =
+          isDefinitiveTelegramRejection(error) &&
+          (error as { error_code: number }).error_code === 401
+            ? "invalid_token"
+            : "unavailable";
         console.error(
           "Bootstrap Telegram connection failed. Check the saved credential, token, network, and whether another instance is running.",
         );
+      }
     } finally {
       tasks?.close();
       status.telegram = "disconnected";

@@ -10,6 +10,7 @@ import { createBotTasks } from "./bot-tasks.js";
 import type { TaskStore } from "./task-queue.js";
 import { getHostStatus } from "./agent-host.js";
 import { withAgentInstructions } from "./agent-instructions.js";
+import { DEFAULT_RETRY_DELAYS_MS, retryTransient } from "./retry.js";
 
 export interface RegisteredBotState {
   status:
@@ -46,6 +47,7 @@ export function createRegisteredBots(
   hosts: Pick<Awaited<ReturnType<typeof openHostCredentials>>, "read">,
   request: typeof fetch = fetch,
   makeBot: typeof createBot = createBot,
+  retryDelaysMs: readonly number[] = DEFAULT_RETRY_DELAYS_MS,
 ) {
   let closed = false;
   const connections = new Map<string, Connection>();
@@ -116,11 +118,16 @@ export function createRegisteredBots(
       // Avoid init's automatic retries: one bounded identity check, without starting polling.
       // grammY's Node declarations use a legacy AbortSignal shim. Its client only
       // uses aborted/addEventListener, which the native Node signal implements.
-      const info = await bot.api.getMe(
-        AbortSignal.any([
-          connection.controller.signal,
-          AbortSignal.timeout(5000),
-        ]) as unknown as Parameters<typeof bot.api.getMe>[0],
+      const info = await retryTransient(
+        () =>
+          bot.api.getMe(
+            AbortSignal.any([
+              connection.controller.signal,
+              AbortSignal.timeout(5000),
+            ]) as unknown as Parameters<typeof bot.api.getMe>[0],
+          ),
+        connection.controller.signal,
+        retryDelaysMs,
       );
       if (connection.controller.signal.aborted) return;
       if (
