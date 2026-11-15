@@ -20,6 +20,7 @@ import { resolve } from "node:path";
 import { openChatBinding } from "./chat-binding.js";
 import { createHostTasks } from "./host-tasks.js";
 import { getHostStatus, readAgentHostConfig } from "./agent-host.js";
+import { getCurrentHostTask } from "./host-current-task.js";
 import { serve } from "@hono/node-server";
 import { createPanel, type AgentStatus } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";
@@ -103,7 +104,18 @@ async function main(): Promise<void> {
     ? createAgentResourceRemoval(registry, provisioningConfig)
     : undefined;
   const containerAction = provisioningConfig
-    ? createAgentContainerAction(registry, provisioningConfig.socketPath)
+    ? createAgentContainerAction(
+        registry,
+        provisioningConfig.socketPath,
+        undefined,
+        async (id) => {
+          try {
+            return await getCurrentHostTask(await hostCredentials!.read(id));
+          } catch {
+            return { availability: "unavailable" };
+          }
+        },
+      )
     : undefined;
   const reconcile = provisioningConfig
     ? createResourceReconciliation(registry, provisioningConfig.socketPath)

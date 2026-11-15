@@ -36,7 +36,7 @@ it("migrates once and restores metadata without storing tokens", async () => {
       expect(
         db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
           ?.total,
-      ).toBe(4);
+      ).toBe(5);
     } finally {
       db.close();
     }
@@ -187,7 +187,7 @@ it("migrates existing configured agents without treating them as provisioned", a
     registry.close();
     const legacy = new DatabaseSync(path);
     legacy.exec(
-      "DROP TABLE agent_host_credentials; DROP TABLE agent_provisioning; DELETE FROM registry_migrations WHERE version >= 3",
+      "DROP TABLE container_stop_observations; DROP TABLE agent_host_credentials; DROP TABLE agent_provisioning; DELETE FROM registry_migrations WHERE version >= 3",
     );
     legacy.close();
     const migrated = openAgentRegistry(path);
@@ -200,6 +200,46 @@ it("migrates existing configured agents without treating them as provisioned", a
       expect(() => migrated.beginProvisioning("existing")).toThrow();
     } finally {
       migrated.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("retains stop snapshots across restart without inferring a final task result", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-stop-observation-"));
+  const path = join(dir, "server.sqlite");
+  try {
+    const first = openAgentRegistry(path);
+    first.createPending({ id: "dev", name: "Dev", ownerId: 42 });
+    expect(() =>
+      first.recordStopObservation("dev", { availability: "unavailable" }),
+    ).toThrow("No pending");
+    first.recordContainerOperation("dev", "stop", "pending");
+    first.recordStopObservation("dev", {
+      availability: "available",
+      task: { id: "a0000000-0000-4000-8000-000000000001", status: "accepted" },
+    });
+    const saved = first.getStopObservation("dev");
+    first.close();
+    const restored = openAgentRegistry(path);
+    try {
+      expect(restored.getContainerOperation("dev")?.status).toBe("interrupted");
+      expect(restored.getStopObservation("dev")).toEqual(saved);
+      expect(() =>
+        restored.recordStopObservation("dev", {
+          availability: "available",
+          task: null,
+        }),
+      ).toThrow("No pending");
+      restored.recordContainerOperation("dev", "stop", "pending");
+      restored.recordStopObservation("dev", { availability: "unavailable" });
+      expect(restored.getStopObservation("dev")).toEqual({
+        availability: "unavailable",
+        observedAt: expect.any(Number),
+      });
+    } finally {
+      restored.close();
     }
   } finally {
     await rm(dir, { recursive: true, force: true });

@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import type { CurrentHostTask } from "./host-current-task.js";
 
 export interface RegisteredAgent {
   id: string;
@@ -91,6 +92,21 @@ export function openAgentRegistry(path: string) {
         agent_id TEXT PRIMARY KEY REFERENCES agents(id),
         credential_ref TEXT NOT NULL UNIQUE
       ); INSERT INTO registry_migrations(version) VALUES (4)`);
+    }
+    if (
+      !db
+        .prepare("SELECT version FROM registry_migrations WHERE version = 5")
+        .get()
+    ) {
+      db.exec(`CREATE TABLE container_stop_observations (
+        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+        availability TEXT NOT NULL CHECK(availability IN ('available', 'unavailable')),
+        task_id TEXT,
+        task_status TEXT CHECK(task_status IN ('accepted', 'running')),
+        observed_at INTEGER NOT NULL,
+        CHECK ((task_id IS NULL AND task_status IS NULL) OR
+          (availability = 'available' AND task_id IS NOT NULL AND task_status IS NOT NULL))
+      ); INSERT INTO registry_migrations(version) VALUES (5)`);
     }
     db.prepare(
       "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
@@ -375,6 +391,56 @@ export function openAgentRegistry(path: string) {
         .run(action, Date.now(), id);
       if (!result.changes)
         throw new Error("Agent container action is not available");
+    },
+    recordStopObservation(id: string, observation: CurrentHostTask) {
+      const task =
+        observation.availability === "available" ? observation.task : null;
+      const result = db
+        .prepare(
+          `INSERT INTO container_stop_observations
+        (agent_id, availability, task_id, task_status, observed_at)
+        SELECT agent_id, ?, ?, ?, ? FROM container_operations
+        WHERE agent_id = ? AND action = 'stop' AND status = 'pending'
+        ON CONFLICT(agent_id) DO UPDATE SET availability = excluded.availability,
+        task_id = excluded.task_id, task_status = excluded.task_status,
+        observed_at = excluded.observed_at`,
+        )
+        .run(
+          observation.availability,
+          task?.id ?? null,
+          task?.status ?? null,
+          Date.now(),
+          id,
+        );
+      if (!result.changes) throw new Error("No pending container stop");
+    },
+    getStopObservation(
+      id: string,
+    ): (CurrentHostTask & { observedAt: number }) | undefined {
+      const row = db
+        .prepare(
+          `SELECT availability, task_id AS taskId,
+        task_status AS taskStatus, observed_at AS observedAt
+        FROM container_stop_observations WHERE agent_id = ?`,
+        )
+        .get(id);
+      if (!row) return undefined;
+      if (row.availability === "unavailable")
+        return {
+          availability: "unavailable",
+          observedAt: row.observedAt as number,
+        };
+      return {
+        availability: "available",
+        task:
+          row.taskId === null
+            ? null
+            : {
+                id: row.taskId as string,
+                status: row.taskStatus as "accepted" | "running",
+              },
+        observedAt: row.observedAt as number,
+      };
     },
     recordContainerOperation(
       id: string,

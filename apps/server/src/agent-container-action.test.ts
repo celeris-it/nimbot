@@ -125,3 +125,79 @@ it.each([404, 500, 200])(
     }
   },
 );
+
+it.each([
+  {
+    availability: "available",
+    task: { id: "a0000000-0000-4000-8000-000000000001", status: "running" },
+  },
+  { availability: "available", task: null },
+  { availability: "unavailable" },
+] as const)(
+  "persists the pre-stop observation before Docker access: %j",
+  async (observation) => {
+    const registry = readyAgent();
+    let observed = false;
+    const call: DockerApi = async (_path, method = "GET") => {
+      expect(observed).toBe(true);
+      expect(registry.getStopObservation("dev")).toEqual({
+        ...observation,
+        observedAt: expect.any(Number),
+      });
+      return method === "GET"
+        ? {
+            code: 200,
+            body: JSON.stringify({
+              Id: "d".repeat(64),
+              State: { Running: true },
+              Config: { Labels: { "io.nimbot.agent-id": "dev" } },
+            }),
+          }
+        : { code: 204, body: "" };
+    };
+    try {
+      const action = createAgentContainerAction(
+        registry,
+        "/unused",
+        call,
+        async (id) => {
+          expect(id).toBe("dev");
+          expect(registry.getContainerOperation(id)?.status).toBe("pending");
+          observed = true;
+          return observation;
+        },
+      );
+      await action("dev", "stop");
+      const saved = registry.getStopObservation("dev");
+      // Starting must preserve the last stop snapshot for later final-state observation.
+      await action("dev", "start");
+      expect(registry.getStopObservation("dev")).toEqual(saved);
+      expect(registry.getStopObservation("other")).toBeUndefined();
+    } finally {
+      registry.close();
+    }
+  },
+);
+
+it("still stops when Host observation fails without saving error details", async () => {
+  const registry = readyAgent();
+  try {
+    await expect(
+      createAgentContainerAction(
+        registry,
+        "/unused",
+        async () => ({ code: 404, body: "" }),
+        async () => {
+          throw new Error("private credential");
+        },
+      )("dev", "stop"),
+    ).rejects.toThrow("Container action failed");
+    expect(registry.getStopObservation("dev")).toEqual({
+      availability: "unavailable",
+      observedAt: expect.any(Number),
+    });
+    expect(registry.getContainerOperation("dev")?.status).toBe("failed");
+  } finally {
+    registry.close();
+  }
+});
