@@ -1,3 +1,5 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { spawnOpenCode, type PermissionOption } from "./acp-client.js";
 import { stopEngine } from "./stop-engine.js";
 import type { Engine } from "./engine.js";
@@ -32,12 +34,50 @@ export function progressLabel(title: string) {
   return `Using tool: ${text || "unnamed step"}`;
 }
 
-export function createOpenCodeEngine(workspace: string): Engine {
+/** Remembers the one engine session so later tasks continue the conversation. */
+export interface SessionStore {
+  read(): Promise<string | undefined>;
+  write(id: string): Promise<void>;
+}
+
+/** Stores the session ID in a small file; unreadable or malformed content means "no session". */
+export function createSessionFile(path: string): SessionStore {
+  return {
+    async read() {
+      try {
+        const id = (
+          JSON.parse(await readFile(path, "utf8")) as {
+            sessionId?: unknown;
+          }
+        ).sessionId;
+        return typeof id === "string" && id ? id : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    async write(id) {
+      await mkdir(dirname(path), { recursive: true });
+      const temporary = `${path}.tmp`;
+      await writeFile(temporary, JSON.stringify({ sessionId: id }), {
+        mode: 0o600,
+      });
+      await rename(temporary, path);
+    },
+  };
+}
+
+export function createOpenCodeEngine(
+  workspace: string,
+  sessions?: SessionStore,
+): Engine {
   let active: ReturnType<typeof spawnOpenCode> | undefined;
   return {
     async run(prompt, onText, onProgress, requestApproval) {
+      // Loading a session replays its history as updates; those are not new output.
+      let replaying = false;
       const engine = spawnOpenCode(workspace, {
         onUpdate: (_id, update) => {
+          if (replaying) return;
           const content = update.content as { text?: string } | undefined;
           if (
             update.sessionUpdate === "agent_message_chunk" &&
@@ -64,7 +104,23 @@ export function createOpenCodeEngine(workspace: string): Engine {
       active = engine;
       try {
         await engine.client.initialize();
-        const session = await engine.client.newSession(workspace);
+        let session = await sessions?.read();
+        if (session) {
+          replaying = true;
+          try {
+            await engine.client.loadSession(session, workspace);
+          } catch {
+            // Unsupported or no longer available: continue in a fresh session.
+            session = undefined;
+          } finally {
+            replaying = false;
+          }
+        }
+        if (!session) {
+          session = await engine.client.newSession(workspace);
+          // Losing continuity must not fail the task.
+          await sessions?.write(session).catch(() => undefined);
+        }
         return await engine.client.prompt(
           session,
           withEnvironmentNotes(prompt),

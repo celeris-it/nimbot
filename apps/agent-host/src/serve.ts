@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { openTaskStore } from "./task-store.js";
 import { createTaskRunner } from "./tasks.js";
-import { createOpenCodeEngine } from "./opencode-engine.js";
+import { createOpenCodeEngine, createSessionFile } from "./opencode-engine.js";
 import { serve } from "@hono/node-server";
 import { createHostApi, readHostConfig } from "./http.js";
 import { readTaskTimeoutMs } from "./task-timeout.js";
@@ -18,7 +18,10 @@ try {
   );
   const runner = createTaskRunner(
     store,
-    createOpenCodeEngine(config.workspace),
+    createOpenCodeEngine(
+      config.workspace,
+      createSessionFile(resolve(stateDir, "engine-session.json")),
+    ),
     readTaskTimeoutMs(process.env),
   );
   const app = createHostApi(config, runner);

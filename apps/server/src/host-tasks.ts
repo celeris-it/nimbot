@@ -65,6 +65,9 @@ export function createHostApprovals(
   };
 }
 
+/** Consecutive failed polls tolerated, e.g. while the Agent Host restarts. */
+const MAX_POLL_FAILURES = 15;
+
 /** Submit once, then observe persisted state. Never retry an ambiguous submission. */
 export function createHostTasks(
   config: AgentHostConfig,
@@ -129,10 +132,25 @@ export function createHostTasks(
       removeCancelListener = () =>
         cancelSignal?.removeEventListener("abort", requestCancel);
       let sequence = 0;
+      let failedPolls = 0;
       while (!deadline.aborted) {
-        const result = await call(
-          `/tasks/${encodeURIComponent(accepted.id)}/events?after=${sequence}`,
-        );
+        let result: unknown;
+        try {
+          result = await call(
+            `/tasks/${encodeURIComponent(accepted.id)}/events?after=${sequence}`,
+          );
+          failedPolls = 0;
+        } catch (error) {
+          // Reading state is safe to repeat; the restarted Host reports what happened.
+          if (
+            (error instanceof HostTaskError && error.kind === "busy") ||
+            deadline.aborted ||
+            ++failedPolls > MAX_POLL_FAILURES
+          )
+            throw error;
+          await pause();
+          continue;
+        }
         if (
           typeof result !== "object" ||
           result === null ||

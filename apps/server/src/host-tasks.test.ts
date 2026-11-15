@@ -325,3 +325,42 @@ describe("approvals", () => {
     );
   });
 });
+
+describe("Agent Host restart while a task is observed", () => {
+  const eventsResponse = (events: unknown[]) =>
+    Response.json({ id: "task-1", events });
+  it("keeps polling through a short outage and reports the interruption the Host recorded", async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(accepted())
+      .mockResolvedValueOnce(
+        eventsResponse([{ sequence: 1, status: "running" }]),
+      )
+      .mockRejectedValueOnce(new TypeError("connection refused"))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(
+        eventsResponse([{ sequence: 2, status: "interrupted" }]),
+      );
+    const pause = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      createHostTasks(config, request, pause)("hello"),
+    ).rejects.toMatchObject({ kind: "interrupted" });
+    // The task was submitted once and the cursor was kept across the outage.
+    expect(
+      request.mock.calls.filter(([url]) => String(url).endsWith("/tasks")),
+    ).toHaveLength(1);
+    expect(String(request.mock.calls.at(-1)![0])).toContain("after=1");
+  });
+  it("gives up after a bounded number of failed polls and reports unavailable", async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(accepted())
+      .mockRejectedValue(new TypeError("connection refused"));
+    const pause = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      createHostTasks(config, request, pause)("hello"),
+    ).rejects.toMatchObject({ kind: "unavailable" });
+    expect(request.mock.calls.length).toBeLessThanOrEqual(20);
+    expect(request.mock.calls.length).toBeGreaterThan(2);
+  });
+});
