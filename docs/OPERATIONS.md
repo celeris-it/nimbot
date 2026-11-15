@@ -12,7 +12,7 @@ See [INSTALL.md](INSTALL.md) for installation. Commands below assume you run the
 | OpenCode sessions, history, and AI provider credentials | Per-agent engine-state volume |
 | Task records and results | Per-agent task-state volume |
 
-Compose names the first agent's volumes `<project>_server-state`, `<project>_agent-workspace`, `<project>_agent-engine-state`, and `<project>_agent-task-state` (the project defaults to the directory name; list them with `docker volume ls`). Agents created in the panel use `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks`.
+Compose stores server state in `<project>_server-state`. Every panel-created agent uses `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks` volumes. Existing legacy Compose agent volumes are retained; the new deployment does not delete them.
 
 Treat backups as secrets: they contain bot tokens, Agent Host tokens, and AI provider credentials. The panel password hash and other settings live in `.env`, which is not in a volume; back it up separately and keep it private.
 
@@ -51,13 +51,13 @@ docker compose up -d
 
 Extraction preserves file owners (the containers run as UID 1000). Restoring into volumes that already hold data merges files; restore into new, empty volumes unless you intend to overwrite. After startup, each registered bot reconnects with its original owner and chat binding without pressing Start again.
 
-Limits of restoring on a different host: the first agent and the server state come back completely. Agents created in the panel keep their volumes and registry entries, but their containers and networks do not exist on the new host, and the panel cannot yet recreate them (it can start and stop existing containers, but it has no recreate action). Prefer restoring on the same Docker host, or keep the volumes and recreate those agents. Do not delete data from the panel while recovering.
+Limits of restoring on a different host: the server state is restored. Agents created in the panel keep their volumes and registry entries, but their containers and networks do not exist on the new host, and the panel cannot yet recreate them (it can start and stop existing containers, but it has no recreate action). Prefer restoring on the same Docker host, or keep the volumes and recreate those agents. Do not delete data from the panel while recovering.
 
 ## Troubleshooting
 
 Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Logs are JSON lines with `event`, `agentId`, and `taskId`; secrets are redacted and prompts and results are never logged.
 
-**The server exits at startup.** The log shows `server.config_invalid` or `server.state_init_failed`. Check that `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `PANEL_PASSWORD_HASH`, and `AGENT_HOST_TOKEN` (at least 32 characters) are set, that `TELEGRAM_OWNER_USER_ID` is set when several users are allowed, and that the state volume is writable. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value.
+**The server exits at startup.** The log shows `server.config_invalid` or `server.state_init_failed`. Check `PANEL_PASSWORD_HASH`, the immutable `AGENT_HOST_IMAGE`, Docker deployment settings, and writable server state. Telegram settings are managed through the panel and are not required for startup. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value.
 
 **The panel rejects my login or forms.** Five failed logins within fifteen minutes block further attempts until the window passes. Sessions last eight hours and end when the server restarts. If sign-in works but actions fail, `PANEL_URL` does not match the address in your browser (scheme, host, and port must match); fix it and recreate the server (`docker compose up -d`).
 
@@ -69,7 +69,7 @@ Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Lo
 
 **Tasks fail or never finish.** If every task fails, authenticate the provider (`opencode auth list`, `opencode auth login` in the agent's container); readiness does not check provider access. A task longer than `TASK_TIMEOUT_SECONDS` is stopped. After a Host restart, a task that was running is reported as interrupted; send it again. Use `/stop` to cancel a running task; queued messages behind it still run. If an approval message got no answer, the action was denied.
 
-**Creating an agent fails.** The creation form appears only when provisioning is configured (INSTALL.md section 8). Typical causes: the bot token is already bound to another agent, the owner ID is not in `TELEGRAM_ALLOWED_USER_IDS`, `AGENT_HOST_IMAGE` no longer matches (rebuilding the image changes its ID), `SERVER_CONTAINER_NAME` is wrong, or the server cannot read the Docker socket (`DOCKER_SOCKET_GID`). The setup page shows pending, in progress, failed, interrupted, or cancelled; a failed setup keeps its resources and volumes. Interrupted work, for example after a server restart, is never retried automatically.
+**Creating an agent fails.** The creation form appears only when provisioning is configured (INSTALL.md section 4). Typical causes: the bot token is already bound to another agent, the owner ID is not permitted in the panel’s **Telegram access** settings, `AGENT_HOST_IMAGE` no longer matches (rebuilding the image changes its ID), `SERVER_CONTAINER_NAME` is wrong, or the server cannot read the Docker socket (`DOCKER_SOCKET_GID`). The setup page shows pending, in progress, failed, interrupted, or cancelled; a failed setup keeps its resources and volumes. Interrupted work, for example after a server restart, is never retried automatically.
 
 **A container is reported missing or stopped.** The panel inspects Docker on each refresh. Start a stopped container from the agent's page. A missing container is never recreated silently, and its volumes stay in place.
 

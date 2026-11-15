@@ -36,30 +36,30 @@ Enter a password of at least 12 characters twice. Copy the printed `PANEL_PASSWO
 
 ```sh
 cp .env.example .env
-openssl rand -hex 32     # use the output as AGENT_HOST_TOKEN
+docker image inspect nimbot-agent-host --format '{{.Id}}'
+stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock
 ```
+
+The socket command supports Linux and macOS and follows symlinks to the actual socket. On macOS, Docker Desktop must be running and its default Docker socket enabled.
 
 Edit `.env`:
 
 | Variable | Meaning |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | Token of the first bot, from BotFather (section 6). |
-| `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated numeric user IDs allowed to use Nimbot. Required; everyone else is rejected. |
-| `TELEGRAM_OWNER_USER_ID` | Owner of the first agent. Optional when only one user is allowed. |
-| `AGENT_ID`, `AGENT_NAME` | Identifier and display name of the first agent. |
 | `PANEL_PASSWORD_HASH` | Hash from section 3. |
 | `PANEL_URL` | Public origin of the panel, for example `https://nimbot.example.com`. Form submissions from any other origin are rejected. |
-| `AGENT_HOST_TOKEN` | Internal API key for the first Agent Host, at least 32 characters. Never reuse another credential. |
+| `AGENT_HOST_IMAGE` | Immutable Agent Host image ID printed above (`sha256:...`). |
+| `DOCKER_SOCKET_GID` | Numeric Docker socket group ID printed above. |
 | `TASK_TIMEOUT_SECONDS` | Maximum run time of one task, 10–3600 (default 600). |
 | `SERVER_STATE_DIR` | State directory for native runs only; Compose uses a named volume. |
 
-The remaining variables in `.env.example` (`DOCKER_SOCKET_PATH`, `AGENT_CONTAINER_NAME`, `DOCKER_SOCKET_GID`, `AGENT_HOST_IMAGE`, `SERVER_CONTAINER_NAME`) are explained in section 8. Do not commit `.env`.
+`DOCKER_SOCKET_PATH` and `SERVER_CONTAINER_NAME` are trusted deployment settings; the defaults use `/var/run/docker.sock` and `nimbot-server`. Only the server gets Docker access. Bot tokens, allowed Telegram users, owners, agent names, and instructions are configured in the authenticated panel. Internal Agent Host tokens are generated automatically. Do not commit `.env`.
 
 ## 5. Start and sign in
 
 ```sh
 docker compose up -d
-docker compose ps          # both services should become "healthy"
+docker compose ps          # the server should become "healthy"
 docker compose logs -f server
 ```
 
@@ -81,10 +81,12 @@ Cookies are marked `Secure` automatically when `PANEL_URL` is HTTPS.
 
 Every agent has its own bot; Nimbot has no management bot and no shared selected agent.
 
-1. In Telegram, open `@BotFather`, send `/newbot`, and follow the prompts. Copy the token.
-2. For the first agent, put the token in `TELEGRAM_BOT_TOKEN` and restart (`docker compose up -d`).
-3. For additional agents, enable provisioning (section 8), open **Create agent** in the panel, and enter a name, optional instructions, the owner's Telegram user ID, and the BotFather token. The server checks the token with Telegram, rejects bots already bound to another agent, and then creates the container, volumes, and private network.
-4. The setup page shows provisioning, bot polling, and owner activation separately. When the bot is polling, the owner opens the bot link and presses **Start**. Only then can tasks run.
+1. In the panel, open **Telegram access** and save the numeric Telegram user IDs permitted to own agents. An empty list blocks all Telegram access. Changes apply immediately without restarting the server.
+2. In Telegram, open `@BotFather`, send `/newbot`, and follow the prompts. Copy the token.
+3. Open **Create agent** in the panel and enter a name, optional instructions, an allowed owner's Telegram user ID, and the token. This same workflow creates the first agent and every later agent. The server checks the token and provisions its private container, volumes, network, and internal credentials.
+4. The setup page shows provisioning, bot polling, and owner activation separately. Authenticate the AI provider as described in section 7. When the bot is polling, the owner opens the bot link and presses **Start**.
+
+The server starts with zero agents; there is no bootstrap bot or pre-created Agent Host to configure.
 
 A bot token belongs to exactly one agent. Another allowlisted user cannot use or activate an agent they do not own.
 
@@ -96,14 +98,7 @@ If a token is revoked or rotated in BotFather, open the agent's setup page, choo
 
 Agents use OpenCode inside their container. Credentials are stored in that agent's own engine-state volume, so each agent is authenticated separately and credentials never pass through the server or the panel.
 
-First agent (Compose service `agent-host`):
-
-```sh
-docker compose exec -it agent-host opencode auth login
-docker compose exec agent-host opencode auth list
-```
-
-Agents created in the panel run in containers named `nimbot-<agent-id>` (the ID appears in the panel and in `docker ps`):
+Every agent runs in a container named `nimbot-<agent-id>` (the ID appears in the panel and in `docker ps`):
 
 ```sh
 docker exec -it nimbot-<agent-id> opencode auth login
@@ -111,42 +106,22 @@ docker exec -it nimbot-<agent-id> opencode auth login
 
 Pick a provider and paste its key when asked. Readiness in the panel does not verify provider access; if tasks fail, check `opencode auth list` first.
 
-## 8. Create more agents from the panel (optional)
+## 8. Docker provisioning
 
-Creating, starting, stopping, and deleting agent containers needs Docker access for the server. Review the security note at the top, then:
-
-1. Find the Docker socket group and the Agent Host image ID:
-
-   ```sh
-   stat -c '%g' /var/run/docker.sock
-   docker image inspect nimbot-agent-host --format '{{.Id}}'
-   ```
-
-2. Add to `.env`:
-
-   ```text
-   DOCKER_SOCKET_GID=<group id>
-   AGENT_HOST_IMAGE=sha256:<image id>
-   SERVER_CONTAINER_NAME=<server container name>
-   ```
-
-   The container name is shown by `docker compose ps --format '{{.Name}}' server` (by default `<directory>-server-1`). The image must be referenced by its immutable ID or digest; rebuilding the image gives a new ID, so update the variable afterwards.
-
-3. Start with the override file:
-
-   ```sh
-   docker compose -f compose.yaml -f compose.docker.yaml up -d
-   ```
-
-   Use the same two `-f` options for every later Compose command. The panel now shows **Create agent**.
+The default Compose deployment enables provisioning for every agent, including the first. Section 4 configures its immutable Agent Host image, Docker socket group, and server container name. No override file is needed. Rebuilding the Agent Host image changes its ID: update `AGENT_HOST_IMAGE` and recreate the server with `docker compose up -d` before creating more agents.
 
 Agent containers run as a non-root user with all capabilities dropped, `no-new-privileges`, one CPU, 1 GiB of memory, 256 processes, no published ports, and a private network shared only with the server. Deleting an agent in the panel keeps its volumes unless you explicitly choose to delete data; deleting the Telegram bot itself is done in BotFather.
+
+### Existing installations with a pre-configured agent
+
+If you already use the old Compose-managed agent, retain its `.env` and start with `docker compose -f compose.yaml -f compose.legacy.yaml up -d`. Use both files for subsequent operations on that installation. This preserves the legacy agent's service and named volumes while enabling panel creation for additional agents. Its environment allowlist seeds the persisted Telegram access list only once; later changes belong in the panel. Fresh installations use only `compose.yaml` and require none of those legacy variables. Do not remove volumes during this transition.
 
 ## 9. Telegram commands
 
 | Command | Description |
 |---|---|
-| `/start`, `/help` | Activate the owner's chat and show help for this agent. |
+| `/start` | Activate the owner's chat. |
+| `/help` | Show help for this agent. |
 | `/status` | Show whether this agent is ready, busy, or stopped. |
 | `/stop` | Cancel this agent's running task. |
 | Any other text | Send a task to this bot's agent. Messages queue and run one at a time. |
