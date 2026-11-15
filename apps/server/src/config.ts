@@ -40,7 +40,7 @@ export function readConfig(env: NodeJS.ProcessEnv): ServerConfig {
     );
   }
   const id = env.AGENT_ID?.trim() || "default";
-  const name = env.AGENT_NAME?.trim() || "Agente configurado";
+  const name = env.AGENT_NAME?.trim() || "Configured agent";
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id) || name.length > 128) {
     throw new Error(
       "AGENT_ID must use 1–64 letters, digits, underscores or hyphens; AGENT_NAME must have at most 128 characters.",

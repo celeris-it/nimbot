@@ -15,7 +15,7 @@ function setup(
     {
       telegramBotToken: "123:fake_test_token",
       allowedUserIds: new Set([42, 73]),
-      agent: { id: "test", name: "Agente de prueba", ownerId: 42 },
+      agent: { id: "test", name: "Test agent", ownerId: 42 },
     },
     (chatId) => activations.push(chatId),
     execute,
@@ -103,7 +103,7 @@ describe("Telegram access", () => {
       await second.bot.handleUpdate(message("hello", 73));
       expect(execute).not.toHaveBeenCalled();
       await second.bot.handleUpdate(message("/status"));
-      expect(second.sent.at(-1)).toContain("Chat: activado");
+      expect(second.sent.at(-1)).toContain("Chat: activated");
       await second.bot.handleUpdate(message("hello"));
       expect(execute).toHaveBeenCalledExactlyOnceWith("hello");
       expect(second.sent.at(-1)).toBe("Restored");
@@ -121,7 +121,7 @@ describe("Telegram access", () => {
     };
     const { bot, sent, activations } = setup(execute, binding);
     await bot.handleUpdate(message("/start"));
-    expect(sent.at(-1)).toContain("No pude guardar");
+    expect(sent.at(-1)).toContain("I could not save");
     expect(activations).toEqual([]);
     await bot.handleUpdate(message("hello"));
     expect(execute).not.toHaveBeenCalled();
@@ -154,7 +154,7 @@ describe("Telegram access", () => {
     const { bot, sent } = setup(execute);
     await bot.handleUpdate(message("/start"));
     await bot.handleUpdate(message("first"));
-    expect(sent.at(-1)).toContain("No pude confirmar");
+    expect(sent.at(-1)).toContain("I could not confirm");
     expect(sent.join("")).not.toContain("secret");
     await bot.handleUpdate(message("second"));
     expect(sent.at(-1)).toBe("Recovered");
@@ -166,15 +166,15 @@ describe("Telegram access", () => {
     await bot.handleUpdate(message("/start"));
     await bot.handleUpdate(message("hello"));
     expect(execute).not.toHaveBeenCalled();
-    expect(sent.at(-1)).toContain("detenido o todavía no está listo");
+    expect(sent.at(-1)).toContain("stopped or not ready yet");
     await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("detenido o sin conexión");
+    expect(sent.at(-1)).toContain("stopped or offline");
     host = "busy";
     await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("ocupado");
+    expect(sent.at(-1)).toContain("busy");
     host = "ready";
     await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("disponible");
+    expect(sent.at(-1)).toContain("available");
     await bot.handleUpdate(message("hello"));
     expect(sent.at(-1)).toBe("Done");
   });
@@ -184,7 +184,7 @@ describe("Telegram access", () => {
       const { bot, sent } = setup();
       await bot.handleUpdate(message(command));
       expect(sent).toHaveLength(1);
-      expect(sent[0]).toContain("autorizado");
+      expect(sent[0]).toContain("authorized");
     },
   );
   it.each(["/start", "run a command"])(
@@ -209,7 +209,7 @@ describe("Telegram access", () => {
   });
   it("rejects an allowlisted user who is not the owner", async () => {
     const { bot, sent, activations } = setup();
-    for (const text of ["/start", "/status", "hola"])
+    for (const text of ["/start", "/status", "hello"])
       await bot.handleUpdate(message(text, 73));
     expect(sent).toEqual([]);
     expect(activations).toEqual([]);
@@ -219,18 +219,18 @@ describe("Telegram access", () => {
     await bot.handleUpdate(message("/help"));
     expect(activations).toEqual([]);
     await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("pendiente");
+    expect(sent.at(-1)).toContain("pending");
     await bot.handleUpdate(message("/start"));
     expect(activations).toEqual([42]);
     await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("Chat: activado");
+    expect(sent.at(-1)).toContain("Chat: activated");
     await bot.handleUpdate(message("create a file"));
-    expect(sent.at(-1)).toContain("falta conectar el Agent Host");
+    expect(sent.at(-1)).toContain("the Agent Host is not connected");
   });
   it("explains that tasks are not connected yet", async () => {
     const { bot, sent } = setup();
     await bot.handleUpdate(message("create a file"));
-    expect(sent[0]).toContain("no se ha enviado");
+    expect(sent[0]).toContain("was not sent");
   });
 });
 
@@ -242,7 +242,7 @@ it("refuses activation when the persisted bot-owner identity cannot be verified"
     canExecute: () => false,
   });
   await bot.handleUpdate(message("/start"));
-  expect(sent.at(-1)).toContain("No pude verificar la vinculación");
+  expect(sent.at(-1)).toContain("I could not verify this bot's link");
   expect(binding.save).not.toHaveBeenCalled();
   expect(activations).toEqual([]);
   expect(execute).not.toHaveBeenCalled();
@@ -282,12 +282,12 @@ it("rechecks persisted setup after Host health and never executes incomplete age
     await bot.handleUpdate(message("first"));
     expect(health).toHaveBeenCalledTimes(1);
     expect(execute).not.toHaveBeenCalled();
-    expect(sent.at(-1)).toContain("configuración del agente no está completa");
+    expect(sent.at(-1)).toContain("agent's setup is not complete");
     await bot.handleUpdate(message("second"));
     expect(health).toHaveBeenCalledTimes(1);
     expect(execute).not.toHaveBeenCalled();
     await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("no puede recibir tareas");
+    expect(sent.at(-1)).toContain("cannot receive tasks");
     registry.recordContainerOperation("test", "stop", "failed");
     changeDuringHealth = false;
     await bot.handleUpdate(message("third"));
@@ -295,7 +295,7 @@ it("rechecks persisted setup after Host health and never executes incomplete age
     registry.beginResourceRemoval("test");
     registry.finishProvisioning("test", "cancelled");
     await bot.handleUpdate(message("/start"));
-    expect(sent.at(-1)).toContain("todavía no permite ejecutar tareas");
+    expect(sent.at(-1)).toContain("does not allow running tasks yet");
     await bot.handleUpdate(message("fourth"));
     expect(execute).toHaveBeenCalledTimes(1);
   } finally {

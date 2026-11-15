@@ -56,6 +56,7 @@ Run lint, type-check, and tests before finishing any change.
 
 ## Conventions
 
+- English is the primary language. Write all user-facing content (panel pages, Telegram bot replies, CLI prompts, API errors), code, comments, tests, and documentation in English. Multi-language content will be added later; until then, do not add text in other languages or introduce localization infrastructure.
 - Do not create standalone manual validation guides or test run reports unless the user explicitly requests them. If the user needs to run commands to test something, provide the commands and instructions directly in chat.
 - Never commit secrets. Configuration comes from environment variables; keep `.env.example` current once it exists.
 - Add tests with new behaviour.

@@ -20,10 +20,10 @@ input.on("SIGINT", () => {
 });
 try {
   process.stdout.write(
-    "Contraseña del panel (mínimo 12 caracteres; no se mostrará): ",
+    "Panel password (at least 12 characters; it will not be shown): ",
   );
   const password = await input.question("");
-  process.stdout.write("\nRepetí la contraseña: ");
+  process.stdout.write("\nRepeat the password: ");
   const confirmation = await input.question("");
   process.stdout.write("\n");
   if (
@@ -32,7 +32,7 @@ try {
     password !== confirmation
   ) {
     console.error(
-      "Las contraseñas deben coincidir y tener entre 12 y 256 caracteres.",
+      "Passwords must match and be between 12 and 256 characters long.",
     );
     process.exitCode = 1;
   } else console.log(`PANEL_PASSWORD_HASH=${await hashPassword(password)}`);

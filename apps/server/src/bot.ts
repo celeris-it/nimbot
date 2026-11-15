@@ -32,7 +32,7 @@ export function createBot(
   bot.command("start", async (ctx) => {
     if (access && !access.canActivate(ctx.me.id, ctx.from!.id)) {
       await ctx.reply(
-        "No pude verificar la vinculación de este bot con tu agente. Revisá su configuración en el panel.",
+        "I could not verify this bot's link to your agent. Check its setup in the panel.",
       );
       return;
     }
@@ -40,61 +40,59 @@ export function createBot(
       binding?.save(ctx.me.id, ctx.chat.id);
     } catch {
       await ctx.reply(
-        "No pude guardar la activación del chat. Intentá /start nuevamente.",
+        "I could not save the chat activation. Try /start again.",
       );
       return;
     }
     activeChatId = ctx.chat.id;
     onActivation(activeChatId);
     await ctx.reply(
-      `${config.agent.name}: tu usuario está autorizado y este chat está activado. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Enviá un mensaje de texto para ejecutar una tarea." : "La configuración del agente todavía no permite ejecutar tareas."}`,
+      `${config.agent.name}: your user is authorized and this chat is activated. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send a text message to run a task." : "The agent's setup does not allow running tasks yet."}`,
     );
   });
   bot.command("help", async (ctx) => {
     await ctx.reply(
-      `${config.agent.name}: tu usuario está autorizado. Usá /start para activar este chat y /status para consultar el estado. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Enviá texto para ejecutar una tarea. Las tareas se procesan de una en una." : "Todavía no puedo ejecutar tareas."}`,
+      `${config.agent.name}: your user is authorized. Use /start to activate this chat and /status to check the status. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
     );
   });
   bot.command("status", async (ctx) => {
     const host =
       access && !access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)
-        ? "Agente: configuración o activación pendiente; no puede recibir tareas."
+        ? "Agent: setup or activation pending; it cannot receive tasks."
         : !execute
-          ? "Agent Host: sin conectar. No hay tareas en ejecución."
+          ? "Agent Host: not connected. No tasks are running."
           : !hostStatus
-            ? "Agent Host configurado. Consultá el panel para verificar disponibilidad."
+            ? "Agent Host configured. Check the panel to verify availability."
             : {
-                ready: "Agente: disponible para recibir tareas.",
-                busy: "Agente: ocupado con una tarea.",
-                unavailable: "Agente: detenido o sin conexión.",
+                ready: "Agent: available to receive tasks.",
+                busy: "Agent: busy with a task.",
+                unavailable: "Agent: stopped or offline.",
               }[await hostStatus()];
     await ctx.reply(
-      `${config.agent.name}\nChat: ${(binding ? binding.get(ctx.me.id) : activeChatId) === ctx.chat.id ? "activado" : "pendiente; usá /start"}\n${host}`,
+      `${config.agent.name}\nChat: ${(binding ? binding.get(ctx.me.id) : activeChatId) === ctx.chat.id ? "activated" : "pending; use /start"}\n${host}`,
     );
   });
   bot.on("message:text", async (ctx) => {
     if ((binding ? binding.get(ctx.me.id) : activeChatId) !== ctx.chat.id) {
       await ctx.reply(
-        "Usá /start para activar el chat de este agente. Tu mensaje no se ha enviado a ningún agente.",
+        "Use /start to activate this agent's chat. Your message was not sent to any agent.",
       );
       return;
     }
     if (!execute) {
       await ctx.reply(
-        "Todavía no puedo ejecutar tareas: falta conectar el Agent Host. Tu mensaje no se ha enviado a ningún agente.",
+        "I cannot run tasks yet: the Agent Host is not connected. Your message was not sent to any agent.",
       );
       return;
     }
     if (ctx.message.text.startsWith("/")) {
-      await ctx.reply(
-        "Comando no disponible. Usá /help para consultar las opciones.",
-      );
+      await ctx.reply("Command not available. Use /help to see the options.");
       return;
     }
     const configured = () =>
       !access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id);
     const incomplete =
-      "La configuración del agente no está completa. Tu mensaje no se ha enviado; revisá el panel antes de volver a intentar.";
+      "The agent's setup is not complete. Your message was not sent; check the panel before trying again.";
     if (!configured()) {
       await ctx.reply(incomplete);
       return;
@@ -102,7 +100,7 @@ export function createBot(
     // Checked before submission, so this reply is unambiguous: nothing was sent.
     if (hostStatus && (await hostStatus()) === "unavailable") {
       await ctx.reply(
-        "El agente está detenido o todavía no está listo. Tu mensaje no se ha enviado; intentá nuevamente cuando esté disponible.",
+        "The agent is stopped or not ready yet. Your message was not sent; try again when it is available.",
       );
       return;
     }
@@ -116,15 +114,14 @@ export function createBot(
       output = await execute(ctx.message.text);
     } catch (error) {
       const messages = {
-        busy: "El agente está ocupado. Intentá nuevamente cuando termine la tarea actual.",
+        busy: "The agent is busy. Try again when the current task finishes.",
         failed:
-          "La tarea falló o superó el tiempo permitido. Podés enviar otra tarea.",
-        interrupted:
-          "La tarea fue interrumpida por un reinicio del Agent Host.",
+          "The task failed or exceeded the time limit. You can send another task.",
+        interrupted: "The task was interrupted by an Agent Host restart.",
         timeout:
-          "Dejé de esperar el resultado. La tarea podría seguir en ejecución; revisá el panel antes de volver a enviarla.",
+          "I stopped waiting for the result. The task may still be running; check the panel before sending it again.",
         unavailable:
-          "No pude confirmar el estado de la tarea en el Agent Host. Podría haberse iniciado; revisá el panel antes de volver a enviarla.",
+          "I could not confirm the task's status on the Agent Host. It may have started; check the panel before sending it again.",
       };
       await ctx.reply(
         messages[error instanceof HostTaskError ? error.kind : "unavailable"],
@@ -132,7 +129,7 @@ export function createBot(
       return;
     }
     for (const part of splitTelegramText(
-      output || "La tarea terminó sin una respuesta de texto.",
+      output || "The task finished without a text response.",
     )) {
       await ctx.reply(part);
     }

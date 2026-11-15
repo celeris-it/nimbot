@@ -52,9 +52,9 @@ function setup(host?: "ready" | "busy" | "unavailable") {
 
 describe("panel access", () => {
   it.each([
-    ["ready", "Disponible"],
-    ["busy", "Ocupado"],
-    ["unavailable", "Sin conexión"],
+    ["ready", "Available"],
+    ["busy", "Busy"],
+    ["unavailable", "Offline"],
   ] as const)("shows verified host status %s", async (host, label) => {
     const { app, login } = setup(host);
     const { cookie } = await login();
@@ -354,7 +354,7 @@ it("protects token replacement and never echoes or prepopulates the credential",
     await app.request("/agent/token?saved=1", { headers: { Cookie: cookie } })
   ).text();
   expect(form).not.toContain("123:secret");
-  expect(form).toContain("Reiniciá el servidor");
+  expect(form).toContain("Restart the server");
   expect(form).toContain('type="password"');
 });
 
@@ -768,13 +768,13 @@ it("creates agents through the panel form and displays saved setup state without
   const result = await (
     await app.request("/agents/agent-test/setup", { headers })
   ).text();
-  expect(result).toContain("Contenedor disponible.");
-  expect(result).toContain("todavía está pendiente");
+  expect(result).toContain("Container available.");
+  expect(result).toContain("is still pending");
   expect(result).not.toContain("good-secret");
   ready = false;
   expect(
     await (await app.request("/agents/agent-test/setup", { headers })).text(),
-  ).toContain("No vuelvas a crear el mismo agente");
+  ).toContain("Do not create the same agent again");
   expect((await app.request("/agents/missing/setup", { headers })).status).toBe(
     404,
   );
@@ -879,7 +879,7 @@ it("edits the requested registered agent without changing another agent", async 
     const refreshed = await (
       await app.request("/agents/first/settings?saved=1", { headers })
     ).text();
-    expect(refreshed).toContain("Cambios guardados.");
+    expect(refreshed).toContain("Changes saved.");
     expect(refreshed).toContain('value="Edited"');
     expect(
       await (await app.request("/agents/first/setup", { headers })).text(),
@@ -970,7 +970,7 @@ it("replaces only the requested agent's token after verifying the same bot", asy
     const form = await (
       await app.request("/agents/first/token", { headers })
     ).text();
-    expect(form).toContain("Agente: first");
+    expect(form).toContain("Agent: first");
     expect(form).toContain('action="/agents/first/token"');
     expect(
       (
@@ -1008,7 +1008,7 @@ it("replaces only the requested agent's token after verifying the same bot", asy
     const confirmation = await (
       await app.request("/agents/first/token?saved=1", { headers })
     ).text();
-    expect(confirmation).toContain("Token guardado.");
+    expect(confirmation).toContain("Token saved.");
     expect(confirmation).not.toContain("valid_secret");
     expect(
       (await post("/agents/missing/token", "token=123%3Avalid_secret", cookie))
@@ -1085,7 +1085,7 @@ it("starts and confirms stopping the selected agent while showing observed runti
   const headers = { Cookie: cookie };
   expect(
     await (await app.request("/agents/dev/setup", { headers })).text(),
-  ).toContain("Contenedor detenido.");
+  ).toContain("Container stopped.");
   expect(
     (
       await post(
@@ -1105,11 +1105,11 @@ it("starts and confirms stopping the selected agent while showing observed runti
   expect(start.headers.get("location")).toBe("/agents/dev/setup");
   expect(
     await (await app.request("/agents/dev/setup", { headers })).text(),
-  ).toContain("Contenedor disponible.");
+  ).toContain("Container available.");
   const confirmation = await (
     await app.request("/agents/dev/container/stop", { headers })
   ).text();
-  expect(confirmation).toContain("¿Detener Developer?");
+  expect(confirmation).toContain("Stop Developer?");
   expect(confirmation).toMatch(/name="confirm"\s+value="dev"/);
   expect(calls).toHaveLength(1);
   expect(
@@ -1119,9 +1119,9 @@ it("starts and confirms stopping the selected agent while showing observed runti
   const stopped = await (
     await app.request("/agents/dev/setup", { headers })
   ).text();
-  expect(stopped).toContain("Contenedor detenido.");
-  expect(stopped.replace(/\s+/g, " ")).toContain("Detención — Completada.");
-  expect(stopped.replace(/\s+/g, " ")).toContain("puede quedar interrumpida");
+  expect(stopped).toContain("Container stopped.");
+  expect(stopped.replace(/\s+/g, " ")).toContain("Stop — Completed.");
+  expect(stopped.replace(/\s+/g, " ")).toContain("may be interrupted");
   expect(calls).toEqual([
     { id: "dev", action: "start" },
     { id: "dev", action: "stop" },
@@ -1135,18 +1135,18 @@ it("starts and confirms stopping the selected agent while showing observed runti
 });
 
 it.each([
-  [undefined, "Una tarea activa puede quedar interrumpida"],
+  [undefined, "An active task may be interrupted"],
   [
     { availability: "unavailable" },
-    "No se pudo consultar si había una tarea activa",
+    "Could not check whether a task was active",
   ],
-  [{ availability: "available", task: null }, "No había una tarea activa"],
+  [{ availability: "available", task: null }, "No task was active"],
   [
     {
       availability: "available",
       task: { id: "private-task-id", status: "running" },
     },
-    "Resultado sin confirmar",
+    "Result unconfirmed",
   ],
   [
     {
@@ -1154,7 +1154,7 @@ it.each([
       task: { id: "private-task-id", status: "running" },
       finalStatus: "interrupted",
     },
-    "Tarea interrumpida.",
+    "Task interrupted.",
   ],
   [
     {
@@ -1162,7 +1162,7 @@ it.each([
       task: { id: "private-task-id", status: "running" },
       finalStatus: "completed",
     },
-    "La tarea terminó antes de que se confirmara una interrupción.",
+    "The task finished before an interruption was confirmed.",
   ],
   [
     {
@@ -1170,7 +1170,7 @@ it.each([
       task: { id: "private-task-id", status: "accepted" },
       finalStatus: "failed",
     },
-    "La tarea terminó con un error.",
+    "The task finished with an error.",
   ],
 ] as const)(
   "shows the captured stop outcome without treating Docker success as interruption: %j",
@@ -1237,13 +1237,13 @@ it.each([
     const response = await app.request("/agents/dev/setup", { headers });
     const body = (await response.text()).replace(/\s+/g, " ");
     expect(body).toContain(message);
-    expect(body).toContain("Contenedor detenido.");
+    expect(body).toContain("Container stopped.");
     expect(body).not.toContain("private-task-id");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(calls).toEqual(["dev"]);
-    if (snapshot) expect(body).toContain("Tarea en la última detención");
+    if (snapshot) expect(body).toContain("Task at the last stop");
     if (snapshot && "finalStatus" in snapshot)
-      expect(body).not.toContain("Resultado sin confirmar");
+      expect(body).not.toContain("Result unconfirmed");
   },
 );
 
@@ -1270,7 +1270,7 @@ it("shows persisted stop results for the configured agent even while it is offli
   });
   const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
   expect(await (await app.request("/", { headers })).text()).toContain(
-    "Tarea interrumpida.",
+    "Task interrupted.",
   );
   expect(
     await (await app.request("/api/status", { headers })).json(),
@@ -1278,20 +1278,11 @@ it("shows persisted stop results for the configured agent even while it is offli
 });
 
 it.each([
-  ["pending", "Configuración: Pendiente."],
-  ["provisioning", "Configuración: En curso."],
-  [
-    "failed",
-    "Configuración: Fallida; los recursos creados se conservan para revisión.",
-  ],
-  [
-    "interrupted",
-    "Configuración: Interrumpida al reiniciar el servidor; requiere revisión.",
-  ],
-  [
-    "cancelled",
-    "Configuración: Cancelada; los recursos creados se conservan para revisión.",
-  ],
+  ["pending", "Setup: Pending."],
+  ["provisioning", "Setup: In progress."],
+  ["failed", "Setup: Failed; created resources are kept for review."],
+  ["interrupted", "Setup: Interrupted by a server restart; needs review."],
+  ["cancelled", "Setup: Cancelled; created resources are kept for review."],
 ] as const)(
   "shows the persisted %s setup state without offering container actions",
   async (provisioning, message) => {
@@ -1324,8 +1315,8 @@ it.each([
     const response = await app.request("/agents/dev/setup", { headers });
     const body = (await response.text()).replace(/\s+/g, " ");
     expect(body).toContain(message);
-    expect(body).not.toContain("Iniciar contenedor");
-    expect(body).not.toContain("Detener contenedor…");
+    expect(body).not.toContain("Start container");
+    expect(body).not.toContain("Stop container…");
     expect(response.headers.get("cache-control")).toBe("no-store");
   },
 );
@@ -1402,10 +1393,8 @@ it.each(["/agents/dev/setup/cancel", "/api/agents/dev/provision/cancel"])(
     const before = await (
       await app.request("/agents/dev/setup", { headers })
     ).text();
-    expect(before).toContain("Cancelar configuración");
-    expect(before.replace(/\s+/g, " ")).toContain(
-      "Los recursos creados se conservan",
-    );
+    expect(before).toContain("Cancel setup");
+    expect(before.replace(/\s+/g, " ")).toContain("Created resources are kept");
     const response = await post(path, "confirm=dev", cookie);
     expect(response.status).toBe(path.startsWith("/api/") ? 202 : 303);
     if (path.startsWith("/api/"))
@@ -1417,9 +1406,9 @@ it.each(["/agents/dev/setup/cancel", "/api/agents/dev/provision/cancel"])(
     const after = await (
       await app.request("/agents/dev/setup", { headers })
     ).text();
-    expect(after).toContain("Cancelación solicitada");
-    expect(after).not.toContain("Cancelar configuración");
-    expect(after).not.toContain("Configuración: Cancelada");
+    expect(after).toContain("Cancellation requested");
+    expect(after).not.toContain("Cancel setup");
+    expect(after).not.toContain("Setup: Cancelled");
     active = false;
     const failed = await post(path, "confirm=dev", cookie);
     expect(failed.status).toBe(409);
@@ -1434,24 +1423,20 @@ it.each(["/agents/dev/setup/cancel", "/api/agents/dev/provision/cancel"])(
 it.each([
   [
     { bot: "linked", owner: "pending" },
-    "Bot verificado y vinculado",
-    "Pendiente: falta activar el chat del dueño",
+    "Bot verified and linked",
+    "Pending: the owner chat has not been activated",
   ],
   [
     { bot: "linked", owner: "verified" },
-    "Bot verificado y vinculado",
-    "Verificado mediante /start",
+    "Bot verified and linked",
+    "Verified through /start",
   ],
   [
     { bot: "unlinked", owner: "not_allowlisted" },
-    "Bot sin vincular",
-    "Dueño fuera de la lista autorizada",
+    "Bot not linked",
+    "Owner not on the allowlist",
   ],
-  [
-    { bot: "unavailable", owner: "unavailable" },
-    "No disponible",
-    "No disponible",
-  ],
+  [{ bot: "unavailable", owner: "unavailable" }, "Unavailable", "Unavailable"],
 ] as const)(
   "shows explicit bot linking and owner verification state: %j",
   async (setupAccess, botLabel, ownerLabel) => {
@@ -1488,9 +1473,9 @@ it.each([
     const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
     for (const path of ["/", "/agents/dev/setup"]) {
       const body = await (await app.request(path, { headers })).text();
-      expect(body).toContain("Vinculación del bot");
+      expect(body).toContain("Bot link");
       expect(body).toContain(botLabel);
-      expect(body).toContain("Verificación del dueño");
+      expect(body).toContain("Owner verification");
       expect(body).toContain(ownerLabel);
       expect(body).not.toContain("file:host");
     }

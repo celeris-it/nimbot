@@ -51,7 +51,7 @@ const css =
   `
 body{margin:0;min-height:100vh;background:var(--color-base-200);color:var(--color-base-content);font:1rem/1.6 Georgia,serif}
 header,main{max-width:62rem;margin:auto;padding:1.5rem}header{display:flex;justify-content:space-between;align-items:center;gap:1rem;border-bottom:1px solid var(--color-base-300)}header a{font-size:1.5rem;font-weight:bold;color:inherit;text-decoration:none}
-main{padding-top:4rem}h1{font-size:clamp(2rem,6vw,3rem);line-height:1.15;margin:0 0 1rem}h2{font-size:1.5rem;overflow-wrap:anywhere}p{margin:.75rem 0}form{display:grid;gap:1rem}label{font-weight:bold}.card{background:var(--color-base-100);border:1px solid var(--color-base-300);padding:clamp(1rem,4vw,2rem);margin-top:2rem}.input,.textarea{width:100%;box-sizing:border-box;border-color:var(--color-base-content)}section[aria-label="Acceso"]{max-width:28rem;margin:auto}dl{display:grid;grid-template-columns:1fr 1fr;gap:1rem}dt{font-weight:bold}dd{margin:0;overflow-wrap:anywhere}footer{margin-top:2rem}button,a.btn{min-height:44px}a{overflow-wrap:anywhere}:focus-visible{outline:3px solid var(--color-base-content);outline-offset:4px}header form{display:block}small{font-family:monospace}*{box-sizing:border-box}
+main{padding-top:4rem}h1{font-size:clamp(2rem,6vw,3rem);line-height:1.15;margin:0 0 1rem}h2{font-size:1.5rem;overflow-wrap:anywhere}p{margin:.75rem 0}form{display:grid;gap:1rem}label{font-weight:bold}.card{background:var(--color-base-100);border:1px solid var(--color-base-300);padding:clamp(1rem,4vw,2rem);margin-top:2rem}.input,.textarea{width:100%;box-sizing:border-box;border-color:var(--color-base-content)}section[aria-label="Sign in"]{max-width:28rem;margin:auto}dl{display:grid;grid-template-columns:1fr 1fr;gap:1rem}dt{font-weight:bold}dd{margin:0;overflow-wrap:anywhere}footer{margin-top:2rem}button,a.btn{min-height:44px}a{overflow-wrap:anywhere}:focus-visible{outline:3px solid var(--color-base-content);outline-offset:4px}header form{display:block}small{font-family:monospace}*{box-sizing:border-box}
 @media(max-width:400px){header,main{padding:1rem}main{padding-top:2rem}dl{grid-template-columns:1fr;gap:.5rem}dd{margin-bottom:.5rem}}`;
 
 function page(
@@ -60,7 +60,7 @@ function page(
   signedIn = false,
 ) {
   return html`<!doctype html>
-    <html lang="es" data-theme="light">
+    <html lang="en" data-theme="light">
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -70,7 +70,7 @@ function page(
       <body>
         <header>
           <a href="/">nimbot<span aria-hidden="true"> /</span></a
-          >${signedIn ? html`<form action="/logout" method="post"><button class="btn" type="submit">Cerrar sesión</button></form>` : html`<small>EN TU SERVIDOR</small>`}
+          >${signedIn ? html`<form action="/logout" method="post"><button class="btn" type="submit">Sign out</button></form>` : html`<small>ON YOUR SERVER</small>`}
         </header>
         <main id="main">${content}</main>
       </body>
@@ -80,25 +80,25 @@ function stopTaskSection(
   observation?: import("./agent-registry.js").StopObservation,
 ) {
   const taskLabels = {
-    interrupted: "Tarea interrumpida.",
-    completed: "La tarea terminó antes de que se confirmara una interrupción.",
-    failed: "La tarea terminó con un error.",
+    interrupted: "Task interrupted.",
+    completed: "The task finished before an interruption was confirmed.",
+    failed: "The task finished with an error.",
   };
   const stopMessage = observation
     ? observation.availability === "unavailable"
-      ? "No se pudo consultar si había una tarea activa antes de detener el contenedor. No hay un resultado confirmado."
+      ? "Could not check whether a task was active before stopping the container. There is no confirmed result."
       : !observation.task
-        ? "No había una tarea activa al consultar el agente antes de detener el contenedor."
+        ? "No task was active when the agent was checked before stopping the container."
         : observation.finalStatus
           ? taskLabels[observation.finalStatus]
-          : "Había una tarea activa. Resultado sin confirmar: iniciá el contenedor y actualizá el estado para consultar el registro de esa tarea."
+          : "A task was active. Result unconfirmed: start the container and refresh the status to check that task's record."
     : undefined;
   return stopMessage
-    ? html`<section aria-label="Tarea en la última detención">
-        <h2>Tarea en la última detención</h2>
+    ? html`<section aria-label="Task at the last stop">
+        <h2>Task at the last stop</h2>
         <p role="status">${stopMessage}</p>
         <p>
-          Consulta previa: ${new Date(observation!.observedAt).toISOString()}.
+          Pre-stop check: ${new Date(observation!.observedAt).toISOString()}.
         </p>
       </section>`
     : "";
@@ -109,35 +109,35 @@ function setupAccessDetails(
 ) {
   if (!access) return "";
   const botLabels = {
-    linked: "Bot verificado y vinculado",
-    unlinked: "Bot sin vincular",
-    unavailable: "No disponible",
+    linked: "Bot verified and linked",
+    unlinked: "Bot not linked",
+    unavailable: "Unavailable",
   };
   const ownerLabels = {
-    pending: "Pendiente: falta activar el chat del dueño",
-    verified: "Verificado mediante /start",
-    not_allowlisted: "Dueño fuera de la lista autorizada",
-    unavailable: "No disponible",
+    pending: "Pending: the owner chat has not been activated",
+    verified: "Verified through /start",
+    not_allowlisted: "Owner not on the allowlist",
+    unavailable: "Unavailable",
   };
   return html`<dl>
-    <dt>Vinculación del bot</dt>
+    <dt>Bot link</dt>
     <dd>${botLabels[access.bot]}</dd>
-    <dt>Verificación del dueño</dt>
+    <dt>Owner verification</dt>
     <dd>${ownerLabels[access.owner]}</dd>
   </dl>`;
 }
 
 function login(error?: string) {
   return page(
-    "Acceso",
-    html`<section aria-label="Acceso">
-      <small>ADMINISTRACIÓN</small>
-      <h1>Tu espacio de agentes.</h1>
-      <p>Ingresá para consultar el estado de tu instalación.</p>
+    "Sign in",
+    html`<section aria-label="Sign in">
+      <small>ADMINISTRATION</small>
+      <h1>Your agent workspace.</h1>
+      <p>Sign in to check the status of your installation.</p>
       <div class="card">
         ${error ? html`<p role="alert" id="login-error" tabindex="-1" autofocus>${error}</p>` : ""}
         <form method="post" action="/login">
-          <label for="password">Contraseña de administrador</label
+          <label for="password">Administrator password</label
           ><input
             class="input"
             id="password"
@@ -148,10 +148,8 @@ function login(error?: string) {
             maxlength="256"
             aria-describedby="password-help${error ? " login-error" : ""}"
           />
-          <p id="password-help">
-            Usá la contraseña configurada en tu servidor.
-          </p>
-          <button class="btn" type="submit">Ingresar al panel</button>
+          <p id="password-help">Use the password configured on your server.</p>
+          <button class="btn" type="submit">Sign in to the panel</button>
         </form>
       </div>
     </section>`,
@@ -212,14 +210,14 @@ export function createPanel(
       !["GET", "HEAD"].includes(c.req.method) &&
       c.req.header("Origin") !== config.origin
     )
-      return c.text("Origen no permitido.", 403);
+      return c.text("Origin not allowed.", 403);
     await next();
   });
   app.use(
     "*",
     bodyLimit({
       maxSize: 65536,
-      onError: (c) => c.text("Solicitud demasiado grande.", 413),
+      onError: (c) => c.text("Request too large.", 413),
     }),
   );
   app.get("/assets/panel.css", (c) =>
@@ -230,7 +228,7 @@ export function createPanel(
     "/login",
     bodyLimit({
       maxSize: 4096,
-      onError: (c) => c.text("Solicitud demasiado grande.", 413),
+      onError: (c) => c.text("Request too large.", 413),
     }),
     async (c) => {
       if (now() >= windowEnd) {
@@ -240,7 +238,7 @@ export function createPanel(
       if (attempts >= 5) {
         c.header("Retry-After", String(Math.ceil((windowEnd - now()) / 1000)));
         return c.html(
-          login("Demasiados intentos. Volvé a intentar en 15 minutos."),
+          login("Too many attempts. Try again in 15 minutes."),
           429,
         );
       }
@@ -252,10 +250,7 @@ export function createPanel(
         password.length > 256 ||
         !(await verifyPassword(password, config.passwordHash))
       )
-        return c.html(
-          login("La contraseña no es correcta. Intentá nuevamente."),
-          401,
-        );
+        return c.html(login("Incorrect password. Try again."), 401);
       attempts = 0;
       for (const [id, expires] of sessions)
         if (expires <= now()) sessions.delete(id);
@@ -296,17 +291,17 @@ export function createPanel(
     back = "/",
   ) =>
     page(
-      "Editar agente",
-      html`<h1>Editar agente.</h1>
+      "Edit agent",
+      html`<h1>Edit agent.</h1>
         <p>
-          Los cambios se aplican a las próximas tareas. El nombre es local a
-          Nimbot; no cambia el perfil del bot en Telegram.
+          Changes apply to upcoming tasks. The name is local to Nimbot; it does
+          not change the bot's profile on Telegram.
         </p>
-        ${saved ? html`<p role="status">Cambios guardados.</p>` : ""}
-        <section class="card" aria-label="Configuración del agente">
+        ${saved ? html`<p role="status">Changes saved.</p>` : ""}
+        <section class="card" aria-label="Agent settings">
           ${error ? html`<p role="alert" id="settings-error" tabindex="-1" autofocus>${error}</p>` : ""}
           <form method="post" action="${target}">
-            <label for="name">Nombre</label
+            <label for="name">Name</label
             ><input
               class="input"
               id="name"
@@ -314,7 +309,7 @@ export function createPanel(
               maxlength="128"
               required
               value="${values.name}"
-            /><label for="instructions">Instrucciones (opcional)</label
+            /><label for="instructions">Instructions (optional)</label
             ><textarea
               class="textarea"
               id="instructions"
@@ -325,12 +320,12 @@ export function createPanel(
             >
 ${values.instructions}</textarea>
             <p id="instructions-help">
-              Hasta 4000 caracteres. Se envían como contexto junto con cada
-              tarea. No incluyas contraseñas ni tokens.
+              Up to 4000 characters. They are sent as context with every task.
+              Do not include passwords or tokens.
             </p>
-            <button class="btn" type="submit">Guardar cambios</button
+            <button class="btn" type="submit">Save changes</button
             ><a class="btn" href="${back}"
-              >${back === "/" ? "Volver al panel" : "Volver al agente"}</a
+              >${back === "/" ? "Back to panel" : "Back to agent"}</a
             >
           </form>
         </section>`,
@@ -363,7 +358,7 @@ ${values.instructions}</textarea>
       return c.html(
         settingsPage(
           values,
-          "Ingresá un nombre de hasta 128 caracteres e instrucciones de hasta 4000 caracteres.",
+          "Enter a name of up to 128 characters and instructions of up to 4000 characters.",
           false,
           target,
           back,
@@ -376,7 +371,7 @@ ${values.instructions}</textarea>
       return c.html(
         settingsPage(
           values,
-          "No pude guardar los cambios. Intentá nuevamente.",
+          "Could not save the changes. Try again.",
           false,
           target,
           back,
@@ -426,17 +421,17 @@ ${values.instructions}</textarea>
     agentName?: string,
   ) =>
     page(
-      "Token del bot",
-      html`<h1>Token del bot.</h1>
-        ${agentName ? html`<p>Agente: ${agentName}</p>` : ""}
+      "Bot token",
+      html`<h1>Bot token.</h1>
+        ${agentName ? html`<p>Agent: ${agentName}</p>` : ""}
         <p>
-          Solo se acepta un token nuevo del mismo bot, creado en BotFather.
-          ${agentName ? "Si el bot ya está conectado, reiniciá el servidor para aplicar el cambio." : "Se aplicará al reiniciar el servidor."}
+          Only a new token for the same bot, created in BotFather, is accepted.
+          ${agentName ? "If the bot is already connected, restart the server to apply the change." : "It will be applied when the server restarts."}
         </p>
-        ${saved ? html`<p role="status">${agentName ? "Token guardado. Si el bot ya está conectado, reiniciá el servidor para aplicar el cambio." : "Token guardado. Reiniciá el servidor para aplicarlo."}</p>` : ""}
-        <section class="card" aria-label="Credencial del bot">
+        ${saved ? html`<p role="status">${agentName ? "Token saved. If the bot is already connected, restart the server to apply the change." : "Token saved. Restart the server to apply it."}</p>` : ""}
+        <section class="card" aria-label="Bot credential">
           <form method="post" action="${target}">
-            <label for="token">Nuevo token de Telegram</label
+            <label for="token">New Telegram token</label
             ><input
               class="input"
               type="password"
@@ -445,9 +440,9 @@ ${values.instructions}</textarea>
               required
               maxlength="256"
               autocomplete="off"
-            /><button class="btn" type="submit">Guardar token</button
+            /><button class="btn" type="submit">Save token</button
             ><a class="btn" href="${back}"
-              >${back === "/" ? "Volver al panel" : "Volver al agente"}</a
+              >${back === "/" ? "Back to panel" : "Back to agent"}</a
             >
           </form>
         </section>`,
@@ -466,19 +461,19 @@ ${values.instructions}</textarea>
     const body = await c.req.parseBody({ all: true });
     const token = typeof body.token === "string" ? body.token.trim() : "";
     if (!token || token.length > 256)
-      return c.text("Ingresá un token válido del mismo bot.", 400);
+      return c.text("Enter a valid token for the same bot.", 400);
     try {
       await save(token);
     } catch {
       return c.html(
         page(
-          "Token no guardado",
-          html`<h1>No pude guardar el token.</h1>
+          "Token not saved",
+          html`<h1>Could not save the token.</h1>
             <p>
-              Verificá que sea un token válido del mismo bot y que el servidor
-              tenga acceso a Telegram y a su almacenamiento.
+              Check that it is a valid token for the same bot and that the
+              server can reach Telegram and its storage.
             </p>
-            <a class="btn" href="${target}">Volver a intentar</a>`,
+            <a class="btn" href="${target}">Try again</a>`,
           true,
         ),
         400,
@@ -518,20 +513,20 @@ ${values.instructions}</textarea>
     container
       ? c.html(
           page(
-            "Detener agente",
-            html`<h1>¿Detener el agente?</h1>
+            "Stop agent",
+            html`<h1>Stop the agent?</h1>
               <p>
-                Se detendrá su contenedor. Una tarea activa será interrumpida y
-                el resultado puede quedar pendiente hasta que vuelva a arrancar.
-                Se conservan los archivos y el historial.
+                Its container will be stopped. An active task will be
+                interrupted and its result may stay pending until the container
+                starts again. Files and history are kept.
               </p>
               <form method="post" action="/agent/container">
                 <input type="hidden" name="action" value="stop" /><button
                   class="btn"
                   type="submit"
                 >
-                  Confirmar detención</button
-                ><a class="btn" href="/">Cancelar</a>
+                  Confirm stop</button
+                ><a class="btn" href="/">Cancel</a>
               </form>`,
             true,
           ),
@@ -542,19 +537,19 @@ ${values.instructions}</textarea>
     if (!container) return c.notFound();
     const body = await c.req.parseBody({ all: true });
     if (body.action !== "start" && body.action !== "stop")
-      return c.text("Acción no válida.", 400);
+      return c.text("Invalid action.", 400);
     try {
       await container.action(body.action);
     } catch {
       return c.html(
         page(
-          "Operación no completada",
-          html`<h1>No pude completar la operación.</h1>
+          "Operation not completed",
+          html`<h1>Could not complete the operation.</h1>
             <p>
-              Comprobá el acceso a Docker, el contenedor configurado y su
-              etiqueta de agente. Actualizá el panel antes de reintentar.
+              Check Docker access, the configured container, and its agent
+              label. Refresh the panel before retrying.
             </p>
-            <a class="btn" href="/">Volver al panel</a>`,
+            <a class="btn" href="/">Back to panel</a>`,
           true,
         ),
         503,
@@ -567,16 +562,16 @@ ${values.instructions}</textarea>
     error?: string,
   ) =>
     page(
-      "Crear agente",
-      html`<h1>Crear agente.</h1>
+      "Create agent",
+      html`<h1>Create agent.</h1>
         <p>
-          Necesitás un bot propio creado en BotFather y el ID de Telegram de su
-          dueño autorizado.
+          You need a dedicated bot created in BotFather and the Telegram ID of
+          its authorized owner.
         </p>
-        <section class="card" aria-label="Nuevo agente">
-          ${error ? html`<p role="alert" id="creation-error" tabindex="-1" autofocus>${error} Volvé a ingresar el token; los demás datos se conservaron.</p>` : ""}
+        <section class="card" aria-label="New agent">
+          ${error ? html`<p role="alert" id="creation-error" tabindex="-1" autofocus>${error} Enter the token again; the other fields were kept.</p>` : ""}
           <form method="post" action="/agents/new">
-            <label for="agent-name">Nombre</label>
+            <label for="agent-name">Name</label>
             <input
               class="input"
               id="agent-name"
@@ -585,7 +580,7 @@ ${values.instructions}</textarea>
               maxlength="128"
               value="${values.name}"
             />
-            <label for="agent-instructions">Instrucciones (opcional)</label>
+            <label for="agent-instructions">Instructions (optional)</label>
             <textarea
               class="textarea"
               id="agent-instructions"
@@ -596,9 +591,9 @@ ${values.instructions}</textarea>
             >
 ${values.instructions}</textarea>
             <p id="creation-instructions-help">
-              Hasta 4000 caracteres. No incluyas contraseñas ni tokens.
+              Up to 4000 characters. Do not include passwords or tokens.
             </p>
-            <label for="agent-owner">ID de Telegram del dueño</label>
+            <label for="agent-owner">Owner's Telegram ID</label>
             <input
               class="input"
               id="agent-owner"
@@ -611,10 +606,10 @@ ${values.instructions}</textarea>
               aria-describedby="creation-owner-help"
             />
             <p id="creation-owner-help">
-              Un número entero positivo. El dueño debe estar autorizado en esta
-              instalación.
+              A positive integer. The owner must be authorized in this
+              installation.
             </p>
-            <label for="agent-token">Token del bot de BotFather</label>
+            <label for="agent-token">BotFather bot token</label>
             <input
               class="input"
               id="agent-token"
@@ -626,16 +621,16 @@ ${values.instructions}</textarea>
               aria-describedby="creation-token-help"
             />
             <p id="creation-token-help">
-              Usá un bot que no esté vinculado a otro agente. Guardamos el token
-              sin mostrarlo en el panel.
+              Use a bot that is not linked to another agent. The token is stored
+              without being shown in the panel.
             </p>
             <p>
-              Al crear, verificaremos el bot y prepararemos su contenedor. Puede
-              tardar unos segundos. La conexión de los nuevos bots a Telegram
-              todavía está pendiente.
+              On creation, the bot is verified and its container is prepared.
+              This can take a few seconds. Connecting new bots to Telegram is
+              still pending.
             </p>
-            <button class="btn" type="submit">Crear agente</button
-            ><a class="btn" href="/">Cancelar</a>
+            <button class="btn" type="submit">Create agent</button
+            ><a class="btn" href="/">Cancel</a>
           </form>
         </section>`,
       true,
@@ -667,7 +662,7 @@ ${values.instructions}</textarea>
       return c.html(
         registrationForm(
           values,
-          "Revisá el nombre, las instrucciones, el ID del dueño y el token según las indicaciones.",
+          "Check the name, instructions, owner ID, and token against the guidance.",
         ),
         400,
       );
@@ -686,7 +681,7 @@ ${values.instructions}</textarea>
       return c.html(
         registrationForm(
           values,
-          "No pude crear el agente. Verificá que el dueño esté autorizado, que el token sea válido y que el bot no esté vinculado a otro agente.",
+          "Could not create the agent. Check that the owner is authorized, the token is valid, and the bot is not linked to another agent.",
         ),
         400,
       );
@@ -697,13 +692,13 @@ ${values.instructions}</textarea>
     if (!agent) return c.notFound();
     const ready = agent.provisioning === "ready";
     const setupLabels: Record<string, string> = {
-      external: "Administrada fuera del aprovisionamiento automático",
-      pending: "Pendiente",
-      provisioning: "En curso",
-      ready: "Completada",
-      failed: "Fallida; los recursos creados se conservan para revisión",
-      interrupted: "Interrumpida al reiniciar el servidor; requiere revisión",
-      cancelled: "Cancelada; los recursos creados se conservan para revisión",
+      external: "Managed outside automatic provisioning",
+      pending: "Pending",
+      provisioning: "In progress",
+      ready: "Completed",
+      failed: "Failed; created resources are kept for review",
+      interrupted: "Interrupted by a server restart; needs review",
+      cancelled: "Cancelled; created resources are kept for review",
     };
     const id = c.req.param("id");
     const [containerState, hostState, stopObservation] = await Promise.all([
@@ -716,28 +711,28 @@ ${values.instructions}</textarea>
       : ready;
     const operation = agent.containerOperation;
     const operationLabels = {
-      pending: "En curso",
-      completed: "Completada",
-      failed: "Fallida",
-      interrupted: "Interrumpida al reiniciar el servidor",
+      pending: "In progress",
+      completed: "Completed",
+      failed: "Failed",
+      interrupted: "Interrupted by a server restart",
     };
 
     return c.html(
       page(
-        "Configuración del agente",
+        "Agent setup",
         html`<h1>${agent.name}</h1>
-          ${agentSettings?.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/settings">Editar agente</a>` : ""}
-          ${agentSettings?.saveToken && agentSettings.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/token">Reemplazar token del bot</a>` : ""}
-          <section class="card" aria-label="Resultado de creación">
+          ${agentSettings?.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/settings">Edit agent</a>` : ""}
+          ${agentSettings?.saveToken && agentSettings.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/token">Replace bot token</a>` : ""}
+          <section class="card" aria-label="Creation result">
             <h2>
-              ${containerState === "stopped" ? "Contenedor detenido." : available ? "Contenedor disponible." : "Agente sin conexión."}
+              ${containerState === "stopped" ? "Container stopped." : available ? "Container available." : "Agent offline."}
             </h2>
             <p role="status">
-              ${available ? "El agente y su bot quedaron guardados y el contenedor está disponible." : "El agente y su bot quedaron guardados, pero el contenedor todavía no está disponible. No vuelvas a crear el mismo agente."}
+              ${available ? "The agent and its bot were saved and the container is available." : "The agent and its bot were saved, but the container is not available yet. Do not create the same agent again."}
             </p>
             <p>
-              Configuración:
-              ${agent.provisioning === "provisioning" && agent.cancellationRequested ? "Cancelación solicitada; esperando que termine la operación en curso" : (setupLabels[agent.provisioning] ?? "Estado desconocido")}.
+              Setup:
+              ${agent.provisioning === "provisioning" && agent.cancellationRequested ? "Cancellation requested; waiting for the current operation to finish" : (setupLabels[agent.provisioning] ?? "Unknown state")}.
             </p>
             ${
               agent.canCancelProvisioning &&
@@ -748,29 +743,29 @@ ${values.instructions}</textarea>
                     action="/agents/${encodeURIComponent(id)}/setup/cancel"
                   >
                     <p>
-                      Cancelar detiene los próximos pasos de configuración. Los
-                      recursos creados se conservan; un contenedor que ya se
-                      inició puede seguir en ejecución.
+                      Cancelling stops the remaining setup steps. Created
+                      resources are kept; a container that already started may
+                      keep running.
                     </p>
                     <input type="hidden" name="confirm" value="${id}" /><button
                       class="btn"
                       type="submit"
                     >
-                      Cancelar configuración
+                      Cancel setup
                     </button>
                   </form>`
                 : ""
             }
-            ${containerState ? html`<p>Contenedor: ${containerState === "running" ? "En ejecución" : containerState === "stopped" ? "Detenido" : containerState === "missing" ? "No encontrado" : "No disponible"}</p>` : ""}
-            ${hostState ? html`<p>Agent Host: ${hostState === "ready" ? "Disponible" : hostState === "busy" ? "Ocupado" : "Sin conexión"}</p>` : ""}
+            ${containerState ? html`<p>Container: ${containerState === "running" ? "Running" : containerState === "stopped" ? "Stopped" : containerState === "missing" ? "Not found" : "Unavailable"}</p>` : ""}
+            ${hostState ? html`<p>Agent Host: ${hostState === "ready" ? "Available" : hostState === "busy" ? "Busy" : "Offline"}</p>` : ""}
             ${
               operation
                 ? html`<p>
-                      Última operación:
-                      ${operation.action === "start" ? "Inicio" : "Detención"} —
+                      Last operation:
+                      ${operation.action === "start" ? "Start" : "Stop"} —
                       ${operationLabels[operation.status]}.
                     </p>
-                    ${operation.action === "stop" && !stopObservation ? html`<p>Una tarea activa puede quedar interrumpida. Su resultado se confirmará cuando el agente vuelva a estar disponible.</p>` : ""}`
+                    ${operation.action === "stop" && !stopObservation ? html`<p>An active task may be interrupted. Its result will be confirmed when the agent is available again.</p>` : ""}`
                 : ""
             }
             ${setupAccessDetails(agent.setupAccess)}
@@ -785,33 +780,33 @@ ${values.instructions}</textarea>
                         class="btn"
                         type="submit"
                       >
-                        Iniciar contenedor
+                        Start container
                       </button>
                     </form>
                     <a
                       class="btn"
                       href="/agents/${encodeURIComponent(id)}/container/stop"
-                      >Detener contenedor…</a
+                      >Stop container…</a
                     >`
                 : ""
             }
             <dl>
-              <dt>Identificador</dt>
+              <dt>Identifier</dt>
               <dd>${c.req.param("id")}</dd>
               <dt>Bot</dt>
               <dd>
-                ${agent.botUsername ? `@${agent.botUsername}` : "Pendiente"}
+                ${agent.botUsername ? `@${agent.botUsername}` : "Pending"}
               </dd>
             </dl>
             <p>
-              La conexión de este bot a Telegram todavía está pendiente. Por
-              ahora no puede recibir tareas.
+              Connecting this bot to Telegram is still pending. It cannot
+              receive tasks yet.
             </p>
             <a
               class="btn"
               href="/agents/${encodeURIComponent(c.req.param("id"))}/setup"
-              >Actualizar estado</a
-            ><a class="btn" href="/">Volver al panel</a>
+              >Refresh status</a
+            ><a class="btn" href="/">Back to panel</a>
           </section>`,
         true,
       ),
@@ -824,12 +819,12 @@ ${values.instructions}</textarea>
       return c.notFound();
     return c.html(
       page(
-        "Detener agente",
-        html`<h1>¿Detener ${agent.name}?</h1>
+        "Stop agent",
+        html`<h1>Stop ${agent.name}?</h1>
           <p>
-            Se detendrá su contenedor. Una tarea activa puede quedar
-            interrumpida; su estado se confirmará cuando el agente vuelva a
-            estar disponible. Se conservan los archivos y el historial.
+            Its container will be stopped. An active task may be interrupted;
+            its status will be confirmed when the agent is available again.
+            Files and history are kept.
           </p>
           <form
             method="post"
@@ -839,9 +834,9 @@ ${values.instructions}</textarea>
               type="hidden"
               name="confirm"
               value="${id}"
-            /><button class="btn" type="submit">Confirmar detención</button
+            /><button class="btn" type="submit">Confirm stop</button
             ><a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
-              >Cancelar</a
+              >Cancel</a
             >
           </form>`,
         true,
@@ -856,20 +851,17 @@ ${values.instructions}</textarea>
       (body.action !== "start" && body.action !== "stop") ||
       (body.action === "stop" && body.confirm !== id)
     )
-      return c.text("Acción no válida o falta confirmar el agente.", 400);
+      return c.text("Invalid action or missing agent confirmation.", 400);
     try {
       await containerAction(id, body.action);
     } catch {
       return c.html(
         page(
-          "Operación no completada",
-          html`<h1>No pude completar la operación.</h1>
-            <p>
-              Actualizá el estado del agente antes de reintentar. Sus datos se
-              conservan.
-            </p>
+          "Operation not completed",
+          html`<h1>Could not complete the operation.</h1>
+            <p>Refresh the agent's status before retrying. Its data is kept.</p>
             <a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
-              >Volver al agente</a
+              >Back to agent</a
             >`,
           true,
         ),
@@ -914,7 +906,7 @@ ${values.instructions}</textarea>
       return c.notFound();
     const body = await c.req.parseBody({ all: true });
     if (body.confirm !== id)
-      return c.text("Confirmá el agente para cancelar su configuración.", 400);
+      return c.text("Confirm the agent to cancel its setup.", 400);
     try {
       agentSettings.cancelProvisioning(id);
       return api
@@ -925,14 +917,14 @@ ${values.instructions}</textarea>
         ? c.json({ error: "No cancellable provisioning attempt" }, 409)
         : c.html(
             page(
-              "No pude cancelar la configuración",
-              html`<h1>No pude cancelar la configuración.</h1>
+              "Could not cancel the setup",
+              html`<h1>Could not cancel the setup.</h1>
                 <p>
-                  La operación puede haber terminado. Actualizá el estado del
-                  agente antes de volver a intentar.
+                  The operation may have finished. Refresh the agent's status
+                  before trying again.
                 </p>
                 <a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
-                  >Volver al agente</a
+                  >Back to agent</a
                 >`,
               true,
             ),
@@ -1037,80 +1029,80 @@ ${values.instructions}</textarea>
     const status = await getStatus();
     const containerState = container ? await container.status() : undefined;
     const labels = {
-      connecting: "Conectando",
-      connected: "Conectado",
-      disconnected: "Sin conexión",
+      connecting: "Connecting",
+      connected: "Connected",
+      disconnected: "Offline",
     };
     return c.html(
       page(
-        "Agentes",
-        html`<small>INSTALACIÓN LOCAL / FASE 1</small>
-          <h1>Tus agentes.</h1>
-          ${registerAgent ? html`<a class="btn" href="/agents/new">Crear agente</a>` : ""}
-          ${c.req.query("containerChanged") === "1" ? html`<p role="status">Operación enviada a Docker. El Agent Host puede tardar unos segundos en estar disponible.</p>` : ""}
-          <p>Un bot de Telegram por agente. Cada conversación, en su lugar.</p>
+        "Agents",
+        html`<small>LOCAL INSTALLATION / PHASE 1</small>
+          <h1>Your agents.</h1>
+          ${registerAgent ? html`<a class="btn" href="/agents/new">Create agent</a>` : ""}
+          ${c.req.query("containerChanged") === "1" ? html`<p role="status">Operation sent to Docker. The Agent Host may take a few seconds to become available.</p>` : ""}
+          <p>One Telegram bot per agent. Every conversation in its place.</p>
           <article class="card">
-            ${settings ? html`<a class="btn" href="/agent/settings">Editar agente</a>` : ""}
-            ${saveBotToken ? html`<a class="btn" href="/agent/token">Reemplazar token del bot</a>` : ""}
+            ${settings ? html`<a class="btn" href="/agent/settings">Edit agent</a>` : ""}
+            ${saveBotToken ? html`<a class="btn" href="/agent/token">Replace bot token</a>` : ""}
             ${
               container
                 ? html`<p>
-                      Contenedor:
-                      ${containerState === "running" ? "En ejecución" : containerState === "stopped" ? "Detenido" : "No disponible"}
+                      Container:
+                      ${containerState === "running" ? "Running" : containerState === "stopped" ? "Stopped" : "Unavailable"}
                     </p>
                     <form method="post" action="/agent/container">
                       <input type="hidden" name="action" value="start" /><button
                         class="btn"
                         type="submit"
                       >
-                        Iniciar contenedor
+                        Start container
                       </button>
                     </form>
                     <a class="btn" href="/agent/container/stop"
-                      >Detener contenedor…</a
+                      >Stop container…</a
                     >`
                 : ""
             }
-            <h2>${status.agentName ?? "Agente configurado"}</h2>
-            <p class="badge">Configuración inicial</p>
+            <h2>${status.agentName ?? "Configured agent"}</h2>
+            <p class="badge">Initial setup</p>
             <dl>
-              <dt>Identificador</dt>
-              <dd>${status.agentId ?? "Sin configurar"}</dd>
-              <dt>Dueño de Telegram</dt>
-              <dd>${status.ownerId ?? "Sin configurar"}</dd>
+              <dt>Identifier</dt>
+              <dd>${status.agentId ?? "Not configured"}</dd>
+              <dt>Telegram owner</dt>
+              <dd>${status.ownerId ?? "Not configured"}</dd>
               <dt>Telegram</dt>
               <dd>${labels[status.telegram]}</dd>
               <dt>Bot</dt>
               <dd>
-                ${status.botUsername ? `@${status.botUsername}` : "Pendiente de conexión"}
+                ${status.botUsername ? `@${status.botUsername}` : "Waiting for connection"}
               </dd>
               <dt>Agent Host</dt>
               <dd>
-                ${status.host === "ready" ? "Disponible" : status.host === "busy" ? "Ocupado" : "Sin conexión"}
+                ${status.host === "ready" ? "Available" : status.host === "busy" ? "Busy" : "Offline"}
               </dd>
-              <dt>Ejecución de tareas por Telegram</dt>
+              <dt>Task execution through Telegram</dt>
               <dd>
-                ${status.setupAccess?.owner === "not_allowlisted" ? "Bloqueada: dueño no autorizado" : "Requiere configuración completa y chat activado"}
+                ${status.setupAccess?.owner === "not_allowlisted" ? "Blocked: owner not authorized" : "Requires complete setup and an activated chat"}
               </dd>
-              <dt>Activación del chat</dt>
+              <dt>Chat activation</dt>
               <dd>
-                ${status.chatActivated ? "Activado por el dueño" : "Pendiente: enviá /start al bot"}
+                ${status.chatActivated ? "Activated by the owner" : "Pending: send /start to the bot"}
               </dd>
             </dl>
             ${setupAccessDetails(status.setupAccess)}
             ${stopTaskSection(status.stopObservation)}
-            ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Abrir bot en Telegram</a>` : html`<p>El enlace aparecerá cuando Telegram confirme la conexión.</p>`}
+            ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Open bot in Telegram</a>` : html`<p>The link will appear once Telegram confirms the connection.</p>`}
           </article>
           <footer>
             <p>
-              ${registerAgent ? "La creación de agentes está disponible. La conexión de nuevos bots y la eliminación completa siguen pendientes." : "Configurá el aprovisionamiento del servidor para crear agentes desde el panel."}
+              ${registerAgent ? "Agent creation is available. Connecting new bots and full deletion are still pending." : "Configure server provisioning to create agents from the panel."}
             </p>
-            <a class="btn" href="/">Actualizar estado</a>
+            <a class="btn" href="/">Refresh status</a>
           </footer>`,
         true,
       ),
     );
   });
-  app.onError((_, c) => c.text("No se pudo completar la solicitud.", 500));
+  app.onError((_, c) => c.text("The request could not be completed.", 500));
   return app;
 }
