@@ -108,6 +108,11 @@ export function createPanel(
   registerAgent?: (
     input: import("./agent-registration.js").AgentRegistrationInput,
   ) => Promise<{ agentId: string; provisioning: string }>,
+  getAgentSetup?: (
+    id: string,
+  ) =>
+    | { name: string; botUsername: string | null; provisioning: string }
+    | undefined,
 ) {
   const app = new Hono();
   const sessions = new Map<string, number>();
@@ -398,6 +403,173 @@ ${values.instructions}</textarea>
     }
     return c.redirect("/?containerChanged=1", 303);
   });
+  const registrationForm = (
+    values = { name: "", instructions: "", ownerId: "" },
+    error?: string,
+  ) =>
+    page(
+      "Crear agente",
+      html`<h1>Crear agente.</h1>
+        <p>
+          Necesitás un bot propio creado en BotFather y el ID de Telegram de su
+          dueño autorizado.
+        </p>
+        <section class="card" aria-label="Nuevo agente">
+          ${error ? html`<p role="alert" id="creation-error" tabindex="-1" autofocus>${error} Volvé a ingresar el token; los demás datos se conservaron.</p>` : ""}
+          <form method="post" action="/agents/new">
+            <label for="agent-name">Nombre</label>
+            <input
+              class="input"
+              id="agent-name"
+              name="name"
+              required
+              maxlength="128"
+              value="${values.name}"
+            />
+            <label for="agent-instructions">Instrucciones (opcional)</label>
+            <textarea
+              class="textarea"
+              id="agent-instructions"
+              name="instructions"
+              rows="6"
+              maxlength="4000"
+              aria-describedby="creation-instructions-help"
+            >
+${values.instructions}</textarea>
+            <p id="creation-instructions-help">
+              Hasta 4000 caracteres. No incluyas contraseñas ni tokens.
+            </p>
+            <label for="agent-owner">ID de Telegram del dueño</label>
+            <input
+              class="input"
+              id="agent-owner"
+              name="ownerId"
+              type="text"
+              inputmode="numeric"
+              pattern="[1-9][0-9]*"
+              required
+              value="${values.ownerId}"
+              aria-describedby="creation-owner-help"
+            />
+            <p id="creation-owner-help">
+              Un número entero positivo. El dueño debe estar autorizado en esta
+              instalación.
+            </p>
+            <label for="agent-token">Token del bot de BotFather</label>
+            <input
+              class="input"
+              id="agent-token"
+              name="token"
+              type="password"
+              autocomplete="off"
+              required
+              maxlength="256"
+              aria-describedby="creation-token-help"
+            />
+            <p id="creation-token-help">
+              Usá un bot que no esté vinculado a otro agente. Guardamos el token
+              sin mostrarlo en el panel.
+            </p>
+            <p>
+              Al crear, verificaremos el bot y prepararemos su contenedor. Puede
+              tardar unos segundos. La conexión de los nuevos bots a Telegram
+              todavía está pendiente.
+            </p>
+            <button class="btn" type="submit">Crear agente</button
+            ><a class="btn" href="/">Cancelar</a>
+          </form>
+        </section>`,
+      true,
+    );
+  app.get("/agents/new", (c) =>
+    registerAgent ? c.html(registrationForm()) : c.notFound(),
+  );
+  app.post("/agents/new", async (c) => {
+    if (!registerAgent) return c.notFound();
+    const body = await c.req.parseBody({ all: true });
+    const values = {
+      name: typeof body.name === "string" ? body.name : "",
+      instructions:
+        typeof body.instructions === "string" ? body.instructions : "",
+      ownerId: typeof body.ownerId === "string" ? body.ownerId : "",
+    };
+    if (
+      !values.name.trim() ||
+      values.name.trim().length > 128 ||
+      values.instructions.length > 4000 ||
+      (body.instructions !== undefined &&
+        typeof body.instructions !== "string") ||
+      !/^[1-9]\d*$/.test(values.ownerId) ||
+      !Number.isSafeInteger(Number(values.ownerId)) ||
+      typeof body.token !== "string" ||
+      !body.token.trim() ||
+      body.token.length > 256
+    )
+      return c.html(
+        registrationForm(
+          values,
+          "Revisá el nombre, las instrucciones, el ID del dueño y el token según las indicaciones.",
+        ),
+        400,
+      );
+    try {
+      const result = await registerAgent({
+        name: values.name,
+        instructions: values.instructions,
+        ownerId: Number(values.ownerId),
+        token: body.token,
+      });
+      return c.redirect(
+        `/agents/${encodeURIComponent(result.agentId)}/setup`,
+        303,
+      );
+    } catch {
+      return c.html(
+        registrationForm(
+          values,
+          "No pude crear el agente. Verificá que el dueño esté autorizado, que el token sea válido y que el bot no esté vinculado a otro agente.",
+        ),
+        400,
+      );
+    }
+  });
+  app.get("/agents/:id/setup", (c) => {
+    const agent = getAgentSetup?.(c.req.param("id"));
+    if (!agent) return c.notFound();
+    const ready = agent.provisioning === "ready";
+    return c.html(
+      page(
+        "Configuración del agente",
+        html`<h1>${agent.name}</h1>
+          <section class="card" aria-label="Resultado de creación">
+            <h2>
+              ${ready ? "Contenedor disponible." : "Configuración incompleta."}
+            </h2>
+            <p role="status">
+              ${ready ? "El agente y su bot quedaron guardados y el contenedor está disponible." : "El agente y su bot quedaron guardados, pero el contenedor todavía no está disponible. No vuelvas a crear el mismo agente."}
+            </p>
+            <dl>
+              <dt>Identificador</dt>
+              <dd>${c.req.param("id")}</dd>
+              <dt>Bot</dt>
+              <dd>
+                ${agent.botUsername ? `@${agent.botUsername}` : "Pendiente"}
+              </dd>
+            </dl>
+            <p>
+              La conexión de este bot a Telegram todavía está pendiente. Por
+              ahora no puede recibir tareas.
+            </p>
+            <a
+              class="btn"
+              href="/agents/${encodeURIComponent(c.req.param("id"))}/setup"
+              >Actualizar estado</a
+            ><a class="btn" href="/">Volver al panel</a>
+          </section>`,
+        true,
+      ),
+    );
+  });
   app.post("/api/agents", async (c) => {
     if (!registerAgent) return c.notFound();
     const body = await c.req.parseBody({ all: true });
@@ -530,6 +702,7 @@ ${values.instructions}</textarea>
         "Agentes",
         html`<small>INSTALACIÓN LOCAL / FASE 1</small>
           <h1>Tus agentes.</h1>
+          ${registerAgent ? html`<a class="btn" href="/agents/new">Crear agente</a>` : ""}
           ${c.req.query("containerChanged") === "1" ? html`<p role="status">Operación enviada a Docker. El Agent Host puede tardar unos segundos en estar disponible.</p>` : ""}
           <p>Un bot de Telegram por agente. Cada conversación, en su lugar.</p>
           <article class="card">
@@ -582,8 +755,7 @@ ${values.instructions}</textarea>
           </article>
           <footer>
             <p>
-              La creación y eliminación de agentes estarán disponibles en la
-              siguiente fase.
+              ${registerAgent ? "La creación de agentes está disponible. La conexión de nuevos bots y la eliminación completa siguen pendientes." : "Configurá el aprovisionamiento del servidor para crear agentes desde el panel."}
             </p>
             <a class="btn" href="/">Actualizar estado</a>
           </footer>`,

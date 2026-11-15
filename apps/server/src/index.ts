@@ -160,6 +160,19 @@ async function main(): Promise<void> {
           provision,
         )
       : undefined,
+    provision
+      ? (id) => {
+          const agent = registry.get(id);
+          const setup = registry.getProvisioning(id);
+          return agent && setup
+            ? {
+                name: agent.name,
+                botUsername: agent.botUsername,
+                provisioning: setup.status,
+              }
+            : undefined;
+        }
+      : undefined,
   );
   const server = serve({
     fetch: panel.fetch,

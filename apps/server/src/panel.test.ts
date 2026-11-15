@@ -677,3 +677,106 @@ it("authenticates agent registration and validates owner fields without echoing 
   expect(failed.status).toBe(400);
   expect(await failed.text()).not.toContain("private-token-details");
 });
+
+it("creates agents through the panel form and displays saved setup state without tokens", async () => {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const calls: unknown[] = [];
+  let ready = true;
+  const app = createPanel(
+    config,
+    () => ({ telegram: "connected" }),
+    Date.now,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (input) => {
+      calls.push(input);
+      if (input.token === "bad-secret") throw new Error("private-error");
+      return { agentId: "agent-test", provisioning: "ready" };
+    },
+    (id) =>
+      id === "agent-test"
+        ? {
+            name: "Developer",
+            botUsername: "dev_bot",
+            provisioning: ready ? "ready" : "failed",
+          }
+        : undefined,
+  );
+  const post = (
+    path: string,
+    body: string,
+    cookie = "",
+    origin = config.origin,
+  ) =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  expect((await app.request("/agents/new")).status).toBe(303);
+  const login = await post(
+    "/login",
+    new URLSearchParams({ password }).toString(),
+  );
+  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+  const headers = { Cookie: cookie };
+  const form = await (await app.request("/agents/new", { headers })).text();
+  expect(form).toContain('type="password"');
+  expect(form).toContain('inputmode="numeric"');
+  expect(
+    (
+      await post(
+        "/agents/new",
+        "name=Dev&ownerId=42&token=secret",
+        cookie,
+        "https://other.example",
+      )
+    ).status,
+  ).toBe(403);
+  const invalid = await post(
+    "/agents/new",
+    new URLSearchParams({
+      name: "<script>alert(1)</script>",
+      instructions: "Be brief",
+      ownerId: "42",
+      token: "bad-secret",
+    }).toString(),
+    cookie,
+  );
+  const errorHtml = await invalid.text();
+  expect(invalid.status).toBe(400);
+  expect(errorHtml).toContain("Be brief");
+  expect(errorHtml).toContain('value="42"');
+  expect(errorHtml).not.toContain("bad-secret");
+  expect(errorHtml).not.toContain("private-error");
+  expect(errorHtml).not.toContain("<script>");
+  const created = await post(
+    "/agents/new",
+    "name=Developer&ownerId=42&token=good-secret",
+    cookie,
+  );
+  expect(created.status).toBe(303);
+  expect(created.headers.get("location")).toBe("/agents/agent-test/setup");
+  const result = await (
+    await app.request("/agents/agent-test/setup", { headers })
+  ).text();
+  expect(result).toContain("Contenedor disponible.");
+  expect(result).toContain("todavía está pendiente");
+  expect(result).not.toContain("good-secret");
+  ready = false;
+  expect(
+    await (await app.request("/agents/agent-test/setup", { headers })).text(),
+  ).toContain("No vuelvas a crear el mismo agente");
+  expect((await app.request("/agents/missing/setup", { headers })).status).toBe(
+    404,
+  );
+  expect(calls).toHaveLength(2);
+});
