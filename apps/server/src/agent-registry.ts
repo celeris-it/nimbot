@@ -1,5 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 import type { CurrentHostTask } from "./host-current-task.js";
+import { randomUUID } from "node:crypto";
+import type { FinalTaskStatus } from "./host-task-status.js";
+
+export type StopObservation = CurrentHostTask & {
+  observedAt: number;
+  observationId: string;
+  finalStatus: FinalTaskStatus | null;
+};
 
 export interface RegisteredAgent {
   id: string;
@@ -107,6 +115,16 @@ export function openAgentRegistry(path: string) {
         CHECK ((task_id IS NULL AND task_status IS NULL) OR
           (availability = 'available' AND task_id IS NOT NULL AND task_status IS NOT NULL))
       ); INSERT INTO registry_migrations(version) VALUES (5)`);
+    }
+    if (
+      !db
+        .prepare("SELECT version FROM registry_migrations WHERE version = 6")
+        .get()
+    ) {
+      db.exec(`ALTER TABLE container_stop_observations ADD COLUMN observation_id TEXT NOT NULL DEFAULT '';
+        ALTER TABLE container_stop_observations ADD COLUMN final_status TEXT CHECK(final_status IN ('completed', 'failed', 'interrupted'));
+        UPDATE container_stop_observations SET observation_id = lower(hex(randomblob(16)));
+        INSERT INTO registry_migrations(version) VALUES (6)`);
     }
     db.prepare(
       "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
@@ -380,17 +398,28 @@ export function openAgentRegistry(path: string) {
       if (!result.changes) throw new Error("Agent is not registered");
     },
     beginContainerAction(id: string, action: "start" | "stop") {
-      const result = db
-        .prepare(
-          `INSERT INTO container_operations (agent_id, action, status, updated_at)
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const result = db
+          .prepare(
+            `INSERT INTO container_operations (agent_id, action, status, updated_at)
         SELECT agent_id, ?, 'pending', ? FROM agent_provisioning
         WHERE agent_id = ? AND status = 'ready'
         ON CONFLICT(agent_id) DO UPDATE SET action = excluded.action, status = 'pending', updated_at = excluded.updated_at
         WHERE container_operations.status <> 'pending'`,
-        )
-        .run(action, Date.now(), id);
-      if (!result.changes)
-        throw new Error("Agent container action is not available");
+          )
+          .run(action, Date.now(), id);
+        if (!result.changes)
+          throw new Error("Agent container action is not available");
+        if (action === "stop")
+          db.prepare(
+            "DELETE FROM container_stop_observations WHERE agent_id = ?",
+          ).run(id);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
     recordStopObservation(id: string, observation: CurrentHostTask) {
       const task =
@@ -398,28 +427,27 @@ export function openAgentRegistry(path: string) {
       const result = db
         .prepare(
           `INSERT INTO container_stop_observations
-        (agent_id, availability, task_id, task_status, observed_at)
-        SELECT agent_id, ?, ?, ?, ? FROM container_operations
+        (agent_id, availability, task_id, task_status, observed_at, observation_id)
+        SELECT agent_id, ?, ?, ?, ?, ? FROM container_operations
         WHERE agent_id = ? AND action = 'stop' AND status = 'pending'
         ON CONFLICT(agent_id) DO UPDATE SET availability = excluded.availability,
         task_id = excluded.task_id, task_status = excluded.task_status,
-        observed_at = excluded.observed_at`,
+        observed_at = excluded.observed_at, observation_id = excluded.observation_id, final_status = NULL`,
         )
         .run(
           observation.availability,
           task?.id ?? null,
           task?.status ?? null,
           Date.now(),
+          randomUUID(),
           id,
         );
       if (!result.changes) throw new Error("No pending container stop");
     },
-    getStopObservation(
-      id: string,
-    ): (CurrentHostTask & { observedAt: number }) | undefined {
+    getStopObservation(id: string): StopObservation | undefined {
       const row = db
         .prepare(
-          `SELECT availability, task_id AS taskId,
+          `SELECT availability, task_id AS taskId, observation_id AS observationId, final_status AS finalStatus,
         task_status AS taskStatus, observed_at AS observedAt
         FROM container_stop_observations WHERE agent_id = ?`,
         )
@@ -429,6 +457,8 @@ export function openAgentRegistry(path: string) {
         return {
           availability: "unavailable",
           observedAt: row.observedAt as number,
+          observationId: row.observationId as string,
+          finalStatus: row.finalStatus as FinalTaskStatus | null,
         };
       return {
         availability: "available",
@@ -440,7 +470,20 @@ export function openAgentRegistry(path: string) {
                 status: row.taskStatus as "accepted" | "running",
               },
         observedAt: row.observedAt as number,
+        observationId: row.observationId as string,
+        finalStatus: row.finalStatus as FinalTaskStatus | null,
       };
+    },
+    confirmStopTask(
+      id: string,
+      observationId: string,
+      status: FinalTaskStatus,
+    ) {
+      // A slow refresh must never overwrite a newer stop snapshot or a confirmed outcome.
+      db.prepare(
+        `UPDATE container_stop_observations SET final_status = ?
+        WHERE agent_id = ? AND observation_id = ? AND task_id IS NOT NULL AND final_status IS NULL`,
+      ).run(status, id, observationId);
     },
     recordContainerOperation(
       id: string,

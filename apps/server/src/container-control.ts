@@ -32,6 +32,7 @@ export function createContainerControl(
     status: "pending" | "completed" | "failed",
   ) => void = () => {},
   call: DockerApi = createDockerApi(config.socketPath),
+  beforeMutation: (action: "start" | "stop") => Promise<void> = async () => {},
 ) {
   let busy = false;
   async function inspect() {
@@ -68,6 +69,7 @@ export function createContainerControl(
         if (!container) throw new Error("Container missing");
         onVerified(container.id);
         recordOperation(action, "pending");
+        await beforeMutation(action);
         const response = await call(
           `/containers/${container.id}/${action}${action === "stop" ? "?t=10" : ""}`,
           "POST",

@@ -21,6 +21,7 @@ import { openChatBinding } from "./chat-binding.js";
 import { createHostTasks } from "./host-tasks.js";
 import { getHostStatus, readAgentHostConfig } from "./agent-host.js";
 import { getCurrentHostTask } from "./host-current-task.js";
+import { createStopObservation } from "./stop-observation.js";
 import { serve } from "@hono/node-server";
 import { createPanel, type AgentStatus } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";
@@ -92,8 +93,21 @@ async function main(): Promise<void> {
     ? createContainerControl(
         containerConfig,
         (id) => registry.setContainerRef(config.agent.id, id),
-        (action, state) =>
-          registry.recordContainerOperation(config.agent.id, action, state),
+        (action, state) => {
+          registry.recordContainerOperation(config.agent.id, action, state);
+          if (action === "stop" && state === "pending")
+            registry.recordStopObservation(config.agent.id, {
+              availability: "unavailable",
+            });
+        },
+        undefined,
+        async (action) => {
+          if (action === "stop")
+            registry.recordStopObservation(
+              config.agent.id,
+              await getCurrentHostTask(hostConfig),
+            );
+        },
       )
     : undefined;
   const provision =
@@ -120,6 +134,9 @@ async function main(): Promise<void> {
   const reconcile = provisioningConfig
     ? createResourceReconciliation(registry, provisioningConfig.socketPath)
     : undefined;
+  const observeStop = createStopObservation(registry, async (id) =>
+    id === config.agent.id ? hostConfig : hostCredentials!.read(id),
+  );
   const panel = createPanel(
     panelConfig,
     async () => ({
@@ -128,6 +145,7 @@ async function main(): Promise<void> {
       agentName: registry.get(config.agent.id)!.name,
       host: await getHostStatus(hostConfig),
       containerOperation: registry.getContainerOperation(config.agent.id),
+      stopObservation: await observeStop(config.agent.id),
       provisioning: registry.getProvisioning(config.agent.id),
     }),
     Date.now,
@@ -213,6 +231,12 @@ async function main(): Promise<void> {
             } catch {
               return "unavailable";
             }
+          },
+          stopObservation: async (id) => {
+            const agent = registry.get(id);
+            if (!agent || !config.allowedUserIds.has(agent.ownerId))
+              return undefined;
+            return observeStop?.(id);
           },
           saveToken: async (id, token) => {
             const agent = registry.get(id);

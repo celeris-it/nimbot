@@ -63,6 +63,17 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
       return c.json({ error: "Task state unavailable" }, 503);
     }
   });
+  app.get("/tasks/:id/status", async (c) => {
+    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
+    try {
+      const task = await runner.get(c.req.param("id"));
+      return task
+        ? c.json({ id: task.id, status: task.status })
+        : c.json({ error: "Task not found" }, 404);
+    } catch {
+      return c.json({ error: "Task state unavailable" }, 503);
+    }
+  });
   app.get("/tasks/:id/events", async (c) => {
     const after = c.req.query("after") ?? "0";
     if (!/^\d+$/.test(after) || !Number.isSafeInteger(Number(after)))

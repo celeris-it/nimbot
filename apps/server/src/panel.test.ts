@@ -1133,3 +1133,146 @@ it("starts and confirms stopping the selected agent while showing observed runti
     (await post("/agents/missing/container", "action=start", cookie)).status,
   ).toBe(404);
 });
+
+it.each([
+  [undefined, "Una tarea activa puede quedar interrumpida"],
+  [
+    { availability: "unavailable" },
+    "No se pudo consultar si había una tarea activa",
+  ],
+  [{ availability: "available", task: null }, "No había una tarea activa"],
+  [
+    {
+      availability: "available",
+      task: { id: "private-task-id", status: "running" },
+    },
+    "Resultado sin confirmar",
+  ],
+  [
+    {
+      availability: "available",
+      task: { id: "private-task-id", status: "running" },
+      finalStatus: "interrupted",
+    },
+    "Tarea interrumpida.",
+  ],
+  [
+    {
+      availability: "available",
+      task: { id: "private-task-id", status: "running" },
+      finalStatus: "completed",
+    },
+    "La tarea terminó antes de que se confirmara una interrupción.",
+  ],
+  [
+    {
+      availability: "available",
+      task: { id: "private-task-id", status: "accepted" },
+      finalStatus: "failed",
+    },
+    "La tarea terminó con un error.",
+  ],
+] as const)(
+  "shows the captured stop outcome without treating Docker success as interruption: %j",
+  async (snapshot, message) => {
+    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+    const calls: string[] = [];
+    const app = createPanel(
+      config,
+      () => ({ telegram: "connected" }),
+      Date.now,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (id) =>
+        id === "dev"
+          ? {
+              name: "Developer",
+              botUsername: "dev_bot",
+              provisioning: "ready",
+              containerOperation: {
+                action: "stop",
+                status: "completed",
+                updatedAt: 1,
+              },
+            }
+          : undefined,
+      {
+        get: () => undefined,
+        save: () => {},
+        containerStatus: async () => "stopped",
+        hostStatus: async () => "unavailable",
+        stopObservation: async (id) => {
+          calls.push(id);
+          return snapshot
+            ? {
+                finalStatus: null,
+                ...snapshot,
+                observedAt: 1,
+                observationId: "observation-id",
+              }
+            : undefined;
+        },
+      },
+    );
+    expect((await app.request("/agents/dev/setup")).status).toBe(303);
+    expect(calls).toEqual([]);
+    const login = await app.request("/login", {
+      method: "POST",
+      headers: {
+        Origin: config.origin,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ password }).toString(),
+    });
+    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
+    expect(
+      (await app.request("/agents/missing/setup", { headers })).status,
+    ).toBe(404);
+    expect(calls).toEqual([]);
+    const response = await app.request("/agents/dev/setup", { headers });
+    const body = (await response.text()).replace(/\s+/g, " ");
+    expect(body).toContain(message);
+    expect(body).toContain("Contenedor detenido.");
+    expect(body).not.toContain("private-task-id");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(calls).toEqual(["dev"]);
+    if (snapshot) expect(body).toContain("Tarea en la última detención");
+    if (snapshot && "finalStatus" in snapshot)
+      expect(body).not.toContain("Resultado sin confirmar");
+  },
+);
+
+it("shows persisted stop results for the configured agent even while it is offline", async () => {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const app = createPanel(config, () => ({
+    telegram: "disconnected",
+    host: "unavailable",
+    stopObservation: {
+      availability: "available",
+      task: { id: "captured-task", status: "running" },
+      finalStatus: "interrupted",
+      observedAt: 1,
+      observationId: "snapshot",
+    },
+  }));
+  const login = await app.request("/login", {
+    method: "POST",
+    headers: {
+      Origin: config.origin,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ password }).toString(),
+  });
+  const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
+  expect(await (await app.request("/", { headers })).text()).toContain(
+    "Tarea interrumpida.",
+  );
+  expect(
+    await (await app.request("/api/status", { headers })).json(),
+  ).toMatchObject({ stopObservation: { finalStatus: "interrupted" } });
+});

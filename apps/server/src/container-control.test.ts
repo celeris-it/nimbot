@@ -111,3 +111,44 @@ it("keeps Docker access opt-in and requires a fixed target", () => {
     ),
   ).toThrow();
 });
+
+it("waits for persisted stop observation before mutation and refuses overlapping actions", async () => {
+  const id = "a".repeat(64);
+  const operations: string[] = [];
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let mutations = 0;
+  const control = createContainerControl(
+    { socketPath: "/unused", target: id, agentId: "dev" },
+    () => {},
+    (action, status) => operations.push(`${action}:${status}`),
+    async (_path, method = "GET") => {
+      if (method === "GET")
+        return {
+          code: 200,
+          body: JSON.stringify({
+            Id: id,
+            State: { Running: true },
+            Config: { Labels: { "io.nimbot.agent-id": "dev" } },
+          }),
+        };
+      mutations++;
+      return { code: 204, body: "" };
+    },
+    async (action) => {
+      expect(action).toBe("stop");
+      expect(operations).toEqual(["stop:pending"]);
+      expect(mutations).toBe(0);
+      await pending;
+      throw new Error("Observation persistence failed");
+    },
+  );
+  const stopping = control.action("stop");
+  await expect(control.action("start")).rejects.toThrow("already running");
+  release();
+  await expect(stopping).rejects.toThrow("Observation persistence failed");
+  expect(mutations).toBe(0);
+  expect(operations).toEqual(["stop:pending", "stop:failed"]);
+});

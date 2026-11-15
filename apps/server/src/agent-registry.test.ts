@@ -36,7 +36,7 @@ it("migrates once and restores metadata without storing tokens", async () => {
       expect(
         db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
           ?.total,
-      ).toBe(5);
+      ).toBe(6);
     } finally {
       db.close();
     }
@@ -237,9 +237,48 @@ it("retains stop snapshots across restart without inferring a final task result"
       expect(restored.getStopObservation("dev")).toEqual({
         availability: "unavailable",
         observedAt: expect.any(Number),
+        observationId: expect.any(String),
+        finalStatus: null,
       });
     } finally {
       restored.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("upgrades saved version-5 stop snapshots without inventing final outcomes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-stop-migration-"));
+  const path = join(dir, "server.sqlite");
+  try {
+    const current = openAgentRegistry(path);
+    current.syncConfigured({ id: "dev", name: "Dev", ownerId: 42 });
+    current.recordContainerOperation("dev", "stop", "pending");
+    current.recordStopObservation("dev", {
+      availability: "available",
+      task: { id: "a0000000-0000-4000-8000-000000000001", status: "running" },
+    });
+    current.recordContainerOperation("dev", "stop", "completed");
+    const previous = current.getStopObservation("dev")!;
+    current.close();
+    const legacy = new DatabaseSync(path);
+    legacy.exec(
+      "ALTER TABLE container_stop_observations DROP COLUMN observation_id; ALTER TABLE container_stop_observations DROP COLUMN final_status; DELETE FROM registry_migrations WHERE version = 6",
+    );
+    legacy.close();
+    const migrated = openAgentRegistry(path);
+    try {
+      expect(migrated.getStopObservation("dev")).toMatchObject({
+        availability: "available",
+        task: previous.availability === "available" ? previous.task : null,
+        observedAt: previous.observedAt,
+        observationId: expect.any(String),
+        finalStatus: null,
+      });
+      expect(migrated.getStopObservation("dev")!.observationId).not.toBe("");
+    } finally {
+      migrated.close();
     }
   } finally {
     await rm(dir, { recursive: true, force: true });

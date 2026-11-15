@@ -283,3 +283,62 @@ it("exposes only persisted active-task metadata and fails closed for ambiguous s
     task: null,
   });
 });
+
+it("serves authenticated task status metadata through recovery without leaking prompts or output", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-status-recovery-"));
+  const url = pathToFileURL(join(dir, "tasks.sqlite")).href;
+  let store = await openTaskStore(url);
+  const id = "a0000000-0000-4000-8000-000000000001";
+  try {
+    await store.insert(id, "secret prompt");
+    await store.update(id, { status: "running", output: "secret output" });
+    let app = createHostApi(
+      { token, workspace: dir },
+      createTaskRunner(store, {
+        async run() {
+          return "end_turn";
+        },
+        async stop() {},
+      }),
+    );
+    const path = `/tasks/${id}/status`;
+    expect((await app.request(path)).status).toBe(401);
+    const request = () =>
+      app.request(path, { headers: { Authorization: `Bearer ${token}` } });
+    expect(await (await request()).json()).toEqual({ id, status: "running" });
+    store.close();
+    store = await openTaskStore(url);
+    app = createHostApi(
+      { token, workspace: dir },
+      createTaskRunner(store, {
+        async run() {
+          return "end_turn";
+        },
+        async stop() {},
+      }),
+    );
+    const response = await request();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ id, status: "interrupted" });
+    expect(
+      (
+        await app.request("/tasks/missing/status", {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await createHostApi({ token, workspace: dir }).request(path, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).status,
+    ).toBe(503);
+    store.close();
+    // An unavailable store must not be mistaken for a missing or interrupted task.
+    expect((await request()).status).toBe(503);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

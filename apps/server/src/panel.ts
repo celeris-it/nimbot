@@ -15,6 +15,7 @@ export interface AgentStatus {
   host?: HostStatus;
   provisioning?: import("./agent-registry.js").ProvisioningState;
   containerOperation?: import("./agent-registry.js").ContainerOperation;
+  stopObservation?: import("./agent-registry.js").StopObservation;
   agentId?: string;
   agentName?: string;
   ownerId?: number;
@@ -30,6 +31,9 @@ export interface RegisteredAgentSettings {
     id: string,
   ): Promise<"running" | "stopped" | "missing" | "unavailable">;
   hostStatus?(id: string): Promise<HostStatus>;
+  stopObservation?(
+    id: string,
+  ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
 export interface AgentSettings {
   get(): { name: string; instructions: string };
@@ -70,6 +74,34 @@ function page(
       </body>
     </html>`;
 }
+function stopTaskSection(
+  observation?: import("./agent-registry.js").StopObservation,
+) {
+  const taskLabels = {
+    interrupted: "Tarea interrumpida.",
+    completed: "La tarea terminó antes de que se confirmara una interrupción.",
+    failed: "La tarea terminó con un error.",
+  };
+  const stopMessage = observation
+    ? observation.availability === "unavailable"
+      ? "No se pudo consultar si había una tarea activa antes de detener el contenedor. No hay un resultado confirmado."
+      : !observation.task
+        ? "No había una tarea activa al consultar el agente antes de detener el contenedor."
+        : observation.finalStatus
+          ? taskLabels[observation.finalStatus]
+          : "Había una tarea activa. Resultado sin confirmar: iniciá el contenedor y actualizá el estado para consultar el registro de esa tarea."
+    : undefined;
+  return stopMessage
+    ? html`<section aria-label="Tarea en la última detención">
+        <h2>Tarea en la última detención</h2>
+        <p role="status">${stopMessage}</p>
+        <p>
+          Consulta previa: ${new Date(observation!.observedAt).toISOString()}.
+        </p>
+      </section>`
+    : "";
+}
+
 function login(error?: string) {
   return page(
     "Acceso",
@@ -637,9 +669,10 @@ ${values.instructions}</textarea>
     if (!agent) return c.notFound();
     const ready = agent.provisioning === "ready";
     const id = c.req.param("id");
-    const [containerState, hostState] = await Promise.all([
+    const [containerState, hostState, stopObservation] = await Promise.all([
       agentSettings?.containerStatus?.(id),
       agentSettings?.hostStatus?.(id),
+      agentSettings?.stopObservation?.(id),
     ]);
     const available = hostState
       ? hostState === "ready" || hostState === "busy"
@@ -674,9 +707,10 @@ ${values.instructions}</textarea>
                       ${operation.action === "start" ? "Inicio" : "Detención"} —
                       ${operationLabels[operation.status]}.
                     </p>
-                    ${operation.action === "stop" ? html`<p>Una tarea activa puede quedar interrumpida. Su resultado se confirmará cuando el agente vuelva a estar disponible.</p>` : ""}`
+                    ${operation.action === "stop" && !stopObservation ? html`<p>Una tarea activa puede quedar interrumpida. Su resultado se confirmará cuando el agente vuelva a estar disponible.</p>` : ""}`
                 : ""
             }
+            ${stopTaskSection(stopObservation)}
             ${
               containerAction && ready
                 ? html`<form
@@ -961,6 +995,7 @@ ${values.instructions}</textarea>
                 ${status.chatActivated ? "Activado por el dueño" : "Pendiente: enviá /start al bot"}
               </dd>
             </dl>
+            ${stopTaskSection(status.stopObservation)}
             ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Abrir bot en Telegram</a>` : html`<p>El enlace aparecerá cuando Telegram confirme la conexión.</p>`}
           </article>
           <footer>

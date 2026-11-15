@@ -143,6 +143,8 @@ it.each([
       expect(registry.getStopObservation("dev")).toEqual({
         ...observation,
         observedAt: expect.any(Number),
+        observationId: expect.any(String),
+        finalStatus: null,
       });
       return method === "GET"
         ? {
@@ -195,8 +197,32 @@ it("still stops when Host observation fails without saving error details", async
     expect(registry.getStopObservation("dev")).toEqual({
       availability: "unavailable",
       observedAt: expect.any(Number),
+      observationId: expect.any(String),
+      finalStatus: null,
     });
     expect(registry.getContainerOperation("dev")?.status).toBe("failed");
+  } finally {
+    registry.close();
+  }
+});
+
+it("clears an earlier stop result atomically when acquiring a new stop", () => {
+  const registry = readyAgent();
+  try {
+    registry.beginContainerAction("dev", "stop");
+    registry.recordStopObservation("dev", {
+      availability: "available",
+      task: { id: "a0000000-0000-4000-8000-000000000001", status: "running" },
+    });
+    const previous = registry.getStopObservation("dev")!;
+    registry.confirmStopTask("dev", previous.observationId, "interrupted");
+    registry.recordContainerOperation("dev", "stop", "completed");
+    registry.beginContainerAction("dev", "stop");
+    expect(registry.getStopObservation("dev")).toBeUndefined();
+    expect(() => registry.beginContainerAction("dev", "stop")).toThrow();
+    registry.recordStopObservation("dev", { availability: "unavailable" });
+    registry.confirmStopTask("dev", previous.observationId, "completed");
+    expect(registry.getStopObservation("dev")?.finalStatus).toBeNull();
   } finally {
     registry.close();
   }
