@@ -207,7 +207,10 @@ the active task, agent, bot, owner, channel, and message, and expire or become
 unusable after restart. The Gateway filters owner button interactions; button
 delivery and deferred interaction acknowledgments now have tested HTTP
 implementations, including destination checks and uncertain-response handling.
-Task lifecycle wiring remains pending.
+The bot task service now uses the shared routed queue and supports Discord
+progress, final delivery, cancellation, and acknowledged owner approvals through
+server transport callbacks. Gateway admission and independent channel lifecycle
+wiring remain pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

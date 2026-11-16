@@ -1,11 +1,21 @@
+import {
+  createDiscordApprovals,
+  type DiscordApprovalInteraction,
+} from "./discord-approvals.js";
+import { acknowledgeDiscordApproval } from "./discord-interactions.js";
 import { InlineKeyboard, type Bot } from "grammy";
 import type { BotAccess } from "./agent-access.js";
 import { createApprovalBook } from "./approvals.js";
 import { sendTaskOutcome } from "./bot.js";
 import type { HostApproval } from "./host-tasks.js";
-import { createTaskQueue, type TaskStore } from "./task-queue.js";
+import {
+  createRoutedTaskQueue,
+  type DiscordQueuedTask,
+  type TaskOutcome,
+  type TaskStore,
+} from "./task-queue.js";
 
-/** One persistent task queue for one agent bot; results return through that same bot. */
+/** One persistent queue and Host runner per agent; callbacks return to the saved origin. */
 export function createBotTasks(config: {
   store: TaskStore;
   agentId: string;
@@ -23,6 +33,13 @@ export function createBotTasks(config: {
     allow: boolean,
   ) => Promise<boolean>;
   access?: BotAccess;
+  discord?: {
+    admit(task: DiscordQueuedTask): boolean;
+    progress(task: DiscordQueuedTask, message: string): Promise<void>;
+    deliver(task: DiscordQueuedTask, outcome: TaskOutcome): Promise<void>;
+    sendApproval: Parameters<typeof createDiscordApprovals>[0]["send"];
+    acknowledge?: typeof acknowledgeDiscordApproval;
+  };
 }) {
   let bot: Bot | undefined;
   const book = createApprovalBook();
@@ -58,31 +75,89 @@ export function createBotTasks(config: {
       await config.decide?.(approval.taskId, approval.id, false);
     }
   }
-  const queue = createTaskQueue({
+  const discordApprovals = createDiscordApprovals({
+    isActive: (task) =>
+      !!config.discord?.admit(task) &&
+      config.store.getTask(task.id)?.status === "running" &&
+      queue.isRunning(task.origin),
+    send: (task, content, buttons) => {
+      if (!config.discord) throw new Error("Discord is unavailable");
+      return config.discord.sendApproval(task, content, buttons);
+    },
+    decide: (_task, approval, allow) =>
+      config.decide?.(approval.taskId, approval.id, allow) ??
+      Promise.resolve(false),
+  });
+  const queue = createRoutedTaskQueue({
     agentId: config.agentId,
     store: config.store,
     execute: (task, report, signal) =>
       config.run(task.prompt, report, signal, (approval) => {
-        void askOwner(task, approval);
+        const request =
+          task.origin.platform === "telegram"
+            ? askOwner(task.origin, approval)
+            : discordApprovals.ask(task as DiscordQueuedTask, approval);
+        void request.catch(() => {});
       }),
     progress: async (task, message) => {
-      if (bot) await bot.api.sendMessage(task.chatId, `Working: ${message}`);
+      if (task.origin.platform === "discord") {
+        const discordTask = task as DiscordQueuedTask;
+        if (config.discord?.admit(discordTask))
+          await config.discord.progress(discordTask, message);
+      } else if (bot)
+        await bot.api.sendMessage(task.origin.chatId, `Working: ${message}`);
     },
-    // Setup may have changed while the task waited in the queue.
     admit: (task) =>
-      !config.access ||
-      config.access.canExecute(task.botId, config.ownerId(), task.chatId),
-    deliver: (task, outcome) => {
-      if (!bot) throw new Error("Bot is not attached");
-      return sendTaskOutcome(bot.api, task.chatId, outcome);
+      task.origin.platform === "discord"
+        ? !!config.discord?.admit(task as DiscordQueuedTask)
+        : !config.access ||
+          config.access.canExecute(
+            task.origin.botId,
+            config.ownerId(),
+            task.origin.chatId,
+          ),
+    deliver: async (task, outcome) => {
+      if (task.origin.platform === "discord") {
+        const discordTask = task as DiscordQueuedTask;
+        if (!config.discord?.admit(discordTask))
+          throw new Error("Discord is unavailable");
+        await config.discord.deliver(discordTask, outcome);
+      } else {
+        if (!bot) throw new Error("Bot is not attached");
+        await sendTaskOutcome(bot.api, task.origin.chatId, outcome);
+      }
     },
   });
   return {
-    submit: queue.submit,
-    control: { isRunning: queue.isRunning, stop: queue.stop },
+    submit: queue.submitTelegram,
+    submitDiscord: queue.submitDiscord,
+    discordControl: {
+      isRunning: (origin: DiscordQueuedTask["origin"]) =>
+        queue.isRunning(origin),
+      stop: (origin: DiscordQueuedTask["origin"]) => queue.stop(origin),
+    },
+    async answerDiscord(interaction: DiscordApprovalInteraction) {
+      if (
+        !config.discord ||
+        !(await (config.discord.acknowledge ?? acknowledgeDiscordApproval)(
+          interaction,
+        ))
+      )
+        return "expired" as const;
+      return discordApprovals.answer(config.agentId, interaction);
+    },
+    control: {
+      isRunning: (botId: number, chatId: number) =>
+        queue.isRunning({ platform: "telegram", botId, chatId }),
+      stop: (botId: number, chatId: number) =>
+        queue.stop({ platform: "telegram", botId, chatId }),
+    },
     resume: queue.resume,
     idle: queue.idle,
-    close: queue.close,
+    close() {
+      discordApprovals.close();
+      queue.close();
+    },
     approvals: {
       /** "expired" covers unknown, reused, foreign and timed-out approvals alike. */
       async answer(
