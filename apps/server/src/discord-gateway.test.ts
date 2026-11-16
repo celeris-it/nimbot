@@ -1,0 +1,122 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { createDiscordGateway } from "./discord-gateway.js";
+class Socket extends EventTarget {
+  sent: Array<{ op: number; d: Record<string, unknown> }> = [];
+  close = vi.fn();
+  send(data: string) {
+    this.sent.push(JSON.parse(data));
+  }
+  receive(payload: unknown) {
+    this.dispatchEvent(
+      new MessageEvent("message", { data: JSON.stringify(payload) }),
+    );
+  }
+}
+afterEach(() => vi.useRealTimers());
+function fixture() {
+  vi.useFakeTimers();
+  const sockets: Socket[] = [];
+  let valid = true;
+  const message = vi.fn();
+  const gateway = createDiscordGateway(
+    {
+      token: "secret",
+      botId: "123",
+      ownerId: "456",
+      isCurrent: () => valid,
+      message,
+    },
+    () => {
+      const socket = new Socket();
+      sockets.push(socket);
+      return socket;
+    },
+    () => 0.5,
+  );
+  const ready = (socket: Socket) => {
+    socket.receive({ op: 10, d: { heartbeat_interval: 1000 } });
+    socket.receive({
+      op: 0,
+      s: 1,
+      t: "READY",
+      d: { user: { id: "123" }, session_id: "session" },
+    });
+  };
+  return {
+    gateway,
+    sockets,
+    message,
+    ready,
+    invalidate: () => {
+      valid = false;
+    },
+  };
+}
+it("identifies with DM intent and accepts only the owner's non-bot private messages", () => {
+  const f = fixture();
+  const socket = f.sockets[0]!;
+  f.ready(socket);
+  expect(socket.sent[0]).toMatchObject({ op: 2, d: { intents: 4096 } });
+  const data = {
+    id: "789",
+    channel_id: "987",
+    author: { id: "456" },
+    content: "hello",
+  };
+  for (const change of [
+    { guild_id: "1" },
+    { author: { id: "999" } },
+    { author: { id: "456", bot: true } },
+    { webhook_id: "1" },
+    { content: " " },
+  ])
+    socket.receive({
+      op: 0,
+      s: 2,
+      t: "MESSAGE_CREATE",
+      d: { ...data, ...change },
+    });
+  expect(f.message).not.toHaveBeenCalled();
+  socket.receive({ op: 0, s: 3, t: "MESSAGE_CREATE", d: data });
+  expect(f.message).toHaveBeenCalledWith({
+    id: "789",
+    channelId: "987",
+    content: "hello",
+  });
+  f.gateway.close();
+});
+it("reconnects after missing heartbeat ACK and resumes the session", () => {
+  const f = fixture();
+  f.ready(f.sockets[0]!);
+  vi.advanceTimersByTime(1500);
+  expect(f.gateway.getState()).toBe("reconnecting");
+  vi.advanceTimersByTime(5000);
+  const next = f.sockets[1]!;
+  next.receive({ op: 10, d: { heartbeat_interval: 1000 } });
+  expect(next.sent[0]).toEqual({
+    op: 6,
+    d: { token: "secret", session_id: "session", seq: 1 },
+  });
+  next.receive({ op: 0, s: 2, t: "RESUMED", d: {} });
+  expect(f.gateway.getState()).toBe("ready");
+  f.gateway.close();
+});
+it("stops on revoked configuration and cancels scheduled reconnections", () => {
+  const f = fixture();
+  f.ready(f.sockets[0]!);
+  f.invalidate();
+  vi.advanceTimersByTime(500);
+  expect(f.gateway.getState()).toBe("stopped");
+  vi.advanceTimersByTime(30000);
+  expect(f.sockets).toHaveLength(1);
+  expect(f.message).not.toHaveBeenCalled();
+});
+it("drops an invalid session and identifies again", () => {
+  const f = fixture();
+  f.ready(f.sockets[0]!);
+  f.sockets[0]!.receive({ op: 9, d: false });
+  vi.advanceTimersByTime(5000);
+  f.sockets[1]!.receive({ op: 10, d: { heartbeat_interval: 1000 } });
+  expect(f.sockets[1]!.sent[0]?.op).toBe(2);
+  f.gateway.close();
+});

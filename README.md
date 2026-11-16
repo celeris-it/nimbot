@@ -190,6 +190,10 @@ explicitly; check your DMs before starting a new test. Configuration changes inv
 connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.
 
+A server-side Discord Gateway transport is under development for the next phase.
+It filters owner DMs and handles heartbeat and session recovery, but is not yet
+started by the server or connected to task execution.
+
 The following ideas are deferred, not supported features or delivery commitments:
 
 - **AI engines:** native Codex, Claude Code, additional ACP providers, per-agent engine selection and switching.
