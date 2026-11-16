@@ -99,15 +99,10 @@ it("retains references after partial failure and prevents overlapping provisioni
   }
 });
 
-it("rejects externally managed, missing, and invalid agents before Docker access", async () => {
+it("rejects missing and invalid agents before Docker access", async () => {
   const f = fixture();
   try {
-    f.registry.syncConfigured({
-      id: "external",
-      name: "External",
-      ownerId: 42,
-    });
-    for (const id of ["external", "missing", "../unsafe"])
+    for (const id of ["missing", "../unsafe"])
       await expect(f.remove(id)).rejects.toThrow();
     expect(f.calls).toEqual([]);
   } finally {

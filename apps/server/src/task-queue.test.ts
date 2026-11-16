@@ -275,36 +275,6 @@ describe("stopping a task", () => {
     await queue.idle();
     expect(delivered.at(-1)?.outcome).toEqual({ ok: true, output: "ran new" });
   });
-
-  it("migrates a task table created before the cancelled status existed", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "nimbot-task-migration-"));
-    const path = join(dir, "server.sqlite");
-    try {
-      const { DatabaseSync } = await import("node:sqlite");
-      const old = new DatabaseSync(path);
-      old.exec(`CREATE TABLE tasks (
-        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
-        agent_id TEXT NOT NULL, bot_id INTEGER NOT NULL, chat_id INTEGER NOT NULL,
-        prompt TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted')),
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-        INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at)
-        VALUES ('old', 'a', 1, 10, 'kept', 'queued', 1, 1)`);
-      old.close();
-      const store = openTaskStore(path);
-      expect(store.get("old")).toMatchObject({
-        prompt: "kept",
-        status: "queued",
-      });
-      const claimed = store.claimNext(1, 10)!;
-      store.finish(claimed.id, "cancelled");
-      expect(store.get("old")?.status).toBe("cancelled");
-      store.close();
-      openTaskStore(path).close();
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
 });
 
 it("lets queued tasks run after a task times out", async () => {
@@ -377,47 +347,6 @@ describe("duplicate Telegram updates", () => {
         }),
       ).toMatchObject({ id: saved.id, duplicate: true });
       restarted.close();
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("adds the update ID to an existing task table without losing tasks", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "nimbot-dedup-migration-"));
-    const path = join(dir, "server.sqlite");
-    try {
-      const { DatabaseSync } = await import("node:sqlite");
-      const old = new DatabaseSync(path);
-      old.exec(`CREATE TABLE tasks (
-        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
-        agent_id TEXT NOT NULL, bot_id INTEGER NOT NULL, chat_id INTEGER NOT NULL,
-        prompt TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted', 'cancelled')),
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-        INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at)
-        VALUES ('old', 'a', 1, 10, 'kept', 'queued', 1, 1)`);
-      old.close();
-      const store = openTaskStore(path);
-      expect(store.get("old")).toMatchObject({ prompt: "kept" });
-      const added = store.enqueue({
-        agentId: "a",
-        botId: 1,
-        chatId: 10,
-        prompt: "new",
-        updateId: 9,
-      });
-      expect(added.duplicate).toBe(false);
-      expect(
-        store.enqueue({
-          agentId: "a",
-          botId: 1,
-          chatId: 10,
-          prompt: "new",
-          updateId: 9,
-        }).duplicate,
-      ).toBe(true);
-      store.close();
-      openTaskStore(path).close();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

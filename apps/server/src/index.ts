@@ -1,5 +1,4 @@
 import { log } from "./logger.js";
-import { findLegacySettings } from "./legacy-settings.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createAgentAccess } from "./agent-access.js";
 import { createProvisioningControl } from "./provisioning-control.js";
@@ -46,12 +45,6 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const legacy = findLegacySettings(process.env);
-  if (legacy.length)
-    log.warn("server.legacy_settings_ignored", {
-      names: legacy.join(","),
-      hint: "Agents and Telegram owners are now configured in the panel.",
-    });
   let statePath;
   let taskStore;
   let registry;

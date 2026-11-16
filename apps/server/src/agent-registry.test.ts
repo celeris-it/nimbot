@@ -6,37 +6,56 @@ import { expect, it } from "vitest";
 import { openAgentRegistry } from "./agent-registry.js";
 import { openChatBinding } from "./chat-binding.js";
 
-it("migrates once and restores metadata without storing tokens", async () => {
+it("creates its schema once and restores metadata without storing tokens", async () => {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-registry-"));
   const path = join(dir, "server.sqlite");
   try {
     const first = openAgentRegistry(path);
-    first.syncConfigured({ id: "dev", name: "Developer", ownerId: 42 });
+    first.createPending({ id: "dev", name: "Developer", ownerId: 42 });
     first.bindBot("dev", 123, "developer_bot");
+    first.setCredentialRef("dev", "file:telegram-saved");
     first.updateSettings("dev", "Edited", "Answer briefly");
     first.close();
-    const restored = openAgentRegistry(path);
-    try {
-      restored.syncConfigured({ id: "dev", name: "Updated", ownerId: 42 });
-      expect(restored.get("dev")).toEqual({
-        id: "dev",
-        name: "Edited",
-        ownerId: 42,
-        instructions: "Answer briefly",
-        botId: 123,
-        botUsername: "developer_bot",
-        credentialRef: "env:TELEGRAM_BOT_TOKEN",
-        containerRef: null,
-      });
-    } finally {
-      restored.close();
+    // Reopening neither recreates nor alters the saved data.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const restored = openAgentRegistry(path);
+      try {
+        expect(restored.get("dev")).toEqual({
+          id: "dev",
+          name: "Edited",
+          ownerId: 42,
+          instructions: "Answer briefly",
+          botId: 123,
+          botUsername: "developer_bot",
+          credentialRef: "file:telegram-saved",
+          containerRef: null,
+        });
+        expect(restored.getProvisioning("dev")?.status).toBe("pending");
+      } finally {
+        restored.close();
+      }
     }
     const db = new DatabaseSync(path);
     try {
+      const tables = (
+        db
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .all() as { name: string }[]
+      ).map((row) => row.name);
+      expect(tables).toEqual(
+        expect.arrayContaining([
+          "agents",
+          "agent_provisioning",
+          "agent_host_credentials",
+          "container_operations",
+          "container_stop_observations",
+          "provisioning_resource_intents",
+          "chat_bindings",
+        ]),
+      );
       expect(
-        db.prepare("SELECT COUNT(*) AS total FROM registry_migrations").get()
-          ?.total,
-      ).toBe(10);
+        JSON.stringify(db.prepare("SELECT * FROM agents").all()),
+      ).not.toMatch(/\d+:[A-Za-z0-9_-]{20,}/);
     } finally {
       db.close();
     }
@@ -48,8 +67,8 @@ it("migrates once and restores metadata without storing tokens", async () => {
 it("rejects duplicate bot identities and missing agents", () => {
   const registry = openAgentRegistry(":memory:");
   try {
-    registry.syncConfigured({ id: "a", name: "A", ownerId: 42 });
-    registry.syncConfigured({ id: "b", name: "B", ownerId: 42 });
+    registry.createPending({ id: "a", name: "A", ownerId: 42 });
+    registry.createPending({ id: "b", name: "B", ownerId: 42 });
     registry.bindBot("a", 123, "a_bot");
     expect(() => registry.bindBot("b", 123, "a_bot")).toThrow(
       "already assigned",
@@ -63,15 +82,15 @@ it("rejects duplicate bot identities and missing agents", () => {
   }
 });
 
-it("preserves existing activation and refuses reuse of a legacy bot", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-legacy-"));
+it("refuses to link a bot that a chat binding still names for another agent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-binding-reuse-"));
   const path = join(dir, "server.sqlite");
   const binding = openChatBinding(path, { id: "original", ownerId: 42 });
   try {
     binding.save(123, 42);
     const registry = openAgentRegistry(path);
     try {
-      registry.syncConfigured({ id: "new", name: "New", ownerId: 42 });
+      registry.createPending({ id: "new", name: "New", ownerId: 42 });
       expect(() => registry.bindBot("new", 123, "original_bot")).toThrow(
         "already assigned",
       );
@@ -90,8 +109,8 @@ it("persists lifecycle outcomes and marks only pending operations interrupted on
   const path = join(dir, "server.sqlite");
   try {
     const registry = openAgentRegistry(path);
-    registry.syncConfigured({ id: "a", name: "A", ownerId: 42 });
-    registry.syncConfigured({ id: "b", name: "B", ownerId: 42 });
+    registry.createPending({ id: "a", name: "A", ownerId: 42 });
+    registry.createPending({ id: "b", name: "B", ownerId: 42 });
     registry.recordContainerOperation("a", "start", "pending");
     registry.recordContainerOperation("b", "stop", "completed");
     expect(() =>
@@ -149,6 +168,7 @@ it("preserves provisioning resources across interruption and explicit retry", as
       });
       expect(() => restored.finishProvisioning("new", "ready")).toThrow();
       restored.bindBot("new", 321, "new_bot");
+      restored.setCredentialRef("new", "file:telegram-saved");
       restored.finishProvisioning("new", "failed");
       restored.beginProvisioning("new");
       expect(() => restored.finishProvisioning("new", "ready")).toThrow();
@@ -171,36 +191,6 @@ it("preserves provisioning resources across interruption and explicit retry", as
     const again = openAgentRegistry(path);
     expect(again.getProvisioning("new")?.status).toBe("ready");
     again.close();
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-it("migrates existing configured agents without treating them as provisioned", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-migration-"));
-  const path = join(dir, "server.sqlite");
-  try {
-    const registry = openAgentRegistry(path);
-    registry.syncConfigured({ id: "existing", name: "Existing", ownerId: 42 });
-    registry.bindBot("existing", 123, "existing_bot");
-    registry.setContainerRef("existing", "container-existing");
-    registry.close();
-    const legacy = new DatabaseSync(path);
-    legacy.exec(
-      "DROP TABLE provisioning_resource_intents; DROP TABLE container_stop_observations; DROP TABLE agent_host_credentials; DROP TABLE agent_provisioning; ALTER TABLE agents DROP COLUMN deleted_at; DELETE FROM registry_migrations WHERE version >= 3",
-    );
-    legacy.close();
-    const migrated = openAgentRegistry(path);
-    try {
-      expect(migrated.getProvisioning("existing")?.status).toBe("external");
-      expect(migrated.get("existing")).toMatchObject({
-        botId: 123,
-        containerRef: "container-existing",
-      });
-      expect(() => migrated.beginProvisioning("existing")).toThrow();
-    } finally {
-      migrated.close();
-    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -248,43 +238,6 @@ it("retains stop snapshots across restart without inferring a final task result"
   }
 });
 
-it("upgrades saved version-5 stop snapshots without inventing final outcomes", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-stop-migration-"));
-  const path = join(dir, "server.sqlite");
-  try {
-    const current = openAgentRegistry(path);
-    current.syncConfigured({ id: "dev", name: "Dev", ownerId: 42 });
-    current.recordContainerOperation("dev", "stop", "pending");
-    current.recordStopObservation("dev", {
-      availability: "available",
-      task: { id: "a0000000-0000-4000-8000-000000000001", status: "running" },
-    });
-    current.recordContainerOperation("dev", "stop", "completed");
-    const previous = current.getStopObservation("dev")!;
-    current.close();
-    const legacy = new DatabaseSync(path);
-    legacy.exec(
-      "ALTER TABLE container_stop_observations DROP COLUMN observation_id; ALTER TABLE container_stop_observations DROP COLUMN final_status; DELETE FROM registry_migrations WHERE version = 6",
-    );
-    legacy.close();
-    const migrated = openAgentRegistry(path);
-    try {
-      expect(migrated.getStopObservation("dev")).toMatchObject({
-        availability: "available",
-        task: previous.availability === "available" ? previous.task : null,
-        observedAt: previous.observedAt,
-        observationId: expect.any(String),
-        finalStatus: null,
-      });
-      expect(migrated.getStopObservation("dev")!.observationId).not.toBe("");
-    } finally {
-      migrated.close();
-    }
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
 it("preserves cancelled setup and resource references across restart and permits explicit recovery", async () => {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-cancelled-setup-"));
   const path = join(dir, "server.sqlite");
@@ -319,49 +272,6 @@ it("preserves cancelled setup and resource references across restart and permits
       expect(() => restored.finishProvisioning("dev", "cancelled")).toThrow();
     } finally {
       restored.close();
-    }
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-it("migrates version-6 provisioning rows without changing references or completed states", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-provisioning-v7-"));
-  const path = join(dir, "server.sqlite");
-  try {
-    const first = openAgentRegistry(path);
-    first.syncConfigured({ id: "external", name: "External", ownerId: 42 });
-    first.createPending({ id: "dev", name: "Dev", ownerId: 42 });
-    first.beginProvisioning("dev");
-    first.recordProvisioningResources("dev", {
-      volumeRef: "workspace",
-      networkRef: "network",
-      containerRef: "container",
-    });
-    first.finishProvisioning("dev", "failed");
-    const saved = first.getProvisioning("dev");
-    const external = first.getProvisioning("external");
-    first.close();
-    const legacy = new DatabaseSync(path);
-    legacy.exec(`CREATE TABLE provisioning_v6 (
-      agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-      status TEXT NOT NULL CHECK(status IN ('external','pending','provisioning','ready','failed','interrupted')),
-      volume_ref TEXT, network_ref TEXT, updated_at INTEGER NOT NULL
-    ); INSERT INTO provisioning_v6 SELECT agent_id, status, volume_ref, network_ref, updated_at FROM agent_provisioning;
-    DROP TABLE agent_provisioning; ALTER TABLE provisioning_v6 RENAME TO agent_provisioning;
-    DROP TABLE provisioning_resource_intents; ALTER TABLE agents DROP COLUMN deleted_at; DELETE FROM registry_migrations WHERE version >= 7;`);
-    legacy.close();
-    const migrated = openAgentRegistry(path);
-    try {
-      expect(migrated.getProvisioning("dev")).toEqual(saved);
-      expect(migrated.getProvisioning("external")).toEqual(external);
-      expect(migrated.get("dev")?.containerRef).toBe("container");
-      migrated.beginProvisioning("dev");
-      migrated.finishProvisioning("dev", "cancelled");
-      expect(migrated.getProvisioning("dev")?.status).toBe("cancelled");
-      expect(() => migrated.beginProvisioning("external")).toThrow();
-    } finally {
-      migrated.close();
     }
   } finally {
     await rm(dir, { recursive: true, force: true });

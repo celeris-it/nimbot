@@ -12,7 +12,7 @@ See [INSTALL.md](INSTALL.md) for installation. Commands below assume you run the
 | OpenCode sessions, history, and AI provider credentials | Per-agent engine-state volume |
 | Task records and results | Per-agent task-state volume |
 
-Compose stores server state in `<project>_server-state`. Every panel-created agent uses `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks` volumes. Volumes left by the removed pre-configured agent (`agent-workspace`, `agent-engine-state`, `agent-task-state`) are never deleted by Nimbot; remove them by hand when no longer needed.
+Compose stores server state in `<project>_server-state`. Every panel-created agent uses `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks` volumes.
 
 Treat backups as secrets: they contain bot tokens, Agent Host tokens, and AI provider credentials. The panel password hash and other settings live in `.env`, which is not in a volume; back it up separately and keep it private.
 
@@ -57,7 +57,7 @@ Limits of restoring on a different host: the server state is restored. Agents cr
 
 Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Logs are JSON lines with `event`, `agentId`, and `taskId`; secrets are redacted and prompts and results are never logged.
 
-**The server exits at startup.** The log shows `server.config_invalid` or `server.state_init_failed`. Check `PANEL_PASSWORD_HASH`, the immutable `AGENT_HOST_IMAGE`, Docker deployment settings, and writable server state. Telegram settings are managed through the panel and are not required for startup. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value.
+**The server exits at startup.** The log shows `server.config_invalid` or `server.state_init_failed`. Check `PANEL_PASSWORD_HASH`, the immutable `AGENT_HOST_IMAGE`, Docker deployment settings, and writable server state. Telegram settings are managed through the panel and are not required for startup. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value. Development builds before `v0.1.0` may change the database schema without migrating it: if the server cannot open an existing state volume after an update, remove that volume (`docker volume rm <project>_server-state`) and set up again.
 
 **The panel rejects my login or forms.** Five failed logins within fifteen minutes block further attempts until the window passes. Sessions last eight hours and end when the server restarts. If sign-in works but actions fail, `PANEL_URL` does not match the address in your browser (scheme, host, and port must match); fix it and recreate the server (`docker compose up -d`).
 

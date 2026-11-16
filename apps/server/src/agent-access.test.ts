@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,12 +7,23 @@ import { openAgentRegistry } from "./agent-registry.js";
 import { openChatBinding } from "./chat-binding.js";
 import { createAgentAccess } from "./agent-access.js";
 
+/** There is no production API that changes an owner; tests edit the row directly. */
+function changeOwner(path: string, id: string, ownerId: number) {
+  const db = new DatabaseSync(path);
+  try {
+    db.prepare("UPDATE agents SET owner_id = ? WHERE id = ?").run(ownerId, id);
+  } finally {
+    db.close();
+  }
+}
+
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-agent-access-"));
   const path = join(dir, "server.sqlite");
   const registry = openAgentRegistry(path);
   registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
+  registry.setCredentialRef("dev", "file:telegram-saved");
   const binding = openChatBinding(path, { id: "dev", ownerId: 42 });
   const access = createAgentAccess(registry, "dev");
   const ready = () => {
@@ -53,7 +65,7 @@ it("requires the current bot, the agent owner and persisted private-chat activat
     expect(f.access.getSetup()).toEqual({ bot: "linked", owner: "verified" });
     expect(f.access.canExecute(123, 42, 42)).toBe(true);
     expect(f.access.canExecute(123, 42, 73)).toBe(false);
-    f.registry.syncConfigured({ id: "dev", name: "Dev", ownerId: 73 });
+    changeOwner(f.path, "dev", 73);
     expect(f.access.getSetup().owner).toBe("pending");
     expect(f.access.canExecute(123, 42, 42)).toBe(false);
   } finally {
@@ -94,13 +106,15 @@ it("blocks pending container actions and missing ready resources without exposin
   }
 });
 
-it("never runs tasks for a legacy externally managed row and fails closed for missing storage", () => {
+it("fails closed when its storage is unavailable", () => {
   const registry = openAgentRegistry(":memory:");
-  registry.syncConfigured({ id: "dev", name: "Dev", ownerId: 42 });
+  registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
+  registry.setCredentialRef("dev", "file:telegram-saved");
   vi.spyOn(registry, "getOwnerChat").mockReturnValue(42);
   const access = createAgentAccess(registry, "dev");
   expect(access.canActivate(123, 42)).toBe(true);
+  // Setup is not ready, so an activated chat alone never runs tasks.
   expect(access.canExecute(123, 42, 42)).toBe(false);
   registry.close();
   expect(access.canActivate(123, 42)).toBe(false);

@@ -57,7 +57,7 @@ export function createAgentProvisioning(
     const agent = registry.get(agentId);
     if (!agent?.botId || !agent.credentialRef)
       throw new Error("Link an agent bot before provisioning");
-    // This atomic transition also refuses concurrent attempts and externally managed agents.
+    // This atomic transition also refuses concurrent attempts.
     registry.beginProvisioning(agentId);
     try {
       signal?.throwIfAborted();

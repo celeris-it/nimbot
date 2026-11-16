@@ -313,6 +313,7 @@ it("rechecks persisted setup after Host health and never executes incomplete age
   const registry = openAgentRegistry(path);
   registry.createPending({ id: "test", name: "Test", ownerId: 42 });
   registry.bindBot("test", 123, "test_bot");
+  registry.setCredentialRef("test", "file:telegram-saved");
   registry.beginProvisioning("test");
   registry.setHostCredentialRef("test", "file:host-saved");
   registry.recordProvisioningResources("test", {

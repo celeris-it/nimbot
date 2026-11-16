@@ -23,11 +23,8 @@ export function openTaskStore(path: string) {
   const db = new DatabaseSync(path);
   try {
     db.exec("PRAGMA busy_timeout = 5000");
-    const tableSql = (
-      db.prepare("SELECT sql FROM sqlite_master WHERE name = 'tasks'").get() as
-        { sql: string } | undefined
-    )?.sql;
-    const table = (name: string) => `CREATE TABLE ${name} (
+    db.exec("BEGIN IMMEDIATE");
+    db.exec(`CREATE TABLE IF NOT EXISTS tasks (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       id TEXT NOT NULL UNIQUE,
       agent_id TEXT NOT NULL,
@@ -38,22 +35,7 @@ export function openTaskStore(path: string) {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       update_id INTEGER
-    )`;
-    db.exec("BEGIN IMMEDIATE");
-    if (!tableSql) db.exec(table("tasks"));
-    else if (!tableSql.includes("'cancelled'")) {
-      // Earlier schema lacked the cancelled status; SQLite cannot alter a CHECK.
-      db.exec(`${table("tasks_new")};
-        INSERT INTO tasks_new (seq, id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at)
-          SELECT seq, id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at FROM tasks;
-        DROP TABLE tasks;
-        ALTER TABLE tasks_new RENAME TO tasks`);
-    }
-    // Tables created before duplicate detection lack the Telegram update ID.
-    const hasUpdateId = (
-      db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]
-    ).some((column) => column.name === "update_id");
-    if (!hasUpdateId) db.exec("ALTER TABLE tasks ADD COLUMN update_id INTEGER");
+    )`);
     db.exec(
       "CREATE INDEX IF NOT EXISTS tasks_conversation ON tasks (bot_id, chat_id, status, seq)",
     );

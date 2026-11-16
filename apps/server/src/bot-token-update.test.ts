@@ -11,7 +11,7 @@ it("verifies identity, stores private files and preserves their reference at sta
   const registry = openAgentRegistry(":memory:");
   try {
     const secrets = await openBotSecrets(join(dir, "secrets"));
-    registry.syncConfigured({ id: "dev", name: "Dev", ownerId: 42 });
+    registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
     registry.bindBot("dev", 123, "dev_bot");
     const verify = vi.fn().mockResolvedValue({ id: 456 });
     const update = createBotTokenUpdate("dev", registry, secrets, verify);

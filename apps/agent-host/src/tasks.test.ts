@@ -225,19 +225,19 @@ it("retains events across restart and records interruption once", async () => {
   }
 });
 
-it("migrates existing tasks and rolls back state when its event cannot be saved", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-migration-"));
+it("rolls back a state change when its event cannot be saved", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-rollback-"));
   const path = join(dir, "tasks.sqlite");
-  const legacy = new DatabaseSync(path);
-  legacy.exec(
-    "CREATE TABLE tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT); INSERT INTO tasks VALUES ('old', 'prompt', 'completed', 'saved output', 'end_turn')",
-  );
-  legacy.close();
   const store = await openTaskStore(pathToFileURL(path).href);
   try {
-    const events = await store.getEvents("old");
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
+    await store.insert("task", "prompt");
+    await store.update("task", {
+      status: "completed",
+      output: "saved output",
+      stopReason: "end_turn",
+    });
+    const events = await store.getEvents("task");
+    expect(events.at(-1)).toMatchObject({
       status: "completed",
       output: "saved output",
     });
@@ -246,9 +246,9 @@ it("migrates existing tasks and rolls back state when its event cannot be saved"
       "CREATE TRIGGER reject_event BEFORE INSERT ON task_events BEGIN SELECT RAISE(ABORT, 'event write failed'); END",
     );
     control.close();
-    await expect(store.update("old", { status: "failed" })).rejects.toThrow();
-    expect((await store.get("old"))?.status).toBe("completed");
-    expect(await store.getEvents("old")).toEqual(events);
+    await expect(store.update("task", { status: "failed" })).rejects.toThrow();
+    expect((await store.get("task"))?.status).toBe("completed");
+    expect(await store.getEvents("task")).toEqual(events);
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });

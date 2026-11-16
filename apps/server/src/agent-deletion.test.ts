@@ -4,7 +4,6 @@ import { createAgentDeletion } from "./agent-deletion.js";
 
 function fixture() {
   const registry = openAgentRegistry(":memory:");
-  registry.syncConfigured({ id: "boot", name: "Boot", ownerId: 42 });
   registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.beginProvisioning("dev");
   registry.recordProvisioningResources("dev", {
@@ -53,7 +52,7 @@ describe("agent deletion", () => {
       "host-secret:file:host-saved",
     ]);
     expect(registry.get("dev")).toBeUndefined();
-    expect(registry.listIds()).toEqual(["boot"]);
+    expect(registry.listIds()).toEqual([]);
     // The retained volume stays traceable and the bot can be linked again.
     expect(registry.getProvisioning("dev")?.volumeRef).toBe(
       "nimbot-dev-workspace",
@@ -85,25 +84,6 @@ describe("agent deletion", () => {
     const { run, events } = deletion(registry);
     await expect(run("../x")).rejects.toThrow("Invalid agent ID");
     expect(events).toEqual([]);
-  });
-
-  it("deletes a legacy externally managed agent without Docker and keeps no credentials", async () => {
-    const registry = fixture();
-    registry.setCredentialRef("boot", "file:telegram-legacy");
-    const { run, events } = deletion(registry);
-    await run("boot");
-    expect(registry.get("boot")).toBeUndefined();
-    // No Docker resource removal; its saved bot credential file is erased.
-    expect(events).toEqual(["stop:boot", "bot-secret:file:telegram-legacy"]);
-    expect(registry.get("dev")).toBeDefined();
-  });
-
-  it("does not try to erase an environment-token reference left by an older installation", async () => {
-    const registry = fixture();
-    registry.bindBot("boot", 9, "boot_bot");
-    const { run, events } = deletion(registry);
-    await run("boot");
-    expect(events).toEqual(["stop:boot"]);
   });
 
   it("refuses to retire an agent whose resources still exist", () => {

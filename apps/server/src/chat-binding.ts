@@ -5,6 +5,14 @@ export interface ChatBinding {
   save(botId: number, chatId: number): void;
 }
 
+/** Identities only; shared with the agent registry, which creates the same table. */
+export const CHAT_BINDINGS_SCHEMA = `CREATE TABLE IF NOT EXISTS chat_bindings (
+  agent_id TEXT PRIMARY KEY,
+  bot_id INTEGER NOT NULL,
+  owner_id INTEGER NOT NULL,
+  chat_id INTEGER NOT NULL
+);`;
+
 /** Store identities only. Bot tokens never enter this database. */
 export function openChatBinding(
   path: string,
@@ -12,13 +20,7 @@ export function openChatBinding(
 ): ChatBinding & { close(): void } {
   const db = new DatabaseSync(path);
   try {
-    // Initial schema; subsequent schema changes require migrations.
-    db.exec(`CREATE TABLE IF NOT EXISTS chat_bindings (
-      agent_id TEXT PRIMARY KEY,
-      bot_id INTEGER NOT NULL,
-      owner_id INTEGER NOT NULL,
-      chat_id INTEGER NOT NULL
-    )`);
+    db.exec(CHAT_BINDINGS_SCHEMA);
   } catch (error) {
     db.close();
     throw error;

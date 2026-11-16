@@ -11,7 +11,8 @@ function capture(
   registry: ReturnType<typeof openAgentRegistry>,
   agentId = "dev",
 ) {
-  registry.syncConfigured({ id: agentId, name: agentId, ownerId: 42 });
+  if (!registry.get(agentId))
+    registry.createPending({ id: agentId, name: agentId, ownerId: 42 });
   registry.recordContainerOperation(agentId, "stop", "pending");
   registry.recordStopObservation(agentId, {
     availability: "available",

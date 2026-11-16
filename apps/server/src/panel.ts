@@ -646,7 +646,6 @@ ${values.instructions}</textarea>
         "Telegram polling could not continue. Check connectivity and whether another instance is polling this bot.",
     };
     const setupLabels: Record<string, string> = {
-      external: "Legacy agent from an older installation (no longer managed)",
       pending: "Pending",
       provisioning: "In progress",
       ready: "Completed",

@@ -36,14 +36,13 @@ export async function openTaskStore(url: string) {
   const client = createClient({ url });
   const db = drizzle(client);
   try {
-    // Additive schema migration and backfill for existing task databases.
+    // Current schema, plus restart recovery: work the previous process left active is interrupted.
     await client.execute("PRAGMA foreign_keys = ON");
     await client.batch(
       [
         "CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT)",
         "CREATE TABLE IF NOT EXISTS task_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT)",
         "CREATE INDEX IF NOT EXISTS task_events_task_sequence ON task_events(task_id, sequence)",
-        "INSERT INTO task_events (task_id, status, output, stop_reason) SELECT id, status, output, stop_reason FROM tasks WHERE NOT EXISTS (SELECT 1 FROM task_events WHERE task_id = tasks.id)",
         "INSERT INTO task_events (task_id, status, output, stop_reason) SELECT id, 'interrupted', output, stop_reason FROM tasks WHERE status IN ('accepted', 'running')",
         "UPDATE tasks SET status = 'interrupted' WHERE status IN ('accepted', 'running')",
       ],

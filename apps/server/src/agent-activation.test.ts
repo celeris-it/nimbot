@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -39,6 +40,7 @@ async function fixture() {
   for (const [id, botId] of identities) {
     registry.createPending({ id, name: `Agent ${id}`, ownerId: 42 });
     registry.bindBot(id, botId, `${id}_bot`);
+    registry.setCredentialRef(id, `file:telegram-${id}`);
   }
   const bots = new Map<string, ReturnType<typeof createBot>>();
   const bindings = new Map<string, ReturnType<typeof openChatBinding>>();
@@ -117,6 +119,7 @@ async function fixture() {
     get registry() {
       return registry;
     },
+    path,
     bots,
     bindings,
     activated,
@@ -192,7 +195,9 @@ it("requires the new owner to start the selected bot after an owner change witho
   const f = await fixture();
   try {
     for (const bot of f.bots.values()) await bot.handleUpdate(start());
-    f.registry.syncConfigured({ id: "a", name: "Agent a", ownerId: 73 });
+    const db = new DatabaseSync(f.path);
+    db.prepare("UPDATE agents SET owner_id = 73 WHERE id = 'a'").run();
+    db.close();
     f.restart();
     expect(f.registry.getOwnerChat("a")).toBeUndefined();
     expect(f.registry.getOwnerChat("b")).toBe(42);

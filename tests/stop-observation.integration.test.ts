@@ -42,7 +42,7 @@ it("confirms the captured task through the real Host API after graceful shutdown
   try {
     const taskId = (await runner.submit("private task"))!;
     await running;
-    registry.syncConfigured({ id: "dev", name: "Dev", ownerId: 42 });
+    registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
     registry.recordContainerOperation("dev", "stop", "pending");
     registry.recordStopObservation(
       "dev",

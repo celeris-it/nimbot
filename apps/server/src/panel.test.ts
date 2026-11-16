@@ -734,8 +734,9 @@ it("replaces only the requested agent's token after verifying the same bot", asy
     ["first", 123],
     ["second", 456],
   ] as const) {
-    registry.syncConfigured({ id, name: id, ownerId: 42 });
+    registry.createPending({ id, name: id, ownerId: 42 });
     registry.bindBot(id, botId, `${id}_bot`);
+    registry.setCredentialRef(id, `file:telegram-${id}-original`);
   }
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
   const app = createPanelPositional(
@@ -822,7 +823,7 @@ it("replaces only the requested agent's token after verifying the same bot", asy
       "123:valid_secret",
     );
     expect(registry.get("second")!.credentialRef).toBe(
-      "env:TELEGRAM_BOT_TOKEN",
+      "file:telegram-second-original",
     );
     const confirmation = await (
       await app.request("/agents/first/token?saved=1", { headers })

@@ -39,6 +39,7 @@ it.skipIf(!image)(
         ownerId: 42,
       });
       registry.bindBot(id, 123, "intent_test_bot");
+      registry.setCredentialRef(id, "file:telegram-saved");
       const provision = createAgentProvisioning(
         registry,
         {

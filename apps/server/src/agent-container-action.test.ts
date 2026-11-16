@@ -7,6 +7,7 @@ function readyAgent() {
   const registry = openAgentRegistry(":memory:");
   registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
+  registry.setCredentialRef("dev", "file:telegram-saved");
   registry.beginProvisioning("dev");
   registry.setHostCredentialRef("dev", "file:host-saved");
   registry.recordProvisioningResources("dev", {

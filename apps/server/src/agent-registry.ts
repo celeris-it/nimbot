@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import type { CurrentHostTask } from "./host-current-task.js";
 import { randomUUID } from "node:crypto";
+import { CHAT_BINDINGS_SCHEMA } from "./chat-binding.js";
 import {
   agentResourceNames,
   type ResourceKind,
@@ -34,7 +35,6 @@ export interface RegisteredAgent {
 
 export interface ProvisioningState {
   status:
-    | "external"
     | "pending"
     | "provisioning"
     | "ready"
@@ -57,15 +57,9 @@ export function openAgentRegistry(path: string) {
   const db = new DatabaseSync(path);
   try {
     db.exec("BEGIN IMMEDIATE");
-    db.exec(
-      "CREATE TABLE IF NOT EXISTS registry_migrations (version INTEGER PRIMARY KEY)",
-    );
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 1")
-        .get()
-    ) {
-      db.exec(`CREATE TABLE agents (
+    // One current schema. When it changes after a release, add versioned migrations here.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         owner_id INTEGER NOT NULL,
@@ -73,119 +67,48 @@ export function openAgentRegistry(path: string) {
         bot_id INTEGER UNIQUE,
         bot_username TEXT,
         credential_ref TEXT,
-        container_ref TEXT
-      ); INSERT INTO registry_migrations(version) VALUES (1)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 2")
-        .get()
-    ) {
-      db.exec(`CREATE TABLE container_operations (
+        container_ref TEXT,
+        deleted_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS container_operations (
         agent_id TEXT PRIMARY KEY REFERENCES agents(id),
         action TEXT NOT NULL CHECK(action IN ('start', 'stop')),
         status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'failed', 'interrupted')),
         updated_at INTEGER NOT NULL
-      ); INSERT INTO registry_migrations(version) VALUES (2)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 3")
-        .get()
-    ) {
-      db.exec(`CREATE TABLE agent_provisioning (
+      );
+      CREATE TABLE IF NOT EXISTS agent_provisioning (
         agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-        status TEXT NOT NULL CHECK(status IN ('external', 'pending', 'provisioning', 'ready', 'failed', 'interrupted')),
+        status TEXT NOT NULL CHECK(status IN ('pending', 'provisioning', 'ready', 'failed', 'interrupted', 'cancelled')),
         volume_ref TEXT,
         network_ref TEXT,
-        updated_at INTEGER NOT NULL
+        updated_at INTEGER NOT NULL,
+        cancel_requested_at INTEGER
       );
-      INSERT INTO agent_provisioning (agent_id, status, updated_at)
-        SELECT id, 'external', 0 FROM agents;
-      INSERT INTO registry_migrations(version) VALUES (3)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 4")
-        .get()
-    ) {
-      db.exec(`CREATE TABLE agent_host_credentials (
+      CREATE TABLE IF NOT EXISTS agent_host_credentials (
         agent_id TEXT PRIMARY KEY REFERENCES agents(id),
         credential_ref TEXT NOT NULL UNIQUE
-      ); INSERT INTO registry_migrations(version) VALUES (4)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 5")
-        .get()
-    ) {
-      db.exec(`CREATE TABLE container_stop_observations (
+      );
+      CREATE TABLE IF NOT EXISTS container_stop_observations (
         agent_id TEXT PRIMARY KEY REFERENCES agents(id),
         availability TEXT NOT NULL CHECK(availability IN ('available', 'unavailable')),
         task_id TEXT,
         task_status TEXT CHECK(task_status IN ('accepted', 'running')),
         observed_at INTEGER NOT NULL,
+        observation_id TEXT NOT NULL DEFAULT '',
+        final_status TEXT CHECK(final_status IN ('completed', 'failed', 'interrupted')),
         CHECK ((task_id IS NULL AND task_status IS NULL) OR
           (availability = 'available' AND task_id IS NOT NULL AND task_status IS NOT NULL))
-      ); INSERT INTO registry_migrations(version) VALUES (5)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 6")
-        .get()
-    ) {
-      db.exec(`ALTER TABLE container_stop_observations ADD COLUMN observation_id TEXT NOT NULL DEFAULT '';
-        ALTER TABLE container_stop_observations ADD COLUMN final_status TEXT CHECK(final_status IN ('completed', 'failed', 'interrupted'));
-        UPDATE container_stop_observations SET observation_id = lower(hex(randomblob(16)));
-        INSERT INTO registry_migrations(version) VALUES (6)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 7")
-        .get()
-    ) {
-      db.exec(`CREATE TABLE agent_provisioning_v7 (
-        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-        status TEXT NOT NULL CHECK(status IN ('external', 'pending', 'provisioning', 'ready', 'failed', 'interrupted', 'cancelled')),
-        volume_ref TEXT,
-        network_ref TEXT,
-        updated_at INTEGER NOT NULL
       );
-      INSERT INTO agent_provisioning_v7 SELECT * FROM agent_provisioning;
-      DROP TABLE agent_provisioning;
-      ALTER TABLE agent_provisioning_v7 RENAME TO agent_provisioning;
-      INSERT INTO registry_migrations(version) VALUES (7)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 8")
-        .get()
-    ) {
-      db.exec(`ALTER TABLE agent_provisioning ADD COLUMN cancel_requested_at INTEGER;
-        INSERT INTO registry_migrations(version) VALUES (8)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 9")
-        .get()
-    ) {
-      db.exec(`CREATE TABLE provisioning_resource_intents (
+      CREATE TABLE IF NOT EXISTS provisioning_resource_intents (
         agent_id TEXT NOT NULL REFERENCES agents(id),
         kind TEXT NOT NULL CHECK(kind IN ('container', 'volume', 'network')),
         name TEXT NOT NULL,
         operation_id TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         PRIMARY KEY (agent_id, kind, name, operation_id)
-      ); INSERT INTO registry_migrations(version) VALUES (9)`);
-    }
-    if (
-      !db
-        .prepare("SELECT version FROM registry_migrations WHERE version = 10")
-        .get()
-    ) {
-      db.exec(`ALTER TABLE agents ADD COLUMN deleted_at INTEGER;
-        INSERT INTO registry_migrations(version) VALUES (10)`);
-    }
+      );
+      ${CHAT_BINDINGS_SCHEMA}
+    `);
     db.prepare(
       "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
     ).run(Date.now());
@@ -208,14 +131,8 @@ export function openAgentRegistry(path: string) {
   const provisioningColumns =
     "status, volume_ref AS volumeRef, network_ref AS networkRef, updated_at AS updatedAt";
   function assertBotAvailable(id: string, botId: number) {
-    // Refuse accidental bot reuse, including bindings created before this registry.
-    const legacyExists = db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_bindings'",
-      )
-      .get();
+    // Refuse accidental bot reuse, including a chat binding that outlived its agent row.
     if (
-      legacyExists &&
       db
         .prepare(
           "SELECT agent_id FROM chat_bindings WHERE bot_id = ? AND agent_id <> ?",
@@ -271,14 +188,6 @@ export function openAgentRegistry(path: string) {
         .all() as unknown as ProvisioningIntent[];
     },
     getOwnerChat(id: string): number | undefined {
-      if (
-        !db
-          .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_bindings'",
-          )
-          .get()
-      )
-        return undefined;
       const row = db
         .prepare(
           `SELECT b.chat_id FROM chat_bindings b
@@ -514,14 +423,6 @@ export function openAgentRegistry(path: string) {
         throw error;
       }
     },
-    syncConfigured(agent: { id: string; name: string; ownerId: number }) {
-      db.prepare(
-        "INSERT INTO agents (id, name, owner_id) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET owner_id = excluded.owner_id",
-      ).run(agent.id, agent.name, agent.ownerId);
-      db.prepare(
-        "INSERT OR IGNORE INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'external', ?)",
-      ).run(agent.id, Date.now());
-    },
     updateSettings(id: string, name: string, instructions: string) {
       const normalized = name.trim();
       if (!normalized || normalized.length > 128 || instructions.length > 4000)
@@ -534,9 +435,7 @@ export function openAgentRegistry(path: string) {
     bindBot(id: string, botId: number, botUsername: string) {
       assertBotAvailable(id, botId);
       const result = db
-        .prepare(
-          "UPDATE agents SET bot_id = ?, bot_username = ?, credential_ref = COALESCE(credential_ref, 'env:TELEGRAM_BOT_TOKEN') WHERE id = ?",
-        )
+        .prepare("UPDATE agents SET bot_id = ?, bot_username = ? WHERE id = ?")
         .run(botId, botUsername, id);
       if (!result.changes) throw new Error("Agent is not registered");
     },
@@ -689,24 +588,14 @@ export function openAgentRegistry(path: string) {
             "SELECT status, network_ref FROM agent_provisioning WHERE agent_id = ?",
           )
           .get(id);
-        const removable =
-          setup?.status === "external" ||
-          (setup?.status === "pending" && !setup.network_ref);
-        if (!agent || !removable)
+        if (!agent || setup?.status !== "pending" || setup.network_ref)
           throw new Error("Agent resources must be removed before deletion");
         const hostRef = db
           .prepare(
             "SELECT credential_ref FROM agent_host_credentials WHERE agent_id = ?",
           )
           .get(id);
-        if (
-          db
-            .prepare(
-              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_bindings'",
-            )
-            .get()
-        )
-          db.prepare("DELETE FROM chat_bindings WHERE agent_id = ?").run(id);
+        db.prepare("DELETE FROM chat_bindings WHERE agent_id = ?").run(id);
         db.prepare("DELETE FROM agent_host_credentials WHERE agent_id = ?").run(
           id,
         );

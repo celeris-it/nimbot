@@ -17,6 +17,7 @@ async function fixture(lostName?: string, inspectionUnavailable = false) {
   let registry = openAgentRegistry(path);
   registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
+  registry.setCredentialRef("dev", "file:telegram-saved");
   const actual: {
     kind: ResourceKind;
     name: string;
