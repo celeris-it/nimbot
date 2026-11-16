@@ -1,6 +1,6 @@
 # Operating Nimbot: backup, restore, troubleshooting, and security limits
 
-See [INSTALL.md](INSTALL.md) for installation. Commands below assume you run them in the directory that holds `compose.yaml` (add `-f compose.docker.yaml` if you use panel provisioning).
+See [INSTALL.md](INSTALL.md) for installation. Commands below assume you run them in the directory that holds `compose.yaml`.
 
 ## What holds your data
 
@@ -12,7 +12,7 @@ See [INSTALL.md](INSTALL.md) for installation. Commands below assume you run the
 | OpenCode sessions, history, and AI provider credentials | Per-agent engine-state volume |
 | Task records and results | Per-agent task-state volume |
 
-Compose stores server state in `<project>_server-state`. Every panel-created agent uses `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks` volumes. Existing legacy Compose agent volumes are retained; the new deployment does not delete them.
+Compose stores server state in `<project>_server-state`. Every panel-created agent uses `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks` volumes. Volumes left by the removed pre-configured agent (`agent-workspace`, `agent-engine-state`, `agent-task-state`) are never deleted by Nimbot; remove them by hand when no longer needed.
 
 Treat backups as secrets: they contain bot tokens, Agent Host tokens, and AI provider credentials. The panel password hash and other settings live in `.env`, which is not in a volume; back it up separately and keep it private.
 
@@ -64,12 +64,12 @@ Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Lo
 **The bot does not answer.**
 
 1. Open the agent's setup page. *Bot polling* shows the reason when it failed: a rejected token (replace it, then restart the server), a token that does not match the registered bot or owner, unavailable credentials, or Telegram unreachable. Telegram also refuses polling when another process uses the same token; stop the other instance.
-2. The owner must press **Start** in that bot's chat. Only the owner, and only if allowlisted, can activate it. Other users receive no reply.
+2. The owner must press **Start** in that bot's chat. Only the owner (the Telegram user ID entered when the agent was created) can activate it. Other users receive no reply, so check that the ID was typed correctly: the panel does not show it again, so if it is wrong, delete the agent and create it again.
 3. Replies such as "stopped" or "not ready" mean the Agent Host is down or unhealthy: check `docker ps` and `docker logs <agent container>`.
 
 **Tasks fail or never finish.** If every task fails, authenticate the provider (`opencode auth list`, `opencode auth login` in the agent's container); readiness does not check provider access. A task longer than `TASK_TIMEOUT_SECONDS` is stopped. After a Host restart, a task that was running is reported as interrupted; send it again. Use `/stop` to cancel a running task; queued messages behind it still run. If an approval message got no answer, the action was denied.
 
-**Creating an agent fails.** The creation form appears only when provisioning is configured (INSTALL.md section 4). Typical causes: the bot token is already bound to another agent, the owner ID is not permitted in the panel’s **Telegram access** settings, `AGENT_HOST_IMAGE` no longer matches (rebuilding the image changes its ID), `SERVER_CONTAINER_NAME` is wrong, or the server cannot read the Docker socket (`DOCKER_SOCKET_GID`). The setup page shows pending, in progress, failed, interrupted, or cancelled; a failed setup keeps its resources and volumes. Interrupted work, for example after a server restart, is never retried automatically.
+**Creating an agent fails.** The creation form appears only when provisioning is configured (INSTALL.md section 4). Typical causes: the bot token is already bound to another agent, `AGENT_HOST_IMAGE` no longer matches (rebuilding the image changes its ID), `SERVER_CONTAINER_NAME` is wrong, or the server cannot read the Docker socket (`DOCKER_SOCKET_GID`). The setup page shows pending, in progress, failed, interrupted, or cancelled; a failed setup keeps its resources and volumes. Interrupted work, for example after a server restart, is never retried automatically.
 
 **A container is reported missing or stopped.** The panel inspects Docker on each refresh. Start a stopped container from the agent's page. A missing container is never recreated silently, and its volumes stay in place.
 

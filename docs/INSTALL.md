@@ -53,7 +53,7 @@ Edit `.env`:
 | `TASK_TIMEOUT_SECONDS` | Maximum run time of one task, 10–3600 (default 600). |
 | `SERVER_STATE_DIR` | State directory for native runs only; Compose uses a named volume. |
 
-`DOCKER_SOCKET_PATH` and `SERVER_CONTAINER_NAME` are trusted deployment settings; the defaults use `/var/run/docker.sock` and `nimbot-server`. Only the server gets Docker access. Bot tokens, allowed Telegram users, owners, agent names, and instructions are configured in the authenticated panel. Internal Agent Host tokens are generated automatically. Do not commit `.env`.
+`DOCKER_SOCKET_PATH` and `SERVER_CONTAINER_NAME` are trusted deployment settings; the defaults use `/var/run/docker.sock` and `nimbot-server`. Only the server gets Docker access. Bot tokens, owners, agent names, and instructions are configured in the authenticated panel. Internal Agent Host tokens are generated automatically. Do not commit `.env`.
 
 ## 5. Start and sign in
 
@@ -81,14 +81,13 @@ Cookies are marked `Secure` automatically when `PANEL_URL` is HTTPS.
 
 Every agent has its own bot; Nimbot has no management bot and no shared selected agent.
 
-1. In the panel, open **Telegram access** and save the numeric Telegram user IDs permitted to own agents. An empty list blocks all Telegram access. Changes apply immediately without restarting the server.
-2. In Telegram, open `@BotFather`, send `/newbot`, and follow the prompts. Copy the token.
-3. Open **Create agent** in the panel and enter a name, optional instructions, an allowed owner's Telegram user ID, and the token. This same workflow creates the first agent and every later agent. The server checks the token and provisions its private container, volumes, network, and internal credentials.
-4. The setup page shows provisioning, bot polling, and owner activation separately. Authenticate the AI provider as described in section 7. When the bot is polling, the owner opens the bot link and presses **Start**.
+1. In Telegram, open `@BotFather`, send `/newbot`, and follow the prompts. Copy the token.
+2. Open **Create agent** in the panel and enter a name, optional instructions, the owner's Telegram user ID, and the token. The owner ID is the only Telegram authorization: only that user can use the agent (find yours by messaging `@userinfobot`). This same workflow creates the first agent and every later agent. The server checks the token and provisions its private container, volumes, network, and internal credentials.
+3. The setup page shows provisioning, bot polling, and owner activation separately. Authenticate the AI provider as described in section 7. When the bot is polling, the owner opens the bot link and presses **Start**.
 
 The server starts with zero agents; there is no bootstrap bot or pre-created Agent Host to configure.
 
-A bot token belongs to exactly one agent. Another allowlisted user cannot use or activate an agent they do not own.
+A bot token belongs to exactly one agent. Any other Telegram user, including the owner of another agent, is ignored by it and cannot activate or use it.
 
 ### Replacing a token
 
@@ -112,9 +111,14 @@ The default Compose deployment enables provisioning for every agent, including t
 
 Agent containers run as a non-root user with all capabilities dropped, `no-new-privileges`, one CPU, 1 GiB of memory, 256 processes, no published ports, and a private network shared only with the server. Deleting an agent in the panel keeps its volumes unless you explicitly choose to delete data; deleting the Telegram bot itself is done in BotFather.
 
-### Existing installations with a pre-configured agent
+### Upgrading from the pre-configured agent
 
-If you already use the old Compose-managed agent, retain its `.env` and start with `docker compose -f compose.yaml -f compose.legacy.yaml up -d`. Use both files for subsequent operations on that installation. This preserves the legacy agent's service and named volumes while enabling panel creation for additional agents. Its environment allowlist seeds the persisted Telegram access list only once; later changes belong in the panel. Fresh installations use only `compose.yaml` and require none of those legacy variables. Do not remove volumes during this transition.
+Earlier development builds could run one Compose-managed agent configured with `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `AGENT_ID`, and related variables, plus a Telegram access page. These are gone: the server ignores those variables (it logs one warning naming them), and compose.legacy.yaml was removed. To move such an installation:
+
+1. Remove the variables from `.env`.
+2. Open the old agent in the panel and delete it. It is listed as a legacy agent and its deletion only removes the registry entry, chat binding, and saved credential; Docker resources are not touched.
+3. Create the agent again with **Create agent**, using the same BotFather token (the old entry released it) and your Telegram user ID as owner.
+4. Remove the old `agent-host` container and, once you no longer need its files, its `agent-workspace`, `agent-engine-state`, and `agent-task-state` volumes by hand (`docker compose down --remove-orphans` stops the container). Copy any files you want into the new agent's workspace first.
 
 ## 9. Telegram commands
 
