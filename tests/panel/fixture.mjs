@@ -24,6 +24,10 @@ const panel = createPanel(
   },
   {
     discord: {
+      status: (id) => ({
+        state: agents.get(id)?.discord ? "ready" : "stopped",
+        ownerLinked: false,
+      }),
       test: async () => ({ status: "delivered", sentParts: 1 }),
       get: (id) => agents.get(id)?.discord,
       configure: async (id, ownerId, token) => {

@@ -283,6 +283,10 @@ async function main(): Promise<void> {
   );
   const panel = createPanel(panelConfig, {
     discord: {
+      status: (id) => ({
+        state: registeredDiscord.getState(id),
+        ownerLinked: discordInbox.getBinding(id) !== undefined,
+      }),
       get: (id) => {
         const connection = registry.getDiscordConnection(id);
         return connection

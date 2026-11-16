@@ -680,3 +680,40 @@ test("sends Discord tests and reuses the request when checking uncertain deliver
   await expect.poll(() => ids.length).toBe(3);
   expect(ids[2]).not.toBe(ids[0]);
 });
+
+test("shows independent Discord conversation and owner-link status while Telegram stays connected", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Manage" }).click();
+  await page.getByLabel("Owner's Discord user ID").fill("987654321098765432");
+  await page
+    .getByLabel("Discord bot token", { exact: true })
+    .fill("valid-discord-token");
+  await page.getByRole("button", { name: "Connect Discord" }).click();
+  await expect(
+    page.getByText("Discord conversation: Connected.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Owner DM: Waiting for the owner's first private message.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.route("**/api/agents/dev", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.discord.conversation = { state: "failed", ownerLinked: true };
+    await route.fulfill({ json: body });
+  });
+  await page
+    .getByRole("button", { name: "Refresh status", exact: true })
+    .click();
+  await expect(
+    page.getByText("Discord conversation: Connection failed.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Owner DM: Linked.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Telegram bot:", { exact: false })).toBeVisible();
+  await expect(page.getByText("@developer_bot", { exact: true })).toBeVisible();
+});

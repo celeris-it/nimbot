@@ -111,3 +111,21 @@ request returns its stored state without resending. Requests interrupted by a
 server restart become uncertain and are never replayed. Notification records
 and the per-agent five-attempt rolling minute limit persist in server SQLite;
 automatic task results, progress, errors, and approvals use their independent path.
+
+### Conversational channel availability
+
+Each agent page reports Telegram polling and Discord conversation state
+separately. Discord can be connecting, connected, reconnecting, failed, or
+disconnected. The owner DM becomes linked after the first authorized private
+message is persisted. A linked DM does not imply a live Gateway connection.
+
+A connected channel does not prove that the container or AI provider is ready.
+Check the container and Agent Host status separately. Tasks from both channels
+share one FIFO and AI context; progress, results, errors, and approval prompts
+return to the original channel. Discord connection failure does not stop
+Telegram polling, and task services survive a Telegram polling failure.
+
+After changing a Discord token or owner, the server replaces its Gateway
+connection. A failed connection can indicate a revoked token or rejected Gateway
+configuration. Save a valid connection again to reconnect; credentials and
+provider error bodies are never displayed in the panel.

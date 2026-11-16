@@ -197,7 +197,9 @@ saved origin; `/stop` in the Discord owner DM cancels its running task. Approval
 interactions verify the active task and owner before applying a decision.
 Task services belong to agents independently of their channel connections.
 Inbox admission is idempotent after restart; interrupted running tasks are not
-replayed. Panel conversational status and broader recovery coverage remain pending.
+replayed. The panel reports Discord conversation state and owner DM linking separately
+from Telegram polling and Host readiness. Broader recovery coverage remains
+pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

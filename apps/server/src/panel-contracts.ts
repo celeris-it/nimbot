@@ -8,8 +8,13 @@ export interface PanelSession {
   authenticated: true;
   capabilities: { createAgent: boolean };
 }
+export interface DiscordConversationStatus {
+  state: "connecting" | "ready" | "reconnecting" | "failed" | "stopped";
+  ownerLinked: boolean;
+}
 export interface AgentDetail extends AgentSummary {
   discord?: {
+    conversation?: DiscordConversationStatus;
     connection: { botId: string; botUsername: string; ownerId: string } | null;
   };
   settings?: { name: string; instructions: string };

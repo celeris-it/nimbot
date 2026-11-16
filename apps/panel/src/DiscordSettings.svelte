@@ -38,13 +38,33 @@
 </script>
 
 <section class="card" aria-label="Discord connection">
-  <h2>Discord notifications</h2>
+  <h2>Discord connection</h2>
   <p>
     Optional Discord connection. Text messages join this agent's shared queue.
     Progress, approvals, and results return to the channel that received the
     task.
   </p>
   {#if agent.discord?.connection}
+    {#if agent.discord.conversation}
+      <p>
+        Discord conversation: {{
+          connecting: "Connecting",
+          ready: "Connected",
+          reconnecting: "Reconnecting",
+          failed: "Connection failed",
+          stopped: "Disconnected",
+        }[agent.discord.conversation.state]}.
+      </p>
+      <p>
+        Owner DM: {agent.discord.conversation.ownerLinked
+          ? "Linked"
+          : "Waiting for the owner's first private message"}.
+      </p>
+      <p>
+        A channel connection does not confirm that the agent is ready to run
+        tasks. Check its container and Agent Host status above.
+      </p>
+    {/if}
     <dl>
       <dt>Discord bot</dt>
       <dd>{agent.discord.connection.botUsername}</dd>

@@ -26,6 +26,9 @@ export interface RegisteredAgentSettings {
 }
 export interface PanelDeps {
   discord?: {
+    status?(
+      id: string,
+    ): import("./panel-contracts.js").DiscordConversationStatus;
     get(
       id: string,
     ): { botId: string; botUsername: string; ownerId: string } | undefined;
@@ -244,6 +247,7 @@ export function createPanel(
       settings,
       discord: deps.discord
         ? {
+            conversation: deps.discord.status?.(id),
             connection: discordConnection
               ? {
                   botId: discordConnection.botId,
