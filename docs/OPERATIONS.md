@@ -136,3 +136,10 @@ Nimbot admits these through the same persistent deduplication checks. A replayed
 message does not mean a running or completed task is executed again. Approval
 interactions are restricted to the bot's owner DM, excluding group and other
 private-channel contexts.
+
+On server startup, a restored Telegram task remains queued until its verified
+reply bot is attached. The queue keeps FIFO order, so later tasks wait behind
+that task rather than executing it without a return route. Discord tasks at the
+head of the queue can run without a Telegram connection. A failed Telegram
+identity check leaves its saved work queued; restore a valid token and restart
+the server before expecting that work to resume.

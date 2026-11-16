@@ -115,6 +115,7 @@ export function openTaskStore(path: string) {
   function claim(
     agentId: string,
     telegramOnly: boolean,
+    ready?: (task: RoutedTask) => boolean,
   ): RoutedTask | undefined {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -134,6 +135,10 @@ export function openTaskStore(path: string) {
         row && (!telegramOnly || row.platform === "telegram")
           ? routed(row)
           : undefined;
+      if (task && ready && !ready(task)) {
+        db.exec("COMMIT");
+        return undefined;
+      }
       if (task)
         db.prepare(
           "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ?",
@@ -207,8 +212,11 @@ export function openTaskStore(path: string) {
         chatId: task.origin.chatId,
       };
     },
-    claimNextTask(agentId: string): RoutedTask | undefined {
-      return claim(agentId, false);
+    claimNextTask(
+      agentId: string,
+      ready?: (task: RoutedTask) => boolean,
+    ): RoutedTask | undefined {
+      return claim(agentId, false, ready);
     },
     enqueueDiscord(task: Omit<DiscordQueuedTask, "id">) {
       const origin = task.origin;
@@ -503,6 +511,8 @@ export function taskOriginKey(origin: RoutedTask["origin"]) {
 /** Both platforms use one executor and context; callbacks route using each saved origin. */
 export function createRoutedTaskQueue(
   config: DeliveryConfig<RoutedTask> & {
+    /** Keep the FIFO head queued until its reply transport has been attached. */
+    ready?: (task: RoutedTask) => boolean;
     store: Pick<
       TaskStore,
       "enqueue" | "enqueueDiscord" | "claimNextTask" | "finish"
@@ -511,7 +521,7 @@ export function createRoutedTaskQueue(
 ) {
   const queue = createAgentQueue({
     ...config,
-    claim: () => config.store.claimNextTask(config.agentId),
+    claim: () => config.store.claimNextTask(config.agentId, config.ready),
     finish: config.store.finish,
     conversation: (task: RoutedTask) => taskOriginKey(task.origin),
   });

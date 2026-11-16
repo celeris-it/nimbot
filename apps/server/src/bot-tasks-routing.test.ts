@@ -136,3 +136,96 @@ it("rejects Discord work when the saved origin is no longer authorized", async (
     store.close();
   }
 });
+
+it("keeps restored Telegram work queued until its verified reply bot attaches", async () => {
+  const store = openTaskStore(":memory:");
+  const run = vi.fn(async (prompt: string) => prompt);
+  const telegram: string[] = [];
+  const discord: string[] = [];
+  const tasks = createBotTasks({
+    agentId: "a",
+    store,
+    ownerId: () => 42,
+    run,
+    discord: {
+      admit: () => true,
+      progress: async () => {},
+      sendApproval: async () => "1",
+      deliver: async (_task, outcome) => {
+        discord.push(outcome.ok ? outcome.output : outcome.kind);
+      },
+    },
+  });
+  try {
+    const first = tasks.submit(123, 42, "restored telegram", 1);
+    tasks.submitDiscord(
+      {
+        platform: "discord",
+        botId: "456",
+        ownerId: "789",
+        channelId: "999",
+        messageId: "2",
+      },
+      "discord after telegram",
+    );
+    tasks.resume();
+    await tasks.idle();
+    expect(run).not.toHaveBeenCalled();
+    expect(store.getTask(first.id)?.status).toBe("queued");
+    const bot = new Bot("123:test-token");
+    bot.api.config.use(async (previous, _method, payload) => {
+      if ("text" in payload) telegram.push(String(payload.text));
+      return {
+        ok: true,
+        result: { message_id: 1, date: 0, chat: { id: 42, type: "private" } },
+      } as Awaited<ReturnType<typeof previous>>;
+    });
+    tasks.attach(bot);
+    await tasks.idle();
+    expect(run.mock.calls.map(([prompt]) => prompt)).toEqual([
+      "restored telegram",
+      "discord after telegram",
+    ]);
+    expect(telegram).toEqual(["restored telegram"]);
+    expect(discord).toEqual(["discord after telegram"]);
+  } finally {
+    tasks.close();
+    store.close();
+  }
+});
+
+it("can execute Discord work without any Telegram attachment when it is the FIFO head", async () => {
+  const store = openTaskStore(":memory:");
+  const run = vi.fn(async () => "discord result");
+  const deliver = vi.fn(async () => {});
+  const tasks = createBotTasks({
+    agentId: "a",
+    store,
+    ownerId: () => 42,
+    run,
+    discord: {
+      admit: () => true,
+      progress: async () => {},
+      sendApproval: async () => "1",
+      deliver,
+    },
+  });
+  try {
+    tasks.submitDiscord(
+      {
+        platform: "discord",
+        botId: "456",
+        ownerId: "789",
+        channelId: "999",
+        messageId: "1",
+      },
+      "discord",
+    );
+    await tasks.idle();
+    expect(run).toHaveBeenCalledOnce();
+    expect(deliver).toHaveBeenCalledOnce();
+  } finally {
+    tasks.close();
+    store.close();
+  }
+});

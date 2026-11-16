@@ -91,6 +91,7 @@ export function createBotTasks(config: {
   const queue = createRoutedTaskQueue({
     agentId: config.agentId,
     store: config.store,
+    ready: (task) => task.origin.platform !== "telegram" || !!bot,
     execute: (task, report, signal) =>
       config.run(task.prompt, report, signal, (approval) => {
         const request =
@@ -179,6 +180,7 @@ export function createBotTasks(config: {
     },
     attach(target: Bot) {
       bot = target;
+      queue.resume();
     },
   };
 }
