@@ -205,7 +205,9 @@ and cancellation by the saved origin. Inbox admission and bot lifecycle
 integration with this processor remain pending. Discord approval keys now bind
 the active task, agent, bot, owner, channel, and message, and expire or become
 unusable after restart. The Gateway filters owner button interactions; button
-delivery and interaction acknowledgments are not wired yet.
+delivery and deferred interaction acknowledgments now have tested HTTP
+implementations, including destination checks and uncertain-response handling.
+Task lifecycle wiring remains pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

@@ -1,7 +1,5 @@
-import type {
-  NotificationAdapter,
-  NotificationResult,
-} from "./notifications.js";
+import type { DiscordQueuedTask } from "./task-queue.js";
+import type { NotificationResult } from "./notifications.js";
 import { isDiscordId as snowflake } from "./discord-identity.js";
 
 /** Resolved only by trusted server code; IDs remain strings. */
@@ -27,14 +25,18 @@ export function createDiscordNotifications(
   resolve: (agentId: string) => Promise<DiscordNotificationTarget | undefined>,
   request: typeof fetch = fetch,
   now: () => number = Date.now,
-): NotificationAdapter {
+) {
   const cooldowns = new Map<string, number>();
   const queues = new Map<string, Promise<void>>();
 
   async function deliver(
     target: DiscordNotificationTarget,
     text: string,
-  ): Promise<NotificationResult> {
+    approval?: {
+      task: DiscordQueuedTask;
+      buttons: { label: string; customId: string; allow: boolean }[];
+    },
+  ): Promise<NotificationResult & { messageId?: string }> {
     let sentParts = 0;
     let sendingMessage = false;
     const fail = (
@@ -115,6 +117,9 @@ export function createDiscordNotifications(
         record(recipients[0]).id !== target.ownerId
       )
         return fail("unavailable");
+      if (approval && dm.data.id !== approval.task.origin.channelId)
+        return fail("unavailable");
+      let messageId: string | undefined;
       const parts: string[] = [];
       let part = "";
       for (const character of text) {
@@ -132,6 +137,21 @@ export function createDiscordNotifications(
         const message = await post(`/channels/${dm.data.id}/messages`, {
           content,
           allowed_mentions: { parse: [] },
+          ...(approval
+            ? {
+                components: [
+                  {
+                    type: 1,
+                    components: approval.buttons.map((button) => ({
+                      type: 2,
+                      style: button.allow ? 3 : 4,
+                      label: button.label,
+                      custom_id: button.customId,
+                    })),
+                  },
+                ],
+              }
+            : {}),
         });
         if (!message.response.ok) return rejection(message.response.status);
         if (
@@ -139,43 +159,82 @@ export function createDiscordNotifications(
           message.data.channel_id !== dm.data.id
         )
           return fail("unavailable", true);
+        messageId = message.data.id;
         sentParts++;
         sendingMessage = false;
       }
-      return { status: "delivered", sentParts };
+      return {
+        status: "delivered",
+        sentParts,
+        ...(approval ? { messageId } : {}),
+      };
     } catch {
       return fail("unavailable", sendingMessage);
     }
   }
 
+  async function send(
+    agentId: string,
+    text: string,
+    approval?: {
+      task: DiscordQueuedTask;
+      buttons: { label: string; customId: string; allow: boolean }[];
+    },
+  ): Promise<NotificationResult & { messageId?: string }> {
+    if (!text.trim())
+      return { status: "failed", sentParts: 0, reason: "invalid_text" };
+    let target: DiscordNotificationTarget | undefined;
+    try {
+      target = await resolve(agentId);
+    } catch {
+      return { status: "failed", sentParts: 0, reason: "unavailable" };
+    }
+    if (!target)
+      return { status: "failed", sentParts: 0, reason: "not_configured" };
+    if (
+      !snowflake(target.botId) ||
+      !snowflake(target.ownerId) ||
+      !target.token.trim()
+    )
+      return { status: "failed", sentParts: 0, reason: "unavailable" };
+    if (
+      approval &&
+      (target.botId !== approval.task.origin.botId ||
+        target.ownerId !== approval.task.origin.ownerId)
+    )
+      return { status: "failed", sentParts: 0, reason: "unavailable" };
+    // Serialize a bot's requests so concurrent callers also honor its cooldown.
+    const previous = queues.get(target.botId) ?? Promise.resolve();
+    const result = previous.then(() => deliver(target, text, approval));
+    const done = result.then(() => {});
+    queues.set(target.botId, done);
+    try {
+      return await result;
+    } finally {
+      if (queues.get(target.botId) === done) queues.delete(target.botId);
+    }
+  }
   return {
-    async send(agentId, text) {
-      if (!text.trim())
-        return { status: "failed", sentParts: 0, reason: "invalid_text" };
-      let target: DiscordNotificationTarget | undefined;
-      try {
-        target = await resolve(agentId);
-      } catch {
-        return { status: "failed", sentParts: 0, reason: "unavailable" };
-      }
-      if (!target)
-        return { status: "failed", sentParts: 0, reason: "not_configured" };
+    send,
+    async sendApproval(
+      task: DiscordQueuedTask,
+      content: string,
+      buttons: { label: string; customId: string; allow: boolean }[],
+    ) {
       if (
-        !snowflake(target.botId) ||
-        !snowflake(target.ownerId) ||
-        !target.token.trim()
+        content.length > 2000 ||
+        buttons.length !== 2 ||
+        buttons.some(
+          (button) =>
+            button.label.length > 80 ||
+            !/^ap:[A-Za-z0-9_-]{12}:[yn]$/.test(button.customId),
+        )
       )
-        return { status: "failed", sentParts: 0, reason: "unavailable" };
-      // Serialize a bot's requests so concurrent callers also honor its cooldown.
-      const previous = queues.get(target.botId) ?? Promise.resolve();
-      const result = previous.then(() => deliver(target, text));
-      const done = result.then(() => {});
-      queues.set(target.botId, done);
-      try {
-        return await result;
-      } finally {
-        if (queues.get(target.botId) === done) queues.delete(target.botId);
-      }
+        throw new Error("Invalid Discord approval");
+      const result = await send(task.agentId, content, { task, buttons });
+      if (result.status !== "delivered" || !result.messageId)
+        throw new Error("Discord approval delivery could not be confirmed");
+      return result.messageId;
     },
   };
 }
