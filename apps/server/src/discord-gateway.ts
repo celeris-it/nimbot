@@ -30,6 +30,8 @@ export function createDiscordGateway(
   let socket: Socket | undefined;
   let sequence: number | null = null;
   let session: string | undefined;
+  const initialUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
+  let resumeUrl = initialUrl;
   let ack = true;
   let stopped = false;
   let heartbeat: ReturnType<typeof setTimeout> | undefined;
@@ -65,10 +67,11 @@ export function createDiscordGateway(
     if (reset) {
       session = undefined;
       sequence = null;
+      resumeUrl = initialUrl;
     }
     const previous = socket;
     socket = undefined;
-    previous?.close(1000);
+    previous?.close(4000);
     state = "reconnecting";
     retry = setTimeout(() => {
       retry = undefined;
@@ -80,7 +83,7 @@ export function createDiscordGateway(
     ack = true;
     let active: Socket;
     try {
-      active = connect("wss://gateway.discord.gg/?v=10&encoding=json");
+      active = connect(session ? resumeUrl : initialUrl);
     } catch {
       reconnect();
       return;
@@ -159,18 +162,37 @@ export function createDiscordGateway(
               active.close(1000);
               return;
             }
+            if (data.resume_gateway_url !== undefined) {
+              const url = new URL(String(data.resume_gateway_url));
+              if (
+                url.protocol !== "wss:" ||
+                !/^gateway(?:-[a-z0-9-]+)?\.discord\.gg$/.test(url.hostname) ||
+                url.username ||
+                url.password ||
+                url.port
+              )
+                throw new Error("Invalid Discord Gateway URL");
+              url.search = "?v=10&encoding=json";
+              resumeUrl = url.toString();
+            }
             session = data.session_id;
             state = "ready";
             clearTimeout(timeout);
           } else if (payload.t === "RESUMED") {
             state = "ready";
             clearTimeout(timeout);
-          } else if (payload.t === "INTERACTION_CREATE" && state === "ready") {
+          } else if (
+            payload.t === "INTERACTION_CREATE" &&
+            (state === "ready" || session !== undefined)
+          ) {
             const user = object(data.user);
             const component = object(data.data);
             const message = object(data.message);
             if (
               data.type === 3 &&
+              (data.context === undefined || data.context === 1) &&
+              (object(data.channel).type === undefined ||
+                object(data.channel).type === 1) &&
               !data.guild_id &&
               !data.guild &&
               user.id === options.ownerId &&
@@ -194,7 +216,10 @@ export function createDiscordGateway(
                 customId: component.custom_id,
               });
             }
-          } else if (payload.t === "MESSAGE_CREATE" && state === "ready") {
+          } else if (
+            payload.t === "MESSAGE_CREATE" &&
+            (state === "ready" || session !== undefined)
+          ) {
             const author = object(data.author);
             if (
               !data.guild_id &&

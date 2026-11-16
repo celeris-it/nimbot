@@ -16,6 +16,7 @@ afterEach(() => vi.useRealTimers());
 function fixture() {
   vi.useFakeTimers();
   const sockets: Socket[] = [];
+  const urls: string[] = [];
   let valid = true;
   const message = vi.fn();
   const interaction = vi.fn();
@@ -28,7 +29,8 @@ function fixture() {
       message,
       interaction,
     },
-    () => {
+    (url) => {
+      urls.push(url);
       const socket = new Socket();
       sockets.push(socket);
       return socket;
@@ -47,6 +49,7 @@ function fixture() {
   return {
     gateway,
     sockets,
+    urls,
     message,
     interaction,
     ready,
@@ -162,5 +165,99 @@ it("accepts only the owner's DM approval interactions for this application", () 
     token: "private",
     customId: "ap:abcdefghijkl:y",
   });
+  f.gateway.close();
+});
+
+it("preserves the session on reconnect and accepts replayed DMs before RESUMED", () => {
+  const f = fixture();
+  const first = f.sockets[0]!;
+  first.receive({ op: 10, d: { heartbeat_interval: 1000 } });
+  first.receive({
+    op: 0,
+    s: 1,
+    t: "READY",
+    d: {
+      user: { id: "123" },
+      session_id: "session",
+      resume_gateway_url: "wss://gateway-us-east1-b.discord.gg/",
+    },
+  });
+  first.receive({ op: 7, d: null });
+  expect(first.close).toHaveBeenCalledWith(4000);
+  vi.advanceTimersByTime(5000);
+  expect(f.urls[1]).toBe(
+    "wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json",
+  );
+  const next = f.sockets[1]!;
+  next.receive({ op: 10, d: { heartbeat_interval: 1000 } });
+  expect(next.sent[0]).toMatchObject({ op: 6, d: { seq: 1 } });
+  next.receive({
+    op: 0,
+    s: 2,
+    t: "MESSAGE_CREATE",
+    d: {
+      id: "789",
+      channel_id: "987",
+      author: { id: "456" },
+      content: "replayed",
+    },
+  });
+  expect(f.message).toHaveBeenCalledWith({
+    id: "789",
+    channelId: "987",
+    content: "replayed",
+  });
+  next.receive({ op: 0, s: 3, t: "RESUMED", d: {} });
+  expect(f.gateway.getState()).toBe("ready");
+  f.gateway.close();
+});
+
+it.each([
+  "wss://evil.example/",
+  "ws://gateway.discord.gg/",
+  "wss://secret@gateway.discord.gg/",
+])("never sends credentials to an invalid resume endpoint %s", (resumeUrl) => {
+  const f = fixture();
+  f.sockets[0]!.receive({
+    op: 0,
+    s: 1,
+    t: "READY",
+    d: {
+      user: { id: "123" },
+      session_id: "session",
+      resume_gateway_url: resumeUrl,
+    },
+  });
+  vi.advanceTimersByTime(5000);
+  expect(
+    f.urls.every(
+      (url) => url === "wss://gateway.discord.gg/?v=10&encoding=json",
+    ),
+  ).toBe(true);
+  f.gateway.close();
+});
+
+it("ignores approval interactions from group and other private-channel contexts", () => {
+  const f = fixture();
+  const socket = f.sockets[0]!;
+  f.ready(socket);
+  const data = {
+    id: "1",
+    type: 3,
+    application_id: "123",
+    user: { id: "456" },
+    channel_id: "789",
+    message: { id: "999" },
+    token: "private",
+    data: { custom_id: "ap:abcdefghijkl:y" },
+  };
+  for (const extra of [{ context: 2 }, { channel: { type: 3 } }])
+    socket.receive({
+      op: 0,
+      s: 2,
+      t: "INTERACTION_CREATE",
+      d: { ...data, ...extra },
+    });
+  expect(f.interaction).not.toHaveBeenCalled();
   f.gateway.close();
 });

@@ -129,3 +129,10 @@ After changing a Discord token or owner, the server replaces its Gateway
 connection. A failed connection can indicate a revoked token or rejected Gateway
 configuration. Save a valid connection again to reconnect; credentials and
 provider error bodies are never displayed in the panel.
+
+Gateway recovery keeps the session active during reconnects and uses Discord's
+resume endpoint. Missed owner events replay before the resumed-state event;
+Nimbot admits these through the same persistent deduplication checks. A replayed
+message does not mean a running or completed task is executed again. Approval
+interactions are restricted to the bot's owner DM, excluding group and other
+private-channel contexts.
