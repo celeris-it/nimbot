@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AgentDetail } from "../../server/src/panel-contracts.js";
+  import DiscordSettings from "./DiscordSettings.svelte";
   import {
     botLabel,
     setupLabels,
@@ -13,11 +14,16 @@
     busy,
     action,
     refresh,
+    discordAction,
   }: {
     agent: AgentDetail;
     busy: boolean;
     action: (kind: "start" | "cancel" | "retry") => Promise<void>;
     refresh: () => void;
+    discordAction: (
+      kind: "save" | "remove",
+      fields: Record<string, string>,
+    ) => Promise<void>;
   } = $props();
   const operationLabels = {
     pending: "In progress",
@@ -150,3 +156,7 @@
     >{/if}
   <a class="btn" href="/">Back to panel</a>
 </section>
+
+{#if agent.discord}
+  {#key agent.id}<DiscordSettings {agent} {busy} action={discordAction} />{/key}
+{/if}

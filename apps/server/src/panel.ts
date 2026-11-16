@@ -233,10 +233,22 @@ export function createPanel(
       agentSettings?.stopObservation?.(id),
     ]);
     const settings = agentSettings?.get(id);
+    const discordConnection = deps.discord?.get(id);
     return c.json({
       id,
       ...setup,
       settings,
+      discord: deps.discord
+        ? {
+            connection: discordConnection
+              ? {
+                  botId: discordConnection.botId,
+                  botUsername: discordConnection.botUsername,
+                  ownerId: discordConnection.ownerId,
+                }
+              : null,
+          }
+        : undefined,
       containerState,
       hostState,
       stopObservation: observation

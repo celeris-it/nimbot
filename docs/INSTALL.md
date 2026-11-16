@@ -93,3 +93,21 @@ docker compose --project-name "nimbot-$(head -n 1 .nimbot-installation)" up -d -
 ```
 
 For backups, diagnostics, security limits, and everyday operations, see [OPERATIONS.md](OPERATIONS.md). For Telegram commands, see [README.md](../README.md#telegram-commands).
+
+### Optional Discord connection (in development)
+
+Open an existing agent in the panel and find **Discord notifications**. Create a
+bot in the [Discord Developer Portal](https://discord.com/developers/applications),
+copy its bot token, and enter it with the owner's Discord user ID. Enable
+Developer Mode in Discord to copy the user ID; enter the full ID as shown.
+Nimbot verifies the token before saving it privately on the server.
+
+The panel can configure, replace, and remove the connection. Outbound delivery
+and its test action are still being integrated. Telegram continues to receive
+tasks, approvals, progress, and automatic results. Discord may restrict DMs when
+the owner blocks the bot, disables direct messages, or does not share a server
+with it. No Gateway connection or privileged intents are needed at this stage.
+
+To replace a token or owner, submit both fields again. Removing the connection
+keeps the agent and its Telegram connection; revoke or delete the Discord bot
+separately if it is no longer needed. Remove Discord before deleting its agent.

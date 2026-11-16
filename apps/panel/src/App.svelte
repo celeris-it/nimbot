@@ -193,6 +193,26 @@
       );
     }
   }
+  async function discordAction(
+    kind: "save" | "remove",
+    fields: Record<string, string>,
+  ) {
+    if (!agent) return;
+    await mutate<{ cleanupPending: boolean }>(
+      `/api/agents/${encodeURIComponent(agent.id)}/discord${kind === "remove" ? "/remove" : ""}`,
+      fields,
+      (result) => {
+        notice =
+          (kind === "remove"
+            ? "Discord removed."
+            : "Discord connection saved.") +
+          (result.cleanupPending
+            ? " An unused credential file could not be erased. Check server storage permissions."
+            : "");
+        void load();
+      },
+    );
+  }
   async function action(
     kind: "start" | "cancel" | "retry" | "stop" | "delete",
   ) {
@@ -374,6 +394,7 @@
         {agent}
         {busy}
         {action}
+        {discordAction}
         refresh={() => load()}
       />
     {:else if route[2] === "settings" || route[2] === "token"}

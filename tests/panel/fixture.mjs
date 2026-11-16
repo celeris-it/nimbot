@@ -23,6 +23,23 @@ const panel = createPanel(
     port: 3199,
   },
   {
+    discord: {
+      get: (id) => agents.get(id)?.discord,
+      configure: async (id, ownerId, token) => {
+        if (token !== "valid-discord-token")
+          throw new Error("private-token-error");
+        agents.get(id).discord = {
+          botId: "123456789012345678",
+          botUsername: "notification_bot",
+          ownerId,
+        };
+        return { cleanupPending: false };
+      },
+      remove: async (id) => {
+        delete agents.get(id).discord;
+        return { cleanupPending: false };
+      },
+    },
     listAgentIds: () => [...agents.keys()],
     getAgentSetup: (id) => {
       const agent = agents.get(id);

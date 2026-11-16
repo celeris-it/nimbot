@@ -9,6 +9,9 @@ export interface PanelSession {
   capabilities: { createAgent: boolean };
 }
 export interface AgentDetail extends AgentSummary {
+  discord?: {
+    connection: { botId: string; botUsername: string; ownerId: string } | null;
+  };
   settings?: { name: string; instructions: string };
   containerState?: "running" | "stopped" | "missing" | "unavailable";
   hostState?: "ready" | "busy" | "unavailable";

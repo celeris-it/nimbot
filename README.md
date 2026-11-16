@@ -175,8 +175,8 @@ The Discord HTTP adapter resolves owner-only DMs, splits text, suppresses mentio
 and honors rate-limit cooldowns without retrying uncertain sends. Both adapters
 remain internal. Discord configuration now has server-side bot verification,
 private credential files, SQLite metadata with string IDs, and authenticated
-configuration API routes. Panel forms, test delivery, durable notification
-records, and per-agent limits are pending. Configuration
+configuration API routes and panel forms to connect, replace, and remove a bot.
+Test delivery, durable notification records, and per-agent limits are pending. Configuration
 changes invalidate previously resolved delivery targets. Remove a Discord
 connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.

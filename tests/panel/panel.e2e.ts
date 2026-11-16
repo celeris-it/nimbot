@@ -573,3 +573,70 @@ test("retries a failed setup from the agent page", async ({
     0,
   );
 });
+
+test("configures, replaces, and removes Discord without changing Telegram", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Manage" }).click();
+  const discord = page.getByRole("region", { name: "Discord connection" });
+  await expect(discord.getByText("Discord is not configured.")).toBeVisible();
+  await discord
+    .getByLabel("Owner's Discord user ID")
+    .fill("987654321098765432");
+  await discord
+    .getByLabel("Discord bot token", { exact: true })
+    .fill("invalid-token");
+  await discord.getByRole("button", { name: "Connect Discord" }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not save Discord");
+  await expect(
+    discord.getByLabel("Discord bot token", { exact: true }),
+  ).toHaveValue("");
+  await expect(discord.getByLabel("Owner's Discord user ID")).toHaveValue(
+    "987654321098765432",
+  );
+  await discord
+    .getByLabel("Discord bot token", { exact: true })
+    .fill("valid-discord-token");
+  await discord.getByRole("button", { name: "Connect Discord" }).click();
+  await expect(
+    discord.getByText("notification_bot", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    discord.getByLabel("Discord bot token", { exact: true }),
+  ).toHaveValue("");
+  await page.reload();
+  await expect(discord.getByLabel("Owner's Discord user ID")).toHaveValue(
+    "987654321098765432",
+  );
+  await discord
+    .getByLabel("Owner's Discord user ID")
+    .fill("876543210987654321");
+  await page
+    .getByRole("button", { name: "Refresh status", exact: true })
+    .click();
+  await expect(discord.getByLabel("Owner's Discord user ID")).toHaveValue(
+    "876543210987654321",
+  );
+  await discord
+    .getByLabel("Discord bot token", { exact: true })
+    .fill("valid-discord-token");
+  await discord
+    .getByRole("button", { name: "Replace Discord connection" })
+    .click();
+  await expect(
+    discord.getByText("876543210987654321", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    discord.getByRole("button", { name: "Remove Discord connection" }),
+  ).toBeDisabled();
+  await discord.getByLabel("Type dev to confirm removal").fill("dev");
+  await discord
+    .getByRole("button", { name: "Remove Discord connection" })
+    .click();
+  await expect(discord.getByText("Discord is not configured.")).toBeVisible();
+  await expect(page.getByText("@developer_bot", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Developer", exact: true }),
+  ).toBeVisible();
+});
