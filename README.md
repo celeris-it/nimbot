@@ -199,8 +199,10 @@ ID. Stale connection identities are rejected. Discord messages are stored but
 not yet executed. Queue claiming and draining now serialize by agent across
 conversations while preserving the original delivery destination. Discord task
 origins can now be stored as string IDs with platform-specific deduplication
-and claimed in the same FIFO as Telegram tasks. Inbox admission and routed
-execution/replies remain pending.
+and claimed in the same FIFO as Telegram tasks. The shared queue processor
+now executes both origins through one callback and routes progress, results,
+and cancellation by the saved origin. Inbox admission and bot lifecycle
+integration with this processor remain pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

@@ -320,31 +320,29 @@ export type TaskStore = ReturnType<typeof openTaskStore>;
  * Runs one task at a time per agent, oldest first. A failed task never
  * blocks the ones behind it. Delivery retains the originating conversation.
  */
-export function createTaskQueue(config: {
+interface QueueConfig<T extends { id: string; prompt: string }> {
   agentId: string;
-  store: Pick<
-    TaskStore,
-    | "enqueue"
-    | "claimNext"
-    | "finish"
-    | "pendingConversations"
-    | "markRunningInterrupted"
-  >;
+  claim(): T | undefined;
+  finish: TaskStore["finish"];
+  conversation(task: T): string;
   execute: (
-    task: QueuedTask,
+    task: T,
     report: (message: string) => void,
     cancelSignal: AbortSignal,
   ) => Promise<string>;
   /** Shows a running task's progress to its owner. Best effort. */
-  progress?: (task: QueuedTask, message: string) => Promise<void>;
+  progress?: (task: T, message: string) => Promise<void>;
   /** Minimum time between two progress messages for one task. */
   progressIntervalMs?: number;
   now?: () => number;
   /** Re-checks persisted setup right before a task starts. */
-  admit?: (task: QueuedTask) => boolean;
-  deliver: (task: QueuedTask, outcome: TaskOutcome) => Promise<void>;
+  admit?: (task: T) => boolean;
+  deliver: (task: T, outcome: TaskOutcome) => Promise<void>;
   log?: Logger;
-}) {
+}
+function createAgentQueue<T extends { id: string; prompt: string }>(
+  config: QueueConfig<T>,
+) {
   const log = (config.log ?? defaultLog).child({ agentId: config.agentId });
   let closed = false;
   const draining = new Map<string, Promise<void>>();
@@ -355,9 +353,9 @@ export function createTaskQueue(config: {
     await Promise.resolve();
     try {
       while (!closed) {
-        let task: QueuedTask | undefined;
+        let task: T | undefined;
         try {
-          task = config.store.claimNext(config.agentId);
+          task = config.claim();
         } catch {
           return;
         }
@@ -365,7 +363,7 @@ export function createTaskQueue(config: {
         log.info("task.started", { taskId: task.id });
         let outcome: TaskOutcome;
         const controller = new AbortController();
-        const conversationKey = `${task.botId}:${task.chatId}`;
+        const conversationKey = config.conversation(task);
         active.set(conversationKey, controller);
         const sending: Promise<unknown>[] = [];
         try {
@@ -413,7 +411,7 @@ export function createTaskQueue(config: {
           ...(outcome.ok ? {} : { reason: outcome.kind }),
         });
         try {
-          config.store.finish(task.id, finalStatus);
+          config.finish(task.id, finalStatus);
         } catch {
           /* The store may be closed during shutdown. */
         }
@@ -434,25 +432,14 @@ export function createTaskQueue(config: {
     draining.set(key, drain());
   }
   return {
-    /** Persists first, then starts draining; never waits for the task itself. */
-    submit(botId: number, chatId: number, prompt: string, updateId?: number) {
-      const saved = config.store.enqueue({
-        agentId: config.agentId,
-        botId,
-        chatId,
-        prompt,
-        ...(updateId === undefined ? {} : { updateId }),
-      });
-      kick();
-      return saved;
-    },
-    isRunning(botId: number, chatId: number): boolean {
-      const controller = active.get(`${botId}:${chatId}`);
+    kick,
+    isRunning(key: string): boolean {
+      const controller = active.get(key);
       return !!controller && !controller.signal.aborted;
     },
     /** Cancels the conversation's running task only; queued tasks behind it still run. */
-    stop(botId: number, chatId: number): boolean {
-      const controller = active.get(`${botId}:${chatId}`);
+    stop(key: string): boolean {
+      const controller = active.get(key);
       if (!controller || controller.signal.aborted) return false;
       controller.abort();
       return true;
@@ -468,5 +455,95 @@ export function createTaskQueue(config: {
     close() {
       closed = true;
     },
+  };
+}
+
+type DeliveryConfig<T extends { id: string; prompt: string }> = Omit<
+  QueueConfig<T>,
+  "claim" | "finish" | "conversation"
+>;
+
+/** Telegram entry point, retained until bot lifecycle uses routed execution. */
+export function createTaskQueue(
+  config: DeliveryConfig<QueuedTask> & {
+    store: Pick<TaskStore, "enqueue" | "claimNext" | "finish">;
+  },
+) {
+  const queue = createAgentQueue({
+    ...config,
+    claim: () => config.store.claimNext(config.agentId),
+    finish: config.store.finish,
+    conversation: (task: QueuedTask) => `${task.botId}:${task.chatId}`,
+  });
+  return {
+    ...queue,
+    submit(botId: number, chatId: number, prompt: string, updateId?: number) {
+      const saved = config.store.enqueue({
+        agentId: config.agentId,
+        botId,
+        chatId,
+        prompt,
+        ...(updateId === undefined ? {} : { updateId }),
+      });
+      queue.kick();
+      return saved;
+    },
+    isRunning: (botId: number, chatId: number) =>
+      queue.isRunning(`${botId}:${chatId}`),
+    stop: (botId: number, chatId: number) => queue.stop(`${botId}:${chatId}`),
+  };
+}
+
+export function taskOriginKey(origin: RoutedTask["origin"]) {
+  return origin.platform === "telegram"
+    ? `telegram:${origin.botId}:${origin.chatId}`
+    : `discord:${origin.botId}:${origin.ownerId}:${origin.channelId}`;
+}
+
+/** Both platforms use one executor and context; callbacks route using each saved origin. */
+export function createRoutedTaskQueue(
+  config: DeliveryConfig<RoutedTask> & {
+    store: Pick<
+      TaskStore,
+      "enqueue" | "enqueueDiscord" | "claimNextTask" | "finish"
+    >;
+  },
+) {
+  const queue = createAgentQueue({
+    ...config,
+    claim: () => config.store.claimNextTask(config.agentId),
+    finish: config.store.finish,
+    conversation: (task: RoutedTask) => taskOriginKey(task.origin),
+  });
+  return {
+    ...queue,
+    submitTelegram(
+      botId: number,
+      chatId: number,
+      prompt: string,
+      updateId?: number,
+    ) {
+      const saved = config.store.enqueue({
+        agentId: config.agentId,
+        botId,
+        chatId,
+        prompt,
+        ...(updateId === undefined ? {} : { updateId }),
+      });
+      queue.kick();
+      return saved;
+    },
+    submitDiscord(origin: DiscordQueuedTask["origin"], prompt: string) {
+      const saved = config.store.enqueueDiscord({
+        agentId: config.agentId,
+        origin,
+        prompt,
+      });
+      queue.kick();
+      return saved;
+    },
+    isRunning: (origin: RoutedTask["origin"]) =>
+      queue.isRunning(taskOriginKey(origin)),
+    stop: (origin: RoutedTask["origin"]) => queue.stop(taskOriginKey(origin)),
   };
 }
