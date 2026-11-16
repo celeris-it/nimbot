@@ -1,3 +1,4 @@
+import type { DiscordApprovalInteraction } from "./discord-approvals.js";
 import { isDiscordId } from "./discord-identity.js";
 
 export interface DiscordDirectMessage {
@@ -20,6 +21,7 @@ export function createDiscordGateway(
     ownerId: string;
     isCurrent(): boolean;
     message(message: DiscordDirectMessage): void;
+    interaction?(interaction: DiscordApprovalInteraction): void;
   },
   connect: (url: string) => Socket = (url) => new WebSocket(url),
   random = Math.random,
@@ -163,6 +165,35 @@ export function createDiscordGateway(
           } else if (payload.t === "RESUMED") {
             state = "ready";
             clearTimeout(timeout);
+          } else if (payload.t === "INTERACTION_CREATE" && state === "ready") {
+            const user = object(data.user);
+            const component = object(data.data);
+            const message = object(data.message);
+            if (
+              data.type === 3 &&
+              !data.guild_id &&
+              !data.guild &&
+              user.id === options.ownerId &&
+              user.bot !== true &&
+              data.application_id === options.botId &&
+              isDiscordId(data.id) &&
+              isDiscordId(data.channel_id) &&
+              isDiscordId(message.id) &&
+              typeof data.token === "string" &&
+              /^[A-Za-z0-9._-]{1,512}$/.test(data.token) &&
+              typeof component.custom_id === "string" &&
+              /^ap:[A-Za-z0-9_-]{12}:[yn]$/.test(component.custom_id)
+            ) {
+              options.interaction?.({
+                id: data.id,
+                token: data.token,
+                botId: options.botId,
+                ownerId: options.ownerId,
+                channelId: data.channel_id,
+                messageId: message.id,
+                customId: component.custom_id,
+              });
+            }
           } else if (payload.t === "MESSAGE_CREATE" && state === "ready") {
             const author = object(data.author);
             if (

@@ -18,6 +18,7 @@ function fixture() {
   const sockets: Socket[] = [];
   let valid = true;
   const message = vi.fn();
+  const interaction = vi.fn();
   const gateway = createDiscordGateway(
     {
       token: "secret",
@@ -25,6 +26,7 @@ function fixture() {
       ownerId: "456",
       isCurrent: () => valid,
       message,
+      interaction,
     },
     () => {
       const socket = new Socket();
@@ -46,6 +48,7 @@ function fixture() {
     gateway,
     sockets,
     message,
+    interaction,
     ready,
     invalidate: () => {
       valid = false;
@@ -118,5 +121,46 @@ it("drops an invalid session and identifies again", () => {
   vi.advanceTimersByTime(5000);
   f.sockets[1]!.receive({ op: 10, d: { heartbeat_interval: 1000 } });
   expect(f.sockets[1]!.sent[0]?.op).toBe(2);
+  f.gateway.close();
+});
+
+it("accepts only the owner's DM approval interactions for this application", () => {
+  const f = fixture();
+  const socket = f.sockets[0]!;
+  f.ready(socket);
+  const interaction = {
+    id: "1",
+    type: 3,
+    application_id: "123",
+    user: { id: "456" },
+    channel_id: "789",
+    message: { id: "999" },
+    token: "private",
+    data: { custom_id: "ap:abcdefghijkl:y" },
+  };
+  for (const change of [
+    { guild_id: "1" },
+    { application_id: "2" },
+    { user: { id: "2" } },
+    { user: { id: "456", bot: true } },
+    { data: { custom_id: "other" } },
+  ])
+    socket.receive({
+      op: 0,
+      s: 2,
+      t: "INTERACTION_CREATE",
+      d: { ...interaction, ...change },
+    });
+  expect(f.interaction).not.toHaveBeenCalled();
+  socket.receive({ op: 0, s: 3, t: "INTERACTION_CREATE", d: interaction });
+  expect(f.interaction).toHaveBeenCalledWith({
+    id: "1",
+    botId: "123",
+    ownerId: "456",
+    channelId: "789",
+    messageId: "999",
+    token: "private",
+    customId: "ap:abcdefghijkl:y",
+  });
   f.gateway.close();
 });

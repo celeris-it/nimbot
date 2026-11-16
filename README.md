@@ -202,7 +202,10 @@ origins can now be stored as string IDs with platform-specific deduplication
 and claimed in the same FIFO as Telegram tasks. The shared queue processor
 now executes both origins through one callback and routes progress, results,
 and cancellation by the saved origin. Inbox admission and bot lifecycle
-integration with this processor remain pending.
+integration with this processor remain pending. Discord approval keys now bind
+the active task, agent, bot, owner, channel, and message, and expire or become
+unusable after restart. The Gateway filters owner button interactions; button
+delivery and interaction acknowledgments are not wired yet.
 
 The following ideas are deferred, not supported features or delivery commitments:
 
