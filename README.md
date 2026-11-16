@@ -8,6 +8,8 @@ You install Nimbot on a Linux server with Docker Compose, sign in to a minimal a
 
 > **Project status:** MVP implementation and automated checks are in place, including panel-based setup from an empty installation. Installation through Docker Compose is maintainer-validated on macOS with Docker Desktop and on a clean Linux server. Live Telegram-to-OpenCode acceptance remains pending before `v0.1.0`. The full plan is in [MVP.md](MVP.md).
 
+The self-hosted software is free under Apache 2.0; you pay separately for your infrastructure and AI provider. A separate paid plan where we host your bots is planned for later. Managed hosting is not available yet, and pricing and plan details are to be announced. It remains outside the current MVP.
+
 ## What the MVP does
 
 - Sign in to a minimal web panel to create, configure, start, stop, and delete agents

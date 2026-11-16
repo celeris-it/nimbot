@@ -673,6 +673,10 @@ Definition of Done status: installation through Docker Compose was confirmed by 
 
 The following features are intentionally deferred.
 
+### Managed Hosting Offering
+
+A separate paid plan is planned where Nimbot hosts customers’ bots. The self-hosted software remains free under Apache 2.0; operators pay their own infrastructure and AI provider costs. Managed hosting is not available yet, and pricing and plan details are to be announced. This future offering does not add hosted accounts, billing, subscriptions, or public multi-tenant hosting to the current MVP.
+
 ### AI Engines
 
 - Codex native integration
