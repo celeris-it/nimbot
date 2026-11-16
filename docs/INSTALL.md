@@ -94,9 +94,9 @@ docker compose --project-name "nimbot-$(head -n 1 .nimbot-installation)" up -d -
 
 For backups, diagnostics, security limits, and everyday operations, see [OPERATIONS.md](OPERATIONS.md). For Telegram commands, see [README.md](../README.md#telegram-commands).
 
-### Optional Discord connection (in development)
+### Optional Discord connection
 
-Open an existing agent in the panel and find **Discord notifications**. Create a
+Open an existing agent in the panel and find **Discord connection**. Create a
 bot in the [Discord Developer Portal](https://discord.com/developers/applications),
 copy its bot token, and enter it with the owner's Discord user ID. Enable
 Developer Mode in Discord to copy the user ID; enter the full ID as shown.
@@ -111,8 +111,8 @@ agent's shared queue. Progress, approvals, and results return to the channel tha
 received the task. Use `/stop` in the Discord owner DM to cancel its active task. Discord may restrict DMs when
 the owner blocks the bot, disables direct messages, or does not share a server
 with it. The server now opens a Gateway connection using the direct-message intent;
-privileged intents are not required. Discord conversations now use the shared agent task runner; the broader
-conversational feature is still under development.
+privileged intents are not required. Discord conversations use the shared agent
+task runner.
 
 To replace a token or owner, submit both fields again. Removing the connection
 keeps the agent and its Telegram connection; revoke or delete the Discord bot

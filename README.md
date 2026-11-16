@@ -2,7 +2,7 @@
 
 **Your AI agents, on your own server.**
 
-Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
+Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram and optional Discord direct messages. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
 > **Project status:** The MVP is complete. Installation through Docker Compose has been validated on macOS with Docker Desktop and on a clean Linux server.
 
@@ -30,13 +30,14 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 
 - Create, list, configure, start, stop, and delete agents through an authenticated web panel.
 - Give each agent a distinct Telegram bot, owner-bound private chat, Docker container, and persistent workspace.
+- Optionally connect a Discord bot and owner DM to the same agent, workspace, AI context, and durable task queue. Configure, replace, test, and remove the connection from the panel.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
 - Cancel a running task without affecting other agents or blocking later queued tasks.
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
 - Replace revoked bot tokens securely and retain persistent volumes by default when deleting an agent.
 
-The panel uses one locally configured administrator account. Each agent has one Telegram owner; everyone else is ignored, including owners of other agents. There is no management bot, shared selected agent, or `/use` workflow. Tasks, progress, approvals, and results use their originating channel. Optional Discord conversations are under development.
+The panel uses one locally configured administrator account. Each agent has one Telegram owner; everyone else is ignored, including owners of other agents. There is no management bot, shared selected agent, or `/use` workflow. Tasks, progress, approvals, and results use their originating channel. Each optional Discord connection has its own configured owner and private DM binding.
 
 ### Telegram commands
 
@@ -87,7 +88,7 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
 ```
 
 - **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing, container lifecycle, and diagnostics. Agent-generated commands never run on the host OS.
-- **Agent Host:** one container per agent, running the AI engine, tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Telegram-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
+- **Agent Host:** one container per agent, running the AI engine, tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
 - **Panel:** Svelte 5, TypeScript, Vite, and daisyUI. Hono serves compiled assets and the same-origin API from one process. JavaScript is required; visible views refresh every five seconds and forms submit without document reloads.
 - **Storage:** SQLite and Docker named volumes. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
 
@@ -129,7 +130,7 @@ Nimbot is intended for trusted, single-server self-hosted deployments. Docker co
 - Agent containers run as non-root with all capabilities dropped, `no-new-privileges`, CPU/memory/process limits, no additional swap, no published ports, and no Docker socket or server credentials. Each agent has its own network, volumes, and internal API token.
 - Outbound network access is unrestricted, including reachable private addresses. Agent volume disk usage is not limited. Apply restrictions on the host if needed.
 - Panel passwords use scrypt hashes. Sessions expire after eight hours and end on server restart. Cookies use HttpOnly and SameSite restrictions, with Secure cookies for HTTPS. State changes require same-origin checks; login is limited to five attempts per fifteen minutes. Remote access requires HTTPS.
-- Telegram tokens stay on the server and never enter agent containers, model context, logs, or task events. Telegram messages and AI provider requests leave the server.
+- Telegram and Discord tokens stay on the server and never enter agent containers, model context, logs, or task events. Telegram messages and AI provider requests leave the server.
 
 See [security and recovery details](docs/OPERATIONS.md#security-limitations), including the limitations of restoring agents onto another Docker host.
 
@@ -169,9 +170,9 @@ NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.I
 
 `NIMBOT_TEST_DOCKER_SOCKET` optionally selects a different Unix socket. Tests create uniquely named resources and clean them up. CI runs lint, type checking, build, tests, and panel browser tests.
 
-## Future work
+## Discord and outbound notifications
 
-Outbound notifications are under development in `TODO.md`. The internal server
+Outbound notifications use an internal server interface. The internal server
 interface and Telegram adapter reuse the agent's verified bot connection and
 owner chat, split long text, and report uncertain sends without retrying them.
 The Discord HTTP adapter resolves owner-only DMs, splits text, suppresses mentions,
@@ -193,7 +194,7 @@ explicitly; check your DMs before starting a new test. Configuration changes inv
 connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.
 
-Discord conversations are under development. The server now runs a Gateway per
+The server runs a Gateway per
 configured agent, persists owner DMs, and admits them to the same FIFO and Host
 runner as Telegram. Progress, results, errors, and approval buttons return to the
 saved origin; `/stop` in the Discord owner DM cancels its running task. Approval
@@ -201,13 +202,15 @@ interactions verify the active task and owner before applying a decision.
 Task services belong to agents independently of their channel connections.
 Inbox admission is idempotent after restart; interrupted running tasks are not
 replayed. The panel reports Discord conversation state and owner DM linking separately
-from Telegram polling and Host readiness. Broader recovery coverage remains
-pending.
+from Telegram polling and Host readiness. Recovery tests cover session resume,
+replayed events, cross-channel deduplication and context, and restored FIFO work.
+
+## Future work
 
 The following ideas are deferred, not supported features or delivery commitments:
 
 - **AI engines:** native Codex, Claude Code, additional ACP providers, per-agent engine selection and switching.
-- **Messaging:** WhatsApp, Slack, Discord, shared agents, groups/topics, file and media attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
+- **Messaging:** WhatsApp, Slack, shared agents, groups/topics, file and media attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
 - **Agent capabilities:** agent-to-agent communication, delegation, shared tools, advanced memory retrieval, scheduled tasks, recurring automations, advanced approvals, and MCP integrations.
 - **User experience:** advanced dashboards and analytics, web chat, richer configuration, templates, browser terminals, workspace browsing, conversation search, and additional panel accounts.
 - **Operations:** multi-server and distributed execution, advanced monitoring, automated backups, image management, alternative runtimes, and stronger isolation.
