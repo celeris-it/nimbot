@@ -176,7 +176,11 @@ and honors rate-limit cooldowns without retrying uncertain sends. Both adapters
 remain internal. Discord configuration now has server-side bot verification,
 private credential files, SQLite metadata with string IDs, and authenticated
 configuration API routes and panel forms to connect, replace, and remove a bot.
-Test delivery, durable notification records, and per-agent limits are pending. Configuration
+A durable notification store and delivery wrapper now record intent and sanitized
+results, deduplicate request IDs, and mark in-flight sends uncertain after restart
+without replaying them. Only a content hash is stored, not notification text.
+Test delivery, production wiring of the durable wrapper, and per-agent limits
+are pending. Configuration
 changes invalidate previously resolved delivery targets. Remove a Discord
 connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.
