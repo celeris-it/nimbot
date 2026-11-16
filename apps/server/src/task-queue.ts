@@ -1,3 +1,4 @@
+import { isDiscordId } from "./discord-identity.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { HostTaskError } from "./host-tasks.js";
@@ -14,6 +15,24 @@ export interface QueuedTask {
   prompt: string;
 }
 
+export interface DiscordQueuedTask {
+  id: string;
+  agentId: string;
+  prompt: string;
+  origin: {
+    platform: "discord";
+    botId: string;
+    ownerId: string;
+    channelId: string;
+    messageId: string;
+  };
+}
+export type RoutedTask =
+  | DiscordQueuedTask
+  | (QueuedTask & {
+      origin: { platform: "telegram"; botId: number; chatId: number };
+    });
+
 export type TaskOutcome =
   | { ok: true; output: string }
   | { ok: false; kind: HostTaskError["kind"] | "not_ready" };
@@ -28,13 +47,20 @@ export function openTaskStore(path: string) {
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       id TEXT NOT NULL UNIQUE,
       agent_id TEXT NOT NULL,
-      bot_id INTEGER NOT NULL,
-      chat_id INTEGER NOT NULL,
+      platform TEXT NOT NULL DEFAULT 'telegram' CHECK(platform IN ('telegram', 'discord')),
+      bot_id INTEGER,
+      chat_id INTEGER,
+      discord_bot_id TEXT,
+      discord_owner_id TEXT,
+      discord_channel_id TEXT,
+      discord_message_id TEXT,
       prompt TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted', 'cancelled')),
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      update_id INTEGER
+      update_id INTEGER,
+      CHECK ((platform = 'telegram' AND bot_id IS NOT NULL AND chat_id IS NOT NULL AND discord_bot_id IS NULL AND discord_owner_id IS NULL AND discord_channel_id IS NULL AND discord_message_id IS NULL)
+        OR (platform = 'discord' AND bot_id IS NULL AND chat_id IS NULL AND update_id IS NULL AND discord_bot_id IS NOT NULL AND discord_owner_id IS NOT NULL AND discord_channel_id IS NOT NULL AND discord_message_id IS NOT NULL))
     )`);
     db.exec(
       "CREATE INDEX IF NOT EXISTS tasks_agent_queue ON tasks (agent_id, status, seq)",
@@ -42,6 +68,9 @@ export function openTaskStore(path: string) {
     // Update IDs are only unique per bot, so the pair identifies one message.
     db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS tasks_update ON tasks (bot_id, update_id) WHERE update_id IS NOT NULL",
+    );
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS tasks_discord_message ON tasks (discord_bot_id, discord_message_id) WHERE platform = 'discord'",
     );
     db.exec("COMMIT");
   } catch (error) {
@@ -55,6 +84,67 @@ export function openTaskStore(path: string) {
   }
   const columns =
     "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt";
+  function routed(row: Record<string, unknown>): RoutedTask {
+    const base = {
+      id: String(row.id),
+      agentId: String(row.agentId),
+      prompt: String(row.prompt),
+    };
+    if (row.platform === "discord")
+      return {
+        ...base,
+        origin: {
+          platform: "discord",
+          botId: String(row.discord_bot_id),
+          ownerId: String(row.discord_owner_id),
+          channelId: String(row.discord_channel_id),
+          messageId: String(row.discord_message_id),
+        },
+      };
+    return {
+      ...base,
+      botId: Number(row.botId),
+      chatId: Number(row.chatId),
+      origin: {
+        platform: "telegram",
+        botId: Number(row.botId),
+        chatId: Number(row.chatId),
+      },
+    };
+  }
+  function claim(
+    agentId: string,
+    telegramOnly: boolean,
+  ): RoutedTask | undefined {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const busy = db
+        .prepare(
+          "SELECT 1 FROM tasks WHERE agent_id = ? AND status = 'running'",
+        )
+        .get(agentId);
+      const row = busy
+        ? undefined
+        : db
+            .prepare(
+              `SELECT ${columns}, platform, discord_bot_id, discord_owner_id, discord_channel_id, discord_message_id FROM tasks WHERE agent_id = ? AND status = 'queued' ORDER BY seq LIMIT 1`,
+            )
+            .get(agentId);
+      const task =
+        row && (!telegramOnly || row.platform === "telegram")
+          ? routed(row)
+          : undefined;
+      if (task)
+        db.prepare(
+          "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ?",
+        ).run(Date.now(), task.id);
+      db.exec("COMMIT");
+      return task;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   return {
     /**
      * Saves the message before any execution; returns how many tasks are ahead
@@ -105,28 +195,75 @@ export function openTaskStore(path: string) {
         throw error;
       }
     },
-    /** Claims the oldest task for an agent, regardless of its originating conversation. */
+    /** Telegram executor admission stops at a Discord task until routed execution is attached. */
     claimNext(agentId: string): QueuedTask | undefined {
+      const task = claim(agentId, true);
+      if (!task || task.origin.platform !== "telegram") return undefined;
+      return {
+        id: task.id,
+        agentId: task.agentId,
+        prompt: task.prompt,
+        botId: task.origin.botId,
+        chatId: task.origin.chatId,
+      };
+    },
+    claimNextTask(agentId: string): RoutedTask | undefined {
+      return claim(agentId, false);
+    },
+    enqueueDiscord(task: Omit<DiscordQueuedTask, "id">) {
+      const origin = task.origin;
+      if (
+        ![
+          origin.botId,
+          origin.ownerId,
+          origin.channelId,
+          origin.messageId,
+        ].every(isDiscordId) ||
+        !task.prompt.trim()
+      )
+        throw new Error("Invalid Discord task");
       db.exec("BEGIN IMMEDIATE");
       try {
-        const running = db
+        const existing = db
           .prepare(
-            "SELECT 1 FROM tasks WHERE agent_id = ? AND status = 'running'",
+            "SELECT id, agent_id, discord_owner_id, discord_channel_id, prompt FROM tasks WHERE platform = 'discord' AND discord_bot_id = ? AND discord_message_id = ?",
           )
-          .get(agentId);
-        const next = running
-          ? undefined
-          : (db
-              .prepare(
-                `SELECT ${columns} FROM tasks WHERE agent_id = ? AND status = 'queued' ORDER BY seq LIMIT 1`,
-              )
-              .get(agentId) as unknown as QueuedTask | undefined);
-        if (next)
-          db.prepare(
-            "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ?",
-          ).run(Date.now(), next.id);
+          .get(origin.botId, origin.messageId);
+        if (existing) {
+          if (
+            existing.agent_id !== task.agentId ||
+            existing.discord_owner_id !== origin.ownerId ||
+            existing.discord_channel_id !== origin.channelId ||
+            existing.prompt !== task.prompt
+          )
+            throw new Error("Discord task identity conflict");
+          db.exec("COMMIT");
+          return { id: String(existing.id), ahead: 0, duplicate: true };
+        }
+        const ahead = Number(
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM tasks WHERE agent_id = ? AND status IN ('queued', 'running')",
+            )
+            .get(task.agentId)!.n,
+        );
+        const id = randomUUID();
+        const now = Date.now();
+        db.prepare(
+          `INSERT INTO tasks (id, agent_id, platform, discord_bot_id, discord_owner_id, discord_channel_id, discord_message_id, prompt, status, created_at, updated_at) VALUES (?, ?, 'discord', ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+        ).run(
+          id,
+          task.agentId,
+          origin.botId,
+          origin.ownerId,
+          origin.channelId,
+          origin.messageId,
+          task.prompt,
+          now,
+          now,
+        );
         db.exec("COMMIT");
-        return next;
+        return { id, ahead, duplicate: false };
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
@@ -149,13 +286,25 @@ export function openTaskStore(path: string) {
     pendingConversations(agentId: string): { botId: number; chatId: number }[] {
       return db
         .prepare(
-          "SELECT DISTINCT bot_id AS botId, chat_id AS chatId FROM tasks WHERE agent_id = ? AND status = 'queued'",
+          "SELECT DISTINCT bot_id AS botId, chat_id AS chatId FROM tasks WHERE agent_id = ? AND platform = 'telegram' AND status = 'queued'",
         )
         .all(agentId) as unknown as { botId: number; chatId: number }[];
     },
+    getTask(id: string): (RoutedTask & { status: TaskStatus }) | undefined {
+      const row = db
+        .prepare(
+          `SELECT ${columns}, platform, discord_bot_id, discord_owner_id, discord_channel_id, discord_message_id, status FROM tasks WHERE id = ?`,
+        )
+        .get(id);
+      return row
+        ? { ...routed(row), status: row.status as TaskStatus }
+        : undefined;
+    },
     get(id: string): (QueuedTask & { status: TaskStatus }) | undefined {
       return db
-        .prepare(`SELECT ${columns}, status FROM tasks WHERE id = ?`)
+        .prepare(
+          `SELECT ${columns}, status FROM tasks WHERE id = ? AND platform = 'telegram'`,
+        )
         .get(id) as unknown as
         (QueuedTask & { status: TaskStatus }) | undefined;
     },

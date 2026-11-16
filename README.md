@@ -198,7 +198,9 @@ link the owner DM and enter a SQLite inbox with deduplication by bot and message
 ID. Stale connection identities are rejected. Discord messages are stored but
 not yet executed. Queue claiming and draining now serialize by agent across
 conversations while preserving the original delivery destination. Discord task
-origin and reply integration remain pending.
+origins can now be stored as string IDs with platform-specific deduplication
+and claimed in the same FIFO as Telegram tasks. Inbox admission and routed
+execution/replies remain pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 
