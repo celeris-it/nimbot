@@ -25,12 +25,19 @@ it("protects Discord configuration, isolates agents, and never returns credentia
     const config = readPanelConfig({
       PANEL_PASSWORD_HASH: await hashPassword("test-password"),
     });
+    const testDelivery = vi.fn(
+      async () => ({ status: "delivered", sentParts: 1 }) as const,
+    );
     const app = createPanel(config, {
       getAgentSetup: (id) =>
         registry.get(id)
           ? { name: id, botUsername: null, provisioning: "pending" }
           : undefined,
-      discord: { ...discord, get: (id) => registry.getDiscordConnection(id) },
+      discord: {
+        ...discord,
+        test: testDelivery,
+        get: (id) => registry.getDiscordConnection(id),
+      },
     });
     let cookie = "";
     const post = (path: string, body: string, origin = config.origin) =>
@@ -51,9 +58,33 @@ it("protects Discord configuration, isolates agents, and never returns credentia
     expect(
       (await post("/api/agents/a/discord/remove", "confirm=a")).status,
     ).toBe(401);
+    expect(
+      (await post("/api/agents/a/discord/test", "requestId=test")).status,
+    ).toBe(401);
     cookie = (await post("/api/login", "password=test-password")).headers
       .get("set-cookie")!
       .split(";")[0]!;
+    expect(
+      (
+        await post(
+          "/api/agents/a/discord/test",
+          "requestId=test",
+          "https://other.example",
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await post("/api/agents/missing/discord/test", "requestId=test")).status,
+    ).toBe(404);
+    expect(
+      (await post("/api/agents/a/discord/test", "requestId=test&ownerId=123"))
+        .status,
+    ).toBe(400);
+    expect(testDelivery).not.toHaveBeenCalled();
+    expect(
+      await (await post("/api/agents/a/discord/test", "requestId=test")).json(),
+    ).toEqual({ status: "delivered", sentParts: 1 });
+    expect(testDelivery).toHaveBeenCalledWith("a", "test");
     expect(await (await get("a")).json()).toEqual({ connection: null });
     expect(
       (await post("/api/agents/a/discord", payload, "https://other.example"))

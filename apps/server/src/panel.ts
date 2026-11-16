@@ -35,6 +35,10 @@ export interface PanelDeps {
       token: string,
     ): Promise<{ cleanupPending: boolean }>;
     remove(id: string): Promise<{ cleanupPending: boolean }>;
+    test?(
+      id: string,
+      requestId: string,
+    ): Promise<import("./notification-store.js").NotificationRecord>;
   };
   /** Docker inventory shown in the status API; omitted when provisioning is off. */
   resources?: () =>
@@ -344,6 +348,29 @@ export function createPanel(
             "Could not save Discord. Check the bot token, owner ID, and whether the bot is already linked.",
         },
         400,
+      );
+    }
+  });
+  app.post("/api/agents/:id/discord/test", async (c) => {
+    const id = c.req.param("id");
+    if (!deps.discord?.test || !getAgentSetup?.(id))
+      return c.json({ error: "Agent not found." }, 404);
+    const body = await c.req.parseBody({ all: true });
+    if (
+      typeof body.requestId !== "string" ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(body.requestId) ||
+      Object.keys(body).some((key) => key !== "requestId")
+    )
+      return c.json({ error: "Enter a valid notification request ID." }, 400);
+    try {
+      return c.json(await deps.discord.test(id, body.requestId));
+    } catch {
+      return c.json(
+        {
+          error:
+            "Delivery could not be confirmed. Retry with the same request ID to check its status.",
+        },
+        500,
       );
     }
   });

@@ -1,3 +1,7 @@
+import { openNotificationStore } from "./notification-store.js";
+import { createDurableNotifications } from "./durable-notifications.js";
+import { createNotifications } from "./notifications.js";
+import { createDiscordNotifications } from "./discord-notifications.js";
 import { log } from "./logger.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createAgentAccess } from "./agent-access.js";
@@ -77,6 +81,7 @@ async function main(): Promise<void> {
   }
   let statePath;
   let taskStore;
+  let notificationStore;
   let registry;
   let botSecrets;
   let discordSecrets;
@@ -95,10 +100,12 @@ async function main(): Promise<void> {
         resolve(stateDir, "host-secrets"),
         registry,
       );
+    notificationStore = openNotificationStore(statePath);
     taskStore = openTaskStore(statePath);
     // A task left running by the previous process cannot be proven finished.
     taskStore.markRunningInterrupted();
   } catch {
+    notificationStore?.close();
     registry?.close();
     log.error("server.state_init_failed", {
       hint: "Check SERVER_STATE_DIR and writable storage.",
@@ -107,6 +114,7 @@ async function main(): Promise<void> {
     return;
   }
   process.once("exit", () => {
+    notificationStore.close();
     taskStore.close();
     registry.close();
   });
@@ -186,6 +194,13 @@ async function main(): Promise<void> {
     if (!registry.get(id)) throw new Error("Agent not found");
   };
   const discord = createDiscordConfiguration(registry, discordSecrets);
+  const notifications = createDurableNotifications(
+    notificationStore,
+    createNotifications({
+      discord: createDiscordNotifications(discord.resolve),
+      ...(registeredBots ? { telegram: registeredBots.notifications } : {}),
+    }),
+  );
   const panel = createPanel(panelConfig, {
     discord: {
       get: (id) => {
@@ -200,6 +215,13 @@ async function main(): Promise<void> {
       },
       configure: (id, ownerId, token) => discord.configure(id, ownerId, token),
       remove: (id) => discord.remove(id),
+      test: (id, requestId) =>
+        notifications.send(
+          id,
+          requestId,
+          "discord",
+          "Nimbot Discord notification test.",
+        ),
     },
     resources: reconcile,
     provisionAgent: provision

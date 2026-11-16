@@ -19,8 +19,18 @@ export function createDurableNotifications(
       channel: NotificationChannel,
       text: string,
     ): Promise<NotificationRecord> {
+      const limited = store.countRecent(agentId, Date.now() - 60000) >= 5;
       const intent = store.begin(agentId, requestId, channel, text);
       if (!intent.fresh) return intent.record;
+      if (limited) {
+        const result = {
+          status: "failed",
+          sentParts: 0,
+          reason: "rate_limited",
+        } as const;
+        store.finish(agentId, requestId, result);
+        return result;
+      }
       logger.info("notification.sending", { agentId, channel });
       let result;
       try {

@@ -179,8 +179,11 @@ configuration API routes and panel forms to connect, replace, and remove a bot.
 A durable notification store and delivery wrapper now record intent and sanitized
 results, deduplicate request IDs, and mark in-flight sends uncertain after restart
 without replaying them. Only a content hash is stored, not notification text.
-Test delivery, production wiring of the durable wrapper, and per-agent limits
-are pending. Configuration
+The authenticated Discord test API uses this durable path with a fixed test
+message. It accepts only a request ID, resolves the saved owner on the server,
+and allows five new notification attempts per minute per agent across channels.
+Automatic task delivery is independent of this limit. The panel test button is
+still pending. Configuration
 changes invalidate previously resolved delivery targets. Remove a Discord
 connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.

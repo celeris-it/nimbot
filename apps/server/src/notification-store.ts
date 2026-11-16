@@ -50,6 +50,15 @@ export function openNotificationStore(path: string) {
   }
   return {
     get,
+    countRecent(agentId: string, since: number) {
+      return Number(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM notifications WHERE agent_id = ? AND created_at >= ? AND (reason IS NULL OR reason <> 'rate_limited')",
+          )
+          .get(agentId, since)!.count,
+      );
+    },
     begin(
       agentId: string,
       requestId: string,

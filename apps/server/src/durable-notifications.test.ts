@@ -99,3 +99,30 @@ it("keeps failures and uncertain sends across restart without replaying or stori
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("limits each agent independently and lets duplicates observe saved results", async () => {
+  const store = openNotificationStore(":memory:");
+  try {
+    const send = vi.fn(
+      async () => ({ status: "delivered", sentParts: 1 }) as const,
+    );
+    const service = createDurableNotifications(
+      store,
+      createNotifications({ discord: { send } }),
+    );
+    for (let n = 0; n < 5; n++)
+      await service.send("a", `r${n}`, "discord", "test");
+    expect(await service.send("a", "limited", "discord", "test")).toMatchObject(
+      { status: "failed", reason: "rate_limited" },
+    );
+    expect(await service.send("a", "r0", "discord", "test")).toMatchObject({
+      status: "delivered",
+    });
+    expect(await service.send("b", "r0", "discord", "test")).toMatchObject({
+      status: "delivered",
+    });
+    expect(send).toHaveBeenCalledTimes(6);
+  } finally {
+    store.close();
+  }
+});
