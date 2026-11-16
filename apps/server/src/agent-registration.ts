@@ -13,7 +13,6 @@ export interface AgentRegistrationInput {
 export function createAgentRegistration(
   registry: ReturnType<typeof openAgentRegistry>,
   secrets: Awaited<ReturnType<typeof openBotSecrets>>,
-  allowedOwners: ReadonlySet<number>,
   provision: (id: string) => Promise<unknown>,
   verify: (
     token: string,
@@ -29,11 +28,10 @@ export function createAgentRegistration(
       input.instructions.length > 4000 ||
       !Number.isSafeInteger(input.ownerId) ||
       input.ownerId <= 0 ||
-      !allowedOwners.has(input.ownerId) ||
       token.length > 256 ||
       !/^\d+:[A-Za-z0-9_-]+$/.test(token)
     )
-      throw new Error("Invalid agent settings or unauthorized owner");
+      throw new Error("Invalid agent settings");
     const bot = await verify(token);
     if (
       !bot.is_bot ||
@@ -43,13 +41,9 @@ export function createAgentRegistration(
       bot.id <= 0
     )
       throw new Error("Invalid Telegram bot identity");
-    if (!allowedOwners.has(input.ownerId))
-      throw new Error("Agent owner is no longer authorized");
     const id = `agent-${randomBytes(16).toString("hex")}`;
     const ref = await secrets.save(token);
     try {
-      if (!allowedOwners.has(input.ownerId))
-        throw new Error("Agent owner is no longer authorized");
       registry.registerLinkedAgent(
         { id, name, ownerId: input.ownerId, instructions: input.instructions },
         { id: bot.id, username: bot.username },

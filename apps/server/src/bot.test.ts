@@ -23,7 +23,6 @@ function setup(
     approvalId: string,
     allow: boolean,
   ) => Promise<boolean>,
-  allowedUserIds = new Set([42, 73]),
 ) {
   const activations: number[] = [];
   const tasks = execute
@@ -39,7 +38,6 @@ function setup(
   const bot = createBot(
     {
       telegramBotToken: "123:fake_test_token",
-      allowedUserIds,
       agent: { id: "test", name: "Test agent", ownerId: 42 },
     },
     (chatId) => activations.push(chatId),
@@ -263,7 +261,7 @@ describe("Telegram access", () => {
     await bot.handleUpdate(update);
     expect(sent).toEqual([]);
   });
-  it("rejects an allowlisted user who is not the owner", async () => {
+  it("rejects any other user, who is not the owner", async () => {
     const { bot, sent, activations } = setup();
     for (const text of ["/start", "/status", "hello"])
       await bot.handleUpdate(message(text, 73));
@@ -324,7 +322,7 @@ it("rechecks persisted setup after Host health and never executes incomplete age
   });
   registry.finishProvisioning("test", "ready");
   const binding = openChatBinding(path, { id: "test", ownerId: 42 });
-  const access = createAgentAccess(registry, "test", new Set([42]));
+  const access = createAgentAccess(registry, "test");
   let changeDuringHealth = true;
   const health = vi.fn(async () => {
     if (changeDuringHealth) registry.beginContainerAction("test", "stop");
@@ -477,7 +475,7 @@ describe("task queue through Telegram", () => {
         },
       };
     }
-    async function pending(allowedUsers?: Set<number>) {
+    async function pending() {
       let release!: () => void;
       const finished = new Promise<void>((resolve) => (release = resolve));
       const decide = vi.fn(async () => {
@@ -506,7 +504,6 @@ describe("task queue through Telegram", () => {
         async () => "ready",
         undefined,
         decide,
-        allowedUsers,
       );
       await f.bot.handleUpdate(message("/start"));
       await f.bot.handleUpdate(message("work"));
@@ -539,7 +536,7 @@ describe("task queue through Telegram", () => {
     it("lets only the authorized owner answer, once, from the bound chat", async () => {
       const f = await pending();
       const data = f.approve.callback_data;
-      // Another allowlisted user, and an owner message from a different chat.
+      // Another user, and an owner message from a different chat.
       await f.bot.handleUpdate(callback(data, 73));
       expect(f.callbackAnswers.at(-1)).toMatchObject({
         text: "Not authorized.",
@@ -566,23 +563,6 @@ describe("task queue through Telegram", () => {
       await f.bot.handleUpdate(callback(f.deny.callback_data));
       expect(f.decide).toHaveBeenCalledTimes(1);
       expect(f.callbackAnswers.at(-1)?.text).toContain("expired");
-    });
-
-    it("rejects an outstanding approval after removing the owner from the live allowlist", async () => {
-      const allowed = new Set([42, 73]);
-      const f = await pending(allowed);
-      allowed.delete(42);
-      await f.bot.handleUpdate(callback(f.approve.callback_data));
-      expect(f.decide).not.toHaveBeenCalled();
-      expect(f.callbackAnswers.at(-1)?.text).toBe("Not authorized.");
-      allowed.add(42);
-      await f.bot.handleUpdate(callback(f.deny.callback_data));
-      expect(f.decide).toHaveBeenCalledExactlyOnceWith(
-        "host-task",
-        approvalId,
-        false,
-      );
-      await f.idle();
     });
 
     it("sends a denial to the Host when the owner presses Deny", async () => {

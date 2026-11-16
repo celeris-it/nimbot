@@ -18,7 +18,6 @@ export interface RegisteredBotState {
     "not_started" | "connecting" | "polling" | "blocked" | "failed" | "stopped";
   failure?:
     | "setup_incomplete"
-    | "owner_not_allowed"
     | "credentials_unavailable"
     | "identity_mismatch"
     | "invalid_token"
@@ -33,12 +32,10 @@ interface Connection {
   finished: boolean;
 }
 
-/** Server-only bot connections. The bootstrap bot remains owned by its existing lifecycle. */
+/** Server-side bot connections: one long-polling loop per registered agent, isolated from the others. */
 export function createRegisteredBots(
   registry: ReturnType<typeof openAgentRegistry>,
   config: {
-    bootstrapId?: string;
-    allowedOwners: ReadonlySet<number>;
     statePath: string;
     taskStore: TaskStore;
     /** Upper bound for waiting on one task; omit for the default. */
@@ -71,10 +68,6 @@ export function createRegisteredBots(
         connection.state = { status: "blocked", failure: "setup_incomplete" };
         return;
       }
-      if (!config.allowedOwners.has(agent.ownerId)) {
-        connection.state = { status: "blocked", failure: "owner_not_allowed" };
-        return;
-      }
       const token = await secrets.read(agent.credentialRef);
       if (!/^\d+:[A-Za-z0-9_-]+$/.test(token))
         throw new Error("Invalid saved bot credential");
@@ -82,7 +75,7 @@ export function createRegisteredBots(
       credentialsLoaded = true;
       if (connection.controller.signal.aborted) return;
       binding = openChatBinding(config.statePath, agent);
-      const access = createAgentAccess(registry, id, config.allowedOwners);
+      const access = createAgentAccess(registry, id);
       const tasks = createBotTasks({
         store: config.taskStore,
         agentId: id,
@@ -98,7 +91,6 @@ export function createRegisteredBots(
       const bot = makeBot(
         {
           telegramBotToken: token,
-          allowedUserIds: config.allowedOwners,
           agent: {
             id,
             ownerId: agent.ownerId,
@@ -205,12 +197,7 @@ export function createRegisteredBots(
   }
   return {
     start(id: string) {
-      if (
-        closed ||
-        id === config.bootstrapId ||
-        connections.get(id)?.finished === false
-      )
-        return;
+      if (closed || connections.get(id)?.finished === false) return;
       const connection: Connection = {
         state: { status: "connecting" },
         controller: new AbortController(),

@@ -1,6 +1,42 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { hashPassword } from "./panel-auth.js";
-import { createPanel } from "./panel.js";
+import { createPanel, type PanelDeps } from "./panel.js";
+
+/**
+ * Older tests pass the panel's dependencies positionally. The slots for the
+ * removed single-agent status, settings, token, and container controls are ignored.
+ */
+function createPanelPositional(
+  config: Parameters<typeof createPanel>[0],
+  _getStatus?: unknown,
+  now?: () => number,
+  _settings?: unknown,
+  _saveBotToken?: unknown,
+  _container?: unknown,
+  provisionAgent?: PanelDeps["provisionAgent"],
+  removeResources?: PanelDeps["removeResources"],
+  containerAction?: PanelDeps["containerAction"],
+  registerAgent?: PanelDeps["registerAgent"],
+  getAgentSetup?: PanelDeps["getAgentSetup"],
+  agentSettings?: PanelDeps["agentSettings"],
+  listAgentIds?: PanelDeps["listAgentIds"],
+  deleteAgent?: PanelDeps["deleteAgent"],
+) {
+  return createPanel(
+    config,
+    {
+      provisionAgent,
+      removeResources,
+      containerAction,
+      registerAgent,
+      getAgentSetup,
+      agentSettings,
+      listAgentIds,
+      deleteAgent,
+    },
+    now,
+  );
+}
 import { readPanelConfig } from "./panel-config.js";
 
 const password = "local-test-password";
@@ -8,18 +44,10 @@ let passwordHash: string;
 beforeAll(async () => {
   passwordHash = await hashPassword(password);
 });
-function setup(host?: "ready" | "busy" | "unavailable") {
+function setup() {
   let clock = 1000;
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const app = createPanel(
-    config,
-    async () => ({
-      telegram: "connected",
-      botUsername: "nimbot_test_bot",
-      ...(host ? { host } : {}),
-    }),
-    () => clock,
-  );
+  const app = createPanelPositional(config, undefined, () => clock);
   const post = (path: string, body = "", cookie = "", origin = config.origin) =>
     app.request(path, {
       method: "POST",
@@ -51,19 +79,6 @@ function setup(host?: "ready" | "busy" | "unavailable") {
 }
 
 describe("panel access", () => {
-  it.each([
-    ["ready", "Available"],
-    ["busy", "Busy"],
-    ["unavailable", "Offline"],
-  ] as const)("shows verified host status %s", async (host, label) => {
-    const { app, login } = setup(host);
-    const { cookie } = await login();
-    const headers = { Cookie: cookie };
-    expect(await (await app.request("/", { headers })).text()).toContain(label);
-    expect(
-      await (await app.request("/api/status", { headers })).json(),
-    ).toMatchObject({ host });
-  });
   it("protects the page and API while serving the login and local CSS", async () => {
     const { app } = setup();
     expect((await app.request("/")).headers.get("location")).toBe("/login");
@@ -84,14 +99,14 @@ describe("panel access", () => {
       "form-action 'self'",
     );
     const text = await page.text();
-    expect(text).toContain("https://t.me/nimbot_test_bot");
+    expect(text).toContain("No agents yet");
     expect(text).not.toContain(passwordHash);
     expect(text).not.toContain(password);
     expect(
       await (
         await app.request("/api/status", { headers: { Cookie: cookie } })
       ).json(),
-    ).toEqual({ telegram: "connected", botUsername: "nimbot_test_bot" });
+    ).toEqual({ agents: [] });
   });
   it("rejects wrong passwords and forged cookies", async () => {
     const { app, post } = setup();
@@ -163,7 +178,7 @@ describe("panel access", () => {
       expect((await login()).response.status).toBe(303);
   });
   it("uses Secure cookies on HTTPS", async () => {
-    const app = createPanel(
+    const app = createPanelPositional(
       readPanelConfig({
         PANEL_PASSWORD_HASH: passwordHash,
         PANEL_URL: "https://nimbot.example",
@@ -220,208 +235,10 @@ describe("panel access", () => {
   });
 });
 
-it("protects settings, validates input, escapes values and persists updates", async () => {
-  const { openAgentRegistry } = await import("./agent-registry.js");
-  const registry = openAgentRegistry(":memory:");
-  registry.syncConfigured({ id: "dev", name: "Developer", ownerId: 42 });
-  const app = createPanel(
-    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
-    () => ({ telegram: "disconnected" }),
-    Date.now,
-    {
-      get: () => registry.get("dev")!,
-      save: (name, instructions) =>
-        registry.updateSettings("dev", name, instructions),
-    },
-  );
-  const post = (
-    path: string,
-    values: Record<string, string>,
-    cookie = "",
-    origin = "http://localhost:3000",
-  ) =>
-    app.request(path, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams(values).toString(),
-    });
-  try {
-    expect((await app.request("/agent/settings")).status).toBe(303);
-    expect(
-      (await post("/agent/settings", { name: "Not saved", instructions: "" }))
-        .status,
-    ).toBe(303);
-    const login = await post("/login", { password });
-    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-    expect(
-      (
-        await post(
-          "/agent/settings",
-          { name: "Not saved", instructions: "" },
-          cookie,
-          "https://evil.example",
-        )
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await post(
-          "/agent/settings",
-          { name: " ", instructions: "Keep me" },
-          cookie,
-        )
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await post(
-          "/agent/settings",
-          { name: "Valid", instructions: "x".repeat(4001) },
-          cookie,
-        )
-      ).status,
-    ).toBe(400);
-    expect(registry.get("dev")?.name).toBe("Developer");
-    const values = {
-      name: '<script>alert("x")</script>',
-      instructions: "</textarea><script>evil()</script>",
-    };
-    expect((await post("/agent/settings", values, cookie)).status).toBe(303);
-    expect(registry.get("dev")?.instructions).toBe(values.instructions);
-    const form = await (
-      await app.request("/agent/settings", { headers: { Cookie: cookie } })
-    ).text();
-    expect(form).not.toContain("<script>");
-    expect(form).toContain("&lt;script&gt;");
-    expect(form).toContain('name="instructions"');
-  } finally {
-    registry.close();
-  }
-});
-
-it("protects token replacement and never echoes or prepopulates the credential", async () => {
-  let stored = "";
-  const app = createPanel(
-    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
-    () => ({ telegram: "disconnected" }),
-    Date.now,
-    undefined,
-    async (token) => {
-      stored = token;
-    },
-  );
-  const post = (
-    path: string,
-    body: string,
-    cookie = "",
-    origin = "http://localhost:3000",
-  ) =>
-    app.request(path, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-  expect((await app.request("/agent/token")).status).toBe(303);
-  expect((await post("/agent/token", "token=123%3Asecret")).status).toBe(303);
-  expect(stored).toBe("");
-  const login = await post(
-    "/login",
-    new URLSearchParams({ password }).toString(),
-  );
-  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-  expect(
-    (
-      await post(
-        "/agent/token",
-        "token=123%3Asecret",
-        cookie,
-        "https://other.example",
-      )
-    ).status,
-  ).toBe(403);
-  const result = await post("/agent/token", "token=123%3Asecret", cookie);
-  expect(result.status).toBe(303);
-  expect(stored).toBe("123:secret");
-  const form = await (
-    await app.request("/agent/token?saved=1", { headers: { Cookie: cookie } })
-  ).text();
-  expect(form).not.toContain("123:secret");
-  expect(form).toContain("Restart the server");
-  expect(form).toContain('type="password"');
-});
-
-it("protects container operations and requires a POST after stop confirmation", async () => {
-  const actions: string[] = [];
-  const app = createPanel(
-    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
-    () => ({ telegram: "disconnected" }),
-    Date.now,
-    undefined,
-    undefined,
-    {
-      status: async () => "running",
-      action: async (action) => {
-        actions.push(action);
-      },
-    },
-  );
-  const post = (body: string, cookie = "", origin = "http://localhost:3000") =>
-    app.request("/agent/container", {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-  expect((await post("action=stop")).status).toBe(303);
-  const login = await app.request("/login", {
-    method: "POST",
-    headers: {
-      Origin: "http://localhost:3000",
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ password }).toString(),
-  });
-  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-  expect(
-    (await post("action=stop", cookie, "https://evil.example")).status,
-  ).toBe(403);
-  expect((await post("action=delete", cookie)).status).toBe(400);
-  expect(
-    (
-      await app.request("/agent/container/stop", {
-        headers: { Cookie: cookie },
-      })
-    ).status,
-  ).toBe(200);
-  expect((await app.request("/api/status")).status).toBe(401);
-  expect(
-    await (
-      await app.request("/api/status", {
-        headers: { Cookie: cookie },
-      })
-    ).json(),
-  ).toMatchObject({ container: "running" });
-  expect(actions).toEqual([]);
-  expect((await post("action=start", cookie)).status).toBe(303);
-  expect((await post("action=stop", cookie)).status).toBe(303);
-  expect(actions).toEqual(["start", "stop"]);
-});
-
 it("protects agent provisioning with sessions and same-origin checks", async () => {
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
   const calls: string[] = [];
-  const app = createPanel(
+  const app = createPanelPositional(
     config,
     () => ({ telegram: "connected" }),
     Date.now,
@@ -469,7 +286,9 @@ it("protects agent provisioning with sessions and same-origin checks", async () 
   expect(failed.status).toBe(409);
   expect(await failed.text()).not.toContain("secret-docker-response");
   expect(calls).toEqual(["dev", "failed"]);
-  const disabled = createPanel(config, () => ({ telegram: "connected" }));
+  const disabled = createPanelPositional(config, () => ({
+    telegram: "connected",
+  }));
   const disabledLogin = await disabled.request("/login", {
     method: "POST",
     headers: {
@@ -494,7 +313,7 @@ it("protects agent provisioning with sessions and same-origin checks", async () 
 it("requires authentication, origin, and explicit confirmation for resource removal", async () => {
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
   const calls: unknown[] = [];
-  const app = createPanel(
+  const app = createPanelPositional(
     config,
     () => ({ telegram: "connected" }),
     Date.now,
@@ -552,7 +371,7 @@ it("requires authentication, origin, and explicit confirmation for resource remo
 it("protects per-agent container actions and requires confirmation before stopping", async () => {
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
   const calls: unknown[] = [];
-  const app = createPanel(
+  const app = createPanelPositional(
     config,
     () => ({ telegram: "connected" }),
     Date.now,
@@ -611,7 +430,7 @@ it("protects per-agent container actions and requires confirmation before stoppi
 it("authenticates agent registration and validates owner fields without echoing tokens", async () => {
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
   const calls: unknown[] = [];
-  const app = createPanel(
+  const app = createPanelPositional(
     config,
     () => ({ telegram: "connected" }),
     Date.now,
@@ -682,7 +501,7 @@ it("creates agents through the panel form and displays saved setup state without
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
   const calls: unknown[] = [];
   let ready = true;
-  const app = createPanel(
+  const app = createPanelPositional(
     config,
     () => ({ telegram: "connected" }),
     Date.now,
@@ -787,7 +606,7 @@ it("edits the requested registered agent without changing another agent", async 
   registry.createPending({ id: "first", name: "First", ownerId: 42 });
   registry.createPending({ id: "second", name: "Second", ownerId: 42 });
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const app = createPanel(
+  const app = createPanelPositional(
     config,
     () => ({ telegram: "connected" }),
     Date.now,
@@ -919,7 +738,7 @@ it("replaces only the requested agent's token after verifying the same bot", asy
     registry.bindBot(id, botId, `${id}_bot`);
   }
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const app = createPanel(
+  const app = createPanelPositional(
     config,
     () => ({ telegram: "connected" }),
     Date.now,
@@ -1028,7 +847,7 @@ it("starts and confirms stopping the selected agent while showing observed runti
   let running = false;
   let operation: import("./agent-registry.js").ContainerOperation | undefined;
   const calls: unknown[] = [];
-  const app = createPanel(
+  const app = createPanelPositional(
     config,
     () => ({ telegram: "connected" }),
     Date.now,
@@ -1177,7 +996,7 @@ it.each([
   async (snapshot, message) => {
     const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
     const calls: string[] = [];
-    const app = createPanel(
+    const app = createPanelPositional(
       config,
       () => ({ telegram: "connected" }),
       Date.now,
@@ -1247,36 +1066,6 @@ it.each([
   },
 );
 
-it("shows persisted stop results for the configured agent even while it is offline", async () => {
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const app = createPanel(config, () => ({
-    telegram: "disconnected",
-    host: "unavailable",
-    stopObservation: {
-      availability: "available",
-      task: { id: "captured-task", status: "running" },
-      finalStatus: "interrupted",
-      observedAt: 1,
-      observationId: "snapshot",
-    },
-  }));
-  const login = await app.request("/login", {
-    method: "POST",
-    headers: {
-      Origin: config.origin,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ password }).toString(),
-  });
-  const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
-  expect(await (await app.request("/", { headers })).text()).toContain(
-    "Task interrupted.",
-  );
-  expect(
-    await (await app.request("/api/status", { headers })).json(),
-  ).toMatchObject({ stopObservation: { finalStatus: "interrupted" } });
-});
-
 it.each([
   ["pending", "Setup: Pending."],
   ["provisioning", "Setup: In progress."],
@@ -1287,7 +1076,7 @@ it.each([
   "shows the persisted %s setup state without offering container actions",
   async (provisioning, message) => {
     const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const app = createPanel(
+    const app = createPanelPositional(
       config,
       () => ({ telegram: "connected" }),
       Date.now,
@@ -1328,7 +1117,7 @@ it.each(["/agents/dev/setup/cancel", "/api/agents/dev/provision/cancel"])(
     let requested = false;
     let active = true;
     const calls: string[] = [];
-    const app = createPanel(
+    const app = createPanelPositional(
       config,
       () => ({ telegram: "connected" }),
       Date.now,
@@ -1432,18 +1221,18 @@ it.each([
     "Verified through /start",
   ],
   [
-    { bot: "unlinked", owner: "not_allowlisted" },
+    { bot: "unlinked", owner: "pending" },
     "Bot not linked",
-    "Owner not on the allowlist",
+    "Pending: the owner chat has not been activated",
   ],
   [{ bot: "unavailable", owner: "unavailable" }, "Unavailable", "Unavailable"],
 ] as const)(
   "shows explicit bot linking and owner verification state: %j",
   async (setupAccess, botLabel, ownerLabel) => {
     const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const app = createPanel(
+    const app = createPanelPositional(
       config,
-      () => ({ telegram: "connected", setupAccess }),
+      undefined,
       Date.now,
       undefined,
       undefined,
@@ -1461,6 +1250,8 @@ it.each([
               setupAccess,
             }
           : undefined,
+      undefined,
+      () => ["dev"],
     );
     const login = await app.request("/login", {
       method: "POST",
@@ -1471,17 +1262,17 @@ it.each([
       body: new URLSearchParams({ password }).toString(),
     });
     const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
-    for (const path of ["/", "/agents/dev/setup"]) {
-      const body = await (await app.request(path, { headers })).text();
-      expect(body).toContain("Bot link");
-      expect(body).toContain(botLabel);
-      expect(body).toContain("Owner verification");
-      expect(body).toContain(ownerLabel);
-      expect(body).not.toContain("file:host");
-    }
+    const body = await (
+      await app.request("/agents/dev/setup", { headers })
+    ).text();
+    expect(body).toContain("Bot link");
+    expect(body).toContain(botLabel);
+    expect(body).toContain("Owner verification");
+    expect(body).toContain(ownerLabel);
+    expect(body).not.toContain("file:host");
     expect(
       await (await app.request("/api/status", { headers })).json(),
-    ).toMatchObject({ setupAccess });
+    ).toMatchObject({ agents: [{ id: "dev", setupAccess }] });
   },
 );
 
@@ -1510,7 +1301,7 @@ it.each([
   "shows registered bot connection state separately from container readiness: %j",
   async (botConnection, label) => {
     const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const app = createPanel(
+    const app = createPanelPositional(
       config,
       () => ({ telegram: "connected" }),
       Date.now,
@@ -1551,7 +1342,7 @@ it.each([
 );
 
 it("lists registered agents with bot state and chat links behind login", async () => {
-  const app = createPanel(
+  const app = createPanelPositional(
     readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
     () => ({ telegram: "connected", agentId: "dev" }),
     Date.now,
@@ -1601,7 +1392,7 @@ it("lists registered agents with bot state and chat links behind login", async (
 describe("agent deletion routes", () => {
   async function deletionApp() {
     const calls: [string, boolean][] = [];
-    const app = createPanel(
+    const app = createPanelPositional(
       readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
       () => ({ telegram: "connected", agentId: "dev" }),
       Date.now,
@@ -1709,7 +1500,7 @@ describe("agent deletion routes", () => {
 
 it("rejects every unauthenticated request to setup and state-changing routes", async () => {
   const noop = async () => {};
-  const app = createPanel(
+  const app = createPanelPositional(
     readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
     () => ({ telegram: "connected" }),
     Date.now,
@@ -1760,29 +1551,108 @@ it("rejects every unauthenticated request to setup and state-changing routes", a
   }
 });
 
-it.each([
-  ["invalid_token", "Telegram rejected the bot token."],
-  ["unavailable", "Could not reach Telegram after several attempts."],
-] as const)(
-  "explains why the configured agent's Telegram connection failed (%s)",
-  async (telegramFailure, text) => {
+async function signedIn(deps: PanelDeps = {}): Promise<{
+  app: ReturnType<typeof createPanel>;
+  headers: { Cookie: string };
+}> {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const app = createPanel(config, deps);
+  const login = await app.request("/login", {
+    method: "POST",
+    headers: {
+      Origin: config.origin,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ password }).toString(),
+  });
+  return {
+    app,
+    headers: { Cookie: login.headers.get("set-cookie")!.split(";")[0]! },
+  };
+}
+
+describe("empty installation", () => {
+  it("starts with no agents and no Telegram access settings, and asks for nothing but an agent", async () => {
     const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const app = createPanel(
-      config,
-      async () => ({ telegram: "disconnected", telegramFailure }),
-      () => 1000,
-    );
-    const login = await app.request("/login", {
-      method: "POST",
-      headers: {
-        Origin: config.origin,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ password }).toString(),
+    const anonymous = createPanel(config, {
+      registerAgent: async () => ({ agentId: "x", provisioning: "pending" }),
     });
-    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
-    const page = await (await app.request("/", { headers })).text();
-    expect(page).toContain(text);
-    expect(page).not.toContain("123:");
-  },
-);
+    expect((await anonymous.request("/")).headers.get("location")).toBe(
+      "/login",
+    );
+    expect((await anonymous.request("/api/status")).status).toBe(401);
+    const { app, headers } = await signedIn({
+      registerAgent: async () => ({ agentId: "x", provisioning: "pending" }),
+    });
+    const home = await (await app.request("/", { headers })).text();
+    expect(home).toContain("No agents yet. Create your first agent.");
+    expect(home).toContain("Create agent");
+    expect(home).not.toContain("Telegram access");
+    expect(home).not.toContain("Configured agent");
+    expect(
+      await (await app.request("/api/status", { headers })).json(),
+    ).toEqual({ agents: [] });
+  });
+
+  it("has no allowlist page and no single pre-configured agent routes", async () => {
+    const { app, headers } = await signedIn();
+    for (const path of [
+      "/settings/telegram",
+      "/agent/settings",
+      "/agent/token",
+      "/agent/container/stop",
+    ])
+      expect((await app.request(path, { headers })).status).toBe(404);
+    for (const path of [
+      "/settings/telegram",
+      "/agent/settings",
+      "/agent/container",
+    ])
+      expect(
+        (
+          await app.request(path, {
+            method: "POST",
+            headers: { ...headers, Origin: "http://localhost:3000" },
+          })
+        ).status,
+      ).toBe(404);
+  });
+
+  it("asks only for the owner's own Telegram ID when creating an agent", async () => {
+    const { app, headers } = await signedIn({
+      registerAgent: async () => ({ agentId: "x", provisioning: "pending" }),
+    });
+    const form = await (await app.request("/agents/new", { headers })).text();
+    expect(form).toContain("Owner's Telegram ID");
+    expect(form).toContain("Only that user can use this agent.");
+    expect(form).not.toMatch(/allowlist|authorized in this installation/i);
+  });
+
+  it("lists every agent and the Docker inventory in the status API without secrets", async () => {
+    const { app, headers } = await signedIn({
+      listAgentIds: () => ["a", "b"],
+      getAgentSetup: (id) => ({
+        name: id.toUpperCase(),
+        botUsername: `${id}_bot`,
+        provisioning: "ready",
+        botConnection: { status: "polling" },
+        setupAccess: { bot: "linked", owner: "verified" },
+      }),
+      resources: async () => ({
+        status: "ok",
+        missing: [],
+        untracked: [],
+        uncertain: [],
+      }),
+    });
+    const status = await (await app.request("/api/status", { headers })).json();
+    expect(status).toMatchObject({
+      agents: [
+        { id: "a", name: "A", botConnection: { status: "polling" } },
+        { id: "b", name: "B" },
+      ],
+      resources: { status: "ok" },
+    });
+    expect(JSON.stringify(status)).not.toMatch(/token|credential|file:/i);
+  });
+});

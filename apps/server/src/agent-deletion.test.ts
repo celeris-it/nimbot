@@ -27,7 +27,6 @@ function deletion(
   const events: string[] = [];
   const run = createAgentDeletion({
     registry,
-    protectedAgentId: "boot",
     stopBot: async (id) => void events.push(`stop:${id}`),
     removeResources:
       overrides.removeResources ??
@@ -81,12 +80,30 @@ describe("agent deletion", () => {
     expect(registry.get("dev")).toBeUndefined();
   });
 
-  it("refuses the pre-configured agent and invalid IDs", async () => {
+  it("refuses invalid IDs before touching anything", async () => {
     const registry = fixture();
     const { run, events } = deletion(registry);
-    await expect(run("boot")).rejects.toThrow("cannot be deleted");
     await expect(run("../x")).rejects.toThrow("Invalid agent ID");
     expect(events).toEqual([]);
+  });
+
+  it("deletes a legacy externally managed agent without Docker and keeps no credentials", async () => {
+    const registry = fixture();
+    registry.setCredentialRef("boot", "file:telegram-legacy");
+    const { run, events } = deletion(registry);
+    await run("boot");
+    expect(registry.get("boot")).toBeUndefined();
+    // No Docker resource removal; its saved bot credential file is erased.
+    expect(events).toEqual(["stop:boot", "bot-secret:file:telegram-legacy"]);
+    expect(registry.get("dev")).toBeDefined();
+  });
+
+  it("does not try to erase an environment-token reference left by an older installation", async () => {
+    const registry = fixture();
+    registry.bindBot("boot", 9, "boot_bot");
+    const { run, events } = deletion(registry);
+    await run("boot");
+    expect(events).toEqual(["stop:boot"]);
   });
 
   it("refuses to retire an agent whose resources still exist", () => {

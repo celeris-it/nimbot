@@ -30,7 +30,6 @@ async function fixture() {
   const register = createAgentRegistration(
     registry,
     secrets,
-    new Set([42]),
     provision,
     verify,
   );
@@ -71,11 +70,13 @@ it("links verified bot and saved credentials atomically before provisioning", as
   }
 });
 
-it("rejects invalid input and unauthorized owners before Telegram, storage, or Docker", async () => {
+it("rejects invalid input and owner IDs before Telegram, storage, or Docker", async () => {
   const f = await fixture();
   try {
     for (const invalid of [
-      { ...input, ownerId: 43 },
+      { ...input, ownerId: 0 },
+      { ...input, ownerId: -5 },
+      { ...input, ownerId: 1.5 },
       { ...input, name: " " },
       { ...input, instructions: "x".repeat(4001) },
       { ...input, token: "invalid" },

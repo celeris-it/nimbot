@@ -3,10 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import {
-  createContainerControl,
-  readContainerConfig,
-} from "./container-control.js";
+import { createContainerControl } from "./container-control.js";
 
 it("inspects the configured label and uses the immutable container ID for start/stop", async () => {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-docker-"));
@@ -99,19 +96,6 @@ it("inspects the configured label and uses the immutable container ID for start/
     await rm(dir, { recursive: true, force: true });
   }
 });
-it("keeps Docker access opt-in and requires a fixed target", () => {
-  expect(readContainerConfig({}, "dev")).toBeUndefined();
-  expect(() =>
-    readContainerConfig({ DOCKER_SOCKET_PATH: "/var/run/docker.sock" }, "dev"),
-  ).toThrow("AGENT_CONTAINER_NAME");
-  expect(() =>
-    readContainerConfig(
-      { DOCKER_SOCKET_PATH: "relative", AGENT_CONTAINER_NAME: "host" },
-      "dev",
-    ),
-  ).toThrow();
-});
-
 it("waits for persisted stop observation before mutation and refuses overlapping actions", async () => {
   const id = "a".repeat(64);
   const operations: string[] = [];

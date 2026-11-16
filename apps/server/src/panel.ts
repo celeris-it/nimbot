@@ -1,4 +1,3 @@
-import type { ContainerControl } from "./container-control.js";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Hono, type Context } from "hono";
@@ -10,21 +9,6 @@ import { verifyPassword } from "./panel-auth.js";
 import type { HostStatus } from "./agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 
-export interface AgentStatus {
-  setupAccess?: import("./agent-access.js").AgentSetupAccess;
-  resources?: import("./resource-reconciliation.js").ResourceInventory;
-  host?: HostStatus;
-  provisioning?: import("./agent-registry.js").ProvisioningState;
-  containerOperation?: import("./agent-registry.js").ContainerOperation;
-  stopObservation?: import("./agent-registry.js").StopObservation;
-  agentId?: string;
-  agentName?: string;
-  ownerId?: number;
-  chatActivated?: boolean;
-  botUsername?: string;
-  telegram: "connecting" | "connected" | "disconnected";
-  telegramFailure?: "invalid_token" | "unavailable";
-}
 export interface RegisteredAgentSettings {
   cancelProvisioning?(id: string): void;
   get(id: string): { name: string; instructions: string } | undefined;
@@ -117,7 +101,6 @@ function setupAccessDetails(
   const ownerLabels = {
     pending: "Pending: the owner chat has not been activated",
     verified: "Verified through /start",
-    not_allowlisted: "Owner not on the allowlist",
     unavailable: "Unavailable",
   };
   return html`<dl>
@@ -161,27 +144,25 @@ const connectionLabels = {
   not_started: "Not started",
   connecting: "Verifying credentials and starting polling",
   polling: "Polling started",
-  blocked: "Blocked by incomplete setup or owner authorization",
+  blocked: "Blocked by incomplete setup",
   failed: "Connection failed",
   stopped: "Stopped",
 };
 
-export function createPanel(
-  config: PanelConfig,
-  getStatus: () => AgentStatus | Promise<AgentStatus>,
-  now = Date.now,
-  settings?: AgentSettings,
-  saveBotToken?: (token: string) => Promise<void>,
-  container?: ContainerControl,
-  provisionAgent?: (agentId: string) => Promise<void>,
-  removeResources?: (agentId: string, deleteData: boolean) => Promise<void>,
+export interface PanelDeps {
+  /** Docker inventory shown in the status API; omitted when provisioning is off. */
+  resources?: () =>
+    | import("./resource-reconciliation.js").ResourceInventory
+    | Promise<import("./resource-reconciliation.js").ResourceInventory>;
+  provisionAgent?: (agentId: string) => Promise<void>;
+  removeResources?: (agentId: string, deleteData: boolean) => Promise<void>;
   containerAction?: (
     agentId: string,
     action: "start" | "stop",
-  ) => Promise<void>,
+  ) => Promise<void>;
   registerAgent?: (
     input: import("./agent-registration.js").AgentRegistrationInput,
-  ) => Promise<{ agentId: string; provisioning: string }>,
+  ) => Promise<{ agentId: string; provisioning: string }>;
   getAgentSetup?: (id: string) =>
     | {
         name: string;
@@ -193,15 +174,28 @@ export function createPanel(
         canCancelProvisioning?: boolean;
         containerOperation?: import("./agent-registry.js").ContainerOperation;
       }
-    | undefined,
-  agentSettings?: RegisteredAgentSettings,
-  listAgentIds?: () => string[],
-  deleteAgent?: (agentId: string, deleteData: boolean) => Promise<void>,
-  telegramAccess?: {
-    get(): number[];
-    save(text: string): void | Promise<void>;
-  },
+    | undefined;
+  agentSettings?: RegisteredAgentSettings;
+  listAgentIds?: () => string[];
+  deleteAgent?: (agentId: string, deleteData: boolean) => Promise<void>;
+}
+
+export function createPanel(
+  config: PanelConfig,
+  deps: PanelDeps = {},
+  now = Date.now,
 ) {
+  const {
+    resources,
+    provisionAgent,
+    removeResources,
+    containerAction,
+    registerAgent,
+    getAgentSetup,
+    agentSettings,
+    listAgentIds,
+    deleteAgent,
+  } = deps;
   const app = new Hono();
   const sessions = new Map<string, number>();
   let attempts = 0;
@@ -295,49 +289,6 @@ export function createPanel(
     }
     await next();
   });
-  app.get("/settings/telegram", (c) => {
-    if (!telegramAccess) return c.notFound();
-    return c.html(
-      page(
-        "Telegram access",
-        html`<h1>Telegram access</h1>
-          <p>
-            Only listed users can own and use agents. An empty list blocks all
-            Telegram access. Changes apply immediately.
-          </p>
-          ${c.req.query("saved") === "1" ? html`<p role="status">Access settings saved.</p>` : ""}
-          <form method="post" action="/settings/telegram">
-            <label for="users">Allowed Telegram user IDs</label>
-            <textarea
-              class="textarea"
-              id="users"
-              name="users"
-              maxlength="16000"
-            >
-${telegramAccess.get().join(", ")}</textarea>
-            <p>Enter numeric user IDs separated by commas or spaces.</p>
-            <button class="btn" type="submit">Save access settings</button>
-          </form>
-          <a href="/">Back to agents</a>`,
-        true,
-      ),
-    );
-  });
-  app.post("/settings/telegram", async (c) => {
-    if (!telegramAccess) return c.notFound();
-    const body = await c.req.parseBody();
-    if (typeof body.users !== "string" || body.users.length > 16000)
-      return c.text("Enter valid Telegram user IDs.", 400);
-    try {
-      await telegramAccess.save(body.users);
-    } catch {
-      return c.text(
-        "Could not save access settings. Enter positive numeric user IDs and check storage.",
-        400,
-      );
-    }
-    return c.redirect("/settings/telegram?saved=1", 303);
-  });
   app.post("/logout", (c) => {
     sessions.delete(getCookie(c, cookieName)!);
     deleteCookie(c, cookieName, { path: "/", secure, sameSite: "Strict" });
@@ -345,10 +296,10 @@ ${telegramAccess.get().join(", ")}</textarea>
   });
   const settingsPage = (
     values: { name: string; instructions: string },
-    error?: string,
-    saved = false,
-    target = "/agent/settings",
-    back = "/",
+    error: string | undefined,
+    saved: boolean,
+    target: string,
+    back: string,
   ) =>
     page(
       "Edit agent",
@@ -384,25 +335,16 @@ ${values.instructions}</textarea>
               Do not include passwords or tokens.
             </p>
             <button class="btn" type="submit">Save changes</button
-            ><a class="btn" href="${back}"
-              >${back === "/" ? "Back to panel" : "Back to agent"}</a
-            >
+            ><a class="btn" href="${back}">Back to agent</a>
           </form>
         </section>`,
       true,
     );
-  app.get("/agent/settings", (c) =>
-    settings
-      ? c.html(
-          settingsPage(settings.get(), undefined, c.req.query("saved") === "1"),
-        )
-      : c.notFound(),
-  );
   const saveSettings = async (
     c: Context,
     store: AgentSettings,
-    target = "/agent/settings",
-    back = "/",
+    target: string,
+    back: string,
   ) => {
     const body = await c.req.parseBody({ all: true });
     const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -441,9 +383,6 @@ ${values.instructions}</textarea>
     }
     return c.redirect(`${target}?saved=1`, 303);
   };
-  app.post("/agent/settings", (c) =>
-    settings ? saveSettings(c, settings) : c.notFound(),
-  );
   app.get("/agents/:id/settings", (c) => {
     const id = c.req.param("id");
     const values = agentSettings?.get(id);
@@ -475,20 +414,21 @@ ${values.instructions}</textarea>
     );
   });
   const tokenPage = (
-    target = "/agent/token",
-    back = "/",
-    saved = false,
-    agentName?: string,
+    target: string,
+    back: string,
+    saved: boolean,
+    agentName: string,
   ) =>
     page(
       "Bot token",
       html`<h1>Bot token.</h1>
-        ${agentName ? html`<p>Agent: ${agentName}</p>` : ""}
+        <p>Agent: ${agentName}</p>
         <p>
           Only a new token for the same bot, created in BotFather, is accepted.
-          ${agentName ? "If the bot is already connected, restart the server to apply the change." : "It will be applied when the server restarts."}
+          If the bot is already connected, restart the server to apply the
+          change.
         </p>
-        ${saved ? html`<p role="status">${agentName ? "Token saved. If the bot is already connected, restart the server to apply the change." : "Token saved. Restart the server to apply it."}</p>` : ""}
+        ${saved ? html`<p role="status">Token saved. If the bot is already connected, restart the server to apply the change.</p>` : ""}
         <section class="card" aria-label="Bot credential">
           <form method="post" action="${target}">
             <label for="token">New Telegram token</label
@@ -501,22 +441,15 @@ ${values.instructions}</textarea>
               maxlength="256"
               autocomplete="off"
             /><button class="btn" type="submit">Save token</button
-            ><a class="btn" href="${back}"
-              >${back === "/" ? "Back to panel" : "Back to agent"}</a
-            >
+            ><a class="btn" href="${back}">Back to agent</a>
           </form>
         </section>`,
       true,
     );
-  app.get("/agent/token", (c) =>
-    saveBotToken
-      ? c.html(tokenPage(undefined, undefined, c.req.query("saved") === "1"))
-      : c.notFound(),
-  );
   const updateToken = async (
     c: Context,
     save: (token: string) => Promise<void>,
-    target = "/agent/token",
+    target: string,
   ) => {
     const body = await c.req.parseBody({ all: true });
     const token = typeof body.token === "string" ? body.token.trim() : "";
@@ -542,9 +475,6 @@ ${values.instructions}</textarea>
     return c.redirect(`${target}?saved=1`, 303);
   };
 
-  app.post("/agent/token", (c) =>
-    saveBotToken ? updateToken(c, saveBotToken) : c.notFound(),
-  );
   app.get("/agents/:id/token", (c) => {
     const id = c.req.param("id");
     const agent = agentSettings?.get(id);
@@ -569,54 +499,6 @@ ${values.instructions}</textarea>
       `/agents/${encodeURIComponent(id)}/token`,
     );
   });
-  app.get("/agent/container/stop", (c) =>
-    container
-      ? c.html(
-          page(
-            "Stop agent",
-            html`<h1>Stop the agent?</h1>
-              <p>
-                Its container will be stopped. An active task will be
-                interrupted and its result may stay pending until the container
-                starts again. Files and history are kept.
-              </p>
-              <form method="post" action="/agent/container">
-                <input type="hidden" name="action" value="stop" /><button
-                  class="btn"
-                  type="submit"
-                >
-                  Confirm stop</button
-                ><a class="btn" href="/">Cancel</a>
-              </form>`,
-            true,
-          ),
-        )
-      : c.notFound(),
-  );
-  app.post("/agent/container", async (c) => {
-    if (!container) return c.notFound();
-    const body = await c.req.parseBody({ all: true });
-    if (body.action !== "start" && body.action !== "stop")
-      return c.text("Invalid action.", 400);
-    try {
-      await container.action(body.action);
-    } catch {
-      return c.html(
-        page(
-          "Operation not completed",
-          html`<h1>Could not complete the operation.</h1>
-            <p>
-              Check Docker access, the configured container, and its agent
-              label. Refresh the panel before retrying.
-            </p>
-            <a class="btn" href="/">Back to panel</a>`,
-          true,
-        ),
-        503,
-      );
-    }
-    return c.redirect("/?containerChanged=1", 303);
-  });
   const registrationForm = (
     values = { name: "", instructions: "", ownerId: "" },
     error?: string,
@@ -625,8 +507,8 @@ ${values.instructions}</textarea>
       "Create agent",
       html`<h1>Create agent.</h1>
         <p>
-          You need a dedicated bot created in BotFather and the Telegram ID of
-          its authorized owner.
+          You need a dedicated bot created in BotFather and your Telegram user
+          ID. Only that user can use this agent.
         </p>
         <section class="card" aria-label="New agent">
           ${error ? html`<p role="alert" id="creation-error" tabindex="-1" autofocus>${error} Enter the token again; the other fields were kept.</p>` : ""}
@@ -666,8 +548,8 @@ ${values.instructions}</textarea>
               aria-describedby="creation-owner-help"
             />
             <p id="creation-owner-help">
-              A positive integer. The owner must be authorized in this
-              installation.
+              A positive integer: the Telegram user ID of the person who will
+              use this agent. Nobody else can.
             </p>
             <label for="agent-token">BotFather bot token</label>
             <input
@@ -754,7 +636,6 @@ ${values.instructions}</textarea>
     const failureLabels = {
       setup_incomplete:
         "Complete agent provisioning before connecting this bot.",
-      owner_not_allowed: "The owner is not allowlisted.",
       credentials_unavailable:
         "Saved bot or Agent Host credentials are unavailable.",
       identity_mismatch:
@@ -765,7 +646,7 @@ ${values.instructions}</textarea>
         "Telegram polling could not continue. Check connectivity and whether another instance is polling this bot.",
     };
     const setupLabels: Record<string, string> = {
-      external: "Managed outside automatic provisioning",
+      external: "Legacy agent from an older installation (no longer managed)",
       pending: "Pending",
       provisioning: "In progress",
       ready: "Completed",
@@ -887,7 +768,7 @@ ${values.instructions}</textarea>
               class="btn"
               href="/agents/${encodeURIComponent(c.req.param("id"))}/setup"
               >Refresh status</a
-            >${deleteAgent && agent.provisioning !== "external" ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/delete">Delete agent…</a>` : ""}<a
+            >${deleteAgent ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/delete">Delete agent…</a>` : ""}<a
               class="btn"
               href="/"
               >Back to panel</a
@@ -1191,107 +1072,28 @@ ${values.instructions}</textarea>
       );
     }
   });
-  app.get("/api/status", async (c) => {
-    const [status, containerState] = await Promise.all([
-      getStatus(),
-      container?.status(),
-    ]);
-    return c.json({ ...status, container: containerState });
-  });
-  app.get("/", async (c) => {
-    const status = await getStatus();
-    const containerState = container ? await container.status() : undefined;
-    const registered = (listAgentIds?.() ?? [])
-      .filter((id) => id !== status.agentId)
-      .flatMap((id) => {
+  app.get("/api/status", async (c) =>
+    c.json({
+      agents: (listAgentIds?.() ?? []).flatMap((id) => {
         const setup = getAgentSetup?.(id);
         return setup ? [{ id, ...setup }] : [];
-      });
-    const labels = {
-      connecting: "Connecting",
-      connected: "Connected",
-      disconnected: "Offline",
-    };
+      }),
+      ...(resources ? { resources: await resources() } : {}),
+    }),
+  );
+  app.get("/", (c) => {
+    const registered = (listAgentIds?.() ?? []).flatMap((id) => {
+      const setup = getAgentSetup?.(id);
+      return setup ? [{ id, ...setup }] : [];
+    });
     return c.html(
       page(
         "Agents",
         html`<small>LOCAL INSTALLATION</small>
           <h1>Your agents.</h1>
-          ${telegramAccess ? html`<a class="btn" href="/settings/telegram">Telegram access</a>` : ""}
-          ${telegramAccess && !status.agentId && registered.length === 0 ? html`<p>No agents yet. Configure Telegram access, then create your first agent.</p>` : ""}
+          ${registered.length === 0 ? html`<p>No agents yet.${registerAgent ? " Create your first agent." : ""}</p>` : ""}
           ${registerAgent ? html`<a class="btn" href="/agents/new">Create agent</a>` : ""}
-          ${c.req.query("containerChanged") === "1" ? html`<p role="status">Operation sent to Docker. The Agent Host may take a few seconds to become available.</p>` : ""}
           <p>One Telegram bot per agent. Every conversation in its place.</p>
-          ${
-            !telegramAccess || status.agentId
-              ? html`<article class="card">
-                  ${settings ? html`<a class="btn" href="/agent/settings">Edit agent</a>` : ""}
-                  ${saveBotToken ? html`<a class="btn" href="/agent/token">Replace bot token</a>` : ""}
-                  ${
-                    container
-                      ? html`<p>
-                            Container:
-                            ${containerState === "running" ? "Running" : containerState === "stopped" ? "Stopped" : "Unavailable"}
-                          </p>
-                          <form method="post" action="/agent/container">
-                            <input
-                              type="hidden"
-                              name="action"
-                              value="start"
-                            /><button class="btn" type="submit">
-                              Start container
-                            </button>
-                          </form>
-                          <a class="btn" href="/agent/container/stop"
-                            >Stop container…</a
-                          >`
-                      : ""
-                  }
-                  <h2>${status.agentName ?? "Configured agent"}</h2>
-                  <p class="badge">Initial setup</p>
-                  <dl>
-                    <dt>Identifier</dt>
-                    <dd>${status.agentId ?? "Not configured"}</dd>
-                    <dt>Telegram owner</dt>
-                    <dd>${status.ownerId ?? "Not configured"}</dd>
-                    <dt>Telegram</dt>
-                    <dd>${labels[status.telegram]}</dd>
-                    ${
-                      status.telegram === "disconnected" &&
-                      status.telegramFailure
-                        ? html`<dt>Telegram problem</dt>
-                            <dd>
-                              ${
-                                status.telegramFailure === "invalid_token"
-                                  ? "Telegram rejected the bot token. Replace it and restart the server."
-                                  : "Could not reach Telegram after several attempts. Check connectivity and whether another instance is polling this bot."
-                              }
-                            </dd>`
-                        : ""
-                    }
-                    <dt>Bot</dt>
-                    <dd>
-                      ${status.botUsername ? `@${status.botUsername}` : "Waiting for connection"}
-                    </dd>
-                    <dt>Agent Host</dt>
-                    <dd>
-                      ${status.host === "ready" ? "Available" : status.host === "busy" ? "Busy" : "Offline"}
-                    </dd>
-                    <dt>Task execution through Telegram</dt>
-                    <dd>
-                      ${status.setupAccess?.owner === "not_allowlisted" ? "Blocked: owner not authorized" : "Requires complete setup and an activated chat"}
-                    </dd>
-                    <dt>Chat activation</dt>
-                    <dd>
-                      ${status.chatActivated ? "Activated by the owner" : "Pending: send /start to the bot"}
-                    </dd>
-                  </dl>
-                  ${setupAccessDetails(status.setupAccess)}
-                  ${stopTaskSection(status.stopObservation)}
-                  ${status.botUsername ? html`<a class="btn" href="https://t.me/${status.botUsername}">Open bot in Telegram</a>` : html`<p>The link will appear once Telegram confirms the connection.</p>`}
-                </article>`
-              : ""
-          }
           ${registered.map((agent) => {
             const bot = agent.botConnection
               ? connectionLabels[agent.botConnection.status]

@@ -13,8 +13,7 @@ async function fixture() {
   registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
   const binding = openChatBinding(path, { id: "dev", ownerId: 42 });
-  const allowed = new Set([42, 73]);
-  const access = createAgentAccess(registry, "dev", allowed);
+  const access = createAgentAccess(registry, "dev");
   const ready = () => {
     registry.beginProvisioning("dev");
     registry.setHostCredentialRef("dev", "file:host-saved");
@@ -28,7 +27,6 @@ async function fixture() {
   return {
     registry,
     binding,
-    allowed,
     access,
     ready,
     path,
@@ -40,7 +38,7 @@ async function fixture() {
   };
 }
 
-it("requires the current bot, allowlisted owner and persisted private-chat activation", async () => {
+it("requires the current bot, the agent owner and persisted private-chat activation", async () => {
   const f = await fixture();
   try {
     f.ready();
@@ -55,11 +53,6 @@ it("requires the current bot, allowlisted owner and persisted private-chat activ
     expect(f.access.getSetup()).toEqual({ bot: "linked", owner: "verified" });
     expect(f.access.canExecute(123, 42, 42)).toBe(true);
     expect(f.access.canExecute(123, 42, 73)).toBe(false);
-    f.allowed.delete(42);
-    expect(f.access.canActivate(123, 42)).toBe(false);
-    expect(f.access.canExecute(123, 42, 42)).toBe(false);
-    expect(f.access.getSetup().owner).toBe("not_allowlisted");
-    f.allowed.add(42);
     f.registry.syncConfigured({ id: "dev", name: "Dev", ownerId: 73 });
     expect(f.access.getSetup().owner).toBe("pending");
     expect(f.access.canExecute(123, 42, 42)).toBe(false);
@@ -101,19 +94,18 @@ it("blocks pending container actions and missing ready resources without exposin
   }
 });
 
-it("requires explicit permission for external bootstrap resources and fails closed for missing storage", () => {
+it("never runs tasks for a legacy externally managed row and fails closed for missing storage", () => {
   const registry = openAgentRegistry(":memory:");
   registry.syncConfigured({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
   vi.spyOn(registry, "getOwnerChat").mockReturnValue(42);
-  const ordinary = createAgentAccess(registry, "dev", new Set([42]));
-  const bootstrap = createAgentAccess(registry, "dev", new Set([42]), true);
-  expect(ordinary.canExecute(123, 42, 42)).toBe(false);
-  expect(bootstrap.canExecute(123, 42, 42)).toBe(true);
+  const access = createAgentAccess(registry, "dev");
+  expect(access.canActivate(123, 42)).toBe(true);
+  expect(access.canExecute(123, 42, 42)).toBe(false);
   registry.close();
-  expect(bootstrap.canActivate(123, 42)).toBe(false);
-  expect(bootstrap.canExecute(123, 42, 42)).toBe(false);
-  expect(bootstrap.getSetup()).toEqual({
+  expect(access.canActivate(123, 42)).toBe(false);
+  expect(access.canExecute(123, 42, 42)).toBe(false);
+  expect(access.getSetup()).toEqual({
     bot: "unavailable",
     owner: "unavailable",
   });

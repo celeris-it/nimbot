@@ -1,32 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { getHostStatus, readAgentHostConfig } from "./agent-host.js";
+import { getHostStatus } from "./agent-host.js";
 
 const config = { url: "http://agent-host:3001", token: "x".repeat(32) };
 
 describe("Agent Host connection", () => {
-  it("validates configuration without exposing credentials", () => {
-    expect(readAgentHostConfig({ AGENT_HOST_TOKEN: config.token })).toEqual(
-      config,
-    );
-    for (const url of [
-      "bad",
-      "file:///workspace",
-      "http://user:secret@host",
-      "http://host/path",
-      "http://host/?token=secret",
-    ]) {
-      expect(() =>
-        readAgentHostConfig({
-          AGENT_HOST_URL: url,
-          AGENT_HOST_TOKEN: config.token,
-        }),
-      ).toThrow("AGENT_HOST_URL must be an HTTP or HTTPS origin.");
-    }
-    expect(() => readAgentHostConfig({ AGENT_HOST_TOKEN: "secret" })).toThrow(
-      "AGENT_HOST_TOKEN must contain at least 32 characters without whitespace.",
-    );
-  });
-
   it.each([
     ["not_started", "ready"],
     ["busy", "busy"],

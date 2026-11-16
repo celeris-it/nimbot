@@ -4,7 +4,6 @@ import type { ChatBinding } from "./chat-binding.js";
 import { splitTelegramText } from "./telegram-text.js";
 import type { TaskOutcome } from "./task-queue.js";
 import { Bot, type Api } from "grammy";
-import type { ServerConfig } from "./config.js";
 import type { BotAccess } from "./agent-access.js";
 
 const failureMessages = {
@@ -48,8 +47,14 @@ export type SubmitTask = (
   updateId: number,
 ) => { ahead: number; duplicate?: boolean };
 
+/** What one agent bot needs: its own token and the one owner it serves. */
+export interface BotConfig {
+  telegramBotToken: string;
+  agent: { id: string; name: string; ownerId: number };
+}
+
 export function createBot(
-  config: ServerConfig,
+  config: BotConfig,
   onActivation: (chatId: number) => void = () => {},
   execute?: SubmitTask,
   binding?: ChatBinding,
@@ -79,7 +84,6 @@ export function createBot(
     if (
       ctx.chat?.type !== "private" ||
       !ctx.from ||
-      !config.allowedUserIds.has(ctx.from.id) ||
       ctx.from.id !== config.agent.ownerId
     ) {
       // Never let anyone else answer an approval prompt, and say so.

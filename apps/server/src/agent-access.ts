@@ -6,15 +6,13 @@ export interface BotAccess {
 }
 export interface AgentSetupAccess {
   bot: "linked" | "unlinked" | "unavailable";
-  owner: "pending" | "verified" | "not_allowlisted" | "unavailable";
+  owner: "pending" | "verified" | "unavailable";
 }
 
 /** Re-read persisted identity and setup at admission time; Host health alone is insufficient. */
 export function createAgentAccess(
   registry: ReturnType<typeof openAgentRegistry>,
   agentId: string,
-  allowedOwners: ReadonlySet<number>,
-  externallyManaged = false,
 ) {
   function linked() {
     const agent = registry.get(agentId);
@@ -30,12 +28,7 @@ export function createAgentAccess(
   function canActivate(botId: number, ownerId: number) {
     try {
       const agent = linked();
-      return (
-        !!agent &&
-        agent.botId === botId &&
-        agent.ownerId === ownerId &&
-        allowedOwners.has(ownerId)
-      );
+      return !!agent && agent.botId === botId && agent.ownerId === ownerId;
     } catch {
       return false;
     }
@@ -56,7 +49,6 @@ export function createAgentAccess(
           registry.getProvisioningCancellation(agentId) !== undefined
         )
           return false;
-        if (setup.status === "external") return externallyManaged;
         return (
           setup.status === "ready" &&
           !!registry.get(agentId)?.containerRef &&
@@ -70,15 +62,12 @@ export function createAgentAccess(
     },
     getSetup(): AgentSetupAccess {
       try {
-        const agent = registry.get(agentId);
         return {
           bot: linked() ? "linked" : "unlinked",
           owner:
-            !agent || !allowedOwners.has(agent.ownerId)
-              ? "not_allowlisted"
-              : registry.getOwnerChat(agentId) !== undefined
-                ? "verified"
-                : "pending",
+            registry.getOwnerChat(agentId) !== undefined
+              ? "verified"
+              : "pending",
         };
       } catch {
         return { bot: "unavailable", owner: "unavailable" };

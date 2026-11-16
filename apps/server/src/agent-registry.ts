@@ -689,7 +689,10 @@ export function openAgentRegistry(path: string) {
             "SELECT status, network_ref FROM agent_provisioning WHERE agent_id = ?",
           )
           .get(id);
-        if (!agent || setup?.status !== "pending" || setup.network_ref)
+        const removable =
+          setup?.status === "external" ||
+          (setup?.status === "pending" && !setup.network_ref);
+        if (!agent || !removable)
           throw new Error("Agent resources must be removed before deletion");
         const hostRef = db
           .prepare(

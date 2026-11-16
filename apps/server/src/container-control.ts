@@ -1,28 +1,9 @@
 import { createDockerApi, type DockerApi } from "./docker-api.js";
-import { isAbsolute } from "node:path";
 
 export interface ContainerConfig {
   socketPath: string;
   target: string;
   agentId: string;
-}
-export function readContainerConfig(
-  env: NodeJS.ProcessEnv,
-  agentId: string,
-): ContainerConfig | undefined {
-  const socketPath = env.DOCKER_SOCKET_PATH?.trim();
-  const target = env.AGENT_CONTAINER_NAME?.trim();
-  if (!socketPath && !target) return;
-  if (
-    !socketPath ||
-    !isAbsolute(socketPath) ||
-    !target ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(target)
-  )
-    throw new Error(
-      "Set both DOCKER_SOCKET_PATH (absolute path) and AGENT_CONTAINER_NAME to enable container controls.",
-    );
-  return { socketPath, target, agentId };
 }
 export function createContainerControl(
   config: ContainerConfig,

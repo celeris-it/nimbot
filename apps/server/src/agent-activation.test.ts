@@ -57,14 +57,13 @@ async function fixture() {
       const bot = createBot(
         {
           telegramBotToken: `${botId}:test-token`,
-          allowedUserIds: new Set([42, 73]),
           agent,
         },
         onActivation,
         undefined,
         binding,
         undefined,
-        createAgentAccess(registry, id, new Set([42, 73])),
+        createAgentAccess(registry, id),
       );
       bot.botInfo = {
         id: botId,

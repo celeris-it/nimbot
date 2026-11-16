@@ -2,37 +2,36 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it, vi } from "vitest";
-import { createBootstrapBot } from "./bootstrap-bot.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";
 import { openAgentRegistry } from "./agent-registry.js";
-import { openChatBinding } from "./chat-binding.js";
 import { openTaskStore } from "./task-queue.js";
 
 let nextUpdateId = 0;
 
-async function fixture(knownBootstrap = true) {
+/** Two independent agents, each with its own bot, owner, Host, and credentials. */
+const OWNERS: Record<string, number> = { alpha: 42, beta: 73 };
+
+async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-connections-"));
   const path = join(dir, "state.sqlite");
   const registry = openAgentRegistry(path);
-  const agent = { id: "bootstrap", name: "Bootstrap", ownerId: 42 };
-  registry.syncConfigured(agent);
-  if (knownBootstrap) {
-    registry.bindBot(agent.id, 123, "bootstrap_bot");
-    registry.setCredentialRef(agent.id, "file:bootstrap");
+  for (const [id, botId] of [
+    ["alpha", 123],
+    ["beta", 456],
+  ] as const) {
+    registry.createPending({ id, name: id, ownerId: OWNERS[id]! });
+    registry.bindBot(id, botId, `${id}_bot`);
+    registry.setCredentialRef(id, `file:${id}`);
+    registry.beginProvisioning(id);
+    registry.setHostCredentialRef(id, `file:host-${id}`);
+    registry.recordProvisioningResources(id, {
+      containerRef: id.padEnd(64, "c"),
+      volumeRef: `${id}-workspace`,
+      networkRef: `${id}-network`,
+    });
+    registry.finishProvisioning(id, "ready");
   }
-  registry.createPending({ id: "registered", name: "Registered", ownerId: 73 });
-  registry.bindBot("registered", 456, "registered_bot");
-  registry.setCredentialRef("registered", "file:registered");
-  registry.beginProvisioning("registered");
-  registry.setHostCredentialRef("registered", "file:host-saved");
-  registry.recordProvisioningResources("registered", {
-    containerRef: "c".repeat(64),
-    volumeRef: "workspace",
-    networkRef: "network",
-  });
-  registry.finishProvisioning("registered", "ready");
-  const binding = openChatBinding(path, agent);
   const polls = new Map<string, (updates: unknown[]) => void>();
   const hold = new Set<string>();
   const reached = new Set<string>();
@@ -40,8 +39,8 @@ async function fixture(knownBootstrap = true) {
   /** Remaining transient (502) failures per `id:method`. */
   const transient = new Map<string, number>();
   const identities = new Map([
-    ["bootstrap", 123],
-    ["registered", 456],
+    ["alpha", 123],
+    ["beta", 456],
   ]);
   const made: { id: string; token: string }[] = [];
   const replies: { id: string; text: string }[] = [];
@@ -104,7 +103,7 @@ async function fixture(knownBootstrap = true) {
           message_id: 1,
           date: 0,
           chat: {
-            id: id === "bootstrap" ? 42 : 73,
+            id: OWNERS[id],
             type: "private",
             first_name: "Owner",
           },
@@ -116,58 +115,30 @@ async function fixture(knownBootstrap = true) {
   };
   const secrets = {
     read: vi.fn(async (ref: string): Promise<string> =>
-      ref === "file:bootstrap" ? "123:saved-token" : "456:saved-token",
+      ref === "file:alpha" ? "123:saved-token" : "456:saved-token",
     ),
   };
   const hosts = {
-    read: async () => ({
-      url: "http://nimbot-registered:3001",
+    read: async (id: string) => ({
+      url: `http://nimbot-${id}:3001`,
       token: "b".repeat(64),
     }),
   };
   const request = vi.fn<typeof fetch>();
-  const allowed = new Set([42, 73]);
-  const status: {
-    telegram: "connecting" | "connected" | "disconnected";
-    botUsername?: string;
-    telegramFailure?: "invalid_token" | "unavailable";
-  } = { telegram: "connecting" };
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
   const taskStore = openTaskStore(path);
-  const bootstrap = createBootstrapBot(
+  const bots = createRegisteredBots(
     registry,
-    {
-      telegramBotToken: "123:environment-token",
-      allowedUserIds: allowed,
-      agent,
-    },
-    secrets,
-    binding,
-    { url: "http://agent-host:3001", token: "a".repeat(64) },
-    status,
-    taskStore,
-    request,
-    makeBot,
-    undefined,
-    [0, 0],
-  );
-  const registered = createRegisteredBots(
-    registry,
-    {
-      bootstrapId: agent.id,
-      allowedOwners: allowed,
-      statePath: path,
-      taskStore,
-    },
+    { statePath: path, taskStore },
     secrets,
     hosts,
     request,
     makeBot,
     [0, 0],
   );
-  async function healthyOwnerCanStart(id = "registered") {
-    const ownerId = id === "bootstrap" ? 42 : 73;
+  async function healthyOwnerCanStart(id = "beta") {
+    const ownerId = OWNERS[id]!;
     await vi.waitFor(() => expect(polls.has(id)).toBe(true), {
       timeout: 3000,
     });
@@ -198,9 +169,7 @@ async function fixture(knownBootstrap = true) {
   }
   return {
     registry,
-    bootstrap,
-    registered,
-    status,
+    bots,
     secrets,
     hold,
     reached,
@@ -213,11 +182,10 @@ async function fixture(knownBootstrap = true) {
     healthyOwnerCanStart,
     async close() {
       try {
-        await Promise.all([bootstrap.stop(), registered.close()]);
+        await bots.close();
       } finally {
         log.mockRestore();
         error.mockRestore();
-        binding.close();
         taskStore.close();
         registry.close();
         await rm(dir, { recursive: true, force: true });
@@ -226,19 +194,23 @@ async function fixture(knownBootstrap = true) {
   };
 }
 
-it("keeps the server's other bot usable when the saved bootstrap credential is missing without using the environment token", async () => {
+it("keeps another agent's bot usable when one saved credential is missing", async () => {
   const f = await fixture();
   f.secrets.read.mockImplementation(async (ref) => {
-    if (ref === "file:bootstrap") throw new Error("private file path");
+    if (ref === "file:alpha") throw new Error("private file path");
     return "456:saved-token";
   });
   try {
-    const failed = f.bootstrap.start();
-    f.registered.start("registered");
-    await failed;
-    expect(f.status.telegram).toBe("disconnected");
+    f.bots.start("alpha");
+    f.bots.start("beta");
+    await vi.waitFor(() =>
+      expect(f.bots.getState("alpha")).toEqual({
+        status: "failed",
+        failure: "credentials_unavailable",
+      }),
+    );
     await f.healthyOwnerCanStart();
-    expect(f.made).toEqual([{ id: "registered", token: "456:saved-token" }]);
+    expect(f.made).toEqual([{ id: "beta", token: "456:saved-token" }]);
     expect(JSON.stringify(f.error.mock.calls)).not.toContain(
       "private file path",
     );
@@ -247,43 +219,47 @@ it("keeps the server's other bot usable when the saved bootstrap credential is m
   }
 });
 
-it("starts one loop per bot, prefers saved credentials and stops the bootstrap without stopping a registered agent", async () => {
+it("starts one loop per bot and stopping one does not stop the other", async () => {
   const f = await fixture();
   try {
-    const first = f.bootstrap.start();
-    expect(f.bootstrap.start()).toBe(first);
-    f.registered.start("registered");
-    await vi.waitFor(() => expect(f.status.telegram).toBe("connected"), {
-      timeout: 3000,
-    });
-    expect(f.made.filter((item) => item.id === "bootstrap")).toEqual([
-      { id: "bootstrap", token: "123:saved-token" },
+    f.bots.start("alpha");
+    f.bots.start("alpha");
+    f.bots.start("beta");
+    await vi.waitFor(
+      () => {
+        expect(f.bots.getState("alpha").status).toBe("polling");
+        expect(f.bots.getState("beta").status).toBe("polling");
+      },
+      { timeout: 3000 },
+    );
+    expect(f.made.filter((item) => item.id === "alpha")).toEqual([
+      { id: "alpha", token: "123:saved-token" },
     ]);
-    expect(f.registry.get("bootstrap")?.botId).toBe(123);
-    await f.bootstrap.stop();
-    await first;
-    expect(f.status.telegram).toBe("disconnected");
+    expect(f.registry.get("alpha")?.botId).toBe(123);
+    await f.bots.stop("alpha");
+    expect(f.bots.getState("alpha").status).toBe("stopped");
+    expect(f.bots.getState("beta").status).toBe("polling");
     await f.healthyOwnerCanStart();
-    await f.bootstrap.start();
-    expect(f.made.filter((item) => item.id === "bootstrap")).toHaveLength(1);
   } finally {
     await f.close();
   }
 });
 
 it.each(["getMe", "getUpdates", "identity"])(
-  "contains a bootstrap %s failure while another bot continues accepting owner updates",
+  "contains an alpha %s failure while beta continues accepting owner updates",
   async (phase) => {
     const f = await fixture();
     try {
-      if (phase === "identity") f.identities.set("bootstrap", 456);
-      else f.errors.set(`bootstrap:${phase}`, 401);
-      const failed = f.bootstrap.start();
-      f.registered.start("registered");
-      await failed;
-      expect(f.status.telegram).toBe("disconnected");
-      expect(f.polls.has("bootstrap")).toBe(false);
-      expect(f.registry.get("bootstrap")?.botId).toBe(123);
+      if (phase === "identity") f.identities.set("alpha", 456);
+      else f.errors.set(`alpha:${phase}`, 401);
+      f.bots.start("alpha");
+      f.bots.start("beta");
+      await vi.waitFor(
+        () => expect(f.bots.getState("alpha").status).toBe("failed"),
+        { timeout: 3000 },
+      );
+      expect(f.polls.has("alpha")).toBe(false);
+      expect(f.registry.get("alpha")?.botId).toBe(123);
       await f.healthyOwnerCanStart();
       expect(JSON.stringify(f.error.mock.calls)).not.toContain(
         "private provider details",
@@ -295,21 +271,20 @@ it.each(["getMe", "getUpdates", "identity"])(
 );
 
 it.each(["getMe", "deleteWebhook"])(
-  "cancels bootstrap initialization during %s without affecting another polling loop",
+  "cancels initialization during %s without affecting another polling loop",
   async (phase) => {
     const f = await fixture();
     try {
-      f.hold.add(`bootstrap:${phase}`);
-      const starting = f.bootstrap.start();
-      f.registered.start("registered");
+      f.hold.add(`alpha:${phase}`);
+      f.bots.start("alpha");
+      f.bots.start("beta");
       await vi.waitFor(
-        () => expect(f.reached.has(`bootstrap:${phase}`)).toBe(true),
+        () => expect(f.reached.has(`alpha:${phase}`)).toBe(true),
         { timeout: 3000 },
       );
-      await f.bootstrap.stop();
-      await starting;
-      expect(f.status.telegram).toBe("disconnected");
-      expect(f.polls.has("bootstrap")).toBe(false);
+      await f.bots.stop("alpha");
+      expect(f.bots.getState("alpha").status).toBe("stopped");
+      expect(f.polls.has("alpha")).toBe(false);
       await f.healthyOwnerCanStart();
     } finally {
       await f.close();
@@ -317,7 +292,7 @@ it.each(["getMe", "deleteWebhook"])(
   },
 );
 
-it("does not open a bootstrap connection when shutdown occurs while reading its credential", async () => {
+it("does not open a connection when shutdown occurs while reading its credential", async () => {
   const f = await fixture();
   let release!: (token: string) => void;
   f.secrets.read.mockImplementationOnce(
@@ -327,64 +302,43 @@ it("does not open a bootstrap connection when shutdown occurs while reading its 
       }),
   );
   try {
-    const starting = f.bootstrap.start();
-    f.registered.start("registered");
-    const closing = f.bootstrap.stop();
+    f.bots.start("alpha");
+    f.bots.start("beta");
+    const closing = f.bots.stop("alpha");
     await f.healthyOwnerCanStart();
     release("123:saved-token");
     await closing;
-    await starting;
-    expect(f.made).toEqual([{ id: "registered", token: "456:saved-token" }]);
-    expect(f.status.telegram).toBe("disconnected");
+    expect(f.made).toEqual([{ id: "beta", token: "456:saved-token" }]);
+    expect(f.bots.getState("alpha").status).toBe("stopped");
   } finally {
     await f.close();
   }
 });
 
-it("keeps the bootstrap serving its owner after a registered bot's polling token is revoked", async () => {
+it("keeps alpha serving its owner after beta's polling token is revoked", async () => {
   const f = await fixture();
   try {
-    void f.bootstrap.start();
-    f.registered.start("registered");
+    f.bots.start("alpha");
+    f.bots.start("beta");
     await vi.waitFor(
       () => {
-        expect(f.status.telegram).toBe("connected");
-        expect(f.polls.has("registered")).toBe(true);
+        expect(f.bots.getState("alpha").status).toBe("polling");
+        expect(f.polls.has("beta")).toBe(true);
       },
       { timeout: 3000 },
     );
-    f.errors.set("registered:getUpdates", 401);
-    f.polls.get("registered")!([]);
+    f.errors.set("beta:getUpdates", 401);
+    f.polls.get("beta")!([]);
     await vi.waitFor(
       () =>
-        expect(f.registered.getState("registered")).toEqual({
+        expect(f.bots.getState("beta")).toEqual({
           status: "failed",
           failure: "invalid_token",
         }),
       { timeout: 3000 },
     );
-    expect(f.status.telegram).toBe("connected");
-    await f.healthyOwnerCanStart("bootstrap");
-  } finally {
-    await f.close();
-  }
-});
-
-it("links the first bootstrap identity from the environment and activates its owner", async () => {
-  const f = await fixture(false);
-  try {
-    void f.bootstrap.start();
-    await vi.waitFor(() => expect(f.status.telegram).toBe("connected"), {
-      timeout: 3000,
-    });
-    expect(f.registry.get("bootstrap")).toMatchObject({
-      botId: 123,
-      credentialRef: "env:TELEGRAM_BOT_TOKEN",
-    });
-    expect(f.made).toEqual([
-      { id: "bootstrap", token: "123:environment-token" },
-    ]);
-    await f.healthyOwnerCanStart("bootstrap");
+    expect(f.bots.getState("alpha").status).toBe("polling");
+    await f.healthyOwnerCanStart("alpha");
   } finally {
     await f.close();
   }
@@ -393,43 +347,51 @@ it("links the first bootstrap identity from the environment and activates its ow
 it("retries transient identity-check failures a bounded number of times, then reports the failure per bot", async () => {
   const f = await fixture();
   try {
-    f.transient.set("bootstrap:getMe", 2);
-    f.transient.set("registered:getMe", 3);
-    const started = f.bootstrap.start();
-    f.registered.start("registered");
-    await vi.waitFor(() => expect(f.status.telegram).toBe("connected"), {
-      timeout: 3000,
-    });
-    expect(f.status.telegramFailure).toBeUndefined();
+    f.transient.set("alpha:getMe", 2);
+    f.transient.set("beta:getMe", 3);
+    f.bots.start("alpha");
+    f.bots.start("beta");
+    await vi.waitFor(
+      () => expect(f.bots.getState("alpha").status).toBe("polling"),
+      { timeout: 3000 },
+    );
     await vi.waitFor(() =>
-      expect(f.registered.getState("registered")).toEqual({
+      expect(f.bots.getState("beta")).toEqual({
         status: "failed",
         failure: "telegram_unavailable",
       }),
     );
-    await f.healthyOwnerCanStart("bootstrap");
-    void started;
+    await f.healthyOwnerCanStart("alpha");
   } finally {
     await f.close();
   }
 });
 
-it("shows a revoked bootstrap token without retrying it or stopping other bots", async () => {
+it("reports a revoked token once, without retrying it or stopping other bots", async () => {
   vi.stubEnv("NIMBOT_LOG", "");
   const f = await fixture();
   try {
-    f.errors.set("bootstrap:getMe", 401);
-    f.registered.start("registered");
-    await f.bootstrap.start();
-    expect(f.status).toMatchObject({
-      telegram: "disconnected",
-      telegramFailure: "invalid_token",
-    });
-    expect(f.reached.has("bootstrap:getMe") && f.error.mock.calls.length).toBe(
-      1,
+    f.errors.set("alpha:getMe", 401);
+    f.bots.start("alpha");
+    f.bots.start("beta");
+    await vi.waitFor(
+      () =>
+        expect(f.bots.getState("alpha")).toEqual({
+          status: "failed",
+          failure: "invalid_token",
+        }),
+      { timeout: 3000 },
     );
     await f.healthyOwnerCanStart();
+    // One log entry for alpha: the definitive rejection was not retried.
+    const failures = f.error.mock.calls
+      .map(([line]) => JSON.parse(String(line)))
+      .filter((entry) => entry.event === "bot.connection_failed");
+    expect(failures).toEqual([
+      expect.objectContaining({ agentId: "alpha", reason: "invalid_token" }),
+    ]);
   } finally {
     await f.close();
+    vi.unstubAllEnvs();
   }
 });

@@ -1,5 +1,0 @@
-# Compatibility override. Docker provisioning is now enabled in compose.yaml.
-services:
-  server:
-    environment:
-      DOCKER_SOCKET_PATH: /var/run/docker.sock

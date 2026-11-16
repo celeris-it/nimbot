@@ -5,30 +5,6 @@ export interface AgentHostConfig {
 
 export type HostStatus = "ready" | "busy" | "unavailable";
 
-export function readAgentHostConfig(env: NodeJS.ProcessEnv): AgentHostConfig {
-  let url: URL;
-  try {
-    url = new URL(env.AGENT_HOST_URL || "http://agent-host:3001");
-  } catch {
-    throw new Error("AGENT_HOST_URL must be an HTTP or HTTPS origin.");
-  }
-  if (
-    !["http:", "https:"].includes(url.protocol) ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  )
-    throw new Error("AGENT_HOST_URL must be an HTTP or HTTPS origin.");
-  const token = env.AGENT_HOST_TOKEN ?? "";
-  if (token.length < 32 || /\s/.test(token))
-    throw new Error(
-      "AGENT_HOST_TOKEN must contain at least 32 characters without whitespace.",
-    );
-  return { url: url.origin, token };
-}
-
 /** Readiness verifies workspace access, not model/provider availability. */
 export async function getHostStatus(
   config: AgentHostConfig,
