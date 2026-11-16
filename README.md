@@ -210,7 +210,10 @@ implementations, including destination checks and uncertain-response handling.
 The bot task service now uses the shared routed queue and supports Discord
 progress, final delivery, cancellation, and acknowledged owner approvals through
 server transport callbacks. Gateway admission and independent channel lifecycle
-wiring remain pending.
+wiring remain pending. An agent task-service registry now shares one runner
+across transport clients, rejects stale loads after shutdown, and exposes a
+Telegram integration hook so polling shutdown does not close an externally
+owned runner. Server startup wiring is still pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

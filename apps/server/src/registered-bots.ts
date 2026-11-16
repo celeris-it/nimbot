@@ -41,6 +41,8 @@ export function createRegisteredBots(
     taskStore: TaskStore;
     /** Upper bound for waiting on one task; omit for the default. */
     taskWaitMs?: number;
+    /** Shared agent runner owned outside the Telegram polling lifecycle. */
+    tasks?: (agentId: string) => Promise<ReturnType<typeof createBotTasks>>;
   },
   secrets: Pick<Awaited<ReturnType<typeof openBotSecrets>>, "read">,
   hosts: Pick<Awaited<ReturnType<typeof openHostCredentials>>, "read">,
@@ -77,17 +79,19 @@ export function createRegisteredBots(
       if (connection.controller.signal.aborted) return;
       binding = openChatBinding(config.statePath, agent);
       const access = createAgentAccess(registry, id);
-      const tasks = createBotTasks({
-        store: config.taskStore,
-        agentId: id,
-        ownerId: () => registry.get(id)?.ownerId ?? agent.ownerId,
-        run: withAgentInstructions(
-          createHostTasks(host, request, undefined, config.taskWaitMs),
-          () => registry.get(id)?.instructions ?? "",
-        ),
-        decide: createHostApprovals(host, request),
-        access,
-      });
+      const tasks = config.tasks
+        ? await config.tasks(id)
+        : createBotTasks({
+            store: config.taskStore,
+            agentId: id,
+            ownerId: () => registry.get(id)?.ownerId ?? agent.ownerId,
+            run: withAgentInstructions(
+              createHostTasks(host, request, undefined, config.taskWaitMs),
+              () => registry.get(id)?.instructions ?? "",
+            ),
+            decide: createHostApprovals(host, request),
+            access,
+          });
       connection.tasks = tasks;
       const bot = makeBot(
         {
@@ -172,7 +176,7 @@ export function createRegisteredBots(
           agentId: id,
           reason: connection.state.failure,
         });
-      connection.tasks?.close();
+      if (!config.tasks) connection.tasks?.close();
       try {
         binding?.close();
       } catch {
