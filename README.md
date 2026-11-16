@@ -6,7 +6,7 @@ Nimbot is a self-hosted platform for creating and managing persistent AI agents 
 
 You install Nimbot on a Linux server with Docker Compose, sign in to a minimal administration panel, link a bot created in BotFather for each agent, and talk to each agent through its own distinct Telegram bot and private chat. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-> **Project status:** MVP implementation and automated checks are in place, including panel-based setup from an empty installation. Installation through Docker Compose is maintainer-validated on macOS with Docker Desktop. Clean-Linux installation and live Telegram-to-OpenCode acceptance remain pending before `v0.1.0`. The full plan is in [MVP.md](MVP.md).
+> **Project status:** MVP implementation and automated checks are in place, including panel-based setup from an empty installation. Installation through Docker Compose is maintainer-validated on macOS with Docker Desktop and on a clean Linux server. Live Telegram-to-OpenCode acceptance remains pending before `v0.1.0`. The full plan is in [MVP.md](MVP.md).
 
 ## What the MVP does
 
