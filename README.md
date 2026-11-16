@@ -157,7 +157,10 @@ Start the compiled server with `pnpm start:server`. Generate its administrator p
 | `tests/` | Integration and panel end-to-end tests |
 | `docs/` | Installation and operations guides |
 
-Default Vitest tests need no Docker, Telegram, or AI provider connection. They cover authentication, CSRF, bot linking, owner authorization, routing, task persistence, cancellation, deduplication, and recovery. Panel browser tests use compiled assets and simulated services. Opt-in Docker tests verify lifecycle, isolation, response-loss recovery, and container hardening across recreation and restarts:
+Default Vitest tests need no Docker, Telegram, or AI provider connection. A
+multichannel integration test exercises simultaneous Telegram and Discord tasks
+through the real Host API with a simulated engine, including shared context,
+owner approvals, duplicate submissions, and server restart recovery. They cover authentication, CSRF, bot linking, owner authorization, routing, task persistence, cancellation, deduplication, and recovery. Panel browser tests use compiled assets and simulated services. Opt-in Docker tests verify lifecycle, isolation, response-loss recovery, and container hardening across recreation and restarts:
 
 ```sh
 docker build -f infrastructure/docker/agent-host.Dockerfile -t nimbot-agent-host .
