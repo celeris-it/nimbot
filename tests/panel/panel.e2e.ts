@@ -379,3 +379,182 @@ test("keeps forms within mobile widths and retains readable theme contrast", asy
     fullPage: true,
   });
 });
+
+test("filters and searches the fleet, selects previews, and reconciles removed agents", async ({
+  page,
+}) => {
+  let agents = [
+    {
+      id: "dev",
+      name: "Developer",
+      botUsername: "developer_bot",
+      provisioning: "ready",
+      botConnection: { status: "polling" },
+      setupAccess: { bot: "linked", owner: "verified" },
+    },
+    {
+      id: "writer",
+      name: "Writer",
+      botUsername: "writer_bot",
+      provisioning: "pending",
+      botConnection: { status: "not_started" },
+      setupAccess: { bot: "linked", owner: "pending" },
+    },
+    {
+      id: "research",
+      name: "Research",
+      botUsername: "research_bot",
+      provisioning: "failed",
+      botConnection: { status: "blocked" },
+      setupAccess: { bot: "linked", owner: "pending" },
+    },
+  ];
+  await page.route("**/api/status", (route) =>
+    route.fulfill({ json: { agents } }),
+  );
+  await login(page);
+  const overview = page.getByLabel("Agent overview");
+  await expect(
+    overview.locator(".stat").filter({ hasText: "Total agents" }),
+  ).toContainText("03");
+  await expect(
+    overview.locator(".stat").filter({ hasText: "Configured" }),
+  ).toContainText("01");
+  await expect(
+    overview.locator(".stat").filter({ hasText: "Needs attention" }),
+  ).toContainText("01");
+  const filters = page.getByRole("group", { name: "Filter agents" });
+  await filters.getByRole("button", { name: /Needs attention/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Select Research" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Select Developer" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "Manage", exact: true }),
+  ).toHaveAttribute("href", "/agents/research/setup");
+  await page.getByRole("searchbox", { name: "Search agents" }).fill("writer");
+  await expect(
+    page.getByRole("heading", { name: "No matching agents." }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(
+    page.getByRole("searchbox", { name: "Search agents" }),
+  ).toHaveValue("");
+  await page.getByRole("button", { name: "Select Writer" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page
+      .getByRole("article", { name: "Selected agent" })
+      .getByRole("heading", { name: "Writer" }),
+  ).toBeVisible();
+  agents = agents.filter((agent) => agent.id !== "writer");
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect(page.getByRole("button", { name: "Select Writer" })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("button", { name: "Select Developer" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page
+    .getByRole("searchbox", { name: "Search agents" })
+    .fill("RESEARCH_BOT");
+  await expect(
+    page.getByRole("button", { name: "Select Research" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Select Developer" }),
+  ).toHaveCount(0);
+});
+
+test("renders the reference-inspired dashboard across screen sizes without external assets", async ({
+  page,
+}) => {
+  const violations: string[] = [];
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      /Content Security Policy|Refused to/.test(message.text())
+    )
+      violations.push(message.text());
+  });
+  const external: string[] = [];
+  page.on("request", (request) => {
+    if (!request.url().startsWith("http://127.0.0.1:3199"))
+      external.push(request.url());
+  });
+  await page.route("**/api/status", (route) =>
+    route.fulfill({
+      json: {
+        agents: [
+          {
+            id: "dev",
+            name: "Developer",
+            botUsername: "nimbot_developer_bot",
+            provisioning: "ready",
+            botConnection: { status: "polling" },
+            setupAccess: { bot: "linked", owner: "verified" },
+          },
+          {
+            id: "research",
+            name: "Research assistant",
+            botUsername: "nimbot_research_bot",
+            provisioning: "ready",
+            botConnection: { status: "polling" },
+            setupAccess: { bot: "linked", owner: "pending" },
+          },
+          {
+            id: "writer",
+            name: "Content studio",
+            botUsername: "nimbot_content_bot",
+            provisioning: "provisioning",
+            botConnection: { status: "connecting" },
+            setupAccess: { bot: "linked", owner: "pending" },
+          },
+          {
+            id: "ops",
+            name: "Operations",
+            botUsername: "nimbot_ops_bot",
+            provisioning: "failed",
+            botConnection: { status: "blocked" },
+            setupAccess: { bot: "linked", owner: "pending" },
+          },
+          {
+            id: "personal",
+            name: "Personal assistant",
+            botUsername: "nimbot_personal_bot",
+            provisioning: "ready",
+            botConnection: { status: "polling" },
+            setupAccess: { bot: "linked", owner: "verified" },
+          },
+        ],
+      },
+    }),
+  );
+  await login(page);
+  await page.evaluate(() => document.fonts.ready);
+  expect(
+    await page.evaluate(() =>
+      document.fonts.check('400 14px "Manrope Variable"'),
+    ),
+  ).toBe(true);
+  for (const width of [1440, 768, 375, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      `overflow at ${width}px`,
+    ).toBe(true);
+    await expect(
+      page.getByRole("link", { name: "Manage", exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `test-results/dashboard-${width}.png`,
+      fullPage: true,
+    });
+  }
+  expect(violations).toEqual([]);
+  expect(external).toEqual([]);
+});

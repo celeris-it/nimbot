@@ -6,7 +6,8 @@
     PanelStatus,
   } from "../../server/src/panel-contracts.js";
   import { ApiError, post, request } from "./api.js";
-  import { botLabel } from "./labels.js";
+  import Dashboard from "./Dashboard.svelte";
+  import { Icon } from "./components/index.js";
   import AgentForm from "./AgentForm.svelte";
   import AgentStatus from "./AgentStatus.svelte";
 
@@ -221,6 +222,7 @@
     );
   }
   function click(event: MouseEvent) {
+    if (event.defaultPrevented) return;
     const link =
       event.target instanceof Element ? event.target.closest("a") : null;
     if (
@@ -269,14 +271,53 @@
 <svelte:head><title>{title} · Nimbot</title></svelte:head>
 <a id="skip" href="#main">Skip to main content</a>
 <header>
-  <a href="/">nimbot<span aria-hidden="true"> /</span></a>
-  {#if session && path !== "/login"}<button
-      class="btn"
-      disabled={busy}
-      onclick={() => mutate("/api/logout", {}, expired)}>Sign out</button
-    >{:else}<small>ON YOUR SERVER</small>{/if}
+  <a href="/" data-ui="wordmark" aria-label="Nimbot home"
+    ><svg
+      width="30"
+      height="30"
+      viewBox="0 0 32 32"
+      fill="none"
+      aria-hidden="true"
+      ><path
+        d="M16 2v28M2 16h28M6 6l20 20M6 26 26 6"
+        stroke="currentColor"
+        stroke-width="2"
+      /><circle cx="16" cy="16" r="5" fill="currentColor" /></svg
+    >nimbot<span data-ui="wordmark-dot">.</span></a
+  >
+  {#if session && path !== "/login"}
+    <nav aria-label="Main navigation">
+      <a href="/" aria-current={path === "/" ? "page" : undefined}
+        ><Icon name="grid" size={15} /> Agents</a
+      >{#if session.capabilities.createAgent}<a
+          href="/agents/new"
+          aria-current={path === "/agents/new" ? "page" : undefined}
+          ><Icon name="plus" size={15} /> New agent</a
+        >{/if}
+    </nav>
+    <div data-ui="header-actions">
+      <span data-ui="installation"
+        ><Icon name="shield" size={15} /> Private installation</span
+      ><button
+        class="btn btn-ghost"
+        disabled={busy}
+        onclick={() => mutate("/api/logout", {}, expired)}
+        ><Icon name="logout" size={16} /> Sign out</button
+      >
+    </div>
+  {:else}<span data-ui="installation"
+      ><Icon name="shield" size={15} /> SELF-HOSTED & PRIVATE</span
+    >{/if}
 </header>
-<main id="main" tabindex="-1">
+<main
+  id="main"
+  tabindex="-1"
+  data-page={path === "/login"
+    ? "login"
+    : path === "/"
+      ? "dashboard"
+      : "detail"}
+>
   <p id="form-error" role="alert" tabindex="-1">{error}</p>
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if updateError}<p role="status">{updateError}</p>
@@ -315,44 +356,11 @@
     <h1 tabindex="-1">Status unavailable.</h1>
     <a class="btn" href="/">Back to panel</a>
   {:else if path === "/"}
-    <small>LOCAL INSTALLATION</small>
-    <h1 tabindex="-1">Your agents.</h1>
-    {#if status.agents.length === 0}<p>
-        No agents yet.{session?.capabilities.createAgent
-          ? " Create your first agent."
-          : ""}
-      </p>{/if}
-    {#if session?.capabilities.createAgent}<a class="btn" href="/agents/new"
-        >Create agent</a
-      >{/if}
-    <p>One Telegram bot per agent. Every conversation in its place.</p>
-    {#each status.agents as item (item.id)}
-      <article class="card">
-        <h2>{item.name}</h2>
-        <p class="badge">Setup: {item.provisioning}</p>
-        <dl>
-          <dt>Bot</dt>
-          <dd>{item.botUsername ? `@${item.botUsername}` : "Pending"}</dd>
-          <dt>Telegram bot</dt>
-          <dd>{botLabel(item)}</dd>
-        </dl>
-        <a class="btn" href={`/agents/${encodeURIComponent(item.id)}/setup`}
-          >Manage</a
-        >
-        {#if item.botUsername}<a
-            class="btn"
-            href={`https://t.me/${item.botUsername}`}>Open chat in Telegram</a
-          >{/if}
-      </article>
-    {/each}
-    <footer>
-      <p>
-        {session?.capabilities.createAgent
-          ? "Registered bots connect after provisioning."
-          : "Configure server provisioning to create agents from the panel."}
-      </p>
-      <button class="btn" onclick={() => load()}>Refresh status</button>
-    </footer>
+    <Dashboard
+      agents={status.agents}
+      canCreate={session?.capabilities.createAgent ?? false}
+      refresh={() => load()}
+    />
   {:else if path === "/agents/new"}
     {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
   {:else if agent && route}

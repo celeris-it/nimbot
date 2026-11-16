@@ -846,3 +846,21 @@ it("reports cancellation, unavailable capabilities and generic conflict errors",
   expect(failed.status).toBe(409);
   expect(await failed.text()).not.toContain("private-error");
 });
+
+it("serves the bundled variable font with its MIME type and same-origin font policy", async () => {
+  const { app } = setup();
+  const entry = await app.request("/login");
+  expect(entry.headers.get("content-security-policy")).toContain(
+    "font-src 'self'",
+  );
+  const html = await entry.text();
+  const stylesheet = html.match(/href="([^"]+\.css)"/)![1]!;
+  const css = await (await app.request(stylesheet)).text();
+  const font = css.match(/url\((?:"|')?([^\s)"']+\.woff2)(?:"|')?\)/)![1]!;
+  const fontPath = new URL(font, `http://localhost:3000${stylesheet}`).pathname;
+  const response = await app.request(fontPath);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toBe("font/woff2");
+  expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(1000);
+  expect((await app.request("/assets/missing.woff2")).status).toBe(404);
+});

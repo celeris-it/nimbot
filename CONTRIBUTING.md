@@ -53,6 +53,10 @@ In a second terminal, run `pnpm dev:panel` and open `http://127.0.0.1:5173`. Vit
 
 `pnpm test:panel` uses the compiled production assets and a local Hono fixture with simulated agent services; it does not connect to Docker, Telegram, or an AI provider. Rebuild after changing the panel or server. Browser tests run separately from Vitest in CI.
 
+The panel's reusable UI lives in `apps/panel/src/components/` and is exported from its `index.ts`. It includes actions, surfaces, metrics, status badges, initial avatars, filter groups, search fields, empty states, progress meters, a generic snippet-based table, and an activity feed. Table rows require a stable `rowKey`; activity entries require an ISO timestamp. The table and activity feed are available for future screens and do not add product features by themselves.
+
+Use the `nimbot` dark theme with `dark` and `muted` surfaces defined in `panel.css`, with daisyUI's semantic color tokens. The Manrope variable font is bundled locally; the panel makes no external font requests. Summaries derive from the existing status API: completed setup and Telegram polling must not be presented as proof of runtime availability. Search, filters, and the selected preview stay local to the dashboard.
+
 ## Pull requests
 
 - Add tests with new behaviour and keep `pnpm test` free of Docker and network access.

@@ -87,6 +87,7 @@ export function createPanel(
         scriptSrc: ["'self'"],
         styleSrc: ["'self'"],
         connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
         formAction: ["'self'"],
         frameAncestors: ["'none'"],
         baseUri: ["'none'"],
@@ -123,14 +124,16 @@ export function createPanel(
   };
   app.get("/assets/:file", async (c) => {
     const file = c.req.param("file");
-    if (!/^[a-zA-Z0-9_-]+\.(js|css)$/.test(file)) return c.notFound();
+    if (!/^[a-zA-Z0-9_-]+\.(js|css|woff2)$/.test(file)) return c.notFound();
     try {
       const data = await readFile(new URL(`assets/${file}`, panelDist));
       return c.body(data, 200, {
         "Content-Type":
           extname(file) === ".js"
             ? "text/javascript; charset=utf-8"
-            : "text/css; charset=utf-8",
+            : extname(file) === ".woff2"
+              ? "font/woff2"
+              : "text/css; charset=utf-8",
       });
     } catch {
       return c.notFound();
