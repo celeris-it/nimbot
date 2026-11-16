@@ -364,3 +364,18 @@ it("fails clearly when the image tag is missing or cannot be pinned", async () =
       ),
     ).rejects.toThrow("immutable ID");
 });
+
+it("accepts an installation identity only in the trusted deployment configuration", async () => {
+  const { readProvisioningConfig } = await import("./agent-provisioning.js");
+  const env = {
+    AGENT_HOST_IMAGE: "nimbot-agent-host:latest",
+    SERVER_CONTAINER_NAME: "nimbot-server",
+    DOCKER_SOCKET_PATH: "/var/run/docker.sock",
+  };
+  expect(
+    readProvisioningConfig({ ...env, NIMBOT_INSTALLATION_ID: "a".repeat(32) }),
+  ).toHaveProperty("installationId", "a".repeat(32));
+  expect(() =>
+    readProvisioningConfig({ ...env, NIMBOT_INSTALLATION_ID: "invalid" }),
+  ).toThrow("Invalid NIMBOT_INSTALLATION_ID");
+});

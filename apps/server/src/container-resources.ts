@@ -45,6 +45,7 @@ export function createContainerResources(
     image: string;
     serverContainerRef?: string;
     taskTimeoutSeconds?: number;
+    installationId?: string;
   },
   call: DockerApi = createDockerApi(config.socketPath),
 ) {
@@ -123,6 +124,9 @@ export function createContainerResources(
         throw new Error("Invalid internal API token");
       const operationId = randomUUID();
       const labels = {
+        ...(config.installationId
+          ? { "io.nimbot.installation": config.installationId }
+          : {}),
         [label]: agentId,
         "io.nimbot.provisioning-operation": operationId,
       };

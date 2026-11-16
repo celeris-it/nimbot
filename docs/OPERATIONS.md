@@ -1,6 +1,12 @@
 # Operating Nimbot: backup, restore, troubleshooting, and security limits
 
-See [INSTALL.md](INSTALL.md) for installation. Commands below assume you run them in the directory that holds `compose.yaml`.
+See [INSTALL.md](INSTALL.md) for installation. Commands below assume you run them in the directory that holds `compose.yaml` (`~/.local/share/nimbot` by default with the installer). For an installer-managed deployment, export its project name before using the Compose commands below:
+
+```sh
+export COMPOSE_PROJECT_NAME="nimbot-$(head -n 1 .nimbot-installation)"
+```
+
+Use the same Docker context/socket used during installation. The installer prints a logs command with its explicit socket. Do not edit or delete `.nimbot-installation`; it identifies the installation for retries and cleanup. Include it in your protected configuration backup along with `.env`.
 
 ## What holds your data
 
@@ -28,6 +34,7 @@ for v in $(docker volume ls -q | grep -E 'server-state|agent-workspace|agent-eng
     tar -czf "/backup/$v.tar.gz" -C /data .
 done
 cp .env backup/env.backup && chmod 600 backup/env.backup
+if [ -f .nimbot-installation ]; then cp .nimbot-installation backup/installation.backup; fi
 chmod -R go-rwx backup
 docker compose start
 ```
@@ -46,6 +53,10 @@ for f in backup/*.tar.gz; do
     tar -xzpf "/backup/$v.tar.gz" -C /data
 done
 cp backup/env.backup .env
+if [ -f backup/installation.backup ]; then
+  cp backup/installation.backup .nimbot-installation
+  export COMPOSE_PROJECT_NAME="nimbot-$(head -n 1 .nimbot-installation)"
+fi
 docker compose up -d
 ```
 
@@ -69,7 +80,7 @@ Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Lo
 
 **Tasks fail or never finish.** If every task fails, authenticate the provider (`opencode auth list`, `opencode auth login` in the agent's container); readiness does not check provider access. A task longer than `TASK_TIMEOUT_SECONDS` is stopped. After a Host restart, a task that was running is reported as interrupted; send it again. Use `/stop` to cancel a running task; queued messages behind it still run. If an approval message got no answer, the action was denied.
 
-**Creating an agent fails.** The creation form appears only when provisioning is configured (INSTALL.md section 4). Typical causes: the bot token is already bound to another agent, `AGENT_HOST_IMAGE` still points at an image resolved before a rebuild (recreate the server to resolve the new ID), `SERVER_CONTAINER_NAME` is wrong, or the server cannot read the Docker socket (`DOCKER_SOCKET_GID`). The setup page shows pending, in progress, failed, interrupted, or cancelled; a failed setup keeps its resources and volumes. Interrupted work, for example after a server restart, is never retried automatically; use **Retry setup** on the agent's page. It keeps created resources and can fail until existing resources are reconciled.
+**Creating an agent fails.** The creation form appears only when provisioning is configured (the installer does this automatically). Typical causes: the bot token is already bound to another agent, `AGENT_HOST_IMAGE` still points at an image resolved before a rebuild (recreate the server to resolve the new ID), `SERVER_CONTAINER_NAME` is wrong, or the server cannot read the Docker socket (`DOCKER_SOCKET_GID`). The setup page shows pending, in progress, failed, interrupted, or cancelled; a failed setup keeps its resources and volumes. Interrupted work, for example after a server restart, is never retried automatically; use **Retry setup** on the agent's page. It keeps created resources and can fail until existing resources are reconciled.
 
 **A container is reported missing or stopped.** The panel inspects Docker on each refresh. Start a stopped container from the agent's page. A missing container is never recreated silently, and its volumes stay in place.
 

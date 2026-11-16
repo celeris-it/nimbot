@@ -34,7 +34,11 @@ export function readProvisioningConfig(env: NodeJS.ProcessEnv) {
     throw new Error(
       "AGENT_HOST_IMAGE must be an image tag or a SHA256 image ID or digest.",
     );
+  const installationId = env.NIMBOT_INSTALLATION_ID?.trim();
+  if (installationId && !/^(?:[a-f0-9]{32}|manual)$/.test(installationId))
+    throw new Error("Invalid NIMBOT_INSTALLATION_ID.");
   const config = {
+    ...(installationId ? { installationId } : {}),
     image,
     serverContainerRef,
     socketPath,
@@ -78,6 +82,7 @@ export function createAgentProvisioning(
     image: string;
     serverContainerRef?: string;
     taskTimeoutSeconds?: number;
+    installationId?: string;
   },
   call: DockerApi = createDockerApi(config.socketPath),
   request: typeof fetch = fetch,

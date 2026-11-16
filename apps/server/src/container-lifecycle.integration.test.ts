@@ -16,6 +16,7 @@ it.skipIf(!image)(
       process.env.NIMBOT_TEST_DOCKER_SOCKET ?? "/var/run/docker.sock";
     const agentId = `test-${randomBytes(8).toString("hex")}`;
     const token = randomBytes(32).toString("hex");
+    const installationId = randomBytes(16).toString("hex");
     const call = createDockerApi(socketPath);
     const serverAgentId = `${agentId}-server`;
     const serverResources = createContainerResources({
@@ -30,6 +31,7 @@ it.skipIf(!image)(
     const resources = createContainerResources({
       socketPath,
       image: image!,
+      installationId,
       serverContainerRef: `nimbot-${serverAgentId}`,
     });
     const control = createContainerControl({
@@ -86,6 +88,20 @@ it.skipIf(!image)(
         const inspection = JSON.parse(
           (await call(`/containers/${refs.containerRef}/json`)).body,
         );
+        expect(inspection.Config.Labels["io.nimbot.installation"]).toBe(
+          installationId,
+        );
+        for (const path of [
+          `/networks/${refs.networkRef}`,
+          ...["workspace", "engine", "tasks"].map(
+            (suffix) => `/volumes/nimbot-${agentId}-${suffix}`,
+          ),
+        ]) {
+          const resource = JSON.parse((await call(path)).body);
+          expect(resource.Labels["io.nimbot.installation"]).toBe(
+            installationId,
+          );
+        }
         expect(inspection.Config.User).toBe("1000:1000");
         expect(inspection.HostConfig.CapDrop).toEqual(["ALL"]);
         expect(inspection.HostConfig.SecurityOpt).toContain(

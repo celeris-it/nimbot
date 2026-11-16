@@ -343,3 +343,19 @@ it("passes only the validated task timeout into the container environment", asyn
     "TASK_TIMEOUT_SECONDS=45",
   ]);
 });
+
+it("labels every provisioned resource with its installation identity", async () => {
+  const f = fixture();
+  const installationId = "a".repeat(32);
+  const manager = createContainerResources(
+    { socketPath: "/unused", image, installationId },
+    f.call,
+  );
+  await manager.create("dev", token, () => {});
+  const creates = f.requests.filter((r) => r.method === "POST");
+  expect(creates).toHaveLength(5);
+  for (const request of creates)
+    expect(
+      (request.body as { Labels: Record<string, string> }).Labels,
+    ).toHaveProperty("io.nimbot.installation", installationId);
+});

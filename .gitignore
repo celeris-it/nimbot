@@ -119,3 +119,8 @@ dist
 # Browser test artifacts
 playwright-report/
 test-results/
+
+# Installer identity and temporary configuration
+.nimbot-installation
+.env.*
+!.env.example
