@@ -34,7 +34,7 @@ export function createDiscordNotifications(
     text: string,
     approval?: {
       task: DiscordQueuedTask;
-      buttons: { label: string; customId: string; allow: boolean }[];
+      buttons?: { label: string; customId: string; allow: boolean }[];
     },
   ): Promise<NotificationResult & { messageId?: string }> {
     let sentParts = 0;
@@ -137,7 +137,7 @@ export function createDiscordNotifications(
         const message = await post(`/channels/${dm.data.id}/messages`, {
           content,
           allowed_mentions: { parse: [] },
-          ...(approval
+          ...(approval?.buttons
             ? {
                 components: [
                   {
@@ -178,7 +178,7 @@ export function createDiscordNotifications(
     text: string,
     approval?: {
       task: DiscordQueuedTask;
-      buttons: { label: string; customId: string; allow: boolean }[];
+      buttons?: { label: string; customId: string; allow: boolean }[];
     },
   ): Promise<NotificationResult & { messageId?: string }> {
     if (!text.trim())
@@ -216,6 +216,9 @@ export function createDiscordNotifications(
   }
   return {
     send,
+    async sendTask(task: DiscordQueuedTask, content: string) {
+      return send(task.agentId, content, { task });
+    },
     async sendApproval(
       task: DiscordQueuedTask,
       content: string,

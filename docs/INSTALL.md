@@ -106,12 +106,13 @@ The panel can configure, replace, test, and remove the connection. Use **Send
 Discord test** to send a fixed message to the saved owner. **Check last test
 status** reuses the request without sending again. If delivery is uncertain,
 check your DMs before starting another test. Five new attempts per minute per
-agent are allowed. Telegram continues to receive
-tasks, approvals, progress, and automatic results. Discord may restrict DMs when
+agent are allowed. Private text messages on either configured bot enter the
+agent's shared queue. Progress, approvals, and results return to the channel that
+received the task. Use `/stop` in the Discord owner DM to cancel its active task. Discord may restrict DMs when
 the owner blocks the bot, disables direct messages, or does not share a server
 with it. The server now opens a Gateway connection using the direct-message intent;
-privileged intents are not required. Incoming Discord DMs are saved, but their
-execution is still under development.
+privileged intents are not required. Discord conversations now use the shared agent task runner; the broader
+conversational feature is still under development.
 
 To replace a token or owner, submit both fields again. Removing the connection
 keeps the agent and its Telegram connection; revoke or delete the Discord bot

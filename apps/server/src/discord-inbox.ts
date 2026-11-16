@@ -23,6 +23,7 @@ export function openDiscordInbox(path: string) {
         message_id TEXT NOT NULL,
         content TEXT NOT NULL,
         created_at INTEGER NOT NULL,
+        handled_at INTEGER,
         UNIQUE(bot_id, message_id)
       );`);
   } catch (error) {
@@ -116,6 +117,27 @@ export function openDiscordInbox(path: string) {
         db.exec("ROLLBACK");
         throw error;
       }
+    },
+    pending(agentId: string) {
+      return db
+        .prepare(
+          `SELECT m.id, m.bot_id AS botId, m.owner_id AS ownerId, m.channel_id AS channelId, m.message_id AS messageId, m.content
+        FROM discord_incoming_messages m JOIN agent_discord_connections d ON d.agent_id = m.agent_id AND d.bot_id = m.bot_id AND d.owner_id = m.owner_id
+        JOIN agents a ON a.id = m.agent_id WHERE m.agent_id = ? AND m.handled_at IS NULL AND a.deleted_at IS NULL ORDER BY m.rowid`,
+        )
+        .all(agentId) as unknown as {
+        id: string;
+        botId: string;
+        ownerId: string;
+        channelId: string;
+        messageId: string;
+        content: string;
+      }[];
+    },
+    markHandled(id: string) {
+      db.prepare(
+        "UPDATE discord_incoming_messages SET handled_at = ? WHERE id = ?",
+      ).run(Date.now(), id);
     },
     getBinding(agentId: string) {
       const binding = db

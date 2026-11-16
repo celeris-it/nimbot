@@ -36,7 +36,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
 - Replace revoked bot tokens securely and retain persistent volumes by default when deleting an agent.
 
-The panel uses one locally configured administrator account. Each agent has one Telegram owner; everyone else is ignored, including owners of other agents. There is no management bot, shared selected agent, or `/use` workflow. Telegram remains the interface for tasks, progress, approvals, and results.
+The panel uses one locally configured administrator account. Each agent has one Telegram owner; everyone else is ignored, including owners of other agents. There is no management bot, shared selected agent, or `/use` workflow. Tasks, progress, approvals, and results use their originating channel. Optional Discord conversations are under development.
 
 ### Telegram commands
 
@@ -190,30 +190,14 @@ explicitly; check your DMs before starting a new test. Configuration changes inv
 connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.
 
-A server-side Discord Gateway transport is under development for the next phase.
-The server starts a Gateway per configured agent, filters owner DMs, and handles
-heartbeat and session recovery. Configuration replacement, removal, and shutdown
-close the corresponding connection independently. Incoming messages atomically
-link the owner DM and enter a SQLite inbox with deduplication by bot and message
-ID. Stale connection identities are rejected. Discord messages are stored but
-not yet executed. Queue claiming and draining now serialize by agent across
-conversations while preserving the original delivery destination. Discord task
-origins can now be stored as string IDs with platform-specific deduplication
-and claimed in the same FIFO as Telegram tasks. The shared queue processor
-now executes both origins through one callback and routes progress, results,
-and cancellation by the saved origin. Inbox admission and bot lifecycle
-integration with this processor remain pending. Discord approval keys now bind
-the active task, agent, bot, owner, channel, and message, and expire or become
-unusable after restart. The Gateway filters owner button interactions; button
-delivery and deferred interaction acknowledgments now have tested HTTP
-implementations, including destination checks and uncertain-response handling.
-The bot task service now uses the shared routed queue and supports Discord
-progress, final delivery, cancellation, and acknowledged owner approvals through
-server transport callbacks. Gateway admission and independent channel lifecycle
-wiring remain pending. An agent task-service registry now shares one runner
-across transport clients, rejects stale loads after shutdown, and exposes a
-Telegram integration hook so polling shutdown does not close an externally
-owned runner. Server startup wiring is still pending.
+Discord conversations are under development. The server now runs a Gateway per
+configured agent, persists owner DMs, and admits them to the same FIFO and Host
+runner as Telegram. Progress, results, errors, and approval buttons return to the
+saved origin; `/stop` in the Discord owner DM cancels its running task. Approval
+interactions verify the active task and owner before applying a decision.
+Task services belong to agents independently of their channel connections.
+Inbox admission is idempotent after restart; interrupted running tasks are not
+replayed. Panel conversational status and broader recovery coverage remain pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

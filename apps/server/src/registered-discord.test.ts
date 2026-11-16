@@ -139,3 +139,100 @@ it("keeps credential failures isolated from other agents", async () => {
     await f.close();
   }
 });
+
+it("executes persisted Gateway messages without Telegram and cancels from the owner DM", async () => {
+  const { createAgentTaskServices } = await import("./agent-task-services.js");
+  const { openTaskStore } = await import("./task-queue.js");
+  const { HostTaskError } = await import("./host-tasks.js");
+  const f = await fixture();
+  const store = openTaskStore(":memory:");
+  const outcomes: string[] = [];
+  const run = vi.fn(
+    async (
+      prompt: string,
+      _report?: (message: string) => void,
+      signal?: AbortSignal,
+    ) => {
+      if (prompt === "long")
+        await new Promise<void>((_resolve, reject) =>
+          signal!.addEventListener("abort", () =>
+            reject(new HostTaskError("cancelled")),
+          ),
+        );
+      return prompt;
+    },
+  );
+  const services = createAgentTaskServices(async (agentId) => ({
+    agentId,
+    store,
+    ownerId: () => 42,
+    run,
+    discord: {
+      admit: () => true,
+      progress: async () => {},
+      sendApproval: async () => "1",
+      deliver: async (_task, outcome) => {
+        outcomes.push(outcome.ok ? outcome.output : outcome.kind);
+      },
+    },
+  }));
+  const manager = createRegisteredDiscord(
+    f.registry,
+    { read: async () => "secret" },
+    f.inbox,
+    f.makeGateway,
+    { get: (id) => services.get(id), inbox: f.inbox },
+  );
+  try {
+    const identity = f.registry.getDiscordConnection("a")!;
+    f.inbox.accept("a", identity, {
+      id: "1",
+      channelId: "999",
+      content: "saved before restart",
+    });
+    store.enqueueDiscord({
+      agentId: "a",
+      prompt: "saved before restart",
+      origin: {
+        platform: "discord",
+        botId: identity.botId,
+        ownerId: identity.ownerId,
+        channelId: "999",
+        messageId: "1",
+      },
+    });
+    f.inbox.markHandled(f.inbox.pending("a")[0]!.id);
+    await manager.start("a");
+    const runner = await services.get("a");
+    await runner.idle();
+    expect(outcomes).toEqual(["saved before restart"]);
+    f.callbacks[0]!.message({
+      id: "1",
+      channelId: "999",
+      content: "saved before restart",
+    });
+    await runner.idle();
+    expect(run).toHaveBeenCalledOnce();
+    f.callbacks[0]!.message({ id: "2", channelId: "999", content: "long" });
+    await vi.waitFor(() =>
+      expect(
+        runner.discordControl.isRunning({
+          platform: "discord",
+          botId: identity.botId,
+          ownerId: identity.ownerId,
+          channelId: "999",
+          messageId: "2",
+        }),
+      ).toBe(true),
+    );
+    f.callbacks[0]!.message({ id: "3", channelId: "999", content: "/stop" });
+    await runner.idle();
+    expect(outcomes).toEqual(["saved before restart", "cancelled"]);
+    expect(f.inbox.pending("a")).toEqual([]);
+  } finally {
+    manager.close();
+    services.close();
+    store.close();
+    await f.close();
+  }
+});

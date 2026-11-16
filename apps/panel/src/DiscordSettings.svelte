@@ -40,8 +40,9 @@
 <section class="card" aria-label="Discord connection">
   <h2>Discord notifications</h2>
   <p>
-    Optional connection for outbound direct messages. Tasks, approvals, and
-    automatic results still use Telegram.
+    Optional Discord connection. Text messages join this agent's shared queue.
+    Progress, approvals, and results return to the channel that received the
+    task.
   </p>
   {#if agent.discord?.connection}
     <dl>

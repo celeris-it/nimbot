@@ -1,3 +1,7 @@
+import { createAgentTaskServices } from "./agent-task-services.js";
+import { createHostTasks, createHostApprovals } from "./host-tasks.js";
+import { withAgentInstructions } from "./agent-instructions.js";
+import type { DiscordQueuedTask } from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
 import { openNotificationStore } from "./notification-store.js";
@@ -84,11 +88,12 @@ async function main(): Promise<void> {
   let statePath;
   let taskStore;
   let notificationStore;
-  let discordInbox;
-  let registry;
+  let discordInbox!: ReturnType<typeof openDiscordInbox>;
+  let registry!: ReturnType<typeof openAgentRegistry>;
   let botSecrets;
   let discordSecrets;
-  let hostCredentials;
+  let hostCredentials:
+    Awaited<ReturnType<typeof openHostCredentials>> | undefined;
   try {
     const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
@@ -124,12 +129,69 @@ async function main(): Promise<void> {
     taskStore.close();
     registry.close();
   });
+  const discord = createDiscordConfiguration(registry, discordSecrets);
+  const discordDelivery = createDiscordNotifications(discord.resolve);
+  function discordAdmit(task: DiscordQueuedTask) {
+    const connection = registry.getDiscordConnection(task.agentId);
+    const setup = registry.getProvisioning(task.agentId);
+    return (
+      connection?.botId === task.origin.botId &&
+      connection.ownerId === task.origin.ownerId &&
+      discordInbox.getBinding(task.agentId) === task.origin.channelId &&
+      setup?.status === "ready" &&
+      !!registry.get(task.agentId)?.containerRef &&
+      !!setup.volumeRef &&
+      !!setup.networkRef &&
+      !!registry.getHostCredentialRef(task.agentId) &&
+      registry.getContainerOperation(task.agentId)?.status !== "pending" &&
+      registry.getProvisioningCancellation(task.agentId) === undefined
+    );
+  }
+  async function sendDiscordTask(task: DiscordQueuedTask, text: string) {
+    if (!discordAdmit(task))
+      throw new Error("Discord destination is unavailable");
+    const result = await discordDelivery.sendTask(task, text);
+    if (result.status !== "delivered")
+      throw new Error("Discord delivery could not be confirmed");
+  }
+  const taskServices = createAgentTaskServices(async (id) => {
+    if (!hostCredentials || !registry.get(id))
+      throw new Error("Agent is unavailable");
+    const host = await hostCredentials.read(id);
+    return {
+      agentId: id,
+      store: taskStore,
+      ownerId: () => registry.get(id)?.ownerId ?? 0,
+      run: withAgentInstructions(
+        createHostTasks(host, fetch, undefined, taskWaitMs(taskTimeoutSeconds)),
+        () => registry.get(id)?.instructions ?? "",
+      ),
+      decide: createHostApprovals(host),
+      access: createAgentAccess(registry, id),
+      discord: {
+        admit: discordAdmit,
+        progress: (task, message) =>
+          sendDiscordTask(task, `Working: ${message}`),
+        deliver: (task, outcome) =>
+          sendDiscordTask(
+            task,
+            outcome.ok
+              ? outcome.output || "The task finished without a text response."
+              : outcome.kind === "cancelled"
+                ? "The task was cancelled. You can send a new task."
+                : "The task could not be completed. Check the agent status before trying again.",
+          ),
+        sendApproval: discordDelivery.sendApproval,
+      },
+    };
+  });
   const registeredBots = hostCredentials
     ? createRegisteredBots(
         registry,
         {
           statePath,
           taskStore,
+          tasks: (id) => taskServices.get(id),
           taskWaitMs: taskWaitMs(taskTimeoutSeconds),
         },
         botSecrets,
@@ -152,6 +214,7 @@ async function main(): Promise<void> {
     ? createProvisioningControl(registry, async (id, signal) => {
         const refs = await provisionTask(id, signal);
         registeredBots!.start(id);
+        void registeredDiscord.start(id);
         return refs;
       })
     : undefined;
@@ -163,7 +226,10 @@ async function main(): Promise<void> {
     removeResources && hostCredentials
       ? createAgentDeletion({
           registry,
-          stopBot: async (id) => registeredBots!.stop(id),
+          stopBot: async (id) => {
+            await registeredBots!.stop(id);
+            taskServices.stop(id);
+          },
           removeResources,
           removeBotSecret: async (ref) => {
             try {
@@ -203,12 +269,15 @@ async function main(): Promise<void> {
     registry,
     discordSecrets,
     discordInbox,
+    undefined,
+    hostCredentials
+      ? { get: (id) => taskServices.get(id), inbox: discordInbox }
+      : undefined,
   );
-  const discord = createDiscordConfiguration(registry, discordSecrets);
   const notifications = createDurableNotifications(
     notificationStore,
     createNotifications({
-      discord: createDiscordNotifications(discord.resolve),
+      discord: discordDelivery,
       ...(registeredBots ? { telegram: registeredBots.notifications } : {}),
     }),
   );
@@ -352,6 +421,7 @@ async function main(): Promise<void> {
   log.info("server.panel_listening", { origin: panelConfig.origin });
   const stop = () => {
     registeredDiscord.close();
+    taskServices.close();
     provisioningShutdown.abort();
     void registeredBots?.close().catch(() => {
       log.error("server.registered_bots_stop_failed");
