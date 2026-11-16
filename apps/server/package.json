@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.8",
-    "daisyui": "^5.8.0",
     "grammy": "^1.46.0",
     "hono": "^4.13.18"
   }

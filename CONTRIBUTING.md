@@ -24,7 +24,10 @@ Run these before opening a pull request. CI runs the same commands.
 ```sh
 pnpm lint        # ESLint and Prettier check (pnpm format fixes formatting)
 pnpm typecheck
+pnpm build       # Builds panel assets required by the server and its tests
 pnpm test
+pnpm exec playwright install chromium
+pnpm test:panel
 ```
 
 Tests that need Docker are opt-in and skipped by default. To run them, build the Agent Host image and pass its ID:
@@ -35,6 +38,20 @@ NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.I
 ```
 
 They create uniquely named resources and remove them afterwards.
+
+## Panel development
+
+The panel lives in `apps/panel/` and uses Svelte 5, TypeScript, Vite, and daisyUI. Hono serves the production build from the same origin as the API. Run `pnpm build` before `pnpm start:server`; asset paths do not depend on the working directory.
+
+For frontend development, start the configured server with its public origin set to Vite's address:
+
+```sh
+PANEL_URL=http://127.0.0.1:5173 PANEL_HOST=127.0.0.1 PANEL_PORT=3000 pnpm start:server
+```
+
+In a second terminal, run `pnpm dev:panel` and open `http://127.0.0.1:5173`. Vite proxies `/api` to `http://127.0.0.1:3000`, preserving the browser's Origin header so the server's existing CSRF check still applies. Use local HTTP for this development setup; production remote access requires HTTPS.
+
+`pnpm test:panel` uses the compiled production assets and a local Hono fixture with simulated agent services; it does not connect to Docker, Telegram, or an AI provider. Rebuild after changing the panel or server. Browser tests run separately from Vitest in CI.
 
 ## Pull requests
 

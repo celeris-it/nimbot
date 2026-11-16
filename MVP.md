@@ -113,7 +113,8 @@ The MVP is complete when:
 | Language | TypeScript |
 | Runtime | Node.js LTS |
 | Package Manager | pnpm |
-| HTTP Framework and Administration Panel | Hono; minimal server-served UI |
+| HTTP Framework | Hono |
+| Administration Panel | Svelte 5, TypeScript, Vite, daisyUI; static assets served by Hono |
 | Telegram Bot | grammY |
 | AI Engine | OpenCode |
 | Agent Protocol | Agent Client Protocol (ACP) |
@@ -201,6 +202,8 @@ The panel supports only:
 - Delete an agent with explicit confirmation and a separate explicit choice to delete its persistent data. Retaining the volume is the default.
 
 Authentication and authorization protect every administration page and API endpoint. Passwords are stored as hashes; sessions use expiring HttpOnly cookies, Secure cookies when served over HTTPS, and SameSite restrictions. State-changing requests have CSRF protection and login attempts are rate limited. Remote deployment requires HTTPS; local access may use loopback HTTP. Bot tokens are accepted only through authenticated requests, masked after saving, and never returned to the browser in subsequent responses.
+
+The administration panel requires JavaScript and uses Svelte 5 with Vite and daisyUI. Hono serves its compiled assets and authenticated same-origin API in the existing server process. List and detail views refresh every five seconds while visible; forms submit without document reloads. Session cookies, server-side validation, Origin checks, rate limits, and explicit destructive-action confirmations remain authoritative. There is no separate frontend service in production.
 
 Web task chat, terminal access, file browsing, analytics, and additional panel accounts are deferred. Telegram remains the interface for tasks, progress, results, and approvals.
 

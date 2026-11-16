@@ -27,6 +27,8 @@ Fresh installations start with zero agents. After signing in, create each agent 
 
 ## Architecture
 
+The administration panel uses Svelte 5, TypeScript, Vite, and daisyUI. Hono serves the compiled frontend and authenticated API from the same process and origin. The panel requires JavaScript, submits forms without reloading, and refreshes agent states every five seconds while visible.
+
 One Nimbot Server serves the authenticated administration panel, maintains a distinct Telegram bot connection per agent, and manages one container per agent on the same machine. The panel uses a single locally configured administrator account. Each agent has one configured Telegram owner; there is no shared active-agent selection or `/use` command. Bot tokens are entered only in the authenticated panel and remain on the server. The owner must open each agent bot and press Start before it can send private notifications.
 
 ```text

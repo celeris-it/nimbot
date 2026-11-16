@@ -79,12 +79,15 @@ function setup() {
 }
 
 describe("panel access", () => {
-  it("protects the page and API while serving the login and local CSS", async () => {
+  it("protects the page and API while serving the login and local assets", async () => {
     const { app } = setup();
     expect((await app.request("/")).headers.get("location")).toBe("/login");
     expect((await app.request("/api/status")).status).toBe(401);
     expect((await app.request("/login")).status).toBe(200);
-    expect((await app.request("/assets/panel.css")).status).toBe(200);
+    const html = await (await app.request("/login")).text();
+    const asset = html.match(/src="([^"]+\.js)"/)![1]!;
+    expect((await app.request(asset)).status).toBe(200);
+    expect((await app.request("/assets/missing.js")).status).toBe(404);
   });
   it("logs in with an opaque HttpOnly cookie and exposes only public status", async () => {
     const { app, login } = setup();
@@ -99,7 +102,7 @@ describe("panel access", () => {
       "form-action 'self'",
     );
     const text = await page.text();
-    expect(text).toContain("No agents yet");
+    expect(text).toContain('id="app"');
     expect(text).not.toContain(passwordHash);
     expect(text).not.toContain(password);
     expect(
@@ -497,39 +500,63 @@ it("authenticates agent registration and validates owner fields without echoing 
   expect(await failed.text()).not.toContain("private-token-details");
 });
 
-it("creates agents through the panel form and displays saved setup state without tokens", async () => {
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+function apiSetup(overrides: PanelDeps = {}) {
+  const records = new Map([
+    ["dev", { name: "Developer", instructions: "Be brief" }],
+    ["other", { name: "Other", instructions: "Other instructions" }],
+  ]);
   const calls: unknown[] = [];
-  let ready = true;
-  const app = createPanelPositional(
-    config,
-    () => ({ telegram: "connected" }),
-    Date.now,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    async (input) => {
-      calls.push(input);
-      if (input.token === "bad-secret") throw new Error("private-error");
-      return { agentId: "agent-test", provisioning: "ready" };
+  const settings: NonNullable<PanelDeps["agentSettings"]> = {
+    get: (id) => records.get(id),
+    save: (id, name, instructions) => {
+      records.set(id, { name, instructions });
     },
-    (id) =>
-      id === "agent-test"
-        ? {
-            name: "Developer",
-            botUsername: "dev_bot",
-            provisioning: ready ? "ready" : "failed",
-          }
-        : undefined,
+    saveToken: async (id, token) => {
+      if (token !== "valid-secret") throw new Error("private-token-details");
+      calls.push([id, token]);
+    },
+    cancelProvisioning: (id) => {
+      calls.push(["cancel", id]);
+    },
+    containerStatus: async () => "stopped",
+    hostStatus: async () => "unavailable",
+    stopObservation: async () => ({
+      availability: "available",
+      task: { id: "private-task-id", status: "running" },
+      observedAt: 1234,
+      observationId: "private-observation-id",
+      finalStatus: null,
+    }),
+  };
+  const app = createPanel(
+    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
+    {
+      listAgentIds: () => [...records.keys()],
+      getAgentSetup: (id) =>
+        records.has(id)
+          ? {
+              name: records.get(id)!.name,
+              botUsername: "developer_bot",
+              provisioning: "ready",
+              setupAccess: { bot: "linked", owner: "pending" },
+            }
+          : undefined,
+      agentSettings: settings,
+      containerAction: async (id, action) => {
+        calls.push([id, action]);
+      },
+      deleteAgent: async (id, deleteData) => {
+        calls.push([id, deleteData]);
+        records.delete(id);
+      },
+      ...overrides,
+    },
   );
   const post = (
     path: string,
-    body: string,
+    fields: Record<string, string> = {},
     cookie = "",
-    origin = config.origin,
+    origin = "http://localhost:3000",
   ) =>
     app.request(path, {
       method: "POST",
@@ -538,1122 +565,284 @@ it("creates agents through the panel form and displays saved setup state without
         Cookie: cookie,
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      body,
+      body: new URLSearchParams(fields),
     });
-  expect((await app.request("/agents/new")).status).toBe(303);
-  const login = await post(
-    "/login",
-    new URLSearchParams({ password }).toString(),
+  const login = async () =>
+    (await post("/api/login", { password })).headers
+      .get("set-cookie")!
+      .split(";")[0]!;
+  const get = (path: string, cookie: string) =>
+    app.request(path, { headers: { Cookie: cookie } });
+  return { app, post, login, get, calls, records };
+}
+
+it("authenticates JSON session endpoints with the same cookie and invalidates logout", async () => {
+  const { app, post, login, get } = apiSetup();
+  expect((await app.request("/api/session")).status).toBe(401);
+  expect((await post("/api/login", { password: "wrong" })).status).toBe(401);
+  const cookie = await login();
+  expect(await (await get("/api/session", cookie)).json()).toEqual({
+    authenticated: true,
+    capabilities: { createAgent: false },
+  });
+  expect(
+    (await post("/api/logout", {}, cookie, "http://attacker.example")).status,
+  ).toBe(403);
+  expect(await (await post("/api/logout", {}, cookie)).json()).toEqual({
+    authenticated: false,
+  });
+  expect((await get("/api/session", cookie)).status).toBe(401);
+});
+
+it("returns browser-safe detail and capabilities without task identifiers or credentials", async () => {
+  const { get, login } = apiSetup();
+  const cookie = await login();
+  const response = await get("/api/agents/dev", cookie);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  const body = await response.json();
+  expect(body).toMatchObject({
+    id: "dev",
+    settings: { name: "Developer", instructions: "Be brief" },
+    containerState: "stopped",
+    hostState: "unavailable",
+    setupAccess: { bot: "linked", owner: "pending" },
+    capabilities: {
+      edit: true,
+      replaceToken: true,
+      container: true,
+      cancel: false,
+      delete: true,
+    },
+    stopObservation: { hadTask: true, observedAt: 1234, finalStatus: null },
+  });
+  expect(JSON.stringify(body)).not.toMatch(
+    /private-|credential|"token":|password/i,
   );
-  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-  const headers = { Cookie: cookie };
-  const form = await (await app.request("/agents/new", { headers })).text();
-  expect(form).toContain('type="password"');
-  expect(form).toContain('inputmode="numeric"');
+  expect((await get("/api/agents/missing", cookie)).status).toBe(404);
+});
+
+it("edits only the selected agent, rejects malformed fields and hides service errors", async () => {
+  const { post, login, records, get } = apiSetup();
+  const cookie = await login();
+  for (const values of [
+    { name: "", instructions: "" },
+    { name: "a".repeat(129), instructions: "" },
+    { name: "Dev", instructions: "x".repeat(4001) },
+  ]) {
+    expect(
+      (await post("/api/agents/dev/settings", values, cookie)).status,
+    ).toBe(400);
+  }
   expect(
     (
       await post(
-        "/agents/new",
-        "name=Dev&ownerId=42&token=secret",
+        "/api/agents/dev/settings",
+        { name: "Edited", instructions: "New instructions" },
         cookie,
-        "https://other.example",
       )
     ).status,
-  ).toBe(403);
-  const invalid = await post(
-    "/agents/new",
-    new URLSearchParams({
-      name: "<script>alert(1)</script>",
-      instructions: "Be brief",
-      ownerId: "42",
-      token: "bad-secret",
-    }).toString(),
-    cookie,
-  );
-  const errorHtml = await invalid.text();
-  expect(invalid.status).toBe(400);
-  expect(errorHtml).toContain("Be brief");
-  expect(errorHtml).toContain('value="42"');
-  expect(errorHtml).not.toContain("bad-secret");
-  expect(errorHtml).not.toContain("private-error");
-  expect(errorHtml).not.toContain("<script>");
-  const created = await post(
-    "/agents/new",
-    "name=Developer&ownerId=42&token=good-secret",
-    cookie,
-  );
-  expect(created.status).toBe(303);
-  expect(created.headers.get("location")).toBe("/agents/agent-test/setup");
-  const result = await (
-    await app.request("/agents/agent-test/setup", { headers })
-  ).text();
-  expect(result).toContain("Container available.");
-  expect(result).toContain("is still pending");
-  expect(result).not.toContain("good-secret");
-  ready = false;
+  ).toBe(200);
+  expect(records.get("dev")).toEqual({
+    name: "Edited",
+    instructions: "New instructions",
+  });
+  expect(records.get("other")!.name).toBe("Other");
   expect(
-    await (await app.request("/agents/agent-test/setup", { headers })).text(),
-  ).toContain("Do not create the same agent again");
-  expect((await app.request("/agents/missing/setup", { headers })).status).toBe(
-    404,
+    (
+      await post(
+        "/api/agents/missing/settings",
+        { name: "X", instructions: "" },
+        cookie,
+      )
+    ).status,
+  ).toBe(404);
+  expect((await get("/api/agents/dev", cookie)).status).toBe(200);
+  const failed = apiSetup({
+    agentSettings: {
+      get: () => ({ name: "Dev", instructions: "" }),
+      save: () => {
+        throw new Error("private-error");
+      },
+    },
+  });
+  const response = await failed.post(
+    "/api/agents/dev/settings",
+    { name: "X", instructions: "" },
+    await failed.login(),
   );
-  expect(calls).toHaveLength(2);
+  expect(response.status).toBe(500);
+  expect(await response.text()).not.toContain("private-error");
 });
 
-it("edits the requested registered agent without changing another agent", async () => {
-  const { openAgentRegistry } = await import("./agent-registry.js");
-  const registry = openAgentRegistry(":memory:");
-  registry.createPending({ id: "first", name: "First", ownerId: 42 });
-  registry.createPending({ id: "second", name: "Second", ownerId: 42 });
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const app = createPanelPositional(
-    config,
-    () => ({ telegram: "connected" }),
-    Date.now,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    (id) => {
-      const agent = registry.get(id);
-      return agent
-        ? { name: agent.name, botUsername: null, provisioning: "pending" }
-        : undefined;
-    },
-    {
-      get: (id) => registry.get(id),
-      save: (id, name, instructions) =>
-        registry.updateSettings(id, name, instructions),
-    },
-  );
-  const post = (
-    path: string,
-    body: string,
-    cookie = "",
-    origin = config.origin,
-  ) =>
-    app.request(path, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-  try {
-    expect((await app.request("/agents/first/settings")).status).toBe(303);
-    expect(
-      (await post("/agents/first/settings", "name=Edited&instructions=New"))
-        .status,
-    ).toBe(303);
-    const login = await post(
-      "/login",
-      new URLSearchParams({ password }).toString(),
+it("passes a replacement token only to the selected agent's verification service", async () => {
+  const { post, login, calls } = apiSetup();
+  const cookie = await login();
+  for (const token of ["", "x".repeat(257), "wrong-secret"]) {
+    const response = await post("/api/agents/dev/token", { token }, cookie);
+    expect(response.status).toBe(400);
+    expect(await response.text()).not.toMatch(
+      /wrong-secret|private-token-details/,
     );
-    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-    const headers = { Cookie: cookie };
+  }
+  const response = await post(
+    "/api/agents/dev/token",
+    { token: "valid-secret" },
+    cookie,
+  );
+  expect(await response.json()).toEqual({ saved: true });
+  expect(calls).toEqual([["dev", "valid-secret"]]);
+});
+
+it("rejects duplicate form fields, foreign origins and unauthenticated new API calls", async () => {
+  const { app, post, login } = apiSetup();
+  const cookie = await login();
+  for (const suffix of ["settings", "token"]) {
+    expect((await post(`/api/agents/dev/${suffix}`, {})).status).toBe(401);
     expect(
       (
         await post(
-          "/agents/first/settings",
-          "name=Edited&instructions=New",
+          `/api/agents/dev/${suffix}`,
+          {},
           cookie,
-          "https://other.example",
+          "http://attacker.example",
         )
       ).status,
     ).toBe(403);
-    const invalid = await post(
-      "/agents/first/settings",
-      new URLSearchParams({
-        name: "",
-        instructions: "<script>test</script>",
-      }).toString(),
-      cookie,
-    );
-    expect(invalid.status).toBe(400);
-    const error = await invalid.text();
-    expect(error).not.toContain("<script>");
-    expect(error).toContain('action="/agents/first/settings"');
-    const saved = await post(
-      "/agents/first/settings",
-      "name=Edited&instructions=New",
-      cookie,
-    );
-    expect(saved.status).toBe(303);
-    expect(saved.headers.get("location")).toBe(
-      "/agents/first/settings?saved=1",
-    );
-    expect(registry.get("first")).toMatchObject({
-      name: "Edited",
-      instructions: "New",
-    });
-    expect(registry.get("second")).toMatchObject({
-      name: "Second",
-      instructions: "",
-    });
-    const refreshed = await (
-      await app.request("/agents/first/settings?saved=1", { headers })
-    ).text();
-    expect(refreshed).toContain("Changes saved.");
-    expect(refreshed).toContain('value="Edited"');
-    expect(
-      await (await app.request("/agents/first/setup", { headers })).text(),
-    ).toContain('href="/agents/first/settings"');
-    expect(
-      (
-        await post(
-          "/agents/missing/settings",
-          "name=Edited&instructions=New",
-          cookie,
-        )
-      ).status,
-    ).toBe(404);
-    expect(
-      (await app.request("/agents/missing/settings", { headers })).status,
-    ).toBe(404);
-  } finally {
-    registry.close();
   }
+  const response = await app.request("/api/agents/dev/settings", {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      Origin: "http://localhost:3000",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "name=One&name=Two&instructions=",
+  });
+  expect(response.status).toBe(400);
 });
 
-it("replaces only the requested agent's token after verifying the same bot", async () => {
-  const { mkdtemp, rm, readdir } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  const { openAgentRegistry } = await import("./agent-registry.js");
-  const { openBotSecrets } = await import("./bot-secret.js");
-  const { createBotTokenUpdate } = await import("./bot-token-update.js");
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-panel-token-"));
-  const registry = openAgentRegistry(join(dir, "server.sqlite"));
-  const secrets = await openBotSecrets(join(dir, "secrets"));
-  for (const [id, botId] of [
-    ["first", 123],
-    ["second", 456],
-  ] as const) {
-    registry.createPending({ id, name: id, ownerId: 42 });
-    registry.bindBot(id, botId, `${id}_bot`);
-    registry.setCredentialRef(id, `file:telegram-${id}-original`);
+it("serves known deep links with a strict production CSP and returns 404 for unknown routes", async () => {
+  const { get, login } = apiSetup();
+  const cookie = await login();
+  for (const path of [
+    "/",
+    "/agents/dev/setup",
+    "/agents/dev/settings",
+    "/agents/dev/token",
+    "/agents/dev/container/stop",
+    "/agents/dev/delete",
+  ]) {
+    const response = await get(path, cookie);
+    expect(response.status, path).toBe(200);
+    expect(await response.text()).toContain('id="app"');
+    const csp = response.headers.get("content-security-policy")!;
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).not.toMatch(/unsafe-inline|unsafe-eval/);
   }
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const app = createPanelPositional(
-    config,
-    () => ({ telegram: "connected" }),
-    Date.now,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      get: (id) => registry.get(id),
-      save: (id, name, instructions) =>
-        registry.updateSettings(id, name, instructions),
-      saveToken: (id, token) =>
-        createBotTokenUpdate(id, registry, secrets, async () => ({
-          id: token === "123:valid_secret" ? 123 : 456,
-        }))(token),
-    },
-  );
-  const post = (
-    path: string,
-    body: string,
-    cookie = "",
-    origin = config.origin,
-  ) =>
-    app.request(path, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-  try {
-    expect((await app.request("/agents/first/token")).status).toBe(303);
-    expect(
-      (await post("/agents/first/token", "token=123%3Avalid_secret")).status,
-    ).toBe(303);
-    const login = await post(
-      "/login",
-      new URLSearchParams({ password }).toString(),
-    );
-    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-    const headers = { Cookie: cookie };
-    const form = await (
-      await app.request("/agents/first/token", { headers })
-    ).text();
-    expect(form).toContain("Agent: first");
-    expect(form).toContain('action="/agents/first/token"');
-    expect(
-      (
-        await post(
-          "/agents/first/token",
-          "token=123%3Avalid_secret",
-          cookie,
-          "https://other.example",
-        )
-      ).status,
-    ).toBe(403);
-    const rejected = await post(
-      "/agents/first/token",
-      "token=456%3Awrong_secret",
-      cookie,
-    );
-    expect(rejected.status).toBe(400);
-    const error = await rejected.text();
-    expect(error).not.toContain("wrong_secret");
-    expect(error).toContain('href="/agents/first/token"');
-    expect(await readdir(join(dir, "secrets"))).toEqual([]);
-    const saved = await post(
-      "/agents/first/token",
-      "token=123%3Avalid_secret",
-      cookie,
-    );
-    expect(saved.status).toBe(303);
-    expect(saved.headers.get("location")).toBe("/agents/first/token?saved=1");
-    expect(await secrets.read(registry.get("first")!.credentialRef!)).toBe(
-      "123:valid_secret",
-    );
-    expect(registry.get("second")!.credentialRef).toBe(
-      "file:telegram-second-original",
-    );
-    const confirmation = await (
-      await app.request("/agents/first/token?saved=1", { headers })
-    ).text();
-    expect(confirmation).toContain("Token saved.");
-    expect(confirmation).not.toContain("valid_secret");
-    expect(
-      (await post("/agents/missing/token", "token=123%3Avalid_secret", cookie))
-        .status,
-    ).toBe(404);
-    expect(
-      (await app.request("/agents/missing/token", { headers })).status,
-    ).toBe(404);
-  } finally {
-    registry.close();
-    await rm(dir, { recursive: true, force: true });
-  }
+  for (const path of [
+    "/unknown",
+    "/api/unknown",
+    "/assets/missing.js",
+    "/agents/dev/unknown",
+    "/agent/settings",
+    "/settings/telegram",
+    "/agents/missing/setup",
+  ])
+    expect((await get(path, cookie)).status, path).toBe(404);
 });
 
-it("starts and confirms stopping the selected agent while showing observed runtime state", async () => {
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  let running = false;
-  let operation: import("./agent-registry.js").ContainerOperation | undefined;
-  const calls: unknown[] = [];
-  const app = createPanelPositional(
-    config,
-    () => ({ telegram: "connected" }),
-    Date.now,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    async (id, action) => {
-      calls.push({ id, action });
-      running = action === "start";
-      operation = { action, status: "completed", updatedAt: 1 };
-    },
-    undefined,
-    (id) =>
-      id === "dev"
-        ? {
-            name: "Developer",
-            botUsername: "dev_bot",
-            provisioning: "ready",
-            containerOperation: operation,
-          }
-        : undefined,
-    {
-      get: () => undefined,
-      save: () => {},
-      containerStatus: async () => (running ? "running" : "stopped"),
-      hostStatus: async () => (running ? "ready" : "unavailable"),
-    },
-  );
-  const post = (
-    path: string,
-    body: string,
-    cookie = "",
-    origin = config.origin,
-  ) =>
-    app.request(path, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-  expect((await post("/agents/dev/container", "action=start")).status).toBe(
-    303,
-  );
-  const login = await post(
-    "/login",
-    new URLSearchParams({ password }).toString(),
-  );
-  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-  const headers = { Cookie: cookie };
+it("retains traditional POST adapters, defaults deletion to retention and requires confirmation", async () => {
+  const { post, login, calls } = apiSetup();
+  const cookie = await login();
   expect(
-    await (await app.request("/agents/dev/setup", { headers })).text(),
-  ).toContain("Container stopped.");
+    (
+      await post(
+        "/agents/dev/settings",
+        { name: "Edited", instructions: "Hello" },
+        cookie,
+      )
+    ).headers.get("location"),
+  ).toBe("/agents/dev/settings?saved=1");
+  expect(
+    (await post("/agents/dev/container", { action: "stop" }, cookie)).status,
+  ).toBe(400);
   expect(
     (
       await post(
         "/agents/dev/container",
-        "action=start",
+        { action: "stop", confirm: "dev" },
         cookie,
-        "https://other.example",
       )
     ).status,
-  ).toBe(403);
-  expect(
-    (await post("/agents/dev/container", "action=stop", cookie)).status,
-  ).toBe(400);
-  expect(calls).toEqual([]);
-  const start = await post("/agents/dev/container", "action=start", cookie);
-  expect(start.status).toBe(303);
-  expect(start.headers.get("location")).toBe("/agents/dev/setup");
-  expect(
-    await (await app.request("/agents/dev/setup", { headers })).text(),
-  ).toContain("Container available.");
-  const confirmation = await (
-    await app.request("/agents/dev/container/stop", { headers })
-  ).text();
-  expect(confirmation).toContain("Stop Developer?");
-  expect(confirmation).toMatch(/name="confirm"\s+value="dev"/);
-  expect(calls).toHaveLength(1);
-  expect(
-    (await post("/agents/dev/container", "action=stop&confirm=dev", cookie))
-      .status,
   ).toBe(303);
-  const stopped = await (
-    await app.request("/agents/dev/setup", { headers })
-  ).text();
-  expect(stopped).toContain("Container stopped.");
-  expect(stopped.replace(/\s+/g, " ")).toContain("Stop — Completed.");
-  expect(stopped.replace(/\s+/g, " ")).toContain("may be interrupted");
+  expect((await post("/agents/dev/delete", {}, cookie)).status).toBe(400);
+  expect(
+    (await post("/agents/dev/delete", { confirm: "dev" }, cookie)).status,
+  ).toBe(303);
   expect(calls).toEqual([
-    { id: "dev", action: "start" },
-    { id: "dev", action: "stop" },
+    ["dev", "stop"],
+    ["dev", false],
   ]);
   expect(
-    (await app.request("/agents/missing/container/stop", { headers })).status,
-  ).toBe(404);
-  expect(
-    (await post("/agents/missing/container", "action=start", cookie)).status,
-  ).toBe(404);
+    (
+      await post(
+        "/api/agents/other/delete",
+        { confirm: "other", deleteData: "true" },
+        cookie,
+      )
+    ).status,
+  ).toBe(200);
+  expect(calls.at(-1)).toEqual(["other", true]);
 });
 
-it.each([
-  [undefined, "An active task may be interrupted"],
-  [
-    { availability: "unavailable" },
-    "Could not check whether a task was active",
-  ],
-  [{ availability: "available", task: null }, "No task was active"],
-  [
-    {
-      availability: "available",
-      task: { id: "private-task-id", status: "running" },
-    },
-    "Result unconfirmed",
-  ],
-  [
-    {
-      availability: "available",
-      task: { id: "private-task-id", status: "running" },
-      finalStatus: "interrupted",
-    },
-    "Task interrupted.",
-  ],
-  [
-    {
-      availability: "available",
-      task: { id: "private-task-id", status: "running" },
-      finalStatus: "completed",
-    },
-    "The task finished before an interruption was confirmed.",
-  ],
-  [
-    {
-      availability: "available",
-      task: { id: "private-task-id", status: "accepted" },
-      finalStatus: "failed",
-    },
-    "The task finished with an error.",
-  ],
-] as const)(
-  "shows the captured stop outcome without treating Docker success as interruption: %j",
-  async (snapshot, message) => {
-    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const calls: string[] = [];
-    const app = createPanelPositional(
-      config,
-      () => ({ telegram: "connected" }),
-      Date.now,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      (id) =>
-        id === "dev"
-          ? {
-              name: "Developer",
-              botUsername: "dev_bot",
-              provisioning: "ready",
-              containerOperation: {
-                action: "stop",
-                status: "completed",
-                updatedAt: 1,
-              },
-            }
-          : undefined,
-      {
-        get: () => undefined,
-        save: () => {},
-        containerStatus: async () => "stopped",
-        hostStatus: async () => "unavailable",
-        stopObservation: async (id) => {
-          calls.push(id);
-          return snapshot
-            ? {
-                finalStatus: null,
-                ...snapshot,
-                observedAt: 1,
-                observationId: "observation-id",
-              }
-            : undefined;
-        },
-      },
-    );
-    expect((await app.request("/agents/dev/setup")).status).toBe(303);
-    expect(calls).toEqual([]);
-    const login = await app.request("/login", {
-      method: "POST",
-      headers: {
-        Origin: config.origin,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ password }).toString(),
-    });
-    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
-    expect(
-      (await app.request("/agents/missing/setup", { headers })).status,
-    ).toBe(404);
-    expect(calls).toEqual([]);
-    const response = await app.request("/agents/dev/setup", { headers });
-    const body = (await response.text()).replace(/\s+/g, " ");
-    expect(body).toContain(message);
-    expect(body).toContain("Container stopped.");
-    expect(body).not.toContain("private-task-id");
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(calls).toEqual(["dev"]);
-    if (snapshot) expect(body).toContain("Task at the last stop");
-    if (snapshot && "finalStatus" in snapshot)
-      expect(body).not.toContain("Result unconfirmed");
-  },
-);
-
-it.each([
-  ["pending", "Setup: Pending."],
-  ["provisioning", "Setup: In progress."],
-  ["failed", "Setup: Failed; created resources are kept for review."],
-  ["interrupted", "Setup: Interrupted by a server restart; needs review."],
-  ["cancelled", "Setup: Cancelled; created resources are kept for review."],
-] as const)(
-  "shows the persisted %s setup state without offering container actions",
-  async (provisioning, message) => {
-    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const app = createPanelPositional(
-      config,
-      () => ({ telegram: "connected" }),
-      Date.now,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      async () => {},
-      undefined,
-      (id) =>
-        id === "dev"
-          ? { name: "Developer", botUsername: "dev_bot", provisioning }
-          : undefined,
-    );
-    const login = await app.request("/login", {
-      method: "POST",
-      headers: {
-        Origin: config.origin,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ password }).toString(),
-    });
-    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
-    const response = await app.request("/agents/dev/setup", { headers });
-    const body = (await response.text()).replace(/\s+/g, " ");
-    expect(body).toContain(message);
-    expect(body).not.toContain("Start container");
-    expect(body).not.toContain("Stop container…");
-    expect(response.headers.get("cache-control")).toBe("no-store");
-  },
-);
-
-it.each(["/agents/dev/setup/cancel", "/api/agents/dev/provision/cancel"])(
-  "protects setup cancellation and reports a request without claiming completion: %s",
-  async (path) => {
-    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    let requested = false;
-    let active = true;
-    const calls: string[] = [];
-    const app = createPanelPositional(
-      config,
-      () => ({ telegram: "connected" }),
-      Date.now,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      (id) =>
-        id === "dev"
-          ? {
-              name: "Developer",
-              botUsername: "dev_bot",
-              provisioning: "provisioning",
-              canCancelProvisioning: active,
-              cancellationRequested: requested,
-            }
-          : undefined,
-      {
-        get: () => undefined,
-        save: () => {},
-        cancelProvisioning: (id) => {
-          if (!active) throw new Error("private details");
-          calls.push(id);
-          requested = true;
-        },
-      },
-    );
-    const post = (
-      target: string,
-      body: string,
-      cookie = "",
-      origin = config.origin,
-    ) =>
-      app.request(target, {
-        method: "POST",
-        headers: {
-          Origin: origin,
-          Cookie: cookie,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body,
-      });
-    expect((await post(path, "confirm=dev")).status).toBe(
-      path.startsWith("/api/") ? 401 : 303,
-    );
-    const login = await post(
-      "/login",
-      new URLSearchParams({ password }).toString(),
-    );
-    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-    const headers = { Cookie: cookie };
-    expect((await app.request(path, { headers })).status).toBe(404);
-    expect(
-      (await post(path, "confirm=dev", cookie, "https://foreign.test")).status,
-    ).toBe(403);
-    expect((await post(path, "", cookie)).status).toBe(400);
-    expect((await post(path, "confirm=other", cookie)).status).toBe(400);
-    expect(calls).toEqual([]);
-    const before = await (
-      await app.request("/agents/dev/setup", { headers })
-    ).text();
-    expect(before).toContain("Cancel setup");
-    expect(before.replace(/\s+/g, " ")).toContain("Created resources are kept");
-    const response = await post(path, "confirm=dev", cookie);
-    expect(response.status).toBe(path.startsWith("/api/") ? 202 : 303);
-    if (path.startsWith("/api/"))
-      expect(await response.json()).toEqual({
-        agentId: "dev",
-        cancellation: "requested",
-      });
-    expect(calls).toEqual(["dev"]);
-    const after = await (
-      await app.request("/agents/dev/setup", { headers })
-    ).text();
-    expect(after).toContain("Cancellation requested");
-    expect(after).not.toContain("Cancel setup");
-    expect(after).not.toContain("Setup: Cancelled");
-    active = false;
-    const failed = await post(path, "confirm=dev", cookie);
-    expect(failed.status).toBe(409);
-    expect(await failed.text()).not.toContain("private details");
-    expect(
-      (await post(path.replace("dev", "missing"), "confirm=missing", cookie))
-        .status,
-    ).toBe(404);
-  },
-);
-
-it.each([
-  [
-    { bot: "linked", owner: "pending" },
-    "Bot verified and linked",
-    "Pending: the owner chat has not been activated",
-  ],
-  [
-    { bot: "linked", owner: "verified" },
-    "Bot verified and linked",
-    "Verified through /start",
-  ],
-  [
-    { bot: "unlinked", owner: "pending" },
-    "Bot not linked",
-    "Pending: the owner chat has not been activated",
-  ],
-  [{ bot: "unavailable", owner: "unavailable" }, "Unavailable", "Unavailable"],
-] as const)(
-  "shows explicit bot linking and owner verification state: %j",
-  async (setupAccess, botLabel, ownerLabel) => {
-    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const app = createPanelPositional(
-      config,
-      undefined,
-      Date.now,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      (id) =>
-        id === "dev"
-          ? {
-              name: "Developer",
-              botUsername: "dev_bot",
-              provisioning: "pending",
-              setupAccess,
-            }
-          : undefined,
-      undefined,
-      () => ["dev"],
-    );
-    const login = await app.request("/login", {
-      method: "POST",
-      headers: {
-        Origin: config.origin,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ password }).toString(),
-    });
-    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
-    const body = await (
-      await app.request("/agents/dev/setup", { headers })
-    ).text();
-    expect(body).toContain("Bot link");
-    expect(body).toContain(botLabel);
-    expect(body).toContain("Owner verification");
-    expect(body).toContain(ownerLabel);
-    expect(body).not.toContain("file:host");
-    expect(
-      await (await app.request("/api/status", { headers })).json(),
-    ).toMatchObject({ agents: [{ id: "dev", setupAccess }] });
-  },
-);
-
-it.each([
-  [{ status: "not_started" }, "Not started"],
-  [{ status: "connecting" }, "Verifying credentials and starting polling"],
-  [{ status: "polling" }, "Polling started"],
-  [
-    { status: "blocked", failure: "setup_incomplete" },
-    "Complete agent provisioning before connecting this bot.",
-  ],
-  [
-    { status: "failed", failure: "invalid_token" },
-    "Telegram rejected the bot token.",
-  ],
-  [
-    { status: "failed", failure: "identity_mismatch" },
-    "The token does not match this agent's registered bot or owner.",
-  ],
-  [
-    { status: "failed", failure: "credentials_unavailable" },
-    "Saved bot or Agent Host credentials are unavailable.",
-  ],
-  [{ status: "stopped" }, "Stopped"],
-] as const)(
-  "shows registered bot connection state separately from container readiness: %j",
-  async (botConnection, label) => {
-    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const app = createPanelPositional(
-      config,
-      () => ({ telegram: "connected" }),
-      Date.now,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      (id) =>
-        id === "dev"
-          ? {
-              name: "Developer",
-              botUsername: "dev_bot",
-              provisioning: "ready",
-              botConnection,
-            }
-          : undefined,
-    );
-    const login = await app.request("/login", {
-      method: "POST",
-      headers: {
-        Origin: config.origin,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ password }).toString(),
-    });
-    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0]! };
-    const response = await app.request("/agents/dev/setup", { headers });
-    const body = (await response.text()).replace(/\s+/g, " ");
-    expect(body).toContain(label.replaceAll("'", "&#39;"));
-    expect(body).not.toContain(
-      "Connecting this bot to Telegram is still pending",
-    );
-    expect(response.headers.get("cache-control")).toBe("no-store");
-  },
-);
-
-it("lists registered agents with bot state and chat links behind login", async () => {
-  const app = createPanelPositional(
-    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
-    () => ({ telegram: "connected", agentId: "dev" }),
-    Date.now,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    (id) =>
+it("reports cancellation, unavailable capabilities and generic conflict errors", async () => {
+  let cancellationRequested = false;
+  const { get, post, login } = apiSetup({
+    getAgentSetup: (id) =>
       id === "dev"
-        ? undefined
-        : {
-            name: id === "a1" ? "Alpha <b>" : "Beta",
-            botUsername: id === "a1" ? "alpha_bot" : null,
-            provisioning: id === "a1" ? "ready" : "pending",
-            ...(id === "a1"
-              ? { botConnection: { status: "polling" as const } }
-              : {}),
-          },
-    undefined,
-    () => ["dev", "a1", "b2"],
-  );
-  expect((await app.request("/")).status).toBe(303);
-  const login = await app.request("/login", {
-    method: "POST",
-    headers: {
-      Origin: "http://localhost:3000",
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ password }).toString(),
-  });
-  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-  const body = await (
-    await app.request("/", { headers: { Cookie: cookie } })
-  ).text();
-  expect(body).toContain("Alpha &lt;b&gt;");
-  expect(body).toContain("https://t.me/alpha_bot");
-  expect(body).toContain("Polling started");
-  expect(body).toContain("/agents/a1/setup");
-  expect(body).toContain("Beta");
-  expect(body).toContain("Not connected yet");
-  expect(body.match(/https:\/\/t\.me\//g)).toHaveLength(1);
-});
-
-describe("agent deletion routes", () => {
-  async function deletionApp() {
-    const calls: [string, boolean][] = [];
-    const app = createPanelPositional(
-      readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
-      () => ({ telegram: "connected", agentId: "dev" }),
-      Date.now,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      (id) =>
-        id === "a1"
-          ? { name: "Alpha", botUsername: "alpha_bot", provisioning: "ready" }
-          : undefined,
-      undefined,
-      () => ["a1"],
-      async (id, deleteData) => void calls.push([id, deleteData]),
-    );
-    const post = (
-      path: string,
-      values: Record<string, string>,
-      cookie = "",
-      origin = "http://localhost:3000",
-    ) =>
-      app.request(path, {
-        method: "POST",
-        headers: {
-          Origin: origin,
-          Cookie: cookie,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams(values).toString(),
-      });
-    const login = await post("/login", { password });
-    return {
-      app,
-      post,
-      calls,
-      cookie: login.headers.get("set-cookie")!.split(";")[0]!,
-    };
-  }
-
-  it("rejects unauthenticated and forged requests", async () => {
-    const { app, post, calls, cookie } = await deletionApp();
-    expect((await app.request("/agents/a1/delete")).status).toBe(303);
-    expect((await post("/agents/a1/delete", { confirm: "a1" })).status).toBe(
-      303,
-    );
-    expect(
-      (
-        await post(
-          "/agents/a1/delete",
-          { confirm: "a1" },
-          cookie,
-          "http://evil.example",
-        )
-      ).status,
-    ).toBe(403);
-    expect(calls).toEqual([]);
-  });
-
-  it("explains retention and Telegram bot identity, and requires confirmation", async () => {
-    const { app, post, calls, cookie } = await deletionApp();
-    const page = await (
-      await app.request("/agents/a1/delete", { headers: { Cookie: cookie } })
-    ).text();
-    expect(page).toContain("does not delete the bot in Telegram");
-    expect(page).toContain("Leave unchecked to keep it");
-    expect((await post("/agents/a1/delete", {}, cookie)).status).toBe(400);
-    expect(
-      (await post("/agents/a1/delete", { confirm: "other" }, cookie)).status,
-    ).toBe(400);
-    expect(calls).toEqual([]);
-  });
-
-  it("retains data by default and deletes it only when selected", async () => {
-    const { post, calls, cookie } = await deletionApp();
-    expect(
-      (await post("/agents/a1/delete", { confirm: "a1" }, cookie)).status,
-    ).toBe(303);
-    await post(
-      "/agents/a1/delete",
-      { confirm: "a1", deleteData: "true" },
-      cookie,
-    );
-    expect(calls).toEqual([
-      ["a1", false],
-      ["a1", true],
-    ]);
-    expect(
-      (await post("/api/agents/a1/delete", { confirm: "a1" }, cookie)).status,
-    ).toBe(400);
-    expect(
-      (
-        await post(
-          "/api/agents/a1/delete",
-          { confirm: "a1", deleteData: "false" },
-          cookie,
-        )
-      ).status,
-    ).toBe(200);
-    expect(calls.at(-1)).toEqual(["a1", false]);
-  });
-});
-
-it("rejects every unauthenticated request to setup and state-changing routes", async () => {
-  const noop = async () => {};
-  const app = createPanelPositional(
-    readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
-    () => ({ telegram: "connected" }),
-    Date.now,
-    { get: () => ({ name: "A", instructions: "" }) as never, save: () => {} },
-    noop,
-    undefined,
-    noop,
-    noop,
-    noop,
-    async () => ({ agentId: "agent-x", provisioning: "ready" }),
-    () => ({ name: "A", botUsername: "a_bot", provisioning: "ready" }),
-    undefined,
-    () => ["a1"],
-    noop,
-  );
-  const routes: [string, string][] = [
-    ["GET", "/"],
-    ["GET", "/api/status"],
-    ["GET", "/agents/new"],
-    ["GET", "/agents/a1/setup"],
-    ["GET", "/agents/a1/delete"],
-    ["GET", "/agents/a1/settings"],
-    ["GET", "/agents/a1/token"],
-    ["GET", "/agents/a1/container/stop"],
-    ["POST", "/agents/new"],
-    ["POST", "/api/agents"],
-    ["POST", "/api/agents/a1/provision"],
-    ["POST", "/api/agents/a1/provision/cancel"],
-    ["POST", "/api/agents/a1/resources/remove"],
-    ["POST", "/api/agents/a1/container"],
-    ["POST", "/api/agents/a1/delete"],
-    ["POST", "/agents/a1/delete"],
-    ["POST", "/agents/a1/container"],
-    ["POST", "/agents/a1/setup/cancel"],
-    ["POST", "/agents/a1/settings"],
-    ["POST", "/agents/a1/token"],
-  ];
-  for (const [method, path] of routes) {
-    const response = await app.request(path, {
-      method,
-      headers: {
-        Origin: "http://localhost:3000",
-        "Content-Type": "application/x-www-form-urlencoded",
+        ? {
+            name: "Dev",
+            botUsername: null,
+            provisioning: "provisioning",
+            canCancelProvisioning: true,
+            cancellationRequested,
+          }
+        : undefined,
+    agentSettings: {
+      get: () => undefined,
+      save: () => {},
+      cancelProvisioning: () => {
+        if (cancellationRequested) throw new Error("private-error");
+        cancellationRequested = true;
       },
-      ...(method === "POST" ? { body: "confirm=a1" } : {}),
-    });
-    expect([303, 401], `${method} ${path}`).toContain(response.status);
-  }
-});
-
-async function signedIn(deps: PanelDeps = {}): Promise<{
-  app: ReturnType<typeof createPanel>;
-  headers: { Cookie: string };
-}> {
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const app = createPanel(config, deps);
-  const login = await app.request("/login", {
-    method: "POST",
-    headers: {
-      Origin: config.origin,
-      "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: new URLSearchParams({ password }).toString(),
   });
-  return {
-    app,
-    headers: { Cookie: login.headers.get("set-cookie")!.split(";")[0]! },
-  };
-}
-
-describe("empty installation", () => {
-  it("starts with no agents and no Telegram access settings, and asks for nothing but an agent", async () => {
-    const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-    const anonymous = createPanel(config, {
-      registerAgent: async () => ({ agentId: "x", provisioning: "pending" }),
-    });
-    expect((await anonymous.request("/")).headers.get("location")).toBe(
-      "/login",
-    );
-    expect((await anonymous.request("/api/status")).status).toBe(401);
-    const { app, headers } = await signedIn({
-      registerAgent: async () => ({ agentId: "x", provisioning: "pending" }),
-    });
-    const home = await (await app.request("/", { headers })).text();
-    expect(home).toContain("No agents yet. Create your first agent.");
-    expect(home).toContain("Create agent");
-    expect(home).not.toContain("Telegram access");
-    expect(home).not.toContain("Configured agent");
-    expect(
-      await (await app.request("/api/status", { headers })).json(),
-    ).toEqual({ agents: [] });
+  const cookie = await login();
+  expect(await (await get("/api/agents/dev", cookie)).json()).toMatchObject({
+    capabilities: {
+      edit: false,
+      replaceToken: false,
+      container: false,
+      cancel: true,
+    },
   });
-
-  it("has no allowlist page and no single pre-configured agent routes", async () => {
-    const { app, headers } = await signedIn();
-    for (const path of [
-      "/settings/telegram",
-      "/agent/settings",
-      "/agent/token",
-      "/agent/container/stop",
-    ])
-      expect((await app.request(path, { headers })).status).toBe(404);
-    for (const path of [
-      "/settings/telegram",
-      "/agent/settings",
-      "/agent/container",
-    ])
-      expect(
-        (
-          await app.request(path, {
-            method: "POST",
-            headers: { ...headers, Origin: "http://localhost:3000" },
-          })
-        ).status,
-      ).toBe(404);
+  expect(
+    (await post("/api/agents/dev/provision/cancel", {}, cookie)).status,
+  ).toBe(400);
+  expect(
+    (await post("/api/agents/dev/provision/cancel", { confirm: "dev" }, cookie))
+      .status,
+  ).toBe(202);
+  expect(await (await get("/api/agents/dev", cookie)).json()).toMatchObject({
+    cancellationRequested: true,
+    capabilities: { cancel: false },
   });
-
-  it("asks only for the owner's own Telegram ID when creating an agent", async () => {
-    const { app, headers } = await signedIn({
-      registerAgent: async () => ({ agentId: "x", provisioning: "pending" }),
-    });
-    const form = await (await app.request("/agents/new", { headers })).text();
-    expect(form).toContain("Owner's Telegram ID");
-    expect(form).toContain("Only that user can use this agent.");
-    expect(form).not.toMatch(/allowlist|authorized in this installation/i);
-  });
-
-  it("lists every agent and the Docker inventory in the status API without secrets", async () => {
-    const { app, headers } = await signedIn({
-      listAgentIds: () => ["a", "b"],
-      getAgentSetup: (id) => ({
-        name: id.toUpperCase(),
-        botUsername: `${id}_bot`,
-        provisioning: "ready",
-        botConnection: { status: "polling" },
-        setupAccess: { bot: "linked", owner: "verified" },
-      }),
-      resources: async () => ({
-        status: "ok",
-        missing: [],
-        untracked: [],
-        uncertain: [],
-      }),
-    });
-    const status = await (await app.request("/api/status", { headers })).json();
-    expect(status).toMatchObject({
-      agents: [
-        { id: "a", name: "A", botConnection: { status: "polling" } },
-        { id: "b", name: "B" },
-      ],
-      resources: { status: "ok" },
-    });
-    expect(JSON.stringify(status)).not.toMatch(/token|credential|file:/i);
-  });
+  const failed = await post(
+    "/api/agents/dev/provision/cancel",
+    { confirm: "dev" },
+    cookie,
+  );
+  expect(failed.status).toBe(409);
+  expect(await failed.text()).not.toContain("private-error");
 });

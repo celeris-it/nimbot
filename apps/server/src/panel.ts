@@ -1,13 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { html } from "hono/html";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { verifyPassword } from "./panel-auth.js";
 import type { HostStatus } from "./agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
+import type { AgentDetail, PanelSession } from "./panel-contracts.js";
 
 export interface RegisteredAgentSettings {
   cancelProvisioning?(id: string): void;
@@ -22,133 +23,6 @@ export interface RegisteredAgentSettings {
     id: string,
   ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
-export interface AgentSettings {
-  get(): { name: string; instructions: string };
-  save(name: string, instructions: string): void;
-}
-const ttl = 8 * 60 * 60 * 1000;
-const cookieName = "nimbot_session";
-const css =
-  readFileSync(
-    new URL("../node_modules/daisyui/daisyui.css", import.meta.url),
-    "utf8",
-  ) +
-  `
-body{margin:0;min-height:100vh;background:var(--color-base-200);color:var(--color-base-content);font:1rem/1.6 Georgia,serif}
-header,main{max-width:62rem;margin:auto;padding:1.5rem}header{display:flex;justify-content:space-between;align-items:center;gap:1rem;border-bottom:1px solid var(--color-base-300)}header a{font-size:1.5rem;font-weight:bold;color:inherit;text-decoration:none}
-main{padding-top:4rem}h1{font-size:clamp(2rem,6vw,3rem);line-height:1.15;margin:0 0 1rem}h2{font-size:1.5rem;overflow-wrap:anywhere}p{margin:.75rem 0}form{display:grid;gap:1rem}label{font-weight:bold}.card{background:var(--color-base-100);border:1px solid var(--color-base-300);padding:clamp(1rem,4vw,2rem);margin-top:2rem}.input,.textarea{width:100%;box-sizing:border-box;border-color:var(--color-base-content)}section[aria-label="Sign in"]{max-width:28rem;margin:auto}dl{display:grid;grid-template-columns:1fr 1fr;gap:1rem}dt{font-weight:bold}dd{margin:0;overflow-wrap:anywhere}footer{margin-top:2rem}button,a.btn{min-height:44px}a{overflow-wrap:anywhere}:focus-visible{outline:3px solid var(--color-base-content);outline-offset:4px}header form{display:block}small{font-family:monospace}*{box-sizing:border-box}
-@media(max-width:400px){header,main{padding:1rem}main{padding-top:2rem}dl{grid-template-columns:1fr;gap:.5rem}dd{margin-bottom:.5rem}}`;
-
-function page(
-  title: string,
-  content: ReturnType<typeof html>,
-  signedIn = false,
-) {
-  return html`<!doctype html>
-    <html lang="en" data-theme="light">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <title>${title} · Nimbot</title>
-        <link rel="stylesheet" href="/assets/panel.css" />
-      </head>
-      <body>
-        <header>
-          <a href="/">nimbot<span aria-hidden="true"> /</span></a
-          >${signedIn ? html`<form action="/logout" method="post"><button class="btn" type="submit">Sign out</button></form>` : html`<small>ON YOUR SERVER</small>`}
-        </header>
-        <main id="main">${content}</main>
-      </body>
-    </html>`;
-}
-function stopTaskSection(
-  observation?: import("./agent-registry.js").StopObservation,
-) {
-  const taskLabels = {
-    interrupted: "Task interrupted.",
-    completed: "The task finished before an interruption was confirmed.",
-    failed: "The task finished with an error.",
-  };
-  const stopMessage = observation
-    ? observation.availability === "unavailable"
-      ? "Could not check whether a task was active before stopping the container. There is no confirmed result."
-      : !observation.task
-        ? "No task was active when the agent was checked before stopping the container."
-        : observation.finalStatus
-          ? taskLabels[observation.finalStatus]
-          : "A task was active. Result unconfirmed: start the container and refresh the status to check that task's record."
-    : undefined;
-  return stopMessage
-    ? html`<section aria-label="Task at the last stop">
-        <h2>Task at the last stop</h2>
-        <p role="status">${stopMessage}</p>
-        <p>
-          Pre-stop check: ${new Date(observation!.observedAt).toISOString()}.
-        </p>
-      </section>`
-    : "";
-}
-
-function setupAccessDetails(
-  access?: import("./agent-access.js").AgentSetupAccess,
-) {
-  if (!access) return "";
-  const botLabels = {
-    linked: "Bot verified and linked",
-    unlinked: "Bot not linked",
-    unavailable: "Unavailable",
-  };
-  const ownerLabels = {
-    pending: "Pending: the owner chat has not been activated",
-    verified: "Verified through /start",
-    unavailable: "Unavailable",
-  };
-  return html`<dl>
-    <dt>Bot link</dt>
-    <dd>${botLabels[access.bot]}</dd>
-    <dt>Owner verification</dt>
-    <dd>${ownerLabels[access.owner]}</dd>
-  </dl>`;
-}
-
-function login(error?: string) {
-  return page(
-    "Sign in",
-    html`<section aria-label="Sign in">
-      <small>ADMINISTRATION</small>
-      <h1>Your agent workspace.</h1>
-      <p>Sign in to check the status of your installation.</p>
-      <div class="card">
-        ${error ? html`<p role="alert" id="login-error" tabindex="-1" autofocus>${error}</p>` : ""}
-        <form method="post" action="/login">
-          <label for="password">Administrator password</label
-          ><input
-            class="input"
-            id="password"
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            required
-            maxlength="256"
-            aria-describedby="password-help${error ? " login-error" : ""}"
-          />
-          <p id="password-help">Use the password configured on your server.</p>
-          <button class="btn" type="submit">Sign in to the panel</button>
-        </form>
-      </div>
-    </section>`,
-  );
-}
-
-const connectionLabels = {
-  not_started: "Not started",
-  connecting: "Verifying credentials and starting polling",
-  polling: "Polling started",
-  blocked: "Blocked by incomplete setup",
-  failed: "Connection failed",
-  stopped: "Stopped",
-};
-
 export interface PanelDeps {
   /** Docker inventory shown in the status API; omitted when provisioning is off. */
   resources?: () =>
@@ -180,6 +54,10 @@ export interface PanelDeps {
   deleteAgent?: (agentId: string, deleteData: boolean) => Promise<void>;
 }
 
+const ttl = 8 * 60 * 60 * 1000;
+const cookieName = "nimbot_session";
+const panelDist = new URL("../../panel/dist/", import.meta.url);
+
 export function createPanel(
   config: PanelConfig,
   deps: PanelDeps = {},
@@ -206,7 +84,9 @@ export function createPanel(
     secureHeaders({
       contentSecurityPolicy: {
         defaultSrc: ["'none'"],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'"],
+        connectSrc: ["'self'"],
         formAction: ["'self'"],
         frameAncestors: ["'none'"],
         baseUri: ["'none'"],
@@ -221,63 +101,87 @@ export function createPanel(
       !["GET", "HEAD"].includes(c.req.method) &&
       c.req.header("Origin") !== config.origin
     )
-      return c.text("Origin not allowed.", 403);
+      return c.json({ error: "Origin not allowed." }, 403);
     await next();
   });
   app.use(
     "*",
     bodyLimit({
       maxSize: 65536,
-      onError: (c) => c.text("Request too large.", 413),
+      onError: (c) => c.json({ error: "Request too large." }, 413),
     }),
   );
-  app.get("/assets/panel.css", (c) =>
-    c.body(css, 200, { "Content-Type": "text/css; charset=utf-8" }),
-  );
-  app.get("/login", (c) => c.html(login()));
-  app.post(
-    "/login",
-    bodyLimit({
-      maxSize: 4096,
-      onError: (c) => c.text("Request too large.", 413),
-    }),
-    async (c) => {
-      if (now() >= windowEnd) {
-        attempts = 0;
-        windowEnd = now() + 15 * 60 * 1000;
-      }
-      if (attempts >= 5) {
-        c.header("Retry-After", String(Math.ceil((windowEnd - now()) / 1000)));
-        return c.html(
-          login("Too many attempts. Try again in 15 minutes."),
-          429,
-        );
-      }
-      attempts++;
-      const body = await c.req.parseBody();
-      const password = body.password;
-      if (
-        typeof password !== "string" ||
-        password.length > 256 ||
-        !(await verifyPassword(password, config.passwordHash))
-      )
-        return c.html(login("Incorrect password. Try again."), 401);
-      attempts = 0;
-      for (const [id, expires] of sessions)
-        if (expires <= now()) sessions.delete(id);
-      if (sessions.size >= 10) sessions.delete(sessions.keys().next().value!);
-      const id = randomBytes(32).toString("hex");
-      sessions.set(id, now() + ttl);
-      setCookie(c, cookieName, id, {
-        httpOnly: true,
-        secure,
-        sameSite: "Strict",
-        path: "/",
-        maxAge: ttl / 1000,
+  const entry = async (c: Context) => {
+    try {
+      return c.html(await readFile(new URL("index.html", panelDist), "utf8"));
+    } catch {
+      return c.text(
+        "Panel assets are unavailable. Run pnpm build before starting the server.",
+        503,
+      );
+    }
+  };
+  app.get("/assets/:file", async (c) => {
+    const file = c.req.param("file");
+    if (!/^[a-zA-Z0-9_-]+\.(js|css)$/.test(file)) return c.notFound();
+    try {
+      const data = await readFile(new URL(`assets/${file}`, panelDist));
+      return c.body(data, 200, {
+        "Content-Type":
+          extname(file) === ".js"
+            ? "text/javascript; charset=utf-8"
+            : "text/css; charset=utf-8",
       });
-      return c.redirect("/", 303);
-    },
-  );
+    } catch {
+      return c.notFound();
+    }
+  });
+  app.get("/login", entry);
+  const signIn = async (c: Context) => {
+    const api = c.req.path.startsWith("/api/");
+    if (now() >= windowEnd) {
+      attempts = 0;
+      windowEnd = now() + 15 * 60 * 1000;
+    }
+    if (attempts >= 5) {
+      c.header("Retry-After", String(Math.ceil((windowEnd - now()) / 1000)));
+      return c.json(
+        { error: "Too many attempts. Try again in 15 minutes." },
+        429,
+      );
+    }
+    attempts++;
+    const body = await c.req.parseBody({ all: true });
+    if (
+      typeof body.password !== "string" ||
+      body.password.length > 256 ||
+      !(await verifyPassword(body.password, config.passwordHash))
+    )
+      return c.json({ error: "Incorrect password. Try again." }, 401);
+    attempts = 0;
+    for (const [id, expires] of sessions)
+      if (expires <= now()) sessions.delete(id);
+    if (sessions.size >= 10) sessions.delete(sessions.keys().next().value!);
+    const id = randomBytes(32).toString("hex");
+    sessions.set(id, now() + ttl);
+    setCookie(c, cookieName, id, {
+      httpOnly: true,
+      secure,
+      sameSite: "Strict",
+      path: "/",
+      maxAge: ttl / 1000,
+    });
+    return api ? c.json({ authenticated: true }) : c.redirect("/", 303);
+  };
+  for (const path of ["/login", "/api/login"])
+    app.post(
+      path,
+      bodyLimit({
+        maxSize: 4096,
+        onError: (c) => c.json({ error: "Request too large." }, 413),
+      }),
+      signIn,
+    );
   app.use("*", async (c, next) => {
     const id = getCookie(c, cookieName);
     const expires = id ? sessions.get(id) : undefined;
@@ -289,551 +193,107 @@ export function createPanel(
     }
     await next();
   });
-  app.post("/logout", (c) => {
+  app.get("/api/session", (c) =>
+    c.json({
+      authenticated: true,
+      capabilities: { createAgent: !!registerAgent },
+    } satisfies PanelSession),
+  );
+  const signOut = (c: Context) => {
     sessions.delete(getCookie(c, cookieName)!);
     deleteCookie(c, cookieName, { path: "/", secure, sameSite: "Strict" });
-    return c.redirect("/login", 303);
-  });
-  const settingsPage = (
-    values: { name: string; instructions: string },
-    error: string | undefined,
-    saved: boolean,
-    target: string,
-    back: string,
-  ) =>
-    page(
-      "Edit agent",
-      html`<h1>Edit agent.</h1>
-        <p>
-          Changes apply to upcoming tasks. The name is local to Nimbot; it does
-          not change the bot's profile on Telegram.
-        </p>
-        ${saved ? html`<p role="status">Changes saved.</p>` : ""}
-        <section class="card" aria-label="Agent settings">
-          ${error ? html`<p role="alert" id="settings-error" tabindex="-1" autofocus>${error}</p>` : ""}
-          <form method="post" action="${target}">
-            <label for="name">Name</label
-            ><input
-              class="input"
-              id="name"
-              name="name"
-              maxlength="128"
-              required
-              value="${values.name}"
-            /><label for="instructions">Instructions (optional)</label
-            ><textarea
-              class="textarea"
-              id="instructions"
-              name="instructions"
-              rows="8"
-              maxlength="4000"
-              aria-describedby="instructions-help"
-            >
-${values.instructions}</textarea>
-            <p id="instructions-help">
-              Up to 4000 characters. They are sent as context with every task.
-              Do not include passwords or tokens.
-            </p>
-            <button class="btn" type="submit">Save changes</button
-            ><a class="btn" href="${back}">Back to agent</a>
-          </form>
-        </section>`,
-      true,
-    );
-  const saveSettings = async (
-    c: Context,
-    store: AgentSettings,
-    target: string,
-    back: string,
-  ) => {
-    const body = await c.req.parseBody({ all: true });
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    const instructions =
-      typeof body.instructions === "string" ? body.instructions : "";
-    const values = { name, instructions };
-    if (
-      !name ||
-      name.length > 128 ||
-      typeof body.instructions !== "string" ||
-      instructions.length > 4000
-    )
-      return c.html(
-        settingsPage(
-          values,
-          "Enter a name of up to 128 characters and instructions of up to 4000 characters.",
-          false,
-          target,
-          back,
-        ),
-        400,
-      );
-    try {
-      store.save(name, instructions);
-    } catch {
-      return c.html(
-        settingsPage(
-          values,
-          "Could not save the changes. Try again.",
-          false,
-          target,
-          back,
-        ),
-        500,
-      );
-    }
-    return c.redirect(`${target}?saved=1`, 303);
+    return c.req.path.startsWith("/api/")
+      ? c.json({ authenticated: false })
+      : c.redirect("/login", 303);
   };
-  app.get("/agents/:id/settings", (c) => {
+  app.post("/logout", signOut);
+  app.post("/api/logout", signOut);
+  app.get("/api/agents/:id", async (c) => {
     const id = c.req.param("id");
-    const values = agentSettings?.get(id);
-    return values
-      ? c.html(
-          settingsPage(
-            values,
-            undefined,
-            c.req.query("saved") === "1",
-            `/agents/${encodeURIComponent(id)}/settings`,
-            `/agents/${encodeURIComponent(id)}/setup`,
-          ),
-        )
-      : c.notFound();
-  });
-  app.post("/agents/:id/settings", (c) => {
-    const id = c.req.param("id");
-    const values = agentSettings?.get(id);
-    if (!values || !agentSettings) return c.notFound();
-    return saveSettings(
-      c,
-      {
-        get: () => values,
-        save: (name, instructions) =>
-          agentSettings.save(id, name, instructions),
-      },
-      `/agents/${encodeURIComponent(id)}/settings`,
-      `/agents/${encodeURIComponent(id)}/setup`,
-    );
-  });
-  const tokenPage = (
-    target: string,
-    back: string,
-    saved: boolean,
-    agentName: string,
-  ) =>
-    page(
-      "Bot token",
-      html`<h1>Bot token.</h1>
-        <p>Agent: ${agentName}</p>
-        <p>
-          Only a new token for the same bot, created in BotFather, is accepted.
-          If the bot is already connected, restart the server to apply the
-          change.
-        </p>
-        ${saved ? html`<p role="status">Token saved. If the bot is already connected, restart the server to apply the change.</p>` : ""}
-        <section class="card" aria-label="Bot credential">
-          <form method="post" action="${target}">
-            <label for="token">New Telegram token</label
-            ><input
-              class="input"
-              type="password"
-              id="token"
-              name="token"
-              required
-              maxlength="256"
-              autocomplete="off"
-            /><button class="btn" type="submit">Save token</button
-            ><a class="btn" href="${back}">Back to agent</a>
-          </form>
-        </section>`,
-      true,
-    );
-  const updateToken = async (
-    c: Context,
-    save: (token: string) => Promise<void>,
-    target: string,
-  ) => {
-    const body = await c.req.parseBody({ all: true });
-    const token = typeof body.token === "string" ? body.token.trim() : "";
-    if (!token || token.length > 256)
-      return c.text("Enter a valid token for the same bot.", 400);
-    try {
-      await save(token);
-    } catch {
-      return c.html(
-        page(
-          "Token not saved",
-          html`<h1>Could not save the token.</h1>
-            <p>
-              Check that it is a valid token for the same bot and that the
-              server can reach Telegram and its storage.
-            </p>
-            <a class="btn" href="${target}">Try again</a>`,
-          true,
-        ),
-        400,
-      );
-    }
-    return c.redirect(`${target}?saved=1`, 303);
-  };
-
-  app.get("/agents/:id/token", (c) => {
-    const id = c.req.param("id");
-    const agent = agentSettings?.get(id);
-    return agent && agentSettings?.saveToken
-      ? c.html(
-          tokenPage(
-            `/agents/${encodeURIComponent(id)}/token`,
-            `/agents/${encodeURIComponent(id)}/setup`,
-            c.req.query("saved") === "1",
-            agent.name,
-          ),
-        )
-      : c.notFound();
-  });
-  app.post("/agents/:id/token", (c) => {
-    const id = c.req.param("id");
-    if (!agentSettings?.get(id) || !agentSettings.saveToken)
-      return c.notFound();
-    return updateToken(
-      c,
-      (token) => agentSettings.saveToken!(id, token),
-      `/agents/${encodeURIComponent(id)}/token`,
-    );
-  });
-  const registrationForm = (
-    values = { name: "", instructions: "", ownerId: "" },
-    error?: string,
-  ) =>
-    page(
-      "Create agent",
-      html`<h1>Create agent.</h1>
-        <p>
-          You need a dedicated bot created in BotFather and your Telegram user
-          ID. Only that user can use this agent.
-        </p>
-        <section class="card" aria-label="New agent">
-          ${error ? html`<p role="alert" id="creation-error" tabindex="-1" autofocus>${error} Enter the token again; the other fields were kept.</p>` : ""}
-          <form method="post" action="/agents/new">
-            <label for="agent-name">Name</label>
-            <input
-              class="input"
-              id="agent-name"
-              name="name"
-              required
-              maxlength="128"
-              value="${values.name}"
-            />
-            <label for="agent-instructions">Instructions (optional)</label>
-            <textarea
-              class="textarea"
-              id="agent-instructions"
-              name="instructions"
-              rows="6"
-              maxlength="4000"
-              aria-describedby="creation-instructions-help"
-            >
-${values.instructions}</textarea>
-            <p id="creation-instructions-help">
-              Up to 4000 characters. Do not include passwords or tokens.
-            </p>
-            <label for="agent-owner">Owner's Telegram ID</label>
-            <input
-              class="input"
-              id="agent-owner"
-              name="ownerId"
-              type="text"
-              inputmode="numeric"
-              pattern="[1-9][0-9]*"
-              required
-              value="${values.ownerId}"
-              aria-describedby="creation-owner-help"
-            />
-            <p id="creation-owner-help">
-              A positive integer: the Telegram user ID of the person who will
-              use this agent. Nobody else can.
-            </p>
-            <label for="agent-token">BotFather bot token</label>
-            <input
-              class="input"
-              id="agent-token"
-              name="token"
-              type="password"
-              autocomplete="off"
-              required
-              maxlength="256"
-              aria-describedby="creation-token-help"
-            />
-            <p id="creation-token-help">
-              Use a bot that is not linked to another agent. The token is stored
-              without being shown in the panel.
-            </p>
-            <p>
-              On creation, the bot is verified and its container is prepared.
-              This can take a few seconds. The server connects the bot after
-              provisioning completes; the owner must then send /start.
-            </p>
-            <button class="btn" type="submit">Create agent</button
-            ><a class="btn" href="/">Cancel</a>
-          </form>
-        </section>`,
-      true,
-    );
-  app.get("/agents/new", (c) =>
-    registerAgent ? c.html(registrationForm()) : c.notFound(),
-  );
-  app.post("/agents/new", async (c) => {
-    if (!registerAgent) return c.notFound();
-    const body = await c.req.parseBody({ all: true });
-    const values = {
-      name: typeof body.name === "string" ? body.name : "",
-      instructions:
-        typeof body.instructions === "string" ? body.instructions : "",
-      ownerId: typeof body.ownerId === "string" ? body.ownerId : "",
-    };
-    if (
-      !values.name.trim() ||
-      values.name.trim().length > 128 ||
-      values.instructions.length > 4000 ||
-      (body.instructions !== undefined &&
-        typeof body.instructions !== "string") ||
-      !/^[1-9]\d*$/.test(values.ownerId) ||
-      !Number.isSafeInteger(Number(values.ownerId)) ||
-      typeof body.token !== "string" ||
-      !body.token.trim() ||
-      body.token.length > 256
-    )
-      return c.html(
-        registrationForm(
-          values,
-          "Check the name, instructions, owner ID, and token against the guidance.",
-        ),
-        400,
-      );
-    try {
-      const result = await registerAgent({
-        name: values.name,
-        instructions: values.instructions,
-        ownerId: Number(values.ownerId),
-        token: body.token,
-      });
-      return c.redirect(
-        `/agents/${encodeURIComponent(result.agentId)}/setup`,
-        303,
-      );
-    } catch {
-      return c.html(
-        registrationForm(
-          values,
-          "Could not create the agent. Check that the owner is authorized, the token is valid, and the bot is not linked to another agent.",
-        ),
-        400,
-      );
-    }
-  });
-  app.get("/agents/:id/setup", async (c) => {
-    const agent = getAgentSetup?.(c.req.param("id"));
-    if (!agent) return c.notFound();
-    const ready = agent.provisioning === "ready";
-    const failureLabels = {
-      setup_incomplete:
-        "Complete agent provisioning before connecting this bot.",
-      credentials_unavailable:
-        "Saved bot or Agent Host credentials are unavailable.",
-      identity_mismatch:
-        "The token does not match this agent's registered bot or owner.",
-      invalid_token:
-        "Telegram rejected the bot token. Replace it and restart the server.",
-      telegram_unavailable:
-        "Telegram polling could not continue. Check connectivity and whether another instance is polling this bot.",
-    };
-    const setupLabels: Record<string, string> = {
-      pending: "Pending",
-      provisioning: "In progress",
-      ready: "Completed",
-      failed: "Failed; created resources are kept for review",
-      interrupted: "Interrupted by a server restart; needs review",
-      cancelled: "Cancelled; created resources are kept for review",
-    };
-    const id = c.req.param("id");
-    const [containerState, hostState, stopObservation] = await Promise.all([
+    const setup = getAgentSetup?.(id);
+    if (!setup) return c.json({ error: "Agent not found." }, 404);
+    const [containerState, hostState, observation] = await Promise.all([
       agentSettings?.containerStatus?.(id),
       agentSettings?.hostStatus?.(id),
       agentSettings?.stopObservation?.(id),
     ]);
-    const available = hostState
-      ? hostState === "ready" || hostState === "busy"
-      : ready;
-    const operation = agent.containerOperation;
-    const operationLabels = {
-      pending: "In progress",
-      completed: "Completed",
-      failed: "Failed",
-      interrupted: "Interrupted by a server restart",
-    };
-
-    return c.html(
-      page(
-        "Agent setup",
-        html`<h1>${agent.name}</h1>
-          ${agentSettings?.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/settings">Edit agent</a>` : ""}
-          ${agentSettings?.saveToken && agentSettings.get(c.req.param("id")) ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/token">Replace bot token</a>` : ""}
-          <section class="card" aria-label="Creation result">
-            <h2>
-              ${containerState === "stopped" ? "Container stopped." : available ? "Container available." : "Agent offline."}
-            </h2>
-            <p role="status">
-              ${available ? "The agent and its bot were saved and the container is available." : "The agent and its bot were saved, but the container is not available yet. Do not create the same agent again."}
-            </p>
-            <p>
-              Setup:
-              ${agent.provisioning === "provisioning" && agent.cancellationRequested ? "Cancellation requested; waiting for the current operation to finish" : (setupLabels[agent.provisioning] ?? "Unknown state")}.
-            </p>
-            ${
-              agent.canCancelProvisioning &&
-              !agent.cancellationRequested &&
-              agentSettings?.cancelProvisioning
-                ? html`<form
-                    method="post"
-                    action="/agents/${encodeURIComponent(id)}/setup/cancel"
-                  >
-                    <p>
-                      Cancelling stops the remaining setup steps. Created
-                      resources are kept; a container that already started may
-                      keep running.
-                    </p>
-                    <input type="hidden" name="confirm" value="${id}" /><button
-                      class="btn"
-                      type="submit"
-                    >
-                      Cancel setup
-                    </button>
-                  </form>`
-                : ""
-            }
-            ${containerState ? html`<p>Container: ${containerState === "running" ? "Running" : containerState === "stopped" ? "Stopped" : containerState === "missing" ? "Not found" : "Unavailable"}</p>` : ""}
-            ${hostState ? html`<p>Agent Host: ${hostState === "ready" ? "Available" : hostState === "busy" ? "Busy" : "Offline"}</p>` : ""}
-            ${
-              operation
-                ? html`<p>
-                      Last operation:
-                      ${operation.action === "start" ? "Start" : "Stop"} —
-                      ${operationLabels[operation.status]}.
-                    </p>
-                    ${operation.action === "stop" && !stopObservation ? html`<p>An active task may be interrupted. Its result will be confirmed when the agent is available again.</p>` : ""}`
-                : ""
-            }
-            ${setupAccessDetails(agent.setupAccess)}
-            ${stopTaskSection(stopObservation)}
-            ${
-              containerAction && ready
-                ? html`<form
-                      method="post"
-                      action="/agents/${encodeURIComponent(id)}/container"
-                    >
-                      <input type="hidden" name="action" value="start" /><button
-                        class="btn"
-                        type="submit"
-                      >
-                        Start container
-                      </button>
-                    </form>
-                    <a
-                      class="btn"
-                      href="/agents/${encodeURIComponent(id)}/container/stop"
-                      >Stop container…</a
-                    >`
-                : ""
-            }
-            <dl>
-              <dt>Identifier</dt>
-              <dd>${c.req.param("id")}</dd>
-              <dt>Bot</dt>
-              <dd>
-                ${agent.botUsername ? `@${agent.botUsername}` : "Pending"}
-              </dd>
-            </dl>
-            ${
-              agent.botConnection
-                ? html`<p role="status">
-                      Telegram bot:
-                      ${connectionLabels[agent.botConnection.status]}.
-                    </p>
-                    ${agent.botConnection.failure ? html`<p>${failureLabels[agent.botConnection.failure]}</p>` : ""}${agent.botConnection.status === "polling" ? html`<p>The owner must activate this bot with /start. Tasks require completed setup and an available Agent Host.</p>` : ""}`
-                : html`<p>
-                    Connecting this bot to Telegram is still pending. It cannot
-                    receive tasks yet.
-                  </p>`
-            }
-            <a
-              class="btn"
-              href="/agents/${encodeURIComponent(c.req.param("id"))}/setup"
-              >Refresh status</a
-            >${deleteAgent ? html`<a class="btn" href="/agents/${encodeURIComponent(c.req.param("id"))}/delete">Delete agent…</a>` : ""}<a
-              class="btn"
-              href="/"
-              >Back to panel</a
-            >
-          </section>`,
-        true,
-      ),
-    );
+    const settings = agentSettings?.get(id);
+    return c.json({
+      id,
+      ...setup,
+      settings,
+      containerState,
+      hostState,
+      stopObservation: observation
+        ? {
+            availability: observation.availability,
+            hadTask:
+              observation.availability === "available" && !!observation.task,
+            observedAt: observation.observedAt,
+            finalStatus: observation.finalStatus,
+          }
+        : undefined,
+      capabilities: {
+        edit: !!settings,
+        replaceToken: !!settings && !!agentSettings?.saveToken,
+        container: setup.provisioning === "ready" && !!containerAction,
+        cancel:
+          !!setup.canCancelProvisioning &&
+          !setup.cancellationRequested &&
+          !!agentSettings?.cancelProvisioning,
+        delete: !!deleteAgent,
+      },
+    } satisfies AgentDetail);
   });
-  app.get("/agents/:id/container/stop", (c) => {
+  app.post("/api/agents/:id/settings", async (c) => {
     const id = c.req.param("id");
-    const agent = getAgentSetup?.(id);
-    if (!agent || !containerAction || agent.provisioning !== "ready")
-      return c.notFound();
-    return c.html(
-      page(
-        "Stop agent",
-        html`<h1>Stop ${agent.name}?</h1>
-          <p>
-            Its container will be stopped. An active task may be interrupted;
-            its status will be confirmed when the agent is available again.
-            Files and history are kept.
-          </p>
-          <form
-            method="post"
-            action="/agents/${encodeURIComponent(id)}/container"
-          >
-            <input type="hidden" name="action" value="stop" /><input
-              type="hidden"
-              name="confirm"
-              value="${id}"
-            /><button class="btn" type="submit">Confirm stop</button
-            ><a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
-              >Cancel</a
-            >
-          </form>`,
-        true,
-      ),
-    );
-  });
-  app.post("/agents/:id/container", async (c) => {
-    const id = c.req.param("id");
-    if (!getAgentSetup?.(id) || !containerAction) return c.notFound();
+    if (!agentSettings?.get(id))
+      return c.json({ error: "Agent not found." }, 404);
     const body = await c.req.parseBody({ all: true });
     if (
-      (body.action !== "start" && body.action !== "stop") ||
-      (body.action === "stop" && body.confirm !== id)
+      typeof body.name !== "string" ||
+      !body.name.trim() ||
+      body.name.trim().length > 128 ||
+      typeof body.instructions !== "string" ||
+      body.instructions.length > 4000
     )
-      return c.text("Invalid action or missing agent confirmation.", 400);
+      return c.json(
+        {
+          error:
+            "Enter a name of up to 128 characters and instructions of up to 4000 characters.",
+        },
+        400,
+      );
     try {
-      await containerAction(id, body.action);
+      agentSettings.save(id, body.name.trim(), body.instructions);
+      return c.json({ saved: true });
     } catch {
-      return c.html(
-        page(
-          "Operation not completed",
-          html`<h1>Could not complete the operation.</h1>
-            <p>Refresh the agent's status before retrying. Its data is kept.</p>
-            <a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
-              >Back to agent</a
-            >`,
-          true,
-        ),
-        503,
+      return c.json({ error: "Could not save the changes. Try again." }, 500);
+    }
+  });
+  app.post("/api/agents/:id/token", async (c) => {
+    const id = c.req.param("id");
+    if (!agentSettings?.get(id) || !agentSettings.saveToken)
+      return c.json({ error: "Agent not found." }, 404);
+    const body = await c.req.parseBody({ all: true });
+    if (
+      typeof body.token !== "string" ||
+      !body.token.trim() ||
+      body.token.trim().length > 256
+    )
+      return c.json({ error: "Enter a valid token for the same bot." }, 400);
+    try {
+      await agentSettings.saveToken(id, body.token.trim());
+      return c.json({ saved: true });
+    } catch {
+      return c.json(
+        {
+          error:
+            "Could not save the token. Enter a valid token for the same bot.",
+        },
+        400,
       );
     }
-    return c.redirect(`/agents/${encodeURIComponent(id)}/setup`, 303);
   });
   app.post("/api/agents", async (c) => {
     if (!registerAgent) return c.notFound();
@@ -865,42 +325,20 @@ ${values.instructions}</textarea>
       );
     }
   });
-  const cancelProvisioning = async (c: Context, api: boolean) => {
+  app.post("/api/agents/:id/provision/cancel", async (c) => {
     const id = c.req.param("id");
-    if (!id || !getAgentSetup?.(id) || !agentSettings?.cancelProvisioning)
-      return c.notFound();
+    if (!getAgentSetup?.(id) || !agentSettings?.cancelProvisioning)
+      return c.json({ error: "Agent not found." }, 404);
     const body = await c.req.parseBody({ all: true });
     if (body.confirm !== id)
-      return c.text("Confirm the agent to cancel its setup.", 400);
+      return c.json({ error: "Confirm the agent to cancel its setup." }, 400);
     try {
       agentSettings.cancelProvisioning(id);
-      return api
-        ? c.json({ agentId: id, cancellation: "requested" }, 202)
-        : c.redirect(`/agents/${encodeURIComponent(id)}/setup`, 303);
+      return c.json({ agentId: id, cancellation: "requested" }, 202);
     } catch {
-      return api
-        ? c.json({ error: "No cancellable provisioning attempt" }, 409)
-        : c.html(
-            page(
-              "Could not cancel the setup",
-              html`<h1>Could not cancel the setup.</h1>
-                <p>
-                  The operation may have finished. Refresh the agent's status
-                  before trying again.
-                </p>
-                <a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
-                  >Back to agent</a
-                >`,
-              true,
-            ),
-            409,
-          );
+      return c.json({ error: "No cancellable provisioning attempt" }, 409);
     }
-  };
-  app.post("/agents/:id/setup/cancel", (c) => cancelProvisioning(c, false));
-  app.post("/api/agents/:id/provision/cancel", (c) =>
-    cancelProvisioning(c, true),
-  );
+  });
   app.post("/api/agents/:id/provision", async (c) => {
     if (!provisionAgent) return c.notFound();
     const id = c.req.param("id");
@@ -953,64 +391,6 @@ ${values.instructions}</textarea>
         409,
       );
     }
-  });
-  app.get("/agents/:id/delete", (c) => {
-    const id = c.req.param("id");
-    const agent = getAgentSetup?.(id);
-    if (!agent || !deleteAgent) return c.notFound();
-    return c.html(
-      page(
-        "Delete agent",
-        html`<h1>Delete ${agent.name}?</h1>
-          <p>
-            Its container will be stopped and removed, its Telegram polling
-            stopped, and its local bot binding and saved credentials erased.
-          </p>
-          <p>
-            This does not delete the bot in Telegram. Remove or revoke it
-            separately with BotFather if you no longer need it.
-          </p>
-          <form method="post" action="/agents/${encodeURIComponent(id)}/delete">
-            <input type="hidden" name="confirm" value="${id}" />
-            <label
-              ><input type="checkbox" name="deleteData" value="true" /> Also
-              permanently delete the persistent volume (workspace files and
-              history). Leave unchecked to keep it.</label
-            >
-            <button class="btn" type="submit">Confirm deletion</button
-            ><a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
-              >Cancel</a
-            >
-          </form>`,
-        true,
-      ),
-    );
-  });
-  app.post("/agents/:id/delete", async (c) => {
-    const id = c.req.param("id");
-    if (!getAgentSetup?.(id) || !deleteAgent) return c.notFound();
-    const body = await c.req.parseBody({ all: true });
-    if (body.confirm !== id) return c.text("Missing agent confirmation.", 400);
-    try {
-      await deleteAgent(id, body.deleteData === "true");
-    } catch {
-      return c.html(
-        page(
-          "Deletion not completed",
-          html`<h1>Could not finish deleting the agent.</h1>
-            <p>
-              Its data was not deleted unless the step completed. Refresh the
-              agent's status and retry.
-            </p>
-            <a class="btn" href="/agents/${encodeURIComponent(id)}/setup"
-              >Back to agent</a
-            >`,
-          true,
-        ),
-        409,
-      );
-    }
-    return c.redirect("/", 303);
   });
   app.post("/api/agents/:id/delete", async (c) => {
     if (!deleteAgent) return c.notFound();
@@ -1080,51 +460,79 @@ ${values.instructions}</textarea>
       ...(resources ? { resources: await resources() } : {}),
     }),
   );
-  app.get("/", (c) => {
-    const registered = (listAgentIds?.() ?? []).flatMap((id) => {
-      const setup = getAgentSetup?.(id);
-      return setup ? [{ id, ...setup }] : [];
+  const adapters: Array<
+    [string, (id: string) => string, (id: string) => string]
+  > = [
+    ["/agents/new", () => "/api/agents", () => "/"],
+    [
+      "/agents/:id/settings",
+      (id) => `/api/agents/${id}/settings`,
+      (id) => `/agents/${id}/settings?saved=1`,
+    ],
+    [
+      "/agents/:id/token",
+      (id) => `/api/agents/${id}/token`,
+      (id) => `/agents/${id}/token?saved=1`,
+    ],
+    [
+      "/agents/:id/container",
+      (id) => `/api/agents/${id}/container`,
+      (id) => `/agents/${id}/setup`,
+    ],
+    [
+      "/agents/:id/setup/cancel",
+      (id) => `/api/agents/${id}/provision/cancel`,
+      (id) => `/agents/${id}/setup`,
+    ],
+    ["/agents/:id/delete", (id) => `/api/agents/${id}/delete`, () => "/"],
+  ];
+  for (const [path, target, back] of adapters)
+    app.post(path, async (c) => {
+      const id = encodeURIComponent(c.req.param("id") ?? "");
+      const form = new URLSearchParams(await c.req.text());
+      if (path.endsWith("/delete") && !form.has("deleteData"))
+        form.set("deleteData", "false");
+      const result = await app.request(target(id), {
+        method: "POST",
+        headers: c.req.raw.headers,
+        body: form.toString(),
+      });
+      if (!result.ok) return result;
+      if (path === "/agents/new") {
+        const created = (await result.json()) as { agentId: string };
+        return c.redirect(
+          `/agents/${encodeURIComponent(created.agentId)}/setup`,
+          303,
+        );
+      }
+      return c.redirect(back(id), 303);
     });
-    return c.html(
-      page(
-        "Agents",
-        html`<small>LOCAL INSTALLATION</small>
-          <h1>Your agents.</h1>
-          ${registered.length === 0 ? html`<p>No agents yet.${registerAgent ? " Create your first agent." : ""}</p>` : ""}
-          ${registerAgent ? html`<a class="btn" href="/agents/new">Create agent</a>` : ""}
-          <p>One Telegram bot per agent. Every conversation in its place.</p>
-          ${registered.map((agent) => {
-            const bot = agent.botConnection
-              ? connectionLabels[agent.botConnection.status]
-              : "Not connected yet";
-            return html`<article class="card">
-              <h2>${agent.name}</h2>
-              <p class="badge">Setup: ${agent.provisioning}</p>
-              <dl>
-                <dt>Bot</dt>
-                <dd>
-                  ${agent.botUsername ? `@${agent.botUsername}` : "Pending"}
-                </dd>
-                <dt>Telegram bot</dt>
-                <dd>${bot}</dd>
-              </dl>
-              <a
-                class="btn"
-                href="/agents/${encodeURIComponent(agent.id)}/setup"
-                >Manage</a
-              >${agent.botUsername ? html`<a class="btn" href="https://t.me/${agent.botUsername}">Open chat in Telegram</a>` : ""}
-            </article>`;
-          })}
-          <footer>
-            <p>
-              ${registerAgent ? "Registered bots connect after provisioning." : "Configure server provisioning to create agents from the panel."}
-            </p>
-            <a class="btn" href="/">Refresh status</a>
-          </footer>`,
-        true,
-      ),
-    );
-  });
-  app.onError((_, c) => c.text("The request could not be completed.", 500));
+  app.get("/", entry);
+  app.get("/agents/new", (c) => (registerAgent ? entry(c) : c.notFound()));
+  for (const suffix of [
+    "setup",
+    "settings",
+    "token",
+    "container/stop",
+    "delete",
+  ]) {
+    app.get(`/agents/:id/${suffix}`, (c) => {
+      const id = c.req.param("id");
+      if (
+        !getAgentSetup?.(id) ||
+        (suffix === "settings" && !agentSettings?.get(id)) ||
+        (suffix === "token" &&
+          (!agentSettings?.get(id) || !agentSettings.saveToken)) ||
+        (suffix === "delete" && !deleteAgent) ||
+        (suffix === "container/stop" &&
+          (!containerAction || getAgentSetup(id)?.provisioning !== "ready"))
+      )
+        return c.notFound();
+      return entry(c);
+    });
+  }
+  app.onError((_, c) =>
+    c.json({ error: "The request could not be completed." }, 500),
+  );
   return app;
 }
