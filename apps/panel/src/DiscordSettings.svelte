@@ -9,12 +9,18 @@
     agent: AgentDetail;
     busy: boolean;
     action: (
-      kind: "save" | "remove",
+      kind: "save" | "remove" | "test",
       fields: Record<string, string>,
     ) => Promise<void>;
   } = $props();
   let ownerId = $state(untrack(() => agent.discord?.connection?.ownerId ?? ""));
   let token = $state("");
+  let requestId = $state("");
+  async function testDelivery(newRequest: boolean) {
+    if (busy) return;
+    if (newRequest || !requestId) requestId = crypto.randomUUID();
+    await action("test", { requestId });
+  }
   let confirmation = $state("");
   async function save(event: SubmitEvent) {
     event.preventDefault();
@@ -44,7 +50,22 @@
       <dt>Discord owner</dt>
       <dd>{agent.discord.connection.ownerId}</dd>
     </dl>
-    <p>Configured. Delivery testing is not available yet.</p>
+    <p>
+      Send a fixed test message to the saved Discord owner. Up to five new
+      notification attempts per minute are allowed.
+    </p>
+    <button class="btn" disabled={busy} onclick={() => testDelivery(true)}
+      >Send Discord test</button
+    >
+    {#if requestId}
+      <button class="btn" disabled={busy} onclick={() => testDelivery(false)}
+        >Check last test status</button
+      >
+      <p>
+        Checking reuses the last request and does not send it again. A new test
+        may duplicate a message whose delivery was uncertain.
+      </p>
+    {/if}
   {:else}
     <p>Discord is not configured.</p>
   {/if}

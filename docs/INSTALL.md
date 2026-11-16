@@ -102,8 +102,11 @@ copy its bot token, and enter it with the owner's Discord user ID. Enable
 Developer Mode in Discord to copy the user ID; enter the full ID as shown.
 Nimbot verifies the token before saving it privately on the server.
 
-The panel can configure, replace, and remove the connection. Outbound delivery
-and its test action are still being integrated. Telegram continues to receive
+The panel can configure, replace, test, and remove the connection. Use **Send
+Discord test** to send a fixed message to the saved owner. **Check last test
+status** reuses the request without sending again. If delivery is uncertain,
+check your DMs before starting another test. Five new attempts per minute per
+agent are allowed. Telegram continues to receive
 tasks, approvals, progress, and automatic results. Discord may restrict DMs when
 the owner blocks the bot, disables direct messages, or does not share a server
 with it. No Gateway connection or privileged intents are needed at this stage.

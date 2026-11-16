@@ -194,10 +194,33 @@
     }
   }
   async function discordAction(
-    kind: "save" | "remove",
+    kind: "save" | "remove" | "test",
     fields: Record<string, string>,
   ) {
     if (!agent) return;
+    if (kind === "test") {
+      await mutate<
+        import("../../server/src/notification-store.js").NotificationRecord
+      >(
+        `/api/agents/${encodeURIComponent(agent.id)}/discord/test`,
+        fields,
+        (result) => {
+          notice =
+            result.status === "delivered"
+              ? "Discord test delivered."
+              : result.status === "sending"
+                ? "Discord test is still sending. Check its status again."
+                : result.status === "uncertain"
+                  ? "Discord delivery is uncertain. Check your DMs before sending a new test."
+                  : result.reason === "rate_limited"
+                    ? "Discord test was rate limited. Wait before sending a new test."
+                    : result.reason === "rejected"
+                      ? "Discord rejected the test. Check your DM settings and whether the bot is blocked."
+                      : "Discord test failed. Check the saved connection and DM availability.";
+        },
+      );
+      return;
+    }
     await mutate<{ cleanupPending: boolean }>(
       `/api/agents/${encodeURIComponent(agent.id)}/discord${kind === "remove" ? "/remove" : ""}`,
       fields,

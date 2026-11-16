@@ -24,6 +24,7 @@ const panel = createPanel(
   },
   {
     discord: {
+      test: async () => ({ status: "delivered", sentParts: 1 }),
       get: (id) => agents.get(id)?.discord,
       configure: async (id, ownerId, token) => {
         if (token !== "valid-discord-token")

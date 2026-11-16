@@ -640,3 +640,43 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
     page.getByRole("heading", { name: "Developer", exact: true }),
   ).toBeVisible();
 });
+
+test("sends Discord tests and reuses the request when checking uncertain delivery", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Manage" }).click();
+  await page.getByLabel("Owner's Discord user ID").fill("987654321098765432");
+  await page
+    .getByLabel("Discord bot token", { exact: true })
+    .fill("valid-discord-token");
+  await page.getByRole("button", { name: "Connect Discord" }).click();
+  const ids: string[] = [];
+  await page.route("**/api/agents/dev/discord/test", async (route) => {
+    const body = new URLSearchParams(route.request().postData()!);
+    expect([...body.keys()]).toEqual(["requestId"]);
+    ids.push(body.get("requestId")!);
+    await route.fulfill({
+      json:
+        ids.length === 1
+          ? { status: "uncertain", sentParts: 0, reason: "unavailable" }
+          : { status: "delivered", sentParts: 1 },
+    });
+  });
+  await page
+    .getByRole("button", { name: "Send Discord test", exact: true })
+    .click();
+  await expect(
+    page.getByText("Discord delivery is uncertain.", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Check last test status" }).click();
+  await expect(
+    page.getByText("Discord test delivered.", { exact: true }),
+  ).toBeVisible();
+  expect(ids[1]).toBe(ids[0]);
+  await page
+    .getByRole("button", { name: "Send Discord test", exact: true })
+    .click();
+  await expect.poll(() => ids.length).toBe(3);
+  expect(ids[2]).not.toBe(ids[0]);
+});

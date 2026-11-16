@@ -182,9 +182,9 @@ without replaying them. Only a content hash is stored, not notification text.
 The authenticated Discord test API uses this durable path with a fixed test
 message. It accepts only a request ID, resolves the saved owner on the server,
 and allows five new notification attempts per minute per agent across channels.
-Automatic task delivery is independent of this limit. The panel test button is
-still pending. Configuration
-changes invalidate previously resolved delivery targets. Remove a Discord
+Automatic task delivery is independent of this limit. The panel can send a test
+and check its last request without resending it. Uncertain delivery is shown
+explicitly; check your DMs before starting a new test. Configuration changes invalidate previously resolved delivery targets. Remove a Discord
 connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.
 

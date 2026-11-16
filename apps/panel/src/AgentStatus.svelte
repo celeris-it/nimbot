@@ -21,7 +21,7 @@
     action: (kind: "start" | "cancel" | "retry") => Promise<void>;
     refresh: () => void;
     discordAction: (
-      kind: "save" | "remove",
+      kind: "save" | "remove" | "test",
       fields: Record<string, string>,
     ) => Promise<void>;
   } = $props();

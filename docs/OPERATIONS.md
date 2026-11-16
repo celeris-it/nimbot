@@ -97,3 +97,17 @@ Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Lo
 - Panel access is protected by one local password, an eight-hour session, same-origin checks, and login rate limiting. Always put the panel behind HTTPS before exposing it beyond localhost.
 - Telegram messages and AI provider traffic leave your server. Anything an agent is told or reads can reach those services.
 - Agent actions that need your permission arrive as Approve/Deny buttons, and only a single action is granted at a time. Approve only what you recognize.
+
+### Discord notification tests
+
+The agent page can send a test DM to its saved Discord owner. A confirmed
+rejection may mean the owner blocked the bot or does not allow DMs. Verify the
+connection and Discord privacy settings before sending another test. Provider
+errors are sanitized; credentials and message text are not logged.
+
+An uncertain delivery means the provider may have accepted the message before
+the response was lost. Check DMs before starting a new test. Checking the last
+request returns its stored state without resending. Requests interrupted by a
+server restart become uncertain and are never replayed. Notification records
+and the per-agent five-attempt rolling minute limit persist in server SQLite;
+automatic task results, progress, errors, and approvals use their independent path.
