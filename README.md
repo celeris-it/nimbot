@@ -192,7 +192,10 @@ its existing independent path.
 
 A server-side Discord Gateway transport is under development for the next phase.
 It filters owner DMs and handles heartbeat and session recovery, but is not yet
-started by the server or connected to task execution.
+started by the server or connected to task execution. A SQLite Discord inbox
+now atomically binds the owner DM and saves messages, deduplicates by bot and
+message ID, and rejects stale connection identities. Its Gateway and shared
+task-queue integration remains pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 
