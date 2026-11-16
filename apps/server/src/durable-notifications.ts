@@ -20,7 +20,7 @@ export function createDurableNotifications(
       text: string,
     ): Promise<NotificationRecord> {
       const limited = store.countRecent(agentId, Date.now() - 60000) >= 5;
-      const intent = store.begin(agentId, requestId, channel, text);
+      const intent = store.begin(agentId, requestId, channel, text, !limited);
       if (!intent.fresh) return intent.record;
       if (limited) {
         const result = {

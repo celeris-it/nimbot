@@ -21,6 +21,7 @@ export function openNotificationStore(path: string) {
         request_id TEXT NOT NULL,
         channel TEXT NOT NULL CHECK(channel IN ('telegram', 'discord')),
         text_hash TEXT NOT NULL,
+        admitted INTEGER NOT NULL DEFAULT 1 CHECK(admitted IN (0, 1)),
         status TEXT NOT NULL CHECK(status IN ('sending', 'delivered', 'failed', 'uncertain')),
         sent_parts INTEGER NOT NULL DEFAULT 0,
         reason TEXT,
@@ -54,7 +55,7 @@ export function openNotificationStore(path: string) {
       return Number(
         db
           .prepare(
-            "SELECT COUNT(*) AS count FROM notifications WHERE agent_id = ? AND created_at >= ? AND (reason IS NULL OR reason <> 'rate_limited')",
+            "SELECT COUNT(*) AS count FROM notifications WHERE agent_id = ? AND created_at >= ? AND admitted = 1",
           )
           .get(agentId, since)!.count,
       );
@@ -64,6 +65,7 @@ export function openNotificationStore(path: string) {
       requestId: string,
       channel: NotificationChannel,
       text: string,
+      admitted = true,
     ) {
       if (
         !agentId ||
@@ -76,10 +78,10 @@ export function openNotificationStore(path: string) {
       const inserted = db
         .prepare(
           `INSERT OR IGNORE INTO notifications
-        (agent_id, request_id, channel, text_hash, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'sending', ?, ?)`,
+        (agent_id, request_id, channel, text_hash, admitted, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'sending', ?, ?)`,
         )
-        .run(agentId, requestId, channel, hash, now, now);
+        .run(agentId, requestId, channel, hash, admitted ? 1 : 0, now, now);
       const row = db
         .prepare(
           "SELECT channel, text_hash FROM notifications WHERE agent_id = ? AND request_id = ?",

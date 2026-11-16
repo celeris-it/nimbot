@@ -182,6 +182,8 @@ without replaying them. Only a content hash is stored, not notification text.
 The authenticated Discord test API uses this durable path with a fixed test
 message. It accepts only a request ID, resolves the saved owner on the server,
 and allows five new notification attempts per minute per agent across channels.
+Provider rate-limit responses count as attempts; locally blocked requests do not
+extend the window. The quota persists across restarts.
 Automatic task delivery is independent of this limit. The panel can send a test
 and check its last request without resending it. Uncertain delivery is shown
 explicitly; check your DMs before starting a new test. Configuration changes invalidate previously resolved delivery targets. Remove a Discord

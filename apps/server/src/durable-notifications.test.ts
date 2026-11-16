@@ -126,3 +126,39 @@ it("limits each agent independently and lets duplicates observe saved results", 
     store.close();
   }
 });
+
+it("counts provider rate limits across restart and releases the quota after a minute", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "notification-quota-"));
+  const path = join(dir, "state.sqlite");
+  let store = openNotificationStore(path);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(100000);
+  try {
+    const send = vi.fn(
+      async () =>
+        ({ status: "failed", sentParts: 0, reason: "rate_limited" }) as const,
+    );
+    const delivery = createNotifications({
+      discord: { send },
+      telegram: { send },
+    });
+    let service = createDurableNotifications(store, delivery);
+    for (let n = 0; n < 5; n++)
+      await service.send("a", `r${n}`, "discord", "test");
+    store.close();
+    store = openNotificationStore(path);
+    service = createDurableNotifications(store, delivery);
+    clock.mockReturnValue(159000);
+    await service.send("a", "blocked", "telegram", "test");
+    expect(send).toHaveBeenCalledTimes(5);
+    clock.mockReturnValue(160001);
+    await service.send("a", "allowed", "telegram", "test");
+    expect(send).toHaveBeenCalledTimes(6);
+    // A previously rejected request stays rejected even after the window expires.
+    await service.send("a", "blocked", "telegram", "test");
+    expect(send).toHaveBeenCalledTimes(6);
+  } finally {
+    clock.mockRestore();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
