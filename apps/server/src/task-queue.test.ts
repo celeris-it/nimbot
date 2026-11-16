@@ -75,7 +75,7 @@ describe("task queue", () => {
     );
   });
 
-  it("keeps conversations independent and does not let a failure block later tasks", async () => {
+  it("serializes conversations for one agent and does not let failures block later tasks", async () => {
     const hold = gate();
     const { queue, delivered, store } = setup(async (task) => {
       if (task.prompt === "stuck") await hold.promise;
@@ -85,17 +85,16 @@ describe("task queue", () => {
     });
     queue.submit(1, 10, "stuck");
     queue.submit(2, 20, "other");
-    await vi.waitFor(() =>
-      expect(delivered.map((d) => d.prompt)).toEqual(["other"]),
-    );
+    await vi.waitFor(() => expect(queue.isRunning(1, 10)).toBe(true));
+    expect(delivered).toEqual([]);
     hold.open();
     queue.submit(1, 10, "bad");
     queue.submit(1, 10, "weird");
     const last = queue.submit(1, 10, "after");
     await queue.idle();
     expect(delivered.map((d) => d.outcome)).toEqual([
-      { ok: true, output: "ok other" },
       { ok: true, output: "ok stuck" },
+      { ok: true, output: "ok other" },
       { ok: false, kind: "failed" },
       { ok: false, kind: "unavailable" },
       { ok: true, output: "ok after" },
@@ -387,5 +386,42 @@ it("logs task start and finish with agent and task IDs but never the prompt", as
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps different agents independent while serializing all conversations of one agent", async () => {
+  const store = openTaskStore(":memory:");
+  const hold = gate();
+  const started: string[] = [];
+  const make = (agentId: string) =>
+    createTaskQueue({
+      agentId,
+      store,
+      execute: async (task) => {
+        started.push(task.prompt);
+        if (task.prompt === "a-first") await hold.promise;
+        return task.prompt;
+      },
+      deliver: async () => {},
+    });
+  const a = make("a");
+  const b = make("b");
+  try {
+    a.submit(1, 10, "a-first");
+    expect(a.submit(2, 20, "a-second").ahead).toBe(1);
+    b.submit(3, 30, "b-first");
+    await b.idle();
+    expect(started).toEqual(["a-first", "b-first"]);
+    expect(a.isRunning(2, 20)).toBe(false);
+    expect(a.stop(2, 20)).toBe(false);
+    hold.open();
+    await a.idle();
+    expect(started).toEqual(["a-first", "b-first", "a-second"]);
+  } finally {
+    hold.open();
+    await a.idle();
+    a.close();
+    b.close();
+    store.close();
   }
 });

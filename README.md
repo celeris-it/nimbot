@@ -107,7 +107,7 @@ Deletion requires explicit confirmation and keeps volumes unless data deletion i
 
 ### Tasks and recovery
 
-Incoming messages and task state are committed before execution. Each conversation has a persistent FIFO queue and runs one turn at a time; duplicate Telegram updates are deduplicated by bot ID and update ID. Commands remain responsive during execution. Progress, approval buttons, and results stay in the originating agent's chat, and long answers are split to fit Telegram limits. Approval callbacks check the owner, agent, and task; unanswered or undeliverable approvals are denied.
+Incoming messages and task state are committed before execution. Each agent has a persistent FIFO queue and runs one turn at a time across its conversations; duplicate Telegram updates are deduplicated by bot ID and update ID. Commands remain responsive during execution. Progress, approval buttons, and results stay in the originating agent's chat, and long answers are split to fit Telegram limits. Approval callbacks check the owner, agent, and task; unanswered or undeliverable approvals are denied.
 
 `TASK_TIMEOUT_SECONDS` bounds execution (10–3600 seconds, default 600). Failed or cancelled tasks free the queue for the next message. Task submissions and uncertain Docker mutations are never retried automatically. Transient reads and engine startup failures use bounded retries; a failed bot connection does not stop other bots.
 
@@ -196,7 +196,9 @@ heartbeat and session recovery. Configuration replacement, removal, and shutdown
 close the corresponding connection independently. Incoming messages atomically
 link the owner DM and enter a SQLite inbox with deduplication by bot and message
 ID. Stale connection identities are rejected. Discord messages are stored but
-not yet executed; shared task-queue and reply integration remain pending.
+not yet executed. Queue claiming and draining now serialize by agent across
+conversations while preserving the original delivery destination. Discord task
+origin and reply integration remain pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

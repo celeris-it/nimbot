@@ -37,7 +37,7 @@ export function openTaskStore(path: string) {
       update_id INTEGER
     )`);
     db.exec(
-      "CREATE INDEX IF NOT EXISTS tasks_conversation ON tasks (bot_id, chat_id, status, seq)",
+      "CREATE INDEX IF NOT EXISTS tasks_agent_queue ON tasks (agent_id, status, seq)",
     );
     // Update IDs are only unique per bot, so the pair identifies one message.
     db.exec(
@@ -82,9 +82,9 @@ export function openTaskStore(path: string) {
         const ahead = Number(
           db
             .prepare(
-              "SELECT COUNT(*) AS n FROM tasks WHERE bot_id = ? AND chat_id = ? AND status IN ('queued', 'running')",
+              "SELECT COUNT(*) AS n FROM tasks WHERE agent_id = ? AND status IN ('queued', 'running')",
             )
-            .get(task.botId, task.chatId)!.n,
+            .get(task.agentId)!.n,
         );
         db.prepare(
           "INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at, update_id) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
@@ -105,22 +105,22 @@ export function openTaskStore(path: string) {
         throw error;
       }
     },
-    /** Moves the oldest queued task of a conversation to running, unless one is already running. */
-    claimNext(botId: number, chatId: number): QueuedTask | undefined {
+    /** Claims the oldest task for an agent, regardless of its originating conversation. */
+    claimNext(agentId: string): QueuedTask | undefined {
       db.exec("BEGIN IMMEDIATE");
       try {
         const running = db
           .prepare(
-            "SELECT 1 FROM tasks WHERE bot_id = ? AND chat_id = ? AND status = 'running'",
+            "SELECT 1 FROM tasks WHERE agent_id = ? AND status = 'running'",
           )
-          .get(botId, chatId);
+          .get(agentId);
         const next = running
           ? undefined
           : (db
               .prepare(
-                `SELECT ${columns} FROM tasks WHERE bot_id = ? AND chat_id = ? AND status = 'queued' ORDER BY seq LIMIT 1`,
+                `SELECT ${columns} FROM tasks WHERE agent_id = ? AND status = 'queued' ORDER BY seq LIMIT 1`,
               )
-              .get(botId, chatId) as unknown as QueuedTask | undefined);
+              .get(agentId) as unknown as QueuedTask | undefined);
         if (next)
           db.prepare(
             "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ?",
@@ -168,8 +168,8 @@ export function openTaskStore(path: string) {
 export type TaskStore = ReturnType<typeof openTaskStore>;
 
 /**
- * Runs one task at a time per conversation, oldest first. A failed task never
- * blocks the ones behind it. One queue serves one bot connection.
+ * Runs one task at a time per agent, oldest first. A failed task never
+ * blocks the ones behind it. Delivery retains the originating conversation.
  */
 export function createTaskQueue(config: {
   agentId: string;
@@ -200,15 +200,15 @@ export function createTaskQueue(config: {
   let closed = false;
   const draining = new Map<string, Promise<void>>();
   const active = new Map<string, AbortController>();
-  async function drain(botId: number, chatId: number) {
-    const key = `${botId}:${chatId}`;
+  async function drain() {
+    const key = config.agentId;
     // Registered by kick() before this body runs, so the exit below cannot race a submit.
     await Promise.resolve();
     try {
       while (!closed) {
         let task: QueuedTask | undefined;
         try {
-          task = config.store.claimNext(botId, chatId);
+          task = config.store.claimNext(config.agentId);
         } catch {
           return;
         }
@@ -216,7 +216,8 @@ export function createTaskQueue(config: {
         log.info("task.started", { taskId: task.id });
         let outcome: TaskOutcome;
         const controller = new AbortController();
-        active.set(key, controller);
+        const conversationKey = `${task.botId}:${task.chatId}`;
+        active.set(conversationKey, controller);
         const sending: Promise<unknown>[] = [];
         try {
           if (config.admit && !config.admit(task))
@@ -249,7 +250,7 @@ export function createTaskQueue(config: {
             kind: error instanceof HostTaskError ? error.kind : "unavailable",
           };
         }
-        active.delete(key);
+        active.delete(conversationKey);
         // Progress must reach the chat before the final result does.
         await Promise.allSettled(sending);
         const finalStatus = outcome.ok
@@ -278,10 +279,10 @@ export function createTaskQueue(config: {
       draining.delete(key);
     }
   }
-  function kick(botId: number, chatId: number) {
-    const key = `${botId}:${chatId}`;
+  function kick() {
+    const key = config.agentId;
     if (closed || draining.has(key)) return;
-    draining.set(key, drain(botId, chatId));
+    draining.set(key, drain());
   }
   return {
     /** Persists first, then starts draining; never waits for the task itself. */
@@ -293,7 +294,7 @@ export function createTaskQueue(config: {
         prompt,
         ...(updateId === undefined ? {} : { updateId }),
       });
-      kick(botId, chatId);
+      kick();
       return saved;
     },
     isRunning(botId: number, chatId: number): boolean {
@@ -309,10 +310,7 @@ export function createTaskQueue(config: {
     },
     /** Continues queued work saved before a restart. */
     resume() {
-      for (const { botId, chatId } of config.store.pendingConversations(
-        config.agentId,
-      ))
-        kick(botId, chatId);
+      kick();
     },
     /** Resolves when no conversation is draining; used by tests and orderly shutdown. */
     async idle() {
