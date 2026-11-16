@@ -229,6 +229,36 @@ async function fixture() {
   };
 }
 
+it("sends notifications through the existing owner-bound connection", async () => {
+  const f = await fixture();
+  try {
+    f.manager.start("a");
+    await vi.waitFor(() =>
+      expect(f.manager.getState("a").status).toBe("polling"),
+    );
+    expect(await f.manager.notifications.send("a", "hello")).toMatchObject({
+      reason: "not_configured",
+    });
+    await f.send("a", "/start", 42);
+    f.sent.length = 0;
+    expect(await f.manager.notifications.send("a", "hello")).toEqual({
+      status: "delivered",
+      sentParts: 1,
+    });
+    expect(f.sent).toEqual([{ bot: "a", chat: 42, text: "hello" }]);
+    expect(await f.manager.notifications.send("b", "hello")).toMatchObject({
+      reason: "not_configured",
+    });
+    await f.manager.stop("a");
+    expect(await f.manager.notifications.send("a", "hello")).toMatchObject({
+      reason: "not_configured",
+    });
+    expect(f.sent).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
 it("runs real grammY polling loops with isolated identities, owner activation, Host credentials and results", async () => {
   const f = await fixture();
   try {

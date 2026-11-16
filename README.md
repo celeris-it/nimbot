@@ -168,6 +168,13 @@ NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.I
 
 ## Future work
 
+Outbound notifications are under development in `TODO.md`. The internal server
+interface and Telegram adapter reuse the agent's verified bot connection and
+owner chat, split long text, and report uncertain sends without retrying them.
+They are not exposed to the panel or agent runtime yet; durable notification
+records, limits, and Discord support remain pending. Automatic task delivery
+continues through its existing independent path.
+
 The following ideas are deferred, not supported features or delivery commitments:
 
 - **AI engines:** native Codex, Claude Code, additional ACP providers, per-agent engine selection and switching.

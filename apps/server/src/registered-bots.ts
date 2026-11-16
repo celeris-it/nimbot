@@ -12,6 +12,7 @@ import type { TaskStore } from "./task-queue.js";
 import { getHostStatus } from "./agent-host.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 import { DEFAULT_RETRY_DELAYS_MS, retryTransient } from "./retry.js";
+import { createTelegramNotifications } from "./telegram-notifications.js";
 
 export interface RegisteredBotState {
   status:
@@ -196,6 +197,48 @@ export function createRegisteredBots(
     }
   }
   return {
+    notifications: createTelegramNotifications((id) => {
+      const connection = connections.get(id);
+      const agent = registry.get(id);
+      const bot = connection?.bot;
+      const chat = registry.getOwnerChat(id);
+      if (
+        closed ||
+        !agent ||
+        !bot ||
+        connection?.state.status !== "polling" ||
+        !agent.credentialRef ||
+        bot.botInfo.id !== agent.botId ||
+        chat !== agent.ownerId
+      )
+        return undefined;
+      return {
+        async send(text) {
+          const current = registry.get(id);
+          if (
+            closed ||
+            connection.controller.signal.aborted ||
+            connection.state.status !== "polling" ||
+            connections.get(id) !== connection ||
+            current?.ownerId !== agent.ownerId ||
+            current?.botId !== agent.botId ||
+            current?.credentialRef !== agent.credentialRef ||
+            registry.getOwnerChat(id) !== chat
+          )
+            return false;
+          await bot.api.sendMessage(
+            chat,
+            text,
+            {},
+            AbortSignal.any([
+              connection.controller.signal,
+              AbortSignal.timeout(10000),
+            ]) as unknown as Parameters<typeof bot.api.sendMessage>[3],
+          );
+          return true;
+        },
+      };
+    }),
     start(id: string) {
       if (closed || connections.get(id)?.finished === false) return;
       const connection: Connection = {
