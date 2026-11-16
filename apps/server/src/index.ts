@@ -1,3 +1,5 @@
+import { openDiscordInbox } from "./discord-inbox.js";
+import { createRegisteredDiscord } from "./registered-discord.js";
 import { openNotificationStore } from "./notification-store.js";
 import { createDurableNotifications } from "./durable-notifications.js";
 import { createNotifications } from "./notifications.js";
@@ -82,6 +84,7 @@ async function main(): Promise<void> {
   let statePath;
   let taskStore;
   let notificationStore;
+  let discordInbox;
   let registry;
   let botSecrets;
   let discordSecrets;
@@ -100,11 +103,13 @@ async function main(): Promise<void> {
         resolve(stateDir, "host-secrets"),
         registry,
       );
+    discordInbox = openDiscordInbox(statePath);
     notificationStore = openNotificationStore(statePath);
     taskStore = openTaskStore(statePath);
     // A task left running by the previous process cannot be proven finished.
     taskStore.markRunningInterrupted();
   } catch {
+    discordInbox?.close();
     notificationStore?.close();
     registry?.close();
     log.error("server.state_init_failed", {
@@ -114,6 +119,7 @@ async function main(): Promise<void> {
     return;
   }
   process.once("exit", () => {
+    discordInbox.close();
     notificationStore.close();
     taskStore.close();
     registry.close();
@@ -193,6 +199,11 @@ async function main(): Promise<void> {
   const requireAgent = (id: string) => {
     if (!registry.get(id)) throw new Error("Agent not found");
   };
+  const registeredDiscord = createRegisteredDiscord(
+    registry,
+    discordSecrets,
+    discordInbox,
+  );
   const discord = createDiscordConfiguration(registry, discordSecrets);
   const notifications = createDurableNotifications(
     notificationStore,
@@ -213,8 +224,16 @@ async function main(): Promise<void> {
             }
           : undefined;
       },
-      configure: (id, ownerId, token) => discord.configure(id, ownerId, token),
-      remove: (id) => discord.remove(id),
+      configure: async (id, ownerId, token) => {
+        const result = await discord.configure(id, ownerId, token);
+        await registeredDiscord.start(id);
+        return result;
+      },
+      remove: async (id) => {
+        const result = await discord.remove(id);
+        registeredDiscord.stop(id);
+        return result;
+      },
       test: (id, requestId) =>
         notifications.send(
           id,
@@ -332,6 +351,7 @@ async function main(): Promise<void> {
   });
   log.info("server.panel_listening", { origin: panelConfig.origin });
   const stop = () => {
+    registeredDiscord.close();
     provisioningShutdown.abort();
     void registeredBots?.close().catch(() => {
       log.error("server.registered_bots_stop_failed");
@@ -342,6 +362,7 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+  for (const id of registry.listIds()) void registeredDiscord.start(id);
   for (const agent of registry.listResourceReferences())
     registeredBots?.start(agent.id);
 }

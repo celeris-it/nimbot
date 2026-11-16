@@ -191,11 +191,12 @@ connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.
 
 A server-side Discord Gateway transport is under development for the next phase.
-It filters owner DMs and handles heartbeat and session recovery, but is not yet
-started by the server or connected to task execution. A SQLite Discord inbox
-now atomically binds the owner DM and saves messages, deduplicates by bot and
-message ID, and rejects stale connection identities. Its Gateway and shared
-task-queue integration remains pending.
+The server starts a Gateway per configured agent, filters owner DMs, and handles
+heartbeat and session recovery. Configuration replacement, removal, and shutdown
+close the corresponding connection independently. Incoming messages atomically
+link the owner DM and enter a SQLite inbox with deduplication by bot and message
+ID. Stale connection identities are rejected. Discord messages are stored but
+not yet executed; shared task-queue and reply integration remain pending.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

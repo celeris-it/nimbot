@@ -109,7 +109,9 @@ check your DMs before starting another test. Five new attempts per minute per
 agent are allowed. Telegram continues to receive
 tasks, approvals, progress, and automatic results. Discord may restrict DMs when
 the owner blocks the bot, disables direct messages, or does not share a server
-with it. No Gateway connection or privileged intents are needed at this stage.
+with it. The server now opens a Gateway connection using the direct-message intent;
+privileged intents are not required. Incoming Discord DMs are saved, but their
+execution is still under development.
 
 To replace a token or owner, submit both fields again. Removing the connection
 keeps the agent and its Telegram connection; revoke or delete the Discord bot
