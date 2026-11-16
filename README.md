@@ -117,7 +117,7 @@ Terminal and filesystem tools run through OpenCode inside the container. Browser
 
 ### Persistence and diagnostics
 
-Server state includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, and the durable task queue. Private `bot-secrets` and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
+Server state includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, and the durable task queue. Private `bot-secrets`, `discord-secrets`, and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
 
 Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner chat linking, container status, and authenticated Host readiness separately; readiness checks workspace access and busy state, not AI provider availability. Stopping an agent captures a task observation, and later refreshes confirm its persisted outcome when the Host is reachable.
 
@@ -174,8 +174,9 @@ owner chat, split long text, and report uncertain sends without retrying them.
 The Discord HTTP adapter resolves owner-only DMs, splits text, suppresses mentions,
 and honors rate-limit cooldowns without retrying uncertain sends. Both adapters
 remain internal. Discord configuration now has server-side bot verification,
-private credential files, and SQLite metadata with string IDs; panel wiring,
-durable notification records, and per-agent limits are pending. Configuration
+private credential files, SQLite metadata with string IDs, and authenticated
+configuration API routes. Panel forms, test delivery, durable notification
+records, and per-agent limits are pending. Configuration
 changes invalidate previously resolved delivery targets. Remove a Discord
 connection before retiring its agent. Automatic task delivery continues through
 its existing independent path.

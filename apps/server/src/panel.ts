@@ -9,6 +9,7 @@ import { verifyPassword } from "./panel-auth.js";
 import type { HostStatus } from "./agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 import type { AgentDetail, PanelSession } from "./panel-contracts.js";
+import { isDiscordId } from "./discord-identity.js";
 
 export interface RegisteredAgentSettings {
   cancelProvisioning?(id: string): void;
@@ -24,6 +25,17 @@ export interface RegisteredAgentSettings {
   ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
 export interface PanelDeps {
+  discord?: {
+    get(
+      id: string,
+    ): { botId: string; botUsername: string; ownerId: string } | undefined;
+    configure(
+      id: string,
+      ownerId: string,
+      token: string,
+    ): Promise<{ cleanupPending: boolean }>;
+    remove(id: string): Promise<{ cleanupPending: boolean }>;
+  };
   /** Docker inventory shown in the status API; omitted when provisioning is off. */
   resources?: () =>
     | import("./resource-reconciliation.js").ResourceInventory
@@ -275,6 +287,69 @@ export function createPanel(
       return c.json({ saved: true });
     } catch {
       return c.json({ error: "Could not save the changes. Try again." }, 500);
+    }
+  });
+  app.get("/api/agents/:id/discord", (c) => {
+    const id = c.req.param("id");
+    if (!deps.discord || !getAgentSetup?.(id))
+      return c.json({ error: "Agent not found." }, 404);
+    const connection = deps.discord.get(id);
+    return c.json({
+      connection: connection
+        ? {
+            botId: connection.botId,
+            botUsername: connection.botUsername,
+            ownerId: connection.ownerId,
+          }
+        : null,
+    });
+  });
+  app.post("/api/agents/:id/discord", async (c) => {
+    const id = c.req.param("id");
+    if (!deps.discord || !getAgentSetup?.(id))
+      return c.json({ error: "Agent not found." }, 404);
+    const body = await c.req.parseBody({ all: true });
+    if (
+      !isDiscordId(body.ownerId) ||
+      typeof body.token !== "string" ||
+      !/^[A-Za-z0-9._-]{1,256}$/.test(body.token.trim())
+    )
+      return c.json(
+        { error: "Enter a valid Discord owner ID and bot token." },
+        400,
+      );
+    try {
+      const result = await deps.discord.configure(
+        id,
+        body.ownerId,
+        body.token.trim(),
+      );
+      return c.json({ saved: true, cleanupPending: result.cleanupPending });
+    } catch {
+      return c.json(
+        {
+          error:
+            "Could not save Discord. Check the bot token, owner ID, and whether the bot is already linked.",
+        },
+        400,
+      );
+    }
+  });
+  app.post("/api/agents/:id/discord/remove", async (c) => {
+    const id = c.req.param("id");
+    if (!deps.discord || !getAgentSetup?.(id))
+      return c.json({ error: "Agent not found." }, 404);
+    const body = await c.req.parseBody({ all: true });
+    if (body.confirm !== id)
+      return c.json({ error: "Confirm the agent ID to remove Discord." }, 400);
+    try {
+      const result = await deps.discord.remove(id);
+      return c.json({ removed: true, cleanupPending: result.cleanupPending });
+    } catch {
+      return c.json(
+        { error: "Could not remove Discord. Refresh and try again." },
+        500,
+      );
     }
   });
   app.post("/api/agents/:id/token", async (c) => {

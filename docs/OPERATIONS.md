@@ -13,7 +13,7 @@ Use the same Docker context/socket used during installation. The installer print
 | Data | Where |
 |---|---|
 | Agents, owners, instructions, bot identities, chat bindings, provisioning state, task metadata | SQLite in the server state volume |
-| Telegram bot tokens (replacement tokens) and Agent Host API tokens | Private files in the same server state volume (`bot-secrets`, `host-secrets`) |
+| Telegram and Discord bot tokens, and Agent Host API tokens | Private files in the same server state volume (`bot-secrets`, `discord-secrets`, `host-secrets`) |
 | Agent files | Per-agent workspace volume |
 | OpenCode sessions, history, and AI provider credentials | Per-agent engine-state volume |
 | Task records and results | Per-agent task-state volume |

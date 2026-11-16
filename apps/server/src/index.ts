@@ -17,6 +17,8 @@ import { checkDockerAccess } from "./docker-preflight.js";
 import { openHostCredentials } from "./host-credentials.js";
 import { createContainerControl } from "./container-control.js";
 import { openBotSecrets } from "./bot-secret.js";
+import { openDiscordSecrets } from "./discord-secret.js";
+import { createDiscordConfiguration } from "./discord-configuration.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
 import { openAgentRegistry } from "./agent-registry.js";
 import { mkdir } from "node:fs/promises";
@@ -77,6 +79,7 @@ async function main(): Promise<void> {
   let taskStore;
   let registry;
   let botSecrets;
+  let discordSecrets;
   let hostCredentials;
   try {
     const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
@@ -84,6 +87,9 @@ async function main(): Promise<void> {
     statePath = resolve(stateDir, "server.sqlite");
     registry = openAgentRegistry(statePath);
     botSecrets = await openBotSecrets(resolve(stateDir, "bot-secrets"));
+    discordSecrets = await openDiscordSecrets(
+      resolve(stateDir, "discord-secrets"),
+    );
     if (provisioningConfig)
       hostCredentials = await openHostCredentials(
         resolve(stateDir, "host-secrets"),
@@ -179,7 +185,22 @@ async function main(): Promise<void> {
   const requireAgent = (id: string) => {
     if (!registry.get(id)) throw new Error("Agent not found");
   };
+  const discord = createDiscordConfiguration(registry, discordSecrets);
   const panel = createPanel(panelConfig, {
+    discord: {
+      get: (id) => {
+        const connection = registry.getDiscordConnection(id);
+        return connection
+          ? {
+              botId: connection.botId,
+              botUsername: connection.botUsername,
+              ownerId: connection.ownerId,
+            }
+          : undefined;
+      },
+      configure: (id, ownerId, token) => discord.configure(id, ownerId, token),
+      remove: (id) => discord.remove(id),
+    },
     resources: reconcile,
     provisionAgent: provision
       ? async (id) => {
@@ -267,6 +288,10 @@ async function main(): Promise<void> {
     deleteAgent: deleteAgent
       ? async (id, deleteData) => {
           requireAgent(id);
+          if (registry.getDiscordConnection(id))
+            throw new Error(
+              "Remove the Discord connection before deleting the agent",
+            );
           await deleteAgent(id, deleteData);
         }
       : undefined,
