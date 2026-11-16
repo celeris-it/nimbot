@@ -171,8 +171,10 @@ NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.I
 Outbound notifications are under development in `TODO.md`. The internal server
 interface and Telegram adapter reuse the agent's verified bot connection and
 owner chat, split long text, and report uncertain sends without retrying them.
-They are not exposed to the panel or agent runtime yet; durable notification
-records, limits, and Discord support remain pending. Automatic task delivery
+The Discord HTTP adapter resolves owner-only DMs, splits text, suppresses mentions,
+and honors rate-limit cooldowns without retrying uncertain sends. Both adapters
+remain internal; panel configuration, durable notification records, and per-agent
+limits are pending. Automatic task delivery
 continues through its existing independent path.
 
 The following ideas are deferred, not supported features or delivery commitments:
