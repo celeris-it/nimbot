@@ -2,6 +2,7 @@ import type {
   NotificationAdapter,
   NotificationResult,
 } from "./notifications.js";
+import { isDiscordId as snowflake } from "./discord-identity.js";
 
 /** Resolved only by trusted server code; IDs remain strings. */
 export interface DiscordNotificationTarget {
@@ -11,8 +12,6 @@ export interface DiscordNotificationTarget {
   isCurrent(): boolean;
 }
 
-const snowflake = (value: unknown): value is string =>
-  typeof value === "string" && /^[1-9]\d{0,19}$/.test(value);
 const record = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === "object"
     ? (value as Record<string, unknown>)

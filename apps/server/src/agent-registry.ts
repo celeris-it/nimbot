@@ -2,6 +2,14 @@ import { DatabaseSync } from "node:sqlite";
 import type { CurrentHostTask } from "./host-current-task.js";
 import { randomUUID } from "node:crypto";
 import { CHAT_BINDINGS_SCHEMA } from "./chat-binding.js";
+import { isDiscordId } from "./discord-identity.js";
+
+export interface DiscordConnection {
+  botId: string;
+  botUsername: string;
+  ownerId: string;
+  credentialRef: string;
+}
 import {
   agentResourceNames,
   type ResourceKind,
@@ -57,7 +65,7 @@ export function openAgentRegistry(path: string) {
   const db = new DatabaseSync(path);
   try {
     db.exec("BEGIN IMMEDIATE");
-    // One current schema. When it changes after a release, add versioned migrations here.
+    // Fresh installations use the current schema directly.
     db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
@@ -69,6 +77,13 @@ export function openAgentRegistry(path: string) {
         credential_ref TEXT,
         container_ref TEXT,
         deleted_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS agent_discord_connections (
+        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+        bot_id TEXT NOT NULL UNIQUE,
+        bot_username TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        credential_ref TEXT NOT NULL UNIQUE
       );
       CREATE TABLE IF NOT EXISTS container_operations (
         agent_id TEXT PRIMARY KEY REFERENCES agents(id),
@@ -146,6 +161,61 @@ export function openAgentRegistry(path: string) {
     if (other) throw new Error("Bot is already assigned to another agent");
   }
   return {
+    getDiscordConnection(id: string): DiscordConnection | undefined {
+      return db
+        .prepare(
+          `SELECT d.bot_id AS botId, d.bot_username AS botUsername,
+        d.owner_id AS ownerId, d.credential_ref AS credentialRef
+        FROM agent_discord_connections d JOIN agents a ON a.id = d.agent_id
+        WHERE a.id = ? AND a.deleted_at IS NULL`,
+        )
+        .get(id) as unknown as DiscordConnection | undefined;
+    },
+    /** Compare the previous reference so overlapping edits cannot overwrite each other. */
+    setDiscordConnection(
+      id: string,
+      connection: DiscordConnection,
+      expectedRef: string | null,
+    ) {
+      if (
+        !isDiscordId(connection.botId) ||
+        !isDiscordId(connection.ownerId) ||
+        !connection.botUsername ||
+        connection.botUsername.length > 32 ||
+        !/^file:discord-[a-f0-9-]{36}$/.test(connection.credentialRef)
+      )
+        throw new Error("Invalid Discord connection");
+      const result = db
+        .prepare(
+          `INSERT INTO agent_discord_connections
+        (agent_id, bot_id, bot_username, owner_id, credential_ref)
+        SELECT id, ?, ?, ?, ? FROM agents WHERE id = ? AND deleted_at IS NULL
+        AND (SELECT credential_ref FROM agent_discord_connections WHERE agent_id = ?) IS ?
+        ON CONFLICT(agent_id) DO UPDATE SET bot_id = excluded.bot_id,
+        bot_username = excluded.bot_username, owner_id = excluded.owner_id,
+        credential_ref = excluded.credential_ref`,
+        )
+        .run(
+          connection.botId,
+          connection.botUsername,
+          connection.ownerId,
+          connection.credentialRef,
+          id,
+          id,
+          expectedRef,
+        );
+      if (!result.changes)
+        throw new Error("Discord connection changed or agent is unavailable");
+    },
+    removeDiscordConnection(id: string, expectedRef: string) {
+      const result = db
+        .prepare(
+          "DELETE FROM agent_discord_connections WHERE agent_id = ? AND credential_ref = ?",
+        )
+        .run(id, expectedRef);
+      if (!result.changes)
+        throw new Error("Discord connection changed or is unavailable");
+    },
     recordProvisioningIntent(
       id: string,
       kind: ResourceKind,
@@ -590,6 +660,16 @@ export function openAgentRegistry(path: string) {
           .get(id);
         if (!agent || setup?.status !== "pending" || setup.network_ref)
           throw new Error("Agent resources must be removed before deletion");
+        if (
+          db
+            .prepare(
+              "SELECT agent_id FROM agent_discord_connections WHERE agent_id = ?",
+            )
+            .get(id)
+        )
+          throw new Error(
+            "Remove the Discord connection before deleting the agent",
+          );
         const hostRef = db
           .prepare(
             "SELECT credential_ref FROM agent_host_credentials WHERE agent_id = ?",

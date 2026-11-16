@@ -173,9 +173,12 @@ interface and Telegram adapter reuse the agent's verified bot connection and
 owner chat, split long text, and report uncertain sends without retrying them.
 The Discord HTTP adapter resolves owner-only DMs, splits text, suppresses mentions,
 and honors rate-limit cooldowns without retrying uncertain sends. Both adapters
-remain internal; panel configuration, durable notification records, and per-agent
-limits are pending. Automatic task delivery
-continues through its existing independent path.
+remain internal. Discord configuration now has server-side bot verification,
+private credential files, and SQLite metadata with string IDs; panel wiring,
+durable notification records, and per-agent limits are pending. Configuration
+changes invalidate previously resolved delivery targets. Remove a Discord
+connection before retiring its agent. Automatic task delivery continues through
+its existing independent path.
 
 The following ideas are deferred, not supported features or delivery commitments:
 
