@@ -85,6 +85,15 @@ const panel = createPanel(
       agent.container = action === "start" ? "running" : "stopped";
       agent.operation = { action, status: "completed", updatedAt: Date.now() };
     },
+    provisionAgent: async (id) => {
+      const agent = agents.get(id);
+      if (
+        !agent ||
+        !["failed", "interrupted", "cancelled"].includes(agent.provisioning)
+      )
+        throw new Error("private-provisioning-error");
+      agent.provisioning = "ready";
+    },
     deleteAgent: async (id) => {
       agents.delete(id);
     },
@@ -93,6 +102,10 @@ const panel = createPanel(
 const app = new Hono();
 app.post("/__test/reset", (c) => {
   reset();
+  return c.json({ ok: true });
+});
+app.post("/__test/fail/:id", (c) => {
+  agents.get(c.req.param("id")).provisioning = "failed";
   return c.json({ ok: true });
 });
 app.route("/", panel);

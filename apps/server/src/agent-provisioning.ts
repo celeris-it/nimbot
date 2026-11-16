@@ -3,7 +3,10 @@ import type { openHostCredentials } from "./host-credentials.js";
 import { setTimeout } from "node:timers/promises";
 import type { openAgentRegistry } from "./agent-registry.js";
 import { getHostStatus } from "./agent-host.js";
-import { createContainerResources } from "./container-resources.js";
+import {
+  createContainerResources,
+  isPinnedImage,
+} from "./container-resources.js";
 import { createContainerControl } from "./container-control.js";
 import { readTaskTimeoutSeconds } from "./task-timeout.js";
 import { createDockerApi, type DockerApi } from "./docker-api.js";
@@ -23,15 +26,47 @@ export function readProvisioningConfig(env: NodeJS.ProcessEnv) {
     throw new Error(
       "Provisioning requires AGENT_HOST_IMAGE, SERVER_CONTAINER_NAME, and an absolute DOCKER_SOCKET_PATH.",
     );
+  // A tag is resolved to its immutable image ID at startup (resolveAgentHostImage).
+  if (
+    !isPinnedImage(image) &&
+    !/^[a-zA-Z0-9][a-zA-Z0-9./:_-]{0,255}$/.test(image)
+  )
+    throw new Error(
+      "AGENT_HOST_IMAGE must be an image tag or a SHA256 image ID or digest.",
+    );
   const config = {
     image,
     serverContainerRef,
     socketPath,
     taskTimeoutSeconds: readTaskTimeoutSeconds(env),
   };
-  // Validate the immutable image before starting the HTTP server or Telegram.
-  createContainerResources(config);
+  // Validate an already pinned image before starting the HTTP server or Telegram.
+  if (isPinnedImage(image)) createContainerResources(config);
   return config;
+}
+
+/**
+ * Pins a local image tag to its immutable ID. Never pulls from a registry, and the
+ * returned configuration always passes createContainerResources' SHA256 check.
+ */
+export async function resolveAgentHostImage<
+  T extends { image: string; socketPath: string },
+>(config: T, call: DockerApi = createDockerApi(config.socketPath)): Promise<T> {
+  if (isPinnedImage(config.image)) return config;
+  const missing = `Agent Host image "${config.image}" not found locally; build it first`;
+  const result = await call(`/images/${encodeURIComponent(config.image)}/json`);
+  if (result.code === 404) throw new Error(missing);
+  let id: unknown;
+  try {
+    id = (JSON.parse(result.body) as { Id?: unknown }).Id;
+  } catch {
+    id = undefined;
+  }
+  if (result.code !== 200 || typeof id !== "string" || !isPinnedImage(id))
+    throw new Error(
+      `Could not resolve Agent Host image "${config.image}" to an immutable ID`,
+    );
+  return { ...config, image: id };
 }
 
 /** Internal workflow: caller connects the Server to the private agent network. */

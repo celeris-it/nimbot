@@ -244,6 +244,9 @@ export function createPanel(
           !!setup.canCancelProvisioning &&
           !setup.cancellationRequested &&
           !!agentSettings?.cancelProvisioning,
+        retry:
+          !!provisionAgent &&
+          ["failed", "interrupted", "cancelled"].includes(setup.provisioning),
         delete: !!deleteAgent,
       },
     } satisfies AgentDetail);

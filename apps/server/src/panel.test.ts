@@ -864,3 +864,32 @@ it("serves the bundled variable font with its MIME type and same-origin font pol
   expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(1000);
   expect((await app.request("/assets/missing.woff2")).status).toBe(404);
 });
+
+it("offers a setup retry only for an unfinished setup when provisioning is enabled", async () => {
+  const states = new Map<string, string>();
+  const deps = (provisionAgent?: PanelDeps["provisionAgent"]): PanelDeps => ({
+    provisionAgent,
+    getAgentSetup: (id) =>
+      states.has(id)
+        ? {
+            name: "Dev",
+            botUsername: null,
+            provisioning: states.get(id)!,
+          }
+        : undefined,
+  });
+  const retry = async (state: string, enabled = true) => {
+    states.set("dev", state);
+    const { get, login } = apiSetup(deps(enabled ? async () => {} : undefined));
+    const cookie = await login();
+    const body = (await (await get("/api/agents/dev", cookie)).json()) as {
+      capabilities: { retry: boolean };
+    };
+    return body.capabilities.retry;
+  };
+  for (const state of ["failed", "interrupted", "cancelled"])
+    expect(await retry(state), state).toBe(true);
+  for (const state of ["pending", "provisioning", "ready"])
+    expect(await retry(state), state).toBe(false);
+  expect(await retry("failed", false)).toBe(false);
+});

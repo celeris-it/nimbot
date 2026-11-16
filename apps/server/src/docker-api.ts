@@ -29,9 +29,14 @@ export function createDockerApi(
         if (result.code < 500 || wait === undefined) return result;
       } catch (error) {
         if (wait === undefined) {
+          const code = (error as NodeJS.ErrnoException | undefined)?.code;
           log.error("docker.request_failed", {
             method,
             attempts: failures + 1,
+            // Errno name only (for example EACCES); never a message or path.
+            ...(typeof code === "string" && /^[A-Z0-9_]{1,32}$/.test(code)
+              ? { code }
+              : {}),
           });
           throw error;
         }

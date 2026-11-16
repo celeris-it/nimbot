@@ -36,7 +36,6 @@ Enter a password of at least 12 characters twice. Copy the printed `PANEL_PASSWO
 
 ```sh
 cp .env.example .env
-docker image inspect nimbot-agent-host --format '{{.Id}}'
 stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock
 ```
 
@@ -48,8 +47,8 @@ Edit `.env`:
 |---|---|
 | `PANEL_PASSWORD_HASH` | Hash from section 3. |
 | `PANEL_URL` | Public origin of the panel, for example `https://nimbot.example.com`. Form submissions from any other origin are rejected. |
-| `AGENT_HOST_IMAGE` | Immutable Agent Host image ID printed above (`sha256:...`). |
-| `DOCKER_SOCKET_GID` | Numeric Docker socket group ID printed above. |
+| `AGENT_HOST_IMAGE` | Agent Host image tag (default `nimbot-agent-host:latest`). The server resolves it to the image's immutable ID at startup and never pulls it. A `sha256:...` ID also works. |
+| `DOCKER_SOCKET_GID` | Numeric Docker socket group ID printed above. If it is wrong, the server stops at startup with `cannot access Docker socket: permission denied; check DOCKER_SOCKET_GID`. |
 | `TASK_TIMEOUT_SECONDS` | Maximum run time of one task, 10–3600 (default 600). |
 | `SERVER_STATE_DIR` | State directory for native runs only; Compose uses a named volume. |
 
@@ -107,7 +106,7 @@ Pick a provider and paste its key when asked. Readiness in the panel does not ve
 
 ## 8. Docker provisioning
 
-The default Compose deployment enables provisioning for every agent, including the first. Section 4 configures its immutable Agent Host image, Docker socket group, and server container name. No override file is needed. Rebuilding the Agent Host image changes its ID: update `AGENT_HOST_IMAGE` and recreate the server with `docker compose up -d` before creating more agents.
+The default Compose deployment enables provisioning for every agent, including the first. Section 4 configures its Agent Host image tag, Docker socket group, and server container name. No override file is needed. The server resolves the tag to the image's immutable ID once at startup. After rebuilding the Agent Host image, recreate the server with `docker compose up -d --force-recreate server` before creating more agents. If an agent's setup fails or is interrupted, open its page and use **Retry setup**; created resources are kept.
 
 Agent containers run as a non-root user with all capabilities dropped, `no-new-privileges`, one CPU, 1 GiB of memory, 256 processes, no published ports, and a private network shared only with the server. Deleting an agent in the panel keeps its volumes unless you explicitly choose to delete data; deleting the Telegram bot itself is done in BotFather.
 

@@ -33,6 +33,12 @@ export interface ResourceReferences {
 }
 
 /** Internal server service only. Image and token come from trusted server configuration, never panel input. */
+export function isPinnedImage(image: string): boolean {
+  return /^(?:sha256:[a-f0-9]{64}|[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64})$/.test(
+    image,
+  );
+}
+
 export function createContainerResources(
   config: {
     socketPath: string;
@@ -43,11 +49,7 @@ export function createContainerResources(
   call: DockerApi = createDockerApi(config.socketPath),
 ) {
   // Require an immutable local image ID or registry digest; mutable tags are rejected.
-  if (
-    !/^(?:sha256:[a-f0-9]{64}|[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64})$/.test(
-      config.image,
-    )
-  )
+  if (!isPinnedImage(config.image))
     throw new Error("Agent Host image must be pinned by SHA256");
 
   async function inspect(

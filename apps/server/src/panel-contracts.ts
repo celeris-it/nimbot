@@ -23,6 +23,7 @@ export interface AgentDetail extends AgentSummary {
     replaceToken: boolean;
     container: boolean;
     cancel: boolean;
+    retry: boolean;
     delete: boolean;
   };
 }

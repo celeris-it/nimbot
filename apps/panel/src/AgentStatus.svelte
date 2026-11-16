@@ -16,7 +16,7 @@
   }: {
     agent: AgentDetail;
     busy: boolean;
-    action: (kind: "start" | "cancel") => Promise<void>;
+    action: (kind: "start" | "cancel" | "retry") => Promise<void>;
     refresh: () => void;
   } = $props();
   const operationLabels = {
@@ -65,6 +65,15 @@
     </p>
     <button class="btn" disabled={busy} onclick={() => action("cancel")}
       >Cancel setup</button
+    >
+  {/if}
+  {#if agent.capabilities.retry}
+    <p>
+      Setup did not finish. Retrying keeps every resource already created and
+      does not duplicate the agent.
+    </p>
+    <button class="btn" disabled={busy} onclick={() => action("retry")}
+      >Retry setup</button
     >
   {/if}
   {#if agent.containerState}<p>

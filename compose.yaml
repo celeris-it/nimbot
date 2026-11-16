@@ -16,7 +16,7 @@ services:
       PANEL_PORT: 3000
       SERVER_STATE_DIR: /home/node/.local/share/nimbot
       DOCKER_SOCKET_PATH: /var/run/docker.sock
-      AGENT_HOST_IMAGE: ${AGENT_HOST_IMAGE:?Set AGENT_HOST_IMAGE to the immutable Agent Host image ID}
+      AGENT_HOST_IMAGE: ${AGENT_HOST_IMAGE:-nimbot-agent-host:latest}
       SERVER_CONTAINER_NAME: ${SERVER_CONTAINER_NAME:-nimbot-server}
       TASK_TIMEOUT_SECONDS: ${TASK_TIMEOUT_SECONDS:-600}
     group_add:

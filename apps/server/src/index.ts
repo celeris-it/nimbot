@@ -10,8 +10,10 @@ import { createAgentDeletion } from "./agent-deletion.js";
 import { createAgentResourceRemoval } from "./agent-resource-removal.js";
 import {
   readProvisioningConfig,
+  resolveAgentHostImage,
   createAgentProvisioning,
 } from "./agent-provisioning.js";
+import { checkDockerAccess } from "./docker-preflight.js";
 import { openHostCredentials } from "./host-credentials.js";
 import { createContainerControl } from "./container-control.js";
 import { openBotSecrets } from "./bot-secret.js";
@@ -44,6 +46,32 @@ async function main(): Promise<void> {
     });
     process.exitCode = 1;
     return;
+  }
+  if (provisioningConfig) {
+    const unavailable = await checkDockerAccess(provisioningConfig.socketPath);
+    if (unavailable) {
+      log.error("server.docker_unavailable", { message: unavailable });
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const requested = provisioningConfig.image;
+      provisioningConfig = await resolveAgentHostImage(provisioningConfig);
+      if (requested !== provisioningConfig.image)
+        log.info("server.agent_host_image_resolved", {
+          tag: requested,
+          id: provisioningConfig.image,
+        });
+    } catch (error) {
+      log.error("server.config_invalid", {
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not resolve the Agent Host image.",
+      });
+      process.exitCode = 1;
+      return;
+    }
   }
   let statePath;
   let taskStore;

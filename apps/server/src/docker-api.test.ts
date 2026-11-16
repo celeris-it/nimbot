@@ -107,3 +107,26 @@ it("never repeats a mutation whose outcome is unknown and does not retry client 
   );
   expect(missing).toHaveBeenCalledOnce();
 });
+
+it("logs only the errno name of a failed request, never its message or path", async () => {
+  vi.stubEnv("NIMBOT_LOG", "");
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const denied = Object.assign(new Error("connect EACCES /secret/path"), {
+      code: "EACCES",
+    });
+    const transport = vi.fn<DockerApi>().mockRejectedValue(denied);
+    await expect(
+      createDockerApi("/unused", [], transport)("/_ping"),
+    ).rejects.toThrow("EACCES");
+    const line = String(error.mock.calls[0]?.[0]);
+    expect(JSON.parse(line)).toMatchObject({
+      event: "docker.request_failed",
+      code: "EACCES",
+    });
+    expect(line).not.toContain("/secret/path");
+  } finally {
+    error.mockRestore();
+    vi.unstubAllEnvs();
+  }
+});

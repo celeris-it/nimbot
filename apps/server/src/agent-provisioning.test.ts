@@ -176,8 +176,13 @@ it("validates opt-in server provisioning configuration", async () => {
     socketPath: env.DOCKER_SOCKET_PATH,
     taskTimeoutSeconds: 600,
   });
+  expect(
+    readProvisioningConfig({ ...env, AGENT_HOST_IMAGE: "nimbot:latest" })
+      ?.image,
+  ).toBe("nimbot:latest");
   for (const invalid of [
-    { ...env, AGENT_HOST_IMAGE: "nimbot:latest" },
+    { ...env, AGENT_HOST_IMAGE: "nimbot@sha256:short" },
+    { ...env, AGENT_HOST_IMAGE: "-bad" },
     { ...env, SERVER_CONTAINER_NAME: "" },
     { ...env, SERVER_CONTAINER_NAME: "../server" },
     { ...env, DOCKER_SOCKET_PATH: "relative.sock" },
@@ -320,4 +325,42 @@ it("cancels an individual attempt through the control while retaining created Do
   } finally {
     f.registry.close();
   }
+});
+
+it("pins a local image tag to its immutable ID without pulling", async () => {
+  const { resolveAgentHostImage } = await import("./agent-provisioning.js");
+  const { createContainerResources } = await import("./container-resources.js");
+  const id = `sha256:${"b".repeat(64)}`;
+  const base = { image: "nimbot-agent-host:latest", socketPath: "/s" };
+  const call = vi
+    .fn<DockerApi>()
+    .mockResolvedValue({ code: 200, body: JSON.stringify({ Id: id }) });
+  const resolved = await resolveAgentHostImage(base, call);
+  expect(resolved).toEqual({ ...base, image: id });
+  expect(call).toHaveBeenCalledWith("/images/nimbot-agent-host%3Alatest/json");
+  expect(() => createContainerResources(resolved)).not.toThrow();
+  expect(() => createContainerResources(base)).toThrow("pinned by SHA256");
+
+  const pinned = { ...base, image: id };
+  call.mockClear();
+  expect(await resolveAgentHostImage(pinned, call)).toBe(pinned);
+  expect(call).not.toHaveBeenCalled();
+});
+
+it("fails clearly when the image tag is missing or cannot be pinned", async () => {
+  const { resolveAgentHostImage } = await import("./agent-provisioning.js");
+  const base = { image: "nimbot-agent-host:latest", socketPath: "/s" };
+  await expect(
+    resolveAgentHostImage(
+      base,
+      vi.fn<DockerApi>().mockResolvedValue({ code: 404, body: "" }),
+    ),
+  ).rejects.toThrow('"nimbot-agent-host:latest" not found locally; build it');
+  for (const body of ["not json", JSON.stringify({ Id: "latest" }), "{}"])
+    await expect(
+      resolveAgentHostImage(
+        base,
+        vi.fn<DockerApi>().mockResolvedValue({ code: 200, body }),
+      ),
+    ).rejects.toThrow("immutable ID");
 });

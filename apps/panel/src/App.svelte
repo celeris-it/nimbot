@@ -193,15 +193,19 @@
       );
     }
   }
-  async function action(kind: "start" | "cancel" | "stop" | "delete") {
+  async function action(
+    kind: "start" | "cancel" | "retry" | "stop" | "delete",
+  ) {
     if (!agent) return;
     const id = encodeURIComponent(agent.id);
     const target =
       kind === "cancel"
         ? "provision/cancel"
-        : kind === "delete"
-          ? "delete"
-          : "container";
+        : kind === "retry"
+          ? "provision"
+          : kind === "delete"
+            ? "delete"
+            : "container";
     await mutate(
       `/api/agents/${id}/${target}`,
       { action: kind, confirm: agent.id, deleteData: String(deleteData) },
@@ -212,7 +216,9 @@
           notice =
             kind === "cancel"
               ? "Cancellation requested."
-              : "Operation sent to Docker. The Agent Host may take a few seconds to become available.";
+              : kind === "retry"
+                ? "Setup restarted."
+                : "Operation sent to Docker. The Agent Host may take a few seconds to become available.";
           controller?.abort();
           controller = undefined;
           inFlight = false;

@@ -558,3 +558,18 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   expect(violations).toEqual([]);
   expect(external).toEqual([]);
 });
+
+test("retries a failed setup from the agent page", async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  await request.post("/__test/fail/dev");
+  await page.goto("/agents/dev/setup");
+  await expect(page.getByText("Setup did not finish.")).toBeVisible();
+  await page.getByRole("button", { name: "Retry setup" }).click();
+  await expect(page.getByText("Setup restarted.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry setup" })).toHaveCount(
+    0,
+  );
+});
