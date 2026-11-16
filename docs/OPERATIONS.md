@@ -60,7 +60,7 @@ fi
 docker compose up -d
 ```
 
-Extraction preserves file owners (the containers run as UID 1000). Restoring into volumes that already hold data merges files; restore into new, empty volumes unless you intend to overwrite. After startup, each registered bot reconnects with its original owner and chat binding without pressing Start again.
+Extraction preserves file owners (the containers run as UID 1000). Restoring into volumes that already hold data merges files; restore into new, empty volumes unless you intend to overwrite. After startup, each registered bot reconnects with its original owner and saved chat binding.
 
 Limits of restoring on a different host: the server state is restored. Agents created in the panel keep their volumes and registry entries, but their containers and networks do not exist on the new host, and the panel cannot yet recreate them (it can start and stop existing containers, but it has no recreate action). Prefer restoring on the same Docker host, or keep the volumes and recreate those agents. Do not delete data from the panel while recovering.
 
@@ -75,7 +75,7 @@ Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Lo
 **The bot does not answer.**
 
 1. Open the agent's setup page. *Bot polling* shows the reason when it failed: a rejected token (replace it, then restart the server), a token that does not match the registered bot or owner, unavailable credentials, or Telegram unreachable. Telegram also refuses polling when another process uses the same token; stop the other instance.
-2. The owner must press **Start** in that bot's chat. Only the owner (the Telegram user ID entered when the agent was created) can activate it. Other users receive no reply, so check that the ID was typed correctly: the panel does not show it again, so if it is wrong, delete the agent and create it again.
+2. The owner can send a private message to that bot; the chat is linked automatically, and the same message is processed as a task if the agent is available. No /start command is required. Only the owner (the Telegram user ID entered when the agent was created) can link and use it. Other users receive no reply, so check that the ID was typed correctly: the panel does not show it again, so if it is wrong, delete the agent and create it again.
 3. Replies such as "stopped" or "not ready" mean the Agent Host is down or unhealthy: check `docker ps` and `docker logs <agent container>`.
 
 **Tasks fail or never finish.** If every task fails, authenticate the provider (`opencode auth list`, `opencode auth login` in the agent's container); readiness does not check provider access. A task longer than `TASK_TIMEOUT_SECONDS` is stopped. After a Host restart, a task that was running is reported as interrupted; send it again. Use `/stop` to cancel a running task; queued messages behind it still run. If an approval message got no answer, the action was denied.

@@ -136,8 +136,8 @@
       max={agents.length}
     />
     <p data-ui="muted">
-      Owners activate their private chat with /start. Polling alone does not
-      confirm task availability.
+      The owner’s first private message links their chat automatically. Polling
+      alone does not confirm task availability.
     </p>
   </Surface>
 </div>

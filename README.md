@@ -22,7 +22,7 @@ To uninstall while retaining data, run `bash "$HOME/.local/share/nimbot/uninstal
 
 See [docs/INSTALL.md](docs/INSTALL.md) for a custom directory, HTTPS, BotFather linking, and AI provider authentication. [docs/OPERATIONS.md](docs/OPERATIONS.md) covers backup and restore, troubleshooting, and security limitations.
 
-Fresh installations start with zero agents. Sign in to the panel and create each agent with a name, optional instructions, its owner's numeric Telegram user ID, and a token from a distinct bot created in BotFather. Nimbot verifies the bot, provisions the agent, and provides its Telegram link. Authenticate the AI provider inside each agent's container as described in the installation guide, then open its bot and press **Start**.
+Fresh installations start with zero agents. Sign in to the panel and create each agent with a name, optional instructions, its owner's numeric Telegram user ID, and a token from a distinct bot created in BotFather. Nimbot verifies the bot, provisions the agent, and provides its Telegram link. Authenticate the AI provider inside each agent's container as described in the installation guide, then send its bot a private message. The chat is linked automatically on first contact; no /start command is required.
 
 No Telegram or per-agent environment variables are required. `.env` contains administrator authentication and trusted deployment settings; internal Agent Host credentials are generated automatically.
 
@@ -42,9 +42,9 @@ The panel uses one locally configured administrator account. Each agent has one 
 
 | Command | Action |
 |---|---|
-| `/start` | Activate the owner's private chat and show help |
+| `/start` | Show an optional welcome message |
 | `/help` | Show this agent's help |
-| `/status` | Show activation and runtime status |
+| `/status` | Show chat and runtime status |
 | `/stop` | Cancel only this agent's running task |
 | Text message | Queue a task for this bot's agent |
 
@@ -119,7 +119,7 @@ Terminal and filesystem tools run through OpenCode inside the container. Browser
 
 Server state includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, and the durable task queue. Private `bot-secrets` and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
 
-Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner activation, container status, and authenticated Host readiness separately; readiness checks workspace access and busy state, not AI provider availability. Stopping an agent captures a task observation, and later refreshes confirm its persisted outcome when the Host is reachable.
+Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner chat linking, container status, and authenticated Host readiness separately; readiness checks workspace access and busy state, not AI provider availability. Stopping an agent captures a task observation, and later refreshes confirm its persisted outcome when the Host is reachable.
 
 ## Security limitations
 

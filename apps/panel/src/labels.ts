@@ -41,8 +41,8 @@ export const botAccessLabels = {
   unavailable: "Unavailable",
 };
 export const ownerLabels = {
-  pending: "Pending: the owner chat has not been activated",
-  verified: "Verified through /start",
+  pending: "Pending: waiting for the owner’s first message",
+  verified: "Verified through a private message",
   unavailable: "Unavailable",
 };
 export function stopMessage(observation: AgentDetail["stopObservation"]) {

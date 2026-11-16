@@ -9,7 +9,7 @@ import { openAgentRegistry } from "./agent-registry.js";
 import { createAgentAccess } from "./agent-access.js";
 
 let updateId = 0;
-function start(
+function contact(
   ownerId = 42,
   type: "private" | "group" | "supergroup" = "private",
 ) {
@@ -23,8 +23,7 @@ function start(
         type === "private"
           ? { id: ownerId, type, first_name: "Owner" }
           : { id: -100, type, title: "Group" },
-      text: "/start",
-      entities: [{ type: "bot_command" as const, offset: 0, length: 6 }],
+      text: "hello",
     },
   };
 }
@@ -91,7 +90,7 @@ async function fixture() {
           throw new Error("Unexpected Telegram API call");
         const text = String(payload.text);
         const chatId = Number(payload.chat_id);
-        if (text.includes("this chat is activated")) {
+        if (!text.includes("could not save")) {
           expect(registry.getOwnerChat(id)).toBe(chatId);
           expect(binding.get(botId)).toBe(chatId);
         }
@@ -141,13 +140,13 @@ async function fixture() {
 it("activates two bots independently even when both agents have the same owner and private chat ID", async () => {
   const f = await fixture();
   try {
-    await f.bots.get("a")!.handleUpdate(start());
+    await f.bots.get("a")!.handleUpdate(contact());
     expect(f.registry.getOwnerChat("a")).toBe(42);
     expect(f.registry.getOwnerChat("b")).toBeUndefined();
     expect(f.bindings.get("a")!.get(456)).toBeUndefined();
     expect(f.bindings.get("b")!.get(123)).toBeUndefined();
-    await f.bots.get("b")!.handleUpdate(start());
-    await f.bots.get("a")!.handleUpdate(start());
+    await f.bots.get("b")!.handleUpdate(contact());
+    await f.bots.get("a")!.handleUpdate(contact());
     expect(f.registry.getOwnerChat("a")).toBe(42);
     expect(f.registry.getOwnerChat("b")).toBe(42);
     expect(
@@ -170,13 +169,13 @@ it("activates two bots independently even when both agents have the same owner a
 it("does not respond or mutate either binding for non-owners, groups, or updates without a sender", async () => {
   const f = await fixture();
   try {
-    const missingSender = start();
+    const missingSender = contact();
     Reflect.deleteProperty(missingSender.message, "from");
     const rejected = [
-      start(73),
-      start(99),
-      start(42, "group"),
-      start(42, "supergroup"),
+      contact(73),
+      contact(99),
+      contact(42, "group"),
+      contact(42, "supergroup"),
       missingSender,
     ];
     for (const bot of f.bots.values())
@@ -191,10 +190,10 @@ it("does not respond or mutate either binding for non-owners, groups, or updates
   }
 });
 
-it("requires the new owner to start the selected bot after an owner change without altering the other agent", async () => {
+it("links the new owner on first contact with the selected bot after an owner change without altering the other agent", async () => {
   const f = await fixture();
   try {
-    for (const bot of f.bots.values()) await bot.handleUpdate(start());
+    for (const bot of f.bots.values()) await bot.handleUpdate(contact());
     const db = new DatabaseSync(f.path);
     db.prepare("UPDATE agents SET owner_id = 73 WHERE id = 'a'").run();
     db.close();
@@ -202,9 +201,9 @@ it("requires the new owner to start the selected bot after an owner change witho
     expect(f.registry.getOwnerChat("a")).toBeUndefined();
     expect(f.registry.getOwnerChat("b")).toBe(42);
     const count = f.replies.length;
-    await f.bots.get("a")!.handleUpdate(start(42));
+    await f.bots.get("a")!.handleUpdate(contact(42));
     expect(f.replies).toHaveLength(count);
-    await f.bots.get("a")!.handleUpdate(start(73));
+    await f.bots.get("a")!.handleUpdate(contact(73));
     expect(f.registry.getOwnerChat("a")).toBe(73);
     expect(f.registry.getOwnerChat("b")).toBe(42);
     expect(f.replies.at(-1)).toMatchObject({ agentId: "a", chatId: 73 });
@@ -221,17 +220,15 @@ it("never acknowledges a failed activation write and allows another agent to act
       .mockImplementationOnce(() => {
         throw new Error("private database details");
       });
-    await f.bots.get("a")!.handleUpdate(start());
+    await f.bots.get("a")!.handleUpdate(contact());
     expect(f.registry.getOwnerChat("a")).toBeUndefined();
     expect(f.activated.get("a")).not.toHaveBeenCalled();
-    expect(f.replies.at(-1)?.text).toContain(
-      "could not save the chat activation",
-    );
+    expect(f.replies.at(-1)?.text).toContain("could not save your chat");
     expect(f.replies.at(-1)?.text).not.toContain("private database details");
-    await f.bots.get("b")!.handleUpdate(start());
+    await f.bots.get("b")!.handleUpdate(contact());
     expect(f.registry.getOwnerChat("b")).toBe(42);
     save.mockRestore();
-    await f.bots.get("a")!.handleUpdate(start());
+    await f.bots.get("a")!.handleUpdate(contact());
     expect(f.registry.getOwnerChat("a")).toBe(42);
     expect(f.activated.get("a")).toHaveBeenCalledExactlyOnceWith(42);
   } finally {

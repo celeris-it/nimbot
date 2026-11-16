@@ -160,7 +160,7 @@ async function fixture() {
         expect(
           replies.some(
             (reply) =>
-              reply.id === id && reply.text.includes("this chat is activated"),
+              reply.id === id && reply.text.includes("your user is authorized"),
           ),
         ).toBe(true),
       { timeout: 3000 },

@@ -51,9 +51,9 @@ The installer does not install a proxy or configure DNS. The port stays bound to
    docker exec -it nimbot-<agent-id> opencode auth login
    ```
 
-5. Open the bot link from the panel, press **Start**, and send a task.
+5. Open the bot link from the panel and send a task. Your first private message links the chat automatically.
 
-Every agent needs its own BotFather bot and provider authentication. Only its owner can activate and use it. No Telegram or per-agent environment variables are needed. Credentials stay in that agent's engine-state volume. Readiness does not verify provider access; use `opencode auth list` inside the container if tasks fail.
+Every agent needs its own BotFather bot and provider authentication. Only its owner can use it; their first private message links the chat automatically. No Telegram or per-agent environment variables are needed. Credentials stay in that agent's engine-state volume. Readiness does not verify provider access; use `opencode auth list` inside the container if tasks fail.
 
 To replace a revoked token, open the agent's token form, enter a replacement for the same bot, and restart the server with `docker restart nimbot-server`.
 

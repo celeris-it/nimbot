@@ -137,8 +137,8 @@
       {failureLabels[agent.botConnection.failure]}
     </p>{/if}
   {#if agent.botConnection?.status === "polling"}<p>
-      The owner must activate this bot with /start. Tasks require completed
-      setup and an available Agent Host.
+      The owner’s first private message links this bot automatically. Tasks
+      require completed setup and an available Agent Host.
     </p>{/if}
   {#if !agent.botConnection}<p>
       Connecting this bot to Telegram is still pending. It cannot receive tasks

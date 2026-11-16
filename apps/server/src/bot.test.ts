@@ -144,14 +144,14 @@ describe("Telegram access", () => {
     const binding = openChatBinding(":memory:", { id: "test", ownerId: 42 });
     try {
       const first = setup(undefined, binding);
-      await first.bot.handleUpdate(message("/start"));
+      await first.bot.handleUpdate(message("/help"));
       expect(binding.get(123)).toBe(42);
       const execute = vi.fn().mockResolvedValue("Restored");
       const second = setup(execute, binding);
       await second.bot.handleUpdate(message("hello", 73));
       expect(execute).not.toHaveBeenCalled();
       await second.bot.handleUpdate(message("/status"));
-      expect(second.sent.at(-1)).toContain("Chat: activated");
+      expect(second.sent.at(-1)).toContain("Chat: linked");
       await second.bot.handleUpdate(message("hello"));
       expect(execute).toHaveBeenCalledOnce();
       expect(execute.mock.calls[0]?.[0]).toBe("hello");
@@ -176,16 +176,14 @@ describe("Telegram access", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(sent.join("")).not.toContain("secret");
   });
-  it("routes only activated owner text and returns split plain text", async () => {
+  it("routes only owner text without start and returns split plain text", async () => {
     const output = "<code> & *plain* " + "😀".repeat(3000);
     const execute = vi.fn().mockResolvedValue(output);
     const { bot, sent, destinations, idle } = setup(execute);
-    await bot.handleUpdate(message("before start"));
     await bot.handleUpdate(message("hello", 99));
     await bot.handleUpdate(message("hello", 73));
     await bot.handleUpdate(message("hello", 42, "group"));
     expect(execute).not.toHaveBeenCalled();
-    await bot.handleUpdate(message("/start"));
     await bot.handleUpdate(message("/unknown"));
     expect(execute).not.toHaveBeenCalled();
     const count = sent.length;
@@ -196,6 +194,52 @@ describe("Telegram access", () => {
     expect(sent.slice(count).join("")).toBe(output);
     expect(destinations.slice(count)).toEqual([42, 42]);
     expect(sent.slice(count).every((part) => part.length <= 4096)).toBe(true);
+  });
+  it("saves the first text before executing it and reuses the binding", async () => {
+    const binding = openChatBinding(":memory:", { id: "test", ownerId: 42 });
+    const save = vi.spyOn(binding, "save");
+    const execute = vi.fn(async (prompt: string) => {
+      expect(binding.get(123)).toBe(42);
+      return prompt;
+    });
+    const { bot, idle, activations } = setup(execute, binding);
+    try {
+      const first = message("first");
+      await bot.handleUpdate(first);
+      await idle();
+      await bot.handleUpdate(first);
+      await bot.handleUpdate(message("second"));
+      await idle();
+      expect(execute.mock.calls.map(([prompt]) => prompt)).toEqual([
+        "first",
+        "second",
+      ]);
+      expect(save).toHaveBeenCalledExactlyOnceWith(123, 42);
+      expect(activations).toEqual([42]);
+    } finally {
+      binding.close();
+    }
+  });
+  it("retries a failed automatic binding without losing the next message", async () => {
+    const binding = openChatBinding(":memory:", { id: "test", ownerId: 42 });
+    const save = vi.spyOn(binding, "save").mockImplementationOnce(() => {
+      throw new Error("private details");
+    });
+    const execute = vi.fn().mockResolvedValue("Done");
+    const { bot, sent, idle } = setup(execute, binding);
+    try {
+      await bot.handleUpdate(message("hello"));
+      expect(execute).not.toHaveBeenCalled();
+      expect(binding.get(123)).toBeUndefined();
+      expect(sent.at(-1)).toContain("send your message again");
+      await bot.handleUpdate(message("hello"));
+      await idle();
+      expect(save).toHaveBeenCalledTimes(2);
+      expect(execute).toHaveBeenCalledOnce();
+      expect(sent.at(-1)).toBe("Done");
+    } finally {
+      binding.close();
+    }
   });
   it("reports errors without exposing internal details and accepts the next task", async () => {
     const execute = vi
@@ -216,7 +260,6 @@ describe("Telegram access", () => {
     const execute = vi.fn().mockResolvedValue("Done");
     let host: HostStatus = "unavailable";
     const { bot, sent, idle } = setup(execute, undefined, async () => host);
-    await bot.handleUpdate(message("/start"));
     await bot.handleUpdate(message("hello"));
     expect(execute).not.toHaveBeenCalled();
     expect(sent.at(-1)).toContain("stopped or not ready yet");
@@ -268,19 +311,19 @@ describe("Telegram access", () => {
     expect(sent).toEqual([]);
     expect(activations).toEqual([]);
   });
-  it("activates only on start and reports activation in status", async () => {
-    const { bot, sent, activations } = setup();
-    await bot.handleUpdate(message("/help"));
-    expect(activations).toEqual([]);
-    await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("pending");
-    await bot.handleUpdate(message("/start"));
-    expect(activations).toEqual([42]);
-    await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("Chat: activated");
-    await bot.handleUpdate(message("create a file"));
-    expect(sent.at(-1)).toContain("the Agent Host is not connected");
-  });
+  it.each(["/help", "/status", "/start"])(
+    "links on first command %s and reports it in status",
+    async (command) => {
+      const { bot, sent, activations } = setup();
+      await bot.handleUpdate(message(command));
+      expect(activations).toEqual([42]);
+      await bot.handleUpdate(message("/status"));
+      expect(sent.at(-1)).toContain("Chat: linked");
+      expect(activations).toEqual([42]);
+      await bot.handleUpdate(message("create a file"));
+      expect(sent.at(-1)).toContain("the Agent Host is not connected");
+    },
+  );
   it("explains that tasks are not connected yet", async () => {
     const { bot, sent } = setup();
     await bot.handleUpdate(message("create a file"));
@@ -288,19 +331,22 @@ describe("Telegram access", () => {
   });
 });
 
-it("refuses activation when the persisted bot-owner identity cannot be verified", async () => {
-  const execute = vi.fn();
-  const binding = { get: () => undefined, save: vi.fn() };
-  const { bot, sent, activations } = setup(execute, binding, undefined, {
-    canActivate: () => false,
-    canExecute: () => false,
-  });
-  await bot.handleUpdate(message("/start"));
-  expect(sent.at(-1)).toContain("I could not verify this bot's link");
-  expect(binding.save).not.toHaveBeenCalled();
-  expect(activations).toEqual([]);
-  expect(execute).not.toHaveBeenCalled();
-});
+it.each(["/start", "hello"])(
+  "refuses %s when the persisted bot-owner identity cannot be verified",
+  async (text) => {
+    const execute = vi.fn();
+    const binding = { get: () => undefined, save: vi.fn() };
+    const { bot, sent, activations } = setup(execute, binding, undefined, {
+      canActivate: () => false,
+      canExecute: () => false,
+    });
+    await bot.handleUpdate(message(text));
+    expect(sent.at(-1)).toContain("I could not verify this bot's link");
+    expect(binding.save).not.toHaveBeenCalled();
+    expect(activations).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
+  },
+);
 
 it("rechecks persisted setup after Host health and never executes incomplete agent tasks", async () => {
   const { mkdtemp, rm } = await import("node:fs/promises");
@@ -386,7 +432,7 @@ describe("task queue through Telegram", () => {
     ]);
     // The bot stays responsive while the first task is still running.
     await bot.handleUpdate(message("/status"));
-    expect(sent.at(-1)).toContain("Chat: activated");
+    expect(sent.at(-1)).toContain("Chat: linked");
     expect(execute).toHaveBeenCalledTimes(1);
     release();
     await idle();

@@ -119,7 +119,7 @@
     {#if mode === "new"}<p>
         On creation, the bot is verified and its container is prepared. This can
         take a few seconds. The server connects the bot after provisioning
-        completes; the owner must then send /start.
+        completes; the owner can then send a message to begin.
       </p>{/if}
     <button class="btn" type="submit" disabled={busy}
       >{busy

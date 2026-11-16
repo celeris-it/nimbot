@@ -93,6 +93,39 @@ export function createBot(
           .catch(() => {});
       return;
     }
+    if (access && !access.canActivate(ctx.me.id, ctx.from.id)) {
+      if (ctx.callbackQuery) {
+        await ctx
+          .answerCallbackQuery({ text: "Not authorized.", show_alert: true })
+          .catch(() => {});
+      } else {
+        await ctx.reply(
+          "I could not verify this bot's link to your agent. Check its setup in the panel.",
+        );
+      }
+      return;
+    }
+    try {
+      if ((binding ? binding.get(ctx.me.id) : activeChatId) !== ctx.chat.id) {
+        binding?.save(ctx.me.id, ctx.chat.id);
+        activeChatId = ctx.chat.id;
+        onActivation(activeChatId);
+      }
+    } catch {
+      if (ctx.callbackQuery) {
+        await ctx
+          .answerCallbackQuery({
+            text: "I could not save your chat. Please try again.",
+            show_alert: true,
+          })
+          .catch(() => {});
+      } else {
+        await ctx.reply(
+          "I could not save your chat. Please send your message again.",
+        );
+      }
+      return;
+    }
     await next();
   });
 
@@ -127,29 +160,13 @@ export function createBot(
   );
 
   bot.command("start", async (ctx) => {
-    if (access && !access.canActivate(ctx.me.id, ctx.from!.id)) {
-      await ctx.reply(
-        "I could not verify this bot's link to your agent. Check its setup in the panel.",
-      );
-      return;
-    }
-    try {
-      binding?.save(ctx.me.id, ctx.chat.id);
-    } catch {
-      await ctx.reply(
-        "I could not save the chat activation. Try /start again.",
-      );
-      return;
-    }
-    activeChatId = ctx.chat.id;
-    onActivation(activeChatId);
     await ctx.reply(
-      `${config.agent.name}: your user is authorized and this chat is activated. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send a text message to run a task." : "The agent's setup does not allow running tasks yet."}`,
+      `${config.agent.name}: your user is authorized. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send a text message to run a task." : "The agent's setup does not allow running tasks yet."}`,
     );
   });
   bot.command("help", async (ctx) => {
     await ctx.reply(
-      `${config.agent.name}: your user is authorized. Use /start to activate this chat, /status to check the status and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
+      `${config.agent.name}: your user is authorized. Use /status to check the status and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
     );
   });
   bot.command("stop", async (ctx) => {
@@ -166,7 +183,7 @@ export function createBot(
   bot.command("status", async (ctx) => {
     const host =
       access && !access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)
-        ? "Agent: setup or activation pending; it cannot receive tasks."
+        ? "Agent: setup pending; it cannot receive tasks."
         : !execute
           ? "Agent Host: not connected. No tasks are running."
           : !hostStatus
@@ -176,17 +193,9 @@ export function createBot(
                 busy: "Agent: busy with a task.",
                 unavailable: "Agent: stopped or offline.",
               }[await hostStatus()];
-    await ctx.reply(
-      `${config.agent.name}\nChat: ${(binding ? binding.get(ctx.me.id) : activeChatId) === ctx.chat.id ? "activated" : "pending; use /start"}\n${host}`,
-    );
+    await ctx.reply(`${config.agent.name}\nChat: linked\n${host}`);
   });
   bot.on("message:text", async (ctx) => {
-    if ((binding ? binding.get(ctx.me.id) : activeChatId) !== ctx.chat.id) {
-      await ctx.reply(
-        "Use /start to activate this agent's chat. Your message was not sent to any agent.",
-      );
-      return;
-    }
     if (!execute) {
       await ctx.reply(
         "I cannot run tasks yet: the Agent Host is not connected. Your message was not sent to any agent.",
