@@ -4,8 +4,8 @@ Thanks for helping. Nimbot is released under the [Apache License 2.0](LICENSE); 
 
 ## Before you start
 
-- [MVP.md](MVP.md) is the source of truth for scope, architecture, and phases. Work that is outside section 2.1 or in the post-MVP backlog needs a discussion first.
-- Keep changes small and aligned with the current phase. Do not add services, packages, or abstractions the phase does not need.
+- [README.md](README.md) is the source of truth for current scope, architecture, and future work. Extensions beyond the documented features need a discussion first.
+- Keep changes small and aligned with the documented scope. Do not add services, packages, or abstractions the change does not need.
 - Architecture constraints are firm: agent-generated commands run only inside the agent's container, Telegram bot tokens stay on the server, one bot per agent, no management bot and no `/use` workflow.
 
 ## Setup
@@ -60,11 +60,11 @@ Use the `nimbot` dark theme with `dark` and `muted` surfaces defined in `panel.c
 ## Pull requests
 
 - Add tests with new behaviour and keep `pnpm test` free of Docker and network access.
-- Update MVP.md and README.md in the same change when scope or architecture changes.
+- Update README.md in the same change when scope or architecture changes.
 - Write user-facing text, code, comments, and documentation in English.
 - Never commit secrets. Configuration comes from environment variables; keep `.env.example` current.
 - Commit messages use an English imperative subject without prefixes such as `feat:`, followed by a blank line and a short explanation of why.
 
 ## Reporting security issues
 
-Do not open a public issue for a vulnerability. Contact the maintainers privately and include steps to reproduce. See the security limitations in MVP.md section 10 for the intended threat model.
+Do not open a public issue for a vulnerability. Contact the maintainers privately and include steps to reproduce. See the [security limitations in README.md](README.md#security-limitations) for the intended threat model.

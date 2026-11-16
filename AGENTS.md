@@ -4,17 +4,17 @@
 
 Nimbot is a self-hosted platform for running persistent AI agents through Telegram. Each agent runs in its own Docker container with a persistent workspace.
 
-Phase 0 validation is complete. Phase 1 is in progress: the Agent Host lives in `apps/agent-host/`, and the Telegram server and initial authenticated status panel live in `apps/server/`.
+The MVP is complete. The Agent Host lives in `apps/agent-host/`, the Nimbot Server in `apps/server/`, and the administration UI in `apps/panel/`.
 
-- [MVP.md](MVP.md) is the source of truth for scope, architecture, and phases.
-- [README.md](README.md) is the short public summary and must stay consistent with MVP.md.
+- [README.md](README.md) is the source of truth for current scope, architecture, and future work.
+- [docs/INSTALL.md](docs/INSTALL.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md) cover installation and operations.
 
 ## Scope rules
 
-- Build only what MVP.md section 2.1 includes. Anything in section 2.2 or the post-MVP backlog (section 14) is out of scope unless the user asks for it.
-- Work in phase order, starting with Phase 0 (validating OpenCode through ACP inside Docker).
-- Prefer the simplest thing that satisfies the phase's acceptance criteria. Do not add services, packages, or abstractions the current phase does not need.
+- Keep work within the current features documented in README.md. Future work is out of scope unless the user asks for it.
+- Prefer the simplest thing that satisfies the requested change. Do not add services, packages, or abstractions it does not need.
 - No PostgreSQL, Redis, Kubernetes, or message brokers. Storage is SQLite and Docker volumes.
+- Until a stable version is reached, every installation starts from scratch. Do not develop database or persisted-state migrations or backward compatibility for previous installations; update schema initialization directly.
 
 ## Stack
 
@@ -24,10 +24,11 @@ Use pnpm, not npm or yarn.
 
 ## Layout
 
-Planned monorepo layout, from MVP.md section 5:
+Monorepo layout:
 
 - `apps/server/` — Nimbot Server: authenticated administration panel, Telegram, agent registry, task routing, container management
 - `apps/agent-host/` — runs inside each agent container: AI engine, tasks, workspace
+- `apps/panel/` — administration UI
 - `packages/` — shared code
 - `infrastructure/docker/` — Dockerfiles
 - `tests/` — integration and end-to-end tests
@@ -60,7 +61,7 @@ Run lint, type-check, and tests before finishing any change.
 - Do not create standalone manual validation guides or test run reports unless the user explicitly requests them. If the user needs to run commands to test something, provide the commands and instructions directly in chat.
 - Never commit secrets. Configuration comes from environment variables; keep `.env.example` current once it exists.
 - Add tests with new behaviour.
-- When a change affects scope or architecture, update MVP.md and README.md in the same change.
+- When a change affects scope or architecture, update README.md in the same change.
 - Commit or push only when the user asks.
 - Match the existing commit message style: an English imperative subject without Conventional Commit prefixes, followed by a blank line and a short explanatory body.
 - Include a `Co-Authored-By` trailer for the assisting AI, naming both the assistant and the model and using the provider's attribution email. Use the actual model identity available in the session; do not invent a model name or version.

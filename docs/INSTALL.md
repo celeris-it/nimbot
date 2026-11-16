@@ -2,7 +2,7 @@
 
 Nimbot runs on one Linux server with Docker Compose. The Nimbot Server hosts the administration panel and every Telegram bot connection. Each agent runs in its own Agent Host container with its own workspace volume.
 
-Before you start, read the security limits in [MVP.md](../MVP.md) section 10: Nimbot is for trusted, self-hosted use, and giving the server access to the Docker socket is equivalent to root on the host.
+Before you start, read the security limits in [README.md](../README.md#security-limitations): Nimbot is for trusted, self-hosted use, and giving the server access to the Docker socket is equivalent to root on the host.
 
 ## 1. Requirements
 

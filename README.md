@@ -2,36 +2,47 @@
 
 **Your AI agents, on your own server.**
 
-Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram.
+Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-You install Nimbot on a Linux server with Docker Compose, sign in to a minimal administration panel, link a bot created in BotFather for each agent, and talk to each agent through its own distinct Telegram bot and private chat. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
+> **Project status:** The MVP is complete. Installation through Docker Compose has been validated on macOS with Docker Desktop and on a clean Linux server.
 
-> **Project status:** MVP implementation and automated checks are in place, including panel-based setup from an empty installation. Installation through Docker Compose is maintainer-validated on macOS with Docker Desktop and on a clean Linux server. Live Telegram-to-OpenCode acceptance remains pending before `v0.1.0`. The full plan is in [MVP.md](MVP.md).
+The self-hosted software is free under [Apache 2.0](LICENSE); you pay separately for your infrastructure and AI provider. A separate paid plan where we host your bots is planned for later. Managed hosting is not available yet, and pricing and plan details are to be announced.
 
-The self-hosted software is free under Apache 2.0; you pay separately for your infrastructure and AI provider. A separate paid plan where we host your bots is planned for later. Managed hosting is not available yet, and pricing and plan details are to be announced. It remains outside the current MVP.
+## Installation
 
-## What the MVP does
+Follow [docs/INSTALL.md](docs/INSTALL.md) for Docker Compose installation, administrator setup, HTTPS, BotFather linking, and AI provider authentication. [docs/OPERATIONS.md](docs/OPERATIONS.md) covers backup and restore, troubleshooting, and security limitations.
 
-- Sign in to a minimal web panel to create, configure, start, stop, and delete agents
-- Link each agent to a distinct BotFather-created bot by entering its token in the panel
-- Chat with each agent through its own Telegram bot; tasks and `/stop` apply only to that agent
-- Give each agent its own Docker container and persistent workspace
-- Let agents run terminal commands, read and write files, and use a browser
-- Send progress updates and final results back to Telegram
-- Cancel a running task
-- Keep conversations, files, and pending tasks across restarts
-- Serve each agent only to its owner: the Telegram user ID entered when the agent is created is the only Telegram authorization, and anyone else is ignored
-- Start with zero agents and configure bot tokens, owners, and agent settings through the authenticated panel, without Telegram or per-agent environment variables
+Fresh installations start with zero agents. Sign in to the panel and create each agent with a name, optional instructions, its owner's numeric Telegram user ID, and a token from a distinct bot created in BotFather. Nimbot verifies the bot, provisions the agent, and provides its Telegram link. Authenticate the AI provider inside each agent's container as described in the installation guide, then open its bot and press **Start**.
 
-Out of scope for the MVP: advanced dashboards, web chat, management bots, other messaging channels, other AI engines, multi-server deployments, and hosted multi-tenant use. See the [post-MVP backlog](MVP.md#14-post-mvp-backlog).
+No Telegram or per-agent environment variables are required. `.env` contains administrator authentication and trusted deployment settings; internal Agent Host credentials are generated automatically.
 
-Fresh installations start with zero agents. After signing in, create each agent in the panel with its name, optional instructions, your Telegram user ID as its owner, and its BotFather token. `.env` contains administrator authentication and trusted deployment settings only; internal Host tokens are generated automatically. The installation guide describes the setup.
+## Features
+
+- Create, list, configure, start, stop, and delete agents through an authenticated web panel.
+- Give each agent a distinct Telegram bot, owner-bound private chat, Docker container, and persistent workspace.
+- Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
+- Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
+- Cancel a running task without affecting other agents or blocking later queued tasks.
+- Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
+- Replace revoked bot tokens securely and retain persistent volumes by default when deleting an agent.
+
+The panel uses one locally configured administrator account. Each agent has one Telegram owner; everyone else is ignored, including owners of other agents. There is no management bot, shared selected agent, or `/use` workflow. Telegram remains the interface for tasks, progress, approvals, and results.
+
+### Telegram commands
+
+| Command | Action |
+|---|---|
+| `/start` | Activate the owner's private chat and show help |
+| `/help` | Show this agent's help |
+| `/status` | Show activation and runtime status |
+| `/stop` | Cancel only this agent's running task |
+| Text message | Queue a task for this bot's agent |
+
+Agent creation, configuration, token replacement, container start/stop, and deletion are panel actions. Stopping a container safely interrupts active work; `/stop` cancels the task while leaving the container available.
 
 ## Architecture
 
-The administration panel uses Svelte 5, TypeScript, Vite, and daisyUI. Hono serves the compiled frontend and authenticated API from the same process and origin. The panel requires JavaScript, submits forms without reloading, and refreshes agent states every five seconds while visible.
-
-One Nimbot Server serves the authenticated administration panel, maintains a distinct Telegram bot connection per agent, and manages one container per agent on the same machine. The panel uses a single locally configured administrator account. Each agent has one configured Telegram owner; there is no shared active-agent selection or `/use` command. Bot tokens are entered only in the authenticated panel and remain on the server. The owner must open each agent bot and press Start before it can send private notifications.
+One Nimbot Server serves the administration panel, maintains a separate Telegram long-polling connection per agent, and manages agent containers on the same machine.
 
 ```text
   Web panel (admin)      Telegram agent bots A, B
@@ -40,7 +51,7 @@ One Nimbot Server serves the authenticated administration panel, maintains a dis
                        |
                        v
               +------------------+
-              |   Nimbot Server  |
+              |   Nimbot Server   |
               |                  |
               | Telegram Adapter |
               | Agent Registry   |
@@ -49,127 +60,119 @@ One Nimbot Server serves the authenticated administration panel, maintains a dis
               | SQLite Database  |
               +--------+---------+
                        |
-                Docker Engine
+                  Docker Engine
                        |
           +------------+------------+
           |                         |
           v                         v
    +-------------+           +-------------+
    | Agent Host A|           | Agent Host B|
-   |             |           |             |
-   | OpenCode    |           | OpenCode    |
-   | ACP Adapter |           | ACP Adapter |
+   | OpenCode/ACP|           | OpenCode/ACP|
    | Tools       |           | Tools       |
    | Workspace   |           | Workspace   |
    +------+------+           +------+------+
           |                         |
           v                         v
-   Persistent Volume         Persistent Volume
+   Persistent Volumes        Persistent Volumes
 ```
 
-- **Nimbot Server** serves the panel and its authenticated administration API, maintains each bot’s long-polling connection, serves each agent only to its owner, and routes messages by bot identity to the bound agent. It also handles agent registration and container lifecycle. Telegram tokens remain on the server and are never sent to agent containers. It never runs agent-generated commands on the host.
-- **Agent Host** is one container per agent. It runs the AI engine, executes tasks, and owns the agent's workspace and conversation state.
-- **Storage** includes bot identities, owners, chat bindings, credential references, and administrator/session state in SQLite, protected server-side bot secrets, and Docker volumes. No PostgreSQL, Redis, or message broker is required.
+- **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing, container lifecycle, and diagnostics. Agent-generated commands never run on the host OS.
+- **Agent Host:** one container per agent, running the AI engine, tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Telegram-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
+- **Panel:** Svelte 5, TypeScript, Vite, and daisyUI. Hono serves compiled assets and the same-origin API from one process. JavaScript is required; visible views refresh every five seconds and forms submit without document reloads.
+- **Storage:** SQLite and Docker named volumes. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
 
-The server persists each agent’s metadata and verified bot identity in its SQLite state database. A bot already linked to another agent is rejected before polling starts. The registry stores a credential reference, not the Telegram token. The panel lets you edit an agent’s local name and optional instructions; saved settings survive restarts, instructions are sent as context with each new task, and edits do not change an in-flight task. The Telegram bot profile is unchanged. The panel also replaces a token with another token for the same bot: it validates the new token against Telegram, stores it in private files under `SERVER_STATE_DIR/bot-secrets`, and applies it at the next server restart. The registry keeps only the file reference. Include the private secret directory in protected server-state backups. Docker API v1.47 is required. Only the server receives the Docker socket, which grants powerful host-level control and must never enter agent containers. Container start/stop operations persist their latest action, outcome, and timestamp in SQLite before Docker mutation, and the authenticated `/api/status` endpoint lists every agent’s setup state and bot connection (and, with provisioning enabled, the Docker resource inventory). Pending operations become interrupted on server restart; this records uncertainty and does not automatically retry Docker actions. Docker inspection and Agent Host health remain the sources of current runtime status; a missing container is shown as unavailable and is never recreated silently.
+The stack uses strict TypeScript on Node.js, pnpm workspaces, Hono, grammY, Drizzle for task persistence, Node's built-in SQLite API for the registry, Docker, Playwright, Vitest, ESLint, and Prettier.
 
-The SQLite registry now also tracks provisioning state (`pending`, `provisioning`, `ready`, `failed`, or `interrupted`) and volume/network references. Interrupted provisioning retains resource references across restarts and requires an explicit retry; ready state requires bot credentials and container, volume, and network references. The authenticated status API exposes this metadata. Registry operations for pending agents are implemented, but panel creation, Docker provisioning, cleanup, and blocking task routing for incomplete dynamic agents still need integration.
+### Agent lifecycle
 
-A server-side Docker resource service now creates stopped Agent Hosts from a fixed template, requiring a SHA256 image ID or digest. It creates three labeled named volumes (workspace, OpenCode state, and task state) and a labeled per-agent bridge network; the registry volume reference identifies the workspace volume, and the other names derive from the same agent ID. The template fixes the non-root UID, dropped capabilities, no-new-privileges, CPU/memory/process limits, no extra swap, and no published ports. A persistence callback records resource references between steps. Partial failures retain resources for explicit recovery; existing containers require reconciliation rather than silent adoption. Removal verifies ownership labels, uses immutable container/network IDs, never forces a running container away, and preserves all volumes unless data deletion is explicitly requested. This service is wired to the server provisioning and cleanup APIs; panel creation/deletion remains pending. An opt-in Docker integration test exercises creation, start/stop, authenticated health, workspace persistence after recreation, retained volumes by default, and explicit data deletion against the fixed template. Run it with `NIMBOT_TEST_DOCKER_IMAGE=sha256:<local-image-id> pnpm test apps/server/src/container-lifecycle.integration.test.ts` after building the current Agent Host image; `NIMBOT_TEST_DOCKER_SOCKET` optionally selects a different Unix socket. It creates uniquely named test resources and cleans them up.
+The server verifies BotFather tokens with Telegram and rejects bots already linked to another agent. Tokens remain in private server-side files; SQLite holds credential references. Replacing a token must preserve the bot's identity and takes effect after a server restart. Switching an existing agent to a different bot is outside the current scope.
 
-An internal provisioning coordinator now connects the registry to Docker creation and startup: it requires a linked bot, persists provisioning state before mutations and resource references before startup, records the start outcome, and checks authenticated Host health up to ten times before marking ready. Failures keep their references and volumes and require explicit inspection; concurrent attempts and externally managed agents are rejected. The coordinator now prepares a saved per-agent token and uses the fixed private Host endpoint derived from the agent ID. The server now initializes this coordinator when provisioning is explicitly configured; panel agent creation remains pending.
+Agent names and instructions persist across restarts. Instructions are snapshotted as context for each new task; edits do not modify running work or the Telegram bot's profile. Names allow up to 128 characters and instructions up to 4000 characters.
 
-The Docker resource service accepts an optional trusted server-container reference, resolves its immutable Docker ID, and attaches that container to each new agent network before creating the Agent Host. The network reference is persisted before attachment, so attachment failures remain tracked and do not create an agent container. Removal disconnects the configured server without force before deleting the agent network; volumes are still retained by default. The opt-in integration test verifies authenticated server-to-agent access, the two network members, recreation, and cleanup against real Docker. The server entrypoint supplies this connection when provisioning is configured.
+Compose enables provisioning using a fixed Docker template. `AGENT_HOST_IMAGE` is resolved to an immutable image ID at server startup without pulling; recreate the server after rebuilding the image. Docker Engine API v1.47 is required. Each agent gets three labeled volumes (workspace, engine state, task state), a private bridge network shared with the server, and a separate generated Host API credential.
 
-Host API credentials now use a separate private server-side store: 32 random bytes per agent, files with mode 600 in a mode-700 directory, and an opaque reference in SQLite. The provisioning coordinator saves the credential before Docker creation and reuses it after failure or restart. Missing, unreadable, or invalid saved credentials fail provisioning instead of silently rotating a token that an existing container may still use. Credential preparation failure prevents all Docker mutations. Tokens are separate from Telegram credentials and are absent from panel status metadata. The server opens this store only when provisioning is enabled.
+Provisioning records state, resource references, and creation intentions before Docker mutations. Failed, cancelled, or interrupted setup retains its resources for explicit retry or cleanup and cannot execute tasks. Resource inventory reports missing, untracked, and uncertain resources without silently adopting, recreating, or deleting them. A lost Docker response is treated as uncertainty, not proof that an operation failed.
 
-Provisioning is now opt-in through `AGENT_HOST_IMAGE` (a local image tag such as `nimbot-agent-host:latest`, which the server resolves to its immutable SHA256 ID at startup without pulling, or a pinned SHA256 ID/digest), `SERVER_CONTAINER_NAME`, and an absolute `DOCKER_SOCKET_PATH`. The server validates the complete configuration at startup, opens its Host credential store, and exposes `POST /api/agents/:id/provision` behind the existing administrator session and same-origin protections. The route uses only the agent ID; Docker settings come from trusted server configuration. The agent must already exist in the registry, have a linked bot, and be pending, failed, or interrupted. Success returns its ID and ready state; failures return a generic conflict without Docker details or credentials. Provisioning does not automatically run on startup or retry uncertain mutations. Agent registration from the panel, full deletion workflow, dynamic task routing, and polling still need integration. Startup checks Docker access first: an unreadable socket stops the server with `server.docker_unavailable` and a hint such as `cannot access Docker socket: permission denied; check DOCKER_SOCKET_GID`, and the resolved image is logged as `server.agent_host_image_resolved`. After rebuilding the Agent Host image, recreate the server so it resolves the new ID. The agent page offers **Retry setup** for failed, interrupted, or cancelled setups; it reuses the existing provisioning route, keeps all created resources, and may fail until existing resources are reconciled.
+Deletion requires explicit confirmation and keeps volumes unless data deletion is separately selected. It stops polling and removes the local agent binding and credentials. Deleting the Telegram bot identity is a separate action in BotFather.
 
-The authenticated `POST /api/agents/:id/resources/remove` endpoint now cleans up dynamically managed Docker resources. It requires a form field `confirm` matching the agent ID; volumes are retained unless `deleteData=true` is explicitly supplied. The server checks that the agent exists, locks the provisioning state before Docker access, stops a running container with the existing interruption grace period, and removes the owned container and network. Success clears container/network references and returns the agent to pending, retaining the workspace-volume reference unless data was deleted. Failure keeps known references and marks the operation failed; a restart during cleanup leaves it interrupted. Externally managed agents are rejected. This is resource cleanup for recovery/reprovisioning, not full agent deletion: the registry entry, bot/chat binding, and credentials remain. Full panel deletion and agent registration remain pending.
+### Tasks and recovery
 
-Dynamically provisioned agents now support `POST /api/agents/:id/container` with form field `action=start` or `action=stop`; stopping also requires `confirm` matching the agent ID. The server applies administrator session and same-origin checks and requires an existing agent. Actions require completed provisioning and a persisted immutable container ID, verify Docker ownership, persist a pending operation before inspection, and use the ten-second shutdown grace period. A pending action blocks other actions, provisioning, and resource cleanup through SQLite; completion or failure releases that guard, and restart marks pending actions interrupted. Docker success does not imply Host health readiness. The server-side create/start/stop/remove lifecycle is implemented; panel management remains a separate pending task.
+Incoming messages and task state are committed before execution. Each conversation has a persistent FIFO queue and runs one turn at a time; duplicate Telegram updates are deduplicated by bot ID and update ID. Commands remain responsive during execution. Progress, approval buttons, and results stay in the originating agent's chat, and long answers are split to fit Telegram limits. Approval callbacks check the owner, agent, and task; unanswered or undeliverable approvals are denied.
 
-When provisioning is enabled, the authenticated status API now includes a read-only `resources` inventory. The server lists all stopped/running containers, volumes, and networks carrying `io.nimbot.agent-id`, compares their immutable IDs or volume names and agent labels with registry references, and reports `missing` and `untracked` resources. Expected engine/task volumes derive from the fixed template alongside the saved workspace volume. A replacement resource or mismatched owner label appears as missing at its expected identity and untracked at its observed identity. Docker failures, volume warnings, or malformed inventories produce `unavailable`, without claiming resources are missing. Responses contain only agent ID, resource kind, and reference; no raw Docker metadata is exposed. These are observations during a refresh, so in-progress operations may produce transient differences. Reconciliation never adopts, recreates, or deletes resources automatically. Real-Docker integration validates the labeled listings against newly created resources.
+`TASK_TIMEOUT_SECONDS` bounds execution (10–3600 seconds, default 600). Failed or cancelled tasks free the queue for the next message. Task submissions and uncertain Docker mutations are never retried automatically. Transient reads and engine startup failures use bounded retries; a failed bot connection does not stop other bots.
 
-The real-Docker lifecycle test now verifies kernel-enforced security before and after container recreation, in addition to the creation specification: UID 1000, zero inherited/permitted/effective/bounding/ambient capabilities on PID 1, `NoNewPrivs=1`, one CPU, 1 GiB memory, zero additional swap, and 256 processes through cgroup limits. It checks that only the three named-volume destinations are mounted, with no bind mounts, added capabilities, devices, Docker socket, or server credential environment variables. This completes the Phase 2 container-hardening task; restart recovery has separate acceptance tasks.
+The Agent Host saves its OpenCode session ID in its task-state volume and loads it for later turns. If a session cannot be loaded, it starts a new one. Running tasks become interrupted after a Host restart rather than being replayed. On server restart, saved agents reconnect with their existing owners and chat bindings, and unfinished operations are recorded as interrupted. Missing or stopped containers are detected rather than silently recreated.
 
-A separate opt-in real-Docker isolation test now creates two Agent Hosts using independently generated credentials from the private credential store and connects a server stand-in to both dedicated networks. It verifies that each network contains only its agent and the server, each agent has one network and no published ports, and the server reaches both APIs by Docker DNS and direct IP. The wrong agent token returns 401. Both cross-agent directions fail to reach the other API by name and IP even with the correct target token, while positive server-side checks confirm that the target is available. Run with `NIMBOT_TEST_DOCKER_IMAGE=sha256:<local-image-id> pnpm test apps/server/src/agent-isolation.integration.test.ts`; temporary containers, networks, volumes, credentials, and registry files are cleaned up.
+Terminal and filesystem tools run through OpenCode inside the container. Browser automation uses headless Chromium through terminal execution with the bundled Playwright tooling; no external browser service is required. Client-side ACP filesystem and terminal capabilities remain disabled.
 
-Agent creation now has a server-side registration workflow and an authenticated same-origin `POST /api/agents` endpoint (enabled with provisioning). Form fields are `name`, optional `instructions`, `ownerId`, and the BotFather `token`; the server generates the resource-safe agent ID. It rejects invalid owner IDs before Telegram access, verifies the bot through bounded `getMe`, writes a private credential file, and atomically records the linked bot, agent metadata, credential reference, and pending provisioning state before Docker is called. Duplicate bot identities, including existing chat bindings, roll back registration and remove the candidate credential. Concurrent requests for the same bot register only one agent. Provisioning failures retain the registered agent, credential, resource references, and explicit setup state; the response exposes only the new ID and provisioning state. The panel now exposes this workflow through a creation form and a persistent setup-result page; registered bot polling and initial task routing are now implemented below.
+### Persistence and diagnostics
 
-With provisioning configured, the panel offers “Create agent” and a single-column form for name, optional instructions, authorized owner Telegram ID, and BotFather token. Server validation preserves non-sensitive fields and clears the token on errors. Successful registration redirects to a setup page that reads persisted metadata on each refresh, distinguishing an available container from incomplete provisioning without resubmitting creation. The page reports setup, bot polling, and owner activation separately; tasks require completed setup and activation. The form is hidden when provisioning is disabled. Chromium checks covered the creation/error flow, keyboard order, and overflow at desktop, 375px, and 320px widths; automated tests cover access control, origin checks, escaping, token non-disclosure, and incomplete setup.
+Server state includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, and the durable task queue. Private `bot-secrets` and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
 
-The saved setup page now links to per-agent name/instruction editing at `/agents/:id/settings`. The form reuses the existing validation, escaping, limits, and save confirmation, and returns to that agent’s setup page. Server callbacks resolve the requested registry ID, require an existing agent, and update only that agent in SQLite. Automated coverage verifies access/origin checks, validation, escaping, missing agents, and isolation between edits to two registered agents; Chromium checks cover editing and returning to the updated setup page. Per-agent token replacement, container start/stop controls, and explicit task interruption observation are now implemented, completing the combined editing/control task.
+Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner activation, container status, and authenticated Host readiness separately; readiness checks workspace access and busy state, not AI provider availability. Stopping an agent captures a task observation, and later refreshes confirm its persisted outcome when the Host is reachable.
 
-Each registered agent’s setup page now links to `/agents/:id/token`. The form identifies the selected agent, accepts only a replacement token for its already linked bot, and reuses bounded Telegram verification and private-file persistence. Server callbacks require an existing agent; routes require administrator authentication and same-origin submission. Errors never echo the submitted token and link back to the same agent. Successful saves redirect to a confirmation that states the restart requirement; neither the old nor new credential is rendered. Automated coverage uses real SQLite and private files to verify wrong-bot rejection and credential isolation between agents; Chromium checks cover rejection, retry, and confirmation. Registered bots now poll from the server; token replacements still require a server restart.
+## Security limitations
 
-Provisioned agents now have start/stop controls on their setup page. Stop opens a confirmation naming the selected agent and explaining possible task interruption and data retention. Form submissions reuse the authorized, persisted per-agent Docker action workflow and redirect back to the same agent. On refresh the server inspects the saved container ID, checks the correct authenticated Host endpoint, and displays the last persisted operation independently of provisioning metadata. A stopped container no longer appears available merely because provisioning previously succeeded. Missing agents and unconfirmed/cross-origin requests are rejected; errors return to the selected agent without exposing Docker details. The panel reports the Docker operation separately from the persisted task observation. When a task was captured before stopping, refresh checks that exact task’s record once the Host is reachable and retains a confirmed interrupted, completed, or failed result across subsequent restarts.
+Nimbot is intended for trusted, single-server self-hosted deployments. Docker containers alone do not provide sufficient isolation for hostile multi-tenant workloads.
 
-As groundwork for explicit task interruption reporting, the authenticated Agent Host API now exposes `GET /tasks/current`, returning only the persisted active task ID and accepted/running state, or `task: null` when no task is active. It never returns prompts or output. The query rejects multiple active records instead of arbitrarily choosing one; unavailable task execution/storage returns 503. Restart recovery continues to mark unfinished tasks interrupted, so those records no longer appear active. A bounded, authenticated server client distinguishes an observed idle Host from unavailable or malformed responses. Capturing this reference before stopping, persisting it on the server, and confirming its final state in the panel are now implemented for registered agent controls.
+- The server's Docker Engine access is equivalent to root on the host. A compromised server or panel can compromise the host; the fixed provisioning template does not constrain an attacker controlling the server. Rootless Docker reduces this exposure where practical.
+- Agent containers run as non-root with all capabilities dropped, `no-new-privileges`, CPU/memory/process limits, no additional swap, no published ports, and no Docker socket or server credentials. Each agent has its own network, volumes, and internal API token.
+- Outbound network access is unrestricted, including reachable private addresses. Agent volume disk usage is not limited. Apply restrictions on the host if needed.
+- Panel passwords use scrypt hashes. Sessions expire after eight hours and end on server restart. Cookies use HttpOnly and SameSite restrictions, with Secure cookies for HTTPS. State changes require same-origin checks; login is limited to five attempts per fifteen minutes. Remote access requires HTTPS.
+- Telegram tokens stay on the server and never enter agent containers, model context, logs, or task events. Telegram messages and AI provider requests leave the server.
 
-## Technology
+See [security and recovery details](docs/OPERATIONS.md#security-limitations), including the limitations of restoring agents onto another Docker host.
 
-TypeScript on Node.js LTS, pnpm, Hono, grammY, Drizzle with SQLite, Docker, Playwright, and Vitest. The AI engine is [OpenCode](https://opencode.ai), driven through the Agent Client Protocol (ACP).
+## Development
 
-Compose defines the server with CPU, memory, and process limits, a non-root user, and a named state volume; each Agent Host container is created by the server from a fixed template with its own named volumes and private network. Only the panel port is published on loopback; Agent Host APIs are reachable only from the server. Its authenticated `/health` endpoint checks workspace access and reports whether the engine is busy. The internal API accepts `POST /tasks` with a JSON `prompt` and returns a task ID (202); `GET /tasks/:id` returns persisted state, output, and stop reason. The authenticated `GET /tasks/:id/events?after=<sequence>` endpoint returns ordered state events, including final output on completion. State changes and events commit atomically, events survive restarts. The server uses a sequence cursor to retrieve subsequent events. All task endpoints require the internal bearer token. One task runs at a time; another submission receives 409. Tasks and prompts are committed to SQLite through Drizzle before OpenCode executes. A separate named volume retains task records, and unfinished records are marked interrupted on startup.
+Use Node.js 22.13 or newer and the pnpm version pinned in `package.json`.
 
-The API continues one OpenCode session across tasks (including after an Agent Host restart), limits execution to `TASK_TIMEOUT_SECONDS` and stored output to 64,000 characters. Engine permission requests go to the owner as Approve/Deny buttons in the originating agent bot; each button is single-use, bound to that bot, chat, task and request, and only the authorized owner can answer. An unanswered request is denied after five minutes, and only single-action grants are ever offered. Activated owner text now submits a task through the authenticated API. The server polls persisted state events and returns plain-text results in the same bot/chat, splitting long answers within Telegram’s limit without cutting surrogate pairs. Errors receive plain-language replies; ambiguous submissions are not retried automatically. Result polling stops at the task timeout plus thirty seconds, with five-second HTTP request timeouts. Messages are saved as queued tasks and run one at a time per conversation, so `/status` and `/stop` stay responsive while a task runs. Each task is saved with its Telegram bot ID and update ID under a unique constraint, so an update Telegram delivers again, including after a restart, does not create a second task; update IDs are only unique per bot, so the pair is used. Tool-use progress, `/stop` cancellation, and owner approvals are implemented; live model-output streaming remains pending. Live Telegram-to-OpenCode validation is still pending. No API task should be submitted to a native Agent Host process on the server machine: run it inside its Docker container.
+```sh
+pnpm install
+pnpm build
+pnpm lint
+pnpm typecheck
+pnpm test
+```
 
-The Agent Host image includes Playwright and headless Chromium. OpenCode uses its container terminal to run the browser probe (`node /app/apps/agent-host/dist/browser-demo.js <url>`); no host browser or external MCP server is needed. Every task the Host sends to the engine is preceded by short environment notes that tell the agent this tool exists; the stored task prompt is unchanged. The probe accepts only http and https URLs without credentials, returns the final URL, page title and visible text as one JSON object, and exits non-zero with a one-line JSON error otherwise. It was validated in the built image as the non-root user, and a task asking for a summary of https://example.org completed through the Host API with a progress event. The demo waits up to two seconds for engine shutdown before forcing termination.
+Start the compiled server with `pnpm start:server`. Generate its administrator password hash with `pnpm panel:password`; `.env.example` documents deployment settings. See [CONTRIBUTING.md](CONTRIBUTING.md) for panel development and browser tests.
 
-## Security
-
-The MVP is intended for trusted, self-hosted use. The panel requires administrator authentication; remote access requires HTTPS. Telegram access is limited to each agent’s owner: the owner ID entered at creation is the only authorization, checked on every message and button press. Deleting an agent retains its persistent volume unless data deletion is explicitly confirmed. Agent containers run as non-root with dropped capabilities, resource limits, a separate network and API token per agent, and no access to the Docker socket or server credentials.
-
-Docker containers alone are not a sufficient isolation boundary for hostile or multi-tenant workloads. The Nimbot Server manages agent containers through the Docker Engine API, which is equivalent to root access on the host: protect the panel accordingly, and prefer rootless Docker where practical. Agent containers have unrestricted outbound network access, and agent volumes have no disk limit.
-
-## Roadmap
-
-| Phase | Goal |
+| Path | Responsibility |
 |---|---|
-| 0 | Validate OpenCode through ACP inside Docker |
-| 1 | One agent bot answering tasks over Telegram, plus an authenticated status panel |
-| 2 | Create and manage multiple agents and their bot bindings through the panel |
-| 3 | Task queue, progress updates, cancellation, and browser |
-| 4 | Recovery and hardening |
-| 5 | Packaging and `v0.1.0` release |
+| `apps/server/` | Panel API, Telegram, registry, routing, and container management |
+| `apps/agent-host/` | AI engine, tasks, and persistent workspace inside each container |
+| `apps/panel/` | Administration UI |
+| `packages/` | Shared code when needed by multiple apps |
+| `infrastructure/docker/` | Application Dockerfiles |
+| `tests/` | Integration and panel end-to-end tests |
+| `docs/` | Installation and operations guides |
 
-Details and acceptance criteria for each phase are in [MVP.md](MVP.md).
+Default Vitest tests need no Docker, Telegram, or AI provider connection. They cover authentication, CSRF, bot linking, owner authorization, routing, task persistence, cancellation, deduplication, and recovery. Panel browser tests use compiled assets and simulated services. Opt-in Docker tests verify lifecycle, isolation, response-loss recovery, and container hardening across recreation and restarts:
+
+```sh
+docker build -f infrastructure/docker/agent-host.Dockerfile -t nimbot-agent-host .
+NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.Id}}') pnpm test integration
+```
+
+`NIMBOT_TEST_DOCKER_SOCKET` optionally selects a different Unix socket. Tests create uniquely named resources and clean them up. CI runs lint, type checking, build, tests, and panel browser tests.
+
+## Future work
+
+The following ideas are deferred, not supported features or delivery commitments:
+
+- **AI engines:** native Codex, Claude Code, additional ACP providers, per-agent engine selection and switching.
+- **Messaging:** WhatsApp, Slack, Discord, shared agents, groups/topics, file and media attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
+- **Agent capabilities:** agent-to-agent communication, delegation, shared tools, advanced memory retrieval, scheduled tasks, recurring automations, advanced approvals, and MCP integrations.
+- **User experience:** advanced dashboards and analytics, web chat, richer configuration, templates, browser terminals, workspace browsing, conversation search, and additional panel accounts.
+- **Operations:** multi-server and distributed execution, advanced monitoring, automated backups, image management, alternative runtimes, and stronger isolation.
+- **Managed hosting:** a separate paid offering; hosted accounts, billing, subscriptions, public registration, public multi-tenant hosting, organizations, marketplaces, and automatic external infrastructure provisioning remain outside the self-hosted product's current scope.
+
+Keep additions focused on the documented features unless an extension is explicitly requested. Prefer simple local components and persistent state over new services or infrastructure.
 
 ## Inspiration
 
 Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly-labs/openbot). It is an independent project and does not reuse OpenBot's source code, which is distributed under the PolyForm Noncommercial License 1.0.0.
 
-## Installation
-
-See [docs/INSTALL.md](docs/INSTALL.md) for the Docker Compose installation, panel administrator setup, HTTPS, BotFather linking, and AI provider authentication. [docs/OPERATIONS.md](docs/OPERATIONS.md) covers backup and restore, troubleshooting, and security limitations.
-
-## Contributing
-
-Use Node.js 22.13 or newer. Run `pnpm install`, then `pnpm build`. Before submitting changes, run `pnpm lint`, `pnpm typecheck`, and `pnpm test`.
-
-Start the compiled server with `pnpm start:server`; `.env.example` lists the deployment settings. The server connects the bots of ready registered agents; chats remain private and owner-bound. The panel reads `PANEL_PASSWORD_HASH` (generated with `pnpm panel:password` after building), `PANEL_URL` (default `http://localhost:3000`), `PANEL_HOST` (default `127.0.0.1`), and `PANEL_PORT` (default `3000`). A valid password hash is required at startup. Sessions expire after eight hours and are invalidated on restart; login allows five attempts per fifteen minutes. Remote access requires an HTTPS origin and a reverse proxy terminating TLS. Each Agent Host gets its own generated API token, stored server-side and passed only to that container together with the workspace setting and task timeout, never Telegram or panel credentials. The image keeps its original ACP demo entrypoint; the provisioning template overrides it to run the internal API. `TASK_TIMEOUT_SECONDS` (10–3600, default 600) is the maximum run time of one task: the Agent Host fails a task that exceeds it and frees itself, the server passes the same value to provisioned Agent Hosts, and the next queued task then runs. The server’s own wait limit is that value plus thirty seconds, and it asks the Host to cancel a task it stops waiting for.
-
-Each agent has one owner, the Telegram user ID entered when it is created; only that user can activate or use it, and anyone else is ignored. The owner activates the chat with `/start`, and `/status` reports activation and whether the agent is ready, busy, or stopped. A task sent while the agent is stopped or not ready is not submitted, and the bot says so. Activation persists in SQLite across server restarts and container recreation. Bindings match the agent ID, verified bot ID, and owner; a changed identity requires `/start` again. The panel shows each agent’s setup state, bot connection, activation, and bot link, and verifies Agent Host readiness and busy state through its authenticated health API on refresh (three-second timeout). Readiness does not validate AI provider availability. Users must open each agent bot and press Start before it can send notifications; delivery uses Telegram chat IDs, not phone numbers.
-
-The server stores chat bindings in `SERVER_STATE_DIR/server.sqlite` (default `.nimbot/` for native runs). Compose sets this to `/home/node/.local/share/nimbot` and mounts the named `server-state` volume. The identity store uses Node’s built-in SQLite API; task persistence uses Drizzle. The database stores agent, bot, owner, and chat IDs, without bot tokens. A storage initialization failure prevents startup.
-
-Agent stops persist a metadata-only pre-stop task snapshot (active, idle, or unavailable) before Docker mutation. The panel distinguishes an observed idle Host, unavailable observation, a captured task awaiting confirmation, and confirmed interrupted/completed/failed outcomes. Refresh queries the exact captured task through the authenticated metadata-only `GET /tasks/:id/status` endpoint, with a three-second timeout. The registry retains confirmed outcomes across restart and gives each stop snapshot a distinct identity, so a slow refresh cannot overwrite a newer stop. Offline, missing, active, or malformed task records never imply interruption. Start the stopped container and refresh to confirm its saved task record. This completes the Phase 2 editing/control task; registered bot polling is now implemented below.
-
-Provisioning now observes server shutdown cooperatively. SIGINT/SIGTERM cancels outstanding setup between steps and during readiness backoff; an in-flight Docker mutation is allowed to settle and its resource references are saved before cancellation is recorded. No new creation/start steps are scheduled after observing cancellation. A durable `cancelled` provisioning state preserves existing references. Cancelled agents cannot use the ready-only container controls; explicit provisioning retry or resource cleanup remains available through the existing protected APIs. A cancellation during startup may retain a running container; it is never silently deleted or treated as ready. The setup page now distinguishes pending, in-progress, completed, failed, interrupted, cancelled, and externally managed provisioning. This is setup cancellation on server shutdown, separate from Telegram task `/stop`; bot setup/owner-verification states and dynamic task-routing guards are now implemented below. Abrupt process termination still uses the existing interrupted-on-restart recovery.
-
-The creation panel now returns to the saved agent’s setup page while provisioning continues in the server, so cancellation is available during setup. Only a live provisioning attempt offers “Cancel setup”; the same-origin authenticated form requires the selected agent ID and preserves all resources. `POST /api/agents/:id/provision/cancel` uses the same checks and returns 202 for a cancellation request, not a completed cancellation. The server checks that the agent exists, persists the request timestamp in SQLite before signalling that agent’s attempt, and shows “Cancellation requested” until its current Docker operation settles and the coordinator records cancelled setup. Requests cannot cancel another agent, resource cleanup, or an already completed attempt; stale forms return a recoverable conflict. Completed/failed/cancelled attempts release their live guard, background errors are handled without exposing provider details, and server shutdown still cancels outstanding attempts. Requests survive restart as metadata, while unfinished provisioning is marked interrupted; explicit retry/cleanup clears the old request. Bot setup/owner-verification states and dynamic task-routing guards are now implemented below.
-
-A registry-backed admission check guards each bot’s chat activation and task submission. It verifies the current bot/credential link and owner, requires the persisted chat binding to match that bot, agent, owner, and receiving chat, and blocks dynamic-style agents unless provisioning is ready with saved resource/Host credential references. Pending container operations, cancellation requests, incomplete setup, and unavailable storage block task submission even if Host health reports ready; the check is repeated after the asynchronous health query. Owner activation can be saved before provisioning completes, but the bot then explains that tasks remain unavailable. Registry reads invalidate stale activation when the saved owner or bot identity changes. The status API and both panel surfaces now distinguish linked/unlinked/unavailable bot setup and pending/verified/unavailable owner verification, without exposing credentials or chat IDs. These fields describe saved setup, not polling connectivity. Registered bot polling and its setup-failure integration are now implemented below, alongside durable creation-intent tracking for failed setup.
-
-With provisioning enabled, the server now starts registered agent bots after successful provisioning and considers saved agents on startup. Only ready, linked agents with readable private bot/Host credentials enter polling. Each connection performs one bounded authenticated Telegram identity check before polling, requires the saved bot ID and current owner assignment, and uses its own persistent chat binding, private Host endpoint/token, and live name/instruction settings. The existing admission guard blocks incomplete setup and checks the bound bot/owner/chat before tasks. Per-agent setup pages distinguish not-started, connecting, polling-started, blocked, failed (including missing credentials, wrong identity, or a rejected token), and stopped states independently of container readiness. Shutdown cancels initialization and stops each registered polling loop before closing its binding. A connection failure remains local to that agent. Tests exercise the real grammY polling loops with simulated Telegram and Host responses, including two-agent routing, owner activation, live settings, revoked tokens, identity mismatch, incomplete setup, missing credentials, and shutdown. Polling-started describes the active loop, not guaranteed continuous Telegram reachability; bounded transient-failure retries, restart reconciliation, and live Telegram/Docker end-to-end acceptance remain separate pending work. Durable creation intents and real-Docker response-loss coverage below complete the remaining setup-state acceptance.
-
-The registry persists each new resource creation intention before its Docker POST, including the fixed resource name, agent ID, resource kind, operation UUID, and timestamp. Docker resources carry that same operation UUID label. Successful inspection verifies the creation operation before saving the immutable reference; only then is the intention cleared. A lost response, unavailable inspection, failed metadata write, or restart leaves the intention available for review and keeps setup non-ready. The authenticated resource inventory adds `uncertain` intentions and accounts for an observed resource only when agent, kind, fixed name, and operation label match; it never adopts or starts a resource from an intention, or interprets its absence from a listing as proof that creation failed. Explicit resource cleanup resolves only operations whose matching resources were observed and successfully removed, and preserves volume intentions unless data deletion was selected. A 404 retains uncertainty because a delayed creation could still complete. Setup cannot become ready while any creation intention remains unresolved. Multiple uncertain attempts for the same name remain recorded. Unit tests cover lost replies for all three volumes, the network, and container, persistence failures, restart, operation mismatch, and cleanup. An opt-in real-Docker test drops the successful container-create reply, reopens SQLite, verifies the stopped container is still accounted for, and checks retained-volume and explicit-data cleanup. Run it with `NIMBOT_TEST_DOCKER_IMAGE=sha256:<local-image-id> pnpm test apps/server/src/provisioning-intents.integration.test.ts`. This completes the Phase 2 setup-state and incomplete-setup tracking task; the remaining Phase 2 acceptance tasks stay separate.
-
-Owner activation is covered by dedicated tests through the real Telegram handlers and SQLite: only the current owner can activate a private chat, persistence precedes the success reply, and two bots owned by the same person remain independent even when their private chat IDs are equal. Activation survives reopened runtime instances; owner changes require a new `/start`, and failed writes can be retried without activating the wrong agent. These checks simulate Telegram updates and delivery; live end-to-end validation remains separate.
-
-Per-bot polling isolation is covered by composition tests that run real grammY loops with simulated Telegram replies: one agent’s unreadable saved token, Telegram authorization failure, identity mismatch, cancelled initialization, or revoked polling token disconnects only that bot while the other keeps handling its owner’s `/start` and messages, and repeated starts share one polling lifetime. Shutdown cancels pending verification and webhook setup without opening another connection. Shared installation configuration/storage errors remain startup errors.
-
 ## License
 
-Nimbot will be released under the Apache License 2.0.
+Nimbot is released under the [Apache License 2.0](LICENSE).
