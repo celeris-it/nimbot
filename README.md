@@ -209,6 +209,10 @@ replayed events, cross-channel deduplication and context, and restored FIFO work
 
 ## Future work
 
+Scheduled tasks are in development. The pure
+cadence and time-zone calculation is implemented and tested; scheduling, persistence,
+delivery, and management are not available yet.
+
 The following ideas are deferred, not supported features or delivery commitments:
 
 - **AI engines:** native Codex, Claude Code, additional ACP providers, per-agent engine selection and switching.
