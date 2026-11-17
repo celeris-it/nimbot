@@ -5,7 +5,7 @@ import { HostTaskError } from "./host-tasks.js";
 import { log as defaultLog, type Logger } from "./logger.js";
 
 export type TaskStatus =
-  "queued" | "running" | "completed" | "failed" | "interrupted";
+  "queued" | "running" | "completed" | "failed" | "interrupted" | "cancelled";
 
 export interface QueuedTask {
   id: string;
@@ -13,6 +13,8 @@ export interface QueuedTask {
   botId: number;
   chatId: number;
   prompt: string;
+  scheduleId?: string;
+  scheduledFor?: number;
 }
 
 export interface DiscordQueuedTask {
@@ -27,11 +29,12 @@ export interface DiscordQueuedTask {
     messageId: string;
   };
 }
-export type RoutedTask =
+export type RoutedTask = (
   | DiscordQueuedTask
   | (QueuedTask & {
       origin: { platform: "telegram"; botId: number; chatId: number };
-    });
+    })
+) & { scheduleId?: string; scheduledFor?: number };
 
 export type TaskOutcome =
   | { ok: true; output: string }
@@ -59,6 +62,10 @@ export function openTaskStore(path: string) {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       update_id INTEGER,
+      schedule_id TEXT,
+      scheduled_for INTEGER,
+      CHECK ((schedule_id IS NULL AND scheduled_for IS NULL) OR
+        (schedule_id IS NOT NULL AND scheduled_for IS NOT NULL AND platform = 'telegram')),
       CHECK ((platform = 'telegram' AND bot_id IS NOT NULL AND chat_id IS NOT NULL AND discord_bot_id IS NULL AND discord_owner_id IS NULL AND discord_channel_id IS NULL AND discord_message_id IS NULL)
         OR (platform = 'discord' AND bot_id IS NULL AND chat_id IS NULL AND update_id IS NULL AND discord_bot_id IS NOT NULL AND discord_owner_id IS NOT NULL AND discord_channel_id IS NOT NULL AND discord_message_id IS NOT NULL))
     )`);
@@ -72,6 +79,9 @@ export function openTaskStore(path: string) {
     db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS tasks_discord_message ON tasks (discord_bot_id, discord_message_id) WHERE platform = 'discord'",
     );
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS tasks_schedule_occurrence ON tasks (schedule_id, scheduled_for) WHERE schedule_id IS NOT NULL",
+    );
     db.exec("COMMIT");
   } catch (error) {
     try {
@@ -83,12 +93,21 @@ export function openTaskStore(path: string) {
     throw error;
   }
   const columns =
-    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt";
+    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, scheduled_for AS scheduledFor";
+  function scheduleMetadata(row: Record<string, unknown>) {
+    return row.scheduleId == null
+      ? {}
+      : {
+          scheduleId: String(row.scheduleId),
+          scheduledFor: Number(row.scheduledFor),
+        };
+  }
   function routed(row: Record<string, unknown>): RoutedTask {
     const base = {
       id: String(row.id),
       agentId: String(row.agentId),
       prompt: String(row.prompt),
+      ...scheduleMetadata(row),
     };
     if (row.platform === "discord")
       return {
@@ -156,7 +175,11 @@ export function openTaskStore(path: string) {
      * of it. A Telegram update already saved for this bot is reported as a
      * duplicate and creates nothing.
      */
-    enqueue(task: Omit<QueuedTask, "id"> & { updateId?: number }): {
+    enqueue(
+      task: Omit<QueuedTask, "id" | "scheduleId" | "scheduledFor"> & {
+        updateId?: number;
+      },
+    ): {
       id: string;
       ahead: number;
       duplicate: boolean;
@@ -210,6 +233,12 @@ export function openTaskStore(path: string) {
         prompt: task.prompt,
         botId: task.origin.botId,
         chatId: task.origin.chatId,
+        ...(task.scheduleId === undefined
+          ? {}
+          : {
+              scheduleId: task.scheduleId,
+              scheduledFor: task.scheduledFor,
+            }),
       };
     },
     claimNextTask(
@@ -309,12 +338,28 @@ export function openTaskStore(path: string) {
         : undefined;
     },
     get(id: string): (QueuedTask & { status: TaskStatus }) | undefined {
-      return db
+      const row = db
         .prepare(
           `SELECT ${columns}, status FROM tasks WHERE id = ? AND platform = 'telegram'`,
         )
-        .get(id) as unknown as
-        (QueuedTask & { status: TaskStatus }) | undefined;
+        .get(id);
+      if (!row) return undefined;
+      return {
+        id: String(row.id),
+        agentId: String(row.agentId),
+        botId: Number(row.botId),
+        chatId: Number(row.chatId),
+        prompt: String(row.prompt),
+        status: row.status as TaskStatus,
+        ...scheduleMetadata(row),
+      };
+    },
+    isScheduleOverlapping(scheduleId: string): boolean {
+      return !!db
+        .prepare(
+          "SELECT 1 FROM tasks WHERE schedule_id = ? AND status IN ('queued', 'running') LIMIT 1",
+        )
+        .get(scheduleId);
     },
     close() {
       db.close();

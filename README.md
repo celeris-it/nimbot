@@ -209,9 +209,12 @@ replayed events, cross-channel deduplication and context, and restored FIFO work
 
 ## Future work
 
-Scheduled tasks are in development. The pure
-cadence and time-zone calculation is implemented and tested; scheduling, persistence,
-delivery, and management are not available yet.
+Scheduled tasks are in development. Cadence and time-zone calculation and the
+SQLite schedule store are implemented and tested. The store shares `server.sqlite`
+with the task queue: each occurrence records its history, enqueues its Telegram
+task, and advances the next run in one transaction. It retains 20 history entries
+per schedule and reads execution status from the task row. Scheduling, delivery,
+and management are not available yet.
 
 The following ideas are deferred, not supported features or delivery commitments:
 
