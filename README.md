@@ -213,7 +213,10 @@ Scheduled tasks are in development. Cadence and time-zone calculation and the
 SQLite schedule store are implemented and tested. The store shares `server.sqlite`
 with the task queue: each occurrence records its history, enqueues its Telegram
 task, and advances the next run in one transaction. It retains 20 history entries
-per schedule and reads execution status from the task row. Scheduling, delivery,
+per schedule and reads execution status from the task row. The scheduler component
+checks due schedules every 30 seconds, skips unavailable agents and overlapping
+runs, and records occurrences more than 10 minutes late as missed without replaying
+a backlog. It is not wired into server startup yet; scheduled execution, delivery,
 and management are not available yet.
 
 The following ideas are deferred, not supported features or delivery commitments:
