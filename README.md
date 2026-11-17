@@ -218,10 +218,6 @@ The following ideas are deferred, not supported features or delivery commitments
 
 Keep additions focused on the documented features unless an extension is explicitly requested. Prefer simple local components and persistent state over new services or infrastructure.
 
-## Inspiration
-
-Nimbot takes architectural inspiration from [OpenBot](https://github.com/nightly-labs/openbot). It is an independent project and does not reuse OpenBot's source code, which is distributed under the PolyForm Noncommercial License 1.0.0.
-
 ## License
 
 Nimbot is released under the [Apache License 2.0](LICENSE).
