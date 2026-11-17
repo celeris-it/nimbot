@@ -49,87 +49,21 @@ async function settled(store: TaskStore, id: string) {
   throw new Error("Task did not settle");
 }
 
-it("passes API keys only to the engine after persistence and never stores them in task records or events", async () => {
-  const credentials = {
-    openai: "private-provider-key",
-    anthropic: "another-private-key",
-  };
-  const engine: Engine = {
-    run: vi.fn(async (_prompt, onText) => {
-      onText("Done");
-      return "end_turn";
-    }),
-    stop: vi.fn(async () => {}),
-  };
-  const f = await setup(engine);
-  const response = await f.request("/tasks", { prompt: "hi", credentials });
-  expect(response.status).toBe(202);
-  const { id } = await response.json();
-  await settled(f.store, id);
-  expect(engine.run).toHaveBeenCalledWith(
-    "hi",
-    expect.any(Function),
-    expect.any(Function),
-    expect.any(Function),
-    credentials,
-  );
-  for (const path of [`/tasks/${id}`, `/tasks/${id}/events`, "/tasks/current"])
-    expect(await (await f.request(path)).text()).not.toMatch(
-      /private-provider-key|another-private-key|credentials/,
-    );
-  const persisted = new DatabaseSync(new URL(f.url));
-  try {
-    const tables = persisted
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-      .all();
-    for (const { name } of tables) {
-      const rows = persisted
-        .prepare(`SELECT * FROM "${String(name).replaceAll('"', '""')}"`)
-        .all();
-      expect(JSON.stringify(rows)).not.toMatch(
-        /private-provider-key|another-private-key|credentials/,
-      );
-    }
-  } finally {
-    persisted.close();
-  }
-});
-
-it("rejects malformed credential snapshots before admitting tasks", async () => {
+it("rejects credential snapshots in task submissions", async () => {
   const engine: Engine = {
     run: vi.fn(async () => "end_turn"),
     stop: async () => {},
   };
   const f = await setup(engine);
-  for (const credentials of [
-    null,
-    [],
-    "key",
-    { unknown: "key" },
-    { openai: "" },
-    { openai: "a\0b" },
-    { openai: "a b" },
-    { openai: "x".repeat(4097) },
-    { openai: 123 },
-  ])
-    expect(
-      (await f.request("/tasks", { prompt: "hi", credentials })).status,
-    ).toBe(400);
+  expect(
+    (
+      await f.request("/tasks", {
+        prompt: "hi",
+        credentials: { openai: "must-not-be-shared" },
+      })
+    ).status,
+  ).toBe(400);
   expect(engine.run).not.toHaveBeenCalled();
-  const response = await f.request("/tasks", {
-    prompt: "empty keys",
-    credentials: {},
-  });
-  const { id } = await response.json();
-  expect(response.status).toBe(202);
-  await settled(f.store, id);
-  expect(engine.run).toHaveBeenLastCalledWith(
-    "empty keys",
-    expect.any(Function),
-    expect.any(Function),
-    expect.any(Function),
-    {},
-  );
 });
 
 it("persists the prompt before engine execution and returns the recorded result", async () => {

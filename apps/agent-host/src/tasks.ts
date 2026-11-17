@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Engine, ProviderCredentials } from "./engine.js";
+import type { Engine } from "./engine.js";
 import type { TaskStore } from "./task-store.js";
 import { log as defaultLog, type Logger } from "./logger.js";
 
@@ -23,19 +23,28 @@ export function createTaskRunner(
   let running: Promise<void> = Promise.resolve();
   let currentId: string | undefined;
   let cancelNow: (() => void) | undefined;
+  function reserve() {
+    if (busy || closing) return undefined;
+    busy = true;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        busy = false;
+      }
+    };
+  }
   return {
-    async submit(
-      prompt: string,
-      credentials?: ProviderCredentials,
-    ): Promise<string | undefined> {
-      if (busy || closing) return undefined;
-      busy = true;
+    reserve,
+    async submit(prompt: string): Promise<string | undefined> {
+      const release = reserve();
+      if (!release) return undefined;
       const id = randomUUID();
       try {
         inserting = store.insert(id, prompt);
         await inserting;
       } catch (error) {
-        busy = false;
+        release();
         throw error;
       }
       currentId = id;
@@ -120,7 +129,6 @@ export function createTaskRunner(
                   .catch(() => {});
               },
               requestApproval,
-              credentials,
             ),
             cancelled,
             new Promise<never>((_, reject) => {
@@ -152,7 +160,7 @@ export function createTaskRunner(
           try {
             await engine.stop();
           } finally {
-            busy = false;
+            release();
           }
         }
       })();

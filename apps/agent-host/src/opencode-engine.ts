@@ -85,50 +85,39 @@ export function createOpenCodeEngine(
     }
   }
   return {
-    async run(prompt, onText, onProgress, requestApproval, credentials = {}) {
+    async run(prompt, onText, onProgress, requestApproval) {
       stopped = false;
       // Loading a session replays its history as updates; those are not new output.
       let replaying = false;
       /** Starts the engine and opens its session; nothing has been sent to the model yet. */
       async function connect() {
-        const engine = spawnOpenCode(
-          workspace,
-          {
-            onUpdate: (_id, update) => {
-              if (replaying) return;
-              const content = update.content as { text?: string } | undefined;
-              if (
-                update.sessionUpdate === "agent_message_chunk" &&
-                typeof content?.text === "string"
-              )
-                onText(content.text);
-              else if (
-                update.sessionUpdate === "tool_call" &&
-                typeof update.title === "string"
-              )
-                onProgress?.(progressLabel(update.title));
-            },
-            // Without an approver, or if asking fails, the request is denied.
-            onPermission: async (options, request) => {
-              let allow: boolean;
-              try {
-                allow =
-                  (await requestApproval?.(describeAction(request))) === true;
-              } catch {
-                allow = false;
-              }
-              return chooseOption(options, allow);
-            },
+        const engine = spawnOpenCode(workspace, {
+          onUpdate: (_id, update) => {
+            if (replaying) return;
+            const content = update.content as { text?: string } | undefined;
+            if (
+              update.sessionUpdate === "agent_message_chunk" &&
+              typeof content?.text === "string"
+            )
+              onText(content.text);
+            else if (
+              update.sessionUpdate === "tool_call" &&
+              typeof update.title === "string"
+            )
+              onProgress?.(progressLabel(update.title));
           },
-          JSON.stringify(
-            Object.fromEntries(
-              Object.entries(credentials).map(([id, key]) => [
-                id,
-                { type: "api", key },
-              ]),
-            ),
-          ),
-        );
+          // Without an approver, or if asking fails, the request is denied.
+          onPermission: async (options, request) => {
+            let allow: boolean;
+            try {
+              allow =
+                (await requestApproval?.(describeAction(request))) === true;
+            } catch {
+              allow = false;
+            }
+            return chooseOption(options, allow);
+          },
+        });
         active = engine;
         try {
           await engine.client.initialize();

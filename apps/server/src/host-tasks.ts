@@ -1,6 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { AgentHostConfig } from "./agent-host.js";
-import type { ProviderCredentials } from "./provider-credentials.js";
 
 export class HostTaskError extends Error {
   constructor(
@@ -76,7 +75,6 @@ export function createHostTasks(
   pause: () => Promise<unknown> = () => delay(1000),
   /** Backstop only: the Host enforces the real task timeout. */
   waitMs = 630_000,
-  loadCredentials?: () => Promise<ProviderCredentials>,
 ) {
   return async (
     prompt: string,
@@ -114,12 +112,7 @@ export function createHostTasks(
       }).catch(() => {});
     };
     try {
-      const credentials = loadCredentials ? await loadCredentials() : undefined;
-      if (cancelSignal?.aborted) throw new HostTaskError("cancelled");
-      const accepted = await call(
-        "/tasks",
-        JSON.stringify({ prompt, credentials }),
-      );
+      const accepted = await call("/tasks", JSON.stringify({ prompt }));
       if (
         typeof accepted !== "object" ||
         accepted === null ||

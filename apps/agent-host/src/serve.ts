@@ -8,6 +8,8 @@ import { serve } from "@hono/node-server";
 import { createHostApi, readHostConfig } from "./http.js";
 import { log } from "./logger.js";
 import { readTaskTimeoutMs } from "./task-timeout.js";
+import { createOpenCodeAuth } from "./opencode-auth.js";
+import { homedir } from "node:os";
 
 try {
   const config = readHostConfig(process.env);
@@ -25,7 +27,15 @@ try {
     ),
     readTaskTimeoutMs(process.env),
   );
-  const app = createHostApi(config, runner);
+  const auth = await createOpenCodeAuth(
+    resolve(
+      process.env.XDG_DATA_HOME || resolve(homedir(), ".local/share"),
+      "opencode",
+    ),
+    runner.reserve,
+    runner.isBusy,
+  );
+  const app = createHostApi(config, runner, auth);
   const server = serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 3001 });
   server.on("error", () => {
     log.error("host.http_start_failed");
@@ -39,7 +49,11 @@ try {
     server.close();
     if ("closeIdleConnections" in server) server.closeIdleConnections();
     try {
-      await runner.close();
+      try {
+        await auth.close();
+      } finally {
+        await runner.close();
+      }
     } catch {
       log.error("host.shutdown_finalize_failed");
       process.exitCode = 1;

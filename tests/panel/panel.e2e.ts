@@ -14,12 +14,21 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
-test("manages global API keys with keyboard navigation, blank secret fields and accessible errors", async ({
-  page,
-}) => {
+async function openProviders(page: Page) {
   await login(page);
-  await page.getByRole("link", { name: "AI providers", exact: true }).click();
-  await expect(page).toHaveURL(/\/settings\/providers$/);
+  await page.goto("/agents/dev/setup");
+  await page.getByRole("button", { name: "Start container" }).click();
+  await page.getByRole("link", { name: "Configure AI providers" }).click();
+  await expect(
+    page.getByRole("heading", { name: "AI providers for Developer" }),
+  ).toBeVisible();
+}
+
+test("manages per-agent API keys with keyboard navigation and blank secret fields", async ({
+  page,
+  request,
+}) => {
+  await openProviders(page);
   const openai = page.getByRole("region", { name: "OpenAI", exact: true });
   const key = page.getByLabel("OpenAI API key", { exact: true });
   await expect(
@@ -31,37 +40,134 @@ test("manages global API keys with keyboard navigation, blank secret fields and 
     openai.getByRole("button", { name: "Save API key" }),
   ).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(openai.getByText("Configured", { exact: true })).toBeVisible();
+  await expect(
+    openai.getByText("Configured — API key", { exact: true }),
+  ).toBeVisible();
   await expect(key).toHaveValue("");
   await key.fill("private-replacement");
-  await openai.getByRole("button", { name: "Replace API key" }).click();
-  await expect(page.getByRole("status")).toContainText("API key saved.");
-  await expect(key).toHaveValue("");
+  await openai.getByRole("button", { name: "Replace with API key" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "API key saved for this agent.",
+  );
   await page.reload();
-  await expect(openai.getByText("Configured", { exact: true })).toBeVisible();
   await expect(key).toHaveValue("");
   await key.fill("invalid key");
-  await openai.getByRole("button", { name: "Replace API key" }).click();
+  await openai.getByRole("button", { name: "Replace with API key" }).click();
   await expect(page.getByRole("alert")).toContainText("without whitespace");
   await expect(page.getByRole("alert")).toBeFocused();
   await expect(key).toHaveValue("");
-  await expect(openai.getByText("Configured", { exact: true })).toBeVisible();
-  await openai.getByRole("button", { name: "Remove API key" }).click();
+  await request.post("/__test/agent/research");
+  await page.goto("/agents/research/providers");
+  await expect(
+    page.getByRole("heading", { name: "AI providers for Researcher" }),
+  ).toBeVisible();
   await expect(
     openai.getByText("Not configured", { exact: true }),
   ).toBeVisible();
+  await key.fill("private-research");
+  await openai.getByRole("button", { name: "Save API key" }).click();
+  await page.goto("/agents/dev/providers");
   await expect(
-    openai.getByRole("button", { name: "Remove API key" }),
-  ).toHaveCount(0);
-  await expect(page.locator("main")).not.toContainText("private-first");
-  await expect(page.locator("main")).not.toContainText("private-replacement");
-  await page.goto("/agents/dev/setup");
-  await page
-    .getByRole("link", { name: "Configure global AI providers" })
-    .click();
-  await expect(
-    page.getByRole("heading", { name: "AI providers", exact: true }),
+    openai.getByText("Configured — API key", { exact: true }),
   ).toBeVisible();
+  await openai.getByRole("button", { name: "Disconnect provider" }).click();
+  await expect(
+    openai.getByText("Not configured", { exact: true }),
+  ).toBeVisible();
+  await page.goto("/agents/research/providers");
+  await expect(
+    openai.getByText("Configured — API key", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("private-");
+});
+
+test("completes device login and recovers its pending state after reload", async ({
+  page,
+  request,
+}) => {
+  await openProviders(page);
+  await page.getByRole("button", { name: "Sign in with ChatGPT" }).click();
+  await expect(
+    page.getByRole("link", { name: "OpenAI device authorization" }),
+  ).toHaveAttribute("href", "https://auth.openai.com/codex/device");
+  await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("OpenAI API key")).toBeDisabled();
+  await page.reload();
+  await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
+  await request.post("/__test/providers/dev/completed");
+  await expect(
+    page.getByText("ChatGPT login completed for this agent."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Configured — ChatGPT device login"),
+  ).toBeVisible();
+  await expect(page.getByLabel("OpenAI API key")).toBeEnabled();
+});
+
+test("cancels device login and preserves an existing API key", async ({
+  page,
+}) => {
+  await openProviders(page);
+  const openai = page.getByRole("region", { name: "OpenAI", exact: true });
+  await page.getByLabel("OpenAI API key").fill("private-existing");
+  await openai.getByRole("button", { name: "Save API key" }).click();
+  await expect(openai.getByText("Configured — API key")).toBeVisible();
+  await page.getByRole("button", { name: "Sign in with ChatGPT" }).click();
+  await page.getByRole("button", { name: "Cancel device login" }).click();
+  await expect(
+    page.getByText("Device login cancelled. The previous credential was kept."),
+  ).toBeVisible();
+  await expect(openai.getByText("Configured — API key")).toBeVisible();
+});
+
+for (const state of ["failed", "expired", "restart"])
+  test(`handles ${state} device login`, async ({ page, request }) => {
+    await openProviders(page);
+    await page.getByRole("button", { name: "Sign in with ChatGPT" }).click();
+    await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
+    await request.post(`/__test/providers/dev/${state}`);
+    await expect(
+      page.getByText(
+        state === "failed"
+          ? "Device login failed."
+          : state === "expired"
+            ? "Device login exceeded its ten-minute time limit."
+            : "The previous login was interrupted.",
+        { exact: false },
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Sign in with ChatGPT" }),
+    ).toBeEnabled();
+  });
+
+test("shows busy and offline provider states without affecting other agents", async ({
+  page,
+  request,
+}) => {
+  await openProviders(page);
+  await request.post("/__test/providers/dev/busy");
+  await expect(
+    page.getByText(
+      "Agent is busy. Wait for its task or authentication change to finish.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign in with ChatGPT" }),
+  ).toBeDisabled();
+  await request.post("/__test/agent/research");
+  await page.goto("/agents/research/providers");
+  await expect(
+    page.getByRole("button", { name: "Sign in with ChatGPT" }),
+  ).toBeEnabled();
+  await request.post("/__test/providers/dev/offline");
+  await page.goto("/agents/dev/providers");
+  await expect(
+    page.getByText("Provider settings unavailable.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Open agent setup" }),
+  ).toHaveAttribute("href", "/agents/dev/setup");
 });
 
 test("logs in, follows deep links and browser history, and signs out", async ({

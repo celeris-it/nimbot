@@ -37,7 +37,14 @@ it("describes the requested action on one bounded line", () => {
   expect(describeAction({ title: "x".repeat(500) })).toHaveLength(200);
 });
 
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, vi } from "vitest";
@@ -48,6 +55,13 @@ const fakeOpenCode = `#!/usr/bin/env node
 const lines = require("node:readline").createInterface({ input: process.stdin });
 const fs = require("node:fs");
 if (process.env.FAKE_AUTH_LOG) fs.writeFileSync(process.env.FAKE_AUTH_LOG, process.env.OPENCODE_AUTH_CONTENT || "missing");
+if (process.env.FAKE_REFRESH_AUTH) {
+  const file = require("node:path").join(process.env.XDG_DATA_HOME, "opencode", "auth.json");
+  const auth = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(process.env.FAKE_AUTH_LOG, auth.openai.refresh);
+  auth.openai.refresh = "rotated-" + auth.openai.refresh;
+  fs.writeFileSync(file, JSON.stringify(auth), {mode:0o600});
+}
 const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\\n");
 const chunk = (sessionId, text) => send({ method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } } });
 const known = process.env.FAKE_KNOWN_SESSION;
@@ -97,33 +111,45 @@ describe("session continuity", () => {
     return text;
   }
 
-  it("injects each task's complete API credentials into ACP without changing parent environment or writing engine auth state", async () => {
+  it("removes inherited shared credentials from every ACP process", async () => {
     await setup();
     vi.stubEnv("FAKE_AUTH_LOG", join(dir, "auth-capture"));
-    vi.stubEnv("OPENCODE_AUTH_CONTENT", "stale-parent-credentials");
+    vi.stubEnv("OPENCODE_AUTH_CONTENT", "stale-shared-credentials");
     const engine = createOpenCodeEngine(dir);
-    await engine.run("hi", () => {}, undefined, undefined, {
-      openai: "private-key",
-      google: "google-key",
-    });
-    expect(
-      JSON.parse(await readFile(join(dir, "auth-capture"), "utf8")),
-    ).toEqual({
-      openai: { type: "api", key: "private-key" },
-      google: { type: "api", key: "google-key" },
-    });
-    await engine.run("hi", () => {}, undefined, undefined, {
-      openai: "replacement",
-    });
-    expect(
-      JSON.parse(await readFile(join(dir, "auth-capture"), "utf8")),
-    ).toEqual({ openai: { type: "api", key: "replacement" } });
-    await engine.run("hi", () => {}, undefined, undefined, {});
-    expect(await readFile(join(dir, "auth-capture"), "utf8")).toBe("{}");
-    expect(process.env.OPENCODE_AUTH_CONTENT).toBe("stale-parent-credentials");
-    await expect(readFile(join(dir, "auth.json"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    await run(engine);
+    expect(await readFile(join(dir, "auth-capture"), "utf8")).toBe("missing");
+    expect(process.env.OPENCODE_AUTH_CONTENT).toBe("stale-shared-credentials");
+  });
+
+  it("lets OpenCode persist refreshed OAuth tokens for the next ACP process", async () => {
+    await setup({ FAKE_REFRESH_AUTH: "1" });
+    const data = join(dir, "data");
+    await mkdir(join(data, "opencode"), { recursive: true });
+    const file = join(data, "opencode", "auth.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        openai: {
+          type: "oauth",
+          access: "fake-access",
+          refresh: "initial",
+          expires: 0,
+        },
+      }),
+      { mode: 0o600 },
+    );
+    vi.stubEnv("XDG_DATA_HOME", data);
+    vi.stubEnv("FAKE_AUTH_LOG", join(dir, "auth-capture"));
+    const engine = createOpenCodeEngine(dir);
+    await run(engine);
+    expect(await readFile(join(dir, "auth-capture"), "utf8")).toBe("initial");
+    await run(engine);
+    expect(await readFile(join(dir, "auth-capture"), "utf8")).toBe(
+      "rotated-initial",
+    );
+    expect(JSON.parse(await readFile(file, "utf8")).openai.refresh).toBe(
+      "rotated-rotated-initial",
+    );
   });
 
   it("creates and remembers a session, then loads it for the next task without replayed history", async () => {

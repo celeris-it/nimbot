@@ -1,3 +1,4 @@
+import { HostProviderError } from "./host-providers.js";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -10,7 +11,7 @@ import type { HostStatus } from "./agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 import type { AgentDetail, PanelSession } from "./panel-contracts.js";
 import { isDiscordId } from "./discord-identity.js";
-import { isProviderId, isApiKey } from "./provider-credentials.js";
+import { isProviderId, isApiKey } from "./provider-contracts.js";
 
 export interface RegisteredAgentSettings {
   cancelProvisioning?(id: string): void;
@@ -26,13 +27,8 @@ export interface RegisteredAgentSettings {
   ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
 export interface PanelDeps {
-  providers?: Pick<
-    Awaited<
-      ReturnType<
-        typeof import("./provider-credentials.js").openProviderCredentials
-      >
-    >,
-    "list" | "save" | "remove"
+  providers?: ReturnType<
+    typeof import("./host-providers.js").createHostProviders
   >;
   discord?: {
     status?(
@@ -239,31 +235,55 @@ export function createPanel(
   };
   app.post("/logout", signOut);
   app.post("/api/logout", signOut);
-  app.get("/api/providers", async (c) => {
+  app.use("/api/agents/:id/providers", async (c, next) => {
+    if (!getAgentSetup?.(c.req.param("id")!))
+      return c.json({ error: "Agent not found." }, 404);
     if (!deps.providers)
       return c.json({ error: "Provider settings unavailable." }, 503);
-    return c.json({ providers: await deps.providers.list() });
+    await next();
   });
-  app.post("/api/providers/:id", async (c) => {
+  app.use("/api/agents/:id/providers/*", async (c, next) => {
+    if (!getAgentSetup?.(c.req.param("id")!))
+      return c.json({ error: "Agent not found." }, 404);
     if (!deps.providers)
       return c.json({ error: "Provider settings unavailable." }, 503);
-    const id = c.req.param("id");
-    if (!isProviderId(id)) return c.json({ error: "Unknown provider." }, 400);
+    await next();
+  });
+  app.get("/api/agents/:id/providers", async (c) =>
+    c.json(await deps.providers!.status(c.req.param("id"))),
+  );
+  app.post("/api/agents/:id/providers/openai/device-login", async (c) =>
+    c.json(await deps.providers!.startLogin(c.req.param("id")), 202),
+  );
+  app.post(
+    "/api/agents/:id/providers/openai/device-login/:attempt/cancel",
+    async (c) => {
+      const attempt = c.req.param("attempt");
+      if (!/^[a-f0-9-]{36}$/.test(attempt))
+        return c.json({ error: "Invalid login attempt." }, 400);
+      return c.json(
+        await deps.providers!.cancelLogin(c.req.param("id"), attempt),
+      );
+    },
+  );
+  app.post("/api/agents/:id/providers/:provider", async (c) => {
+    const provider = c.req.param("provider");
+    if (!isProviderId(provider))
+      return c.json({ error: "Unknown provider." }, 400);
     const body = await c.req.parseBody({ all: true });
     if (!isApiKey(body.key))
       return c.json(
         { error: "Enter an API key of 1–4096 characters without whitespace." },
         400,
       );
-    await deps.providers.save(id, body.key);
+    await deps.providers!.save(c.req.param("id"), provider, body.key);
     return c.json({ saved: true });
   });
-  app.post("/api/providers/:id/remove", async (c) => {
-    if (!deps.providers)
-      return c.json({ error: "Provider settings unavailable." }, 503);
-    const id = c.req.param("id");
-    if (!isProviderId(id)) return c.json({ error: "Unknown provider." }, 400);
-    await deps.providers.remove(id);
+  app.post("/api/agents/:id/providers/:provider/remove", async (c) => {
+    const provider = c.req.param("provider");
+    if (!isProviderId(provider))
+      return c.json({ error: "Unknown provider." }, 400);
+    await deps.providers!.remove(c.req.param("id"), provider);
     return c.json({ removed: true });
   });
   app.get("/api/agents/:id", async (c) => {
@@ -668,10 +688,10 @@ export function createPanel(
       return c.redirect(back(id), 303);
     });
   app.get("/", entry);
-  app.get("/settings/providers", entry);
   app.get("/agents/new", (c) => (registerAgent ? entry(c) : c.notFound()));
   for (const suffix of [
     "setup",
+    "providers",
     "settings",
     "token",
     "container/stop",
@@ -692,8 +712,20 @@ export function createPanel(
       return entry(c);
     });
   }
-  app.onError((_, c) =>
-    c.json({ error: "The request could not be completed." }, 500),
+  app.onError((error, c) =>
+    error instanceof HostProviderError
+      ? c.json(
+          {
+            error: {
+              400: "Invalid provider request.",
+              404: "Login attempt not found. Start a new login.",
+              409: "Agent is busy. Try again after the task or login finishes.",
+              503: "Provider settings unavailable. Start the agent and refresh to try again.",
+            }[error.status],
+          },
+          error.status,
+        )
+      : c.json({ error: "The request could not be completed." }, 500),
   );
   return app;
 }

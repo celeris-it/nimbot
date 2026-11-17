@@ -4,7 +4,7 @@
     AgentDetail,
     PanelSession,
     PanelStatus,
-    ProviderStatus,
+    ProviderSettings as ProviderSettingsState,
   } from "../../server/src/panel-contracts.js";
   import { ApiError, post, request } from "./api.js";
   import Dashboard from "./Dashboard.svelte";
@@ -17,7 +17,7 @@
   let session = $state<PanelSession>();
   let status = $state<PanelStatus>({ agents: [] });
   let agent = $state<AgentDetail>();
-  let providers = $state<ProviderStatus[]>([]);
+  let providerSettings = $state<ProviderSettingsState>();
   let loaded = $state(false);
   let contentAvailable = $state(false);
   let missing = $state(false);
@@ -31,7 +31,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|token|delete|container\/stop)$/,
     ),
   );
   let title = $derived(
@@ -39,7 +39,7 @@
       ? "Sign in"
       : path === "/"
         ? "Agents"
-        : path === "/settings/providers"
+        : route?.[2] === "providers"
           ? "AI providers"
           : path === "/agents/new"
             ? "Create agent"
@@ -66,6 +66,7 @@
     else history.pushState(null, "", next);
     path = new URL(next, location.origin).pathname;
     agent = undefined;
+    providerSettings = undefined;
     loaded = false;
     contentAvailable = false;
     missing = false;
@@ -99,16 +100,25 @@
         status = await request<PanelStatus>("/api/status", {
           signal: current.signal,
         });
-      else if (path === "/settings/providers") {
-        providers = (
-          await request<{ providers: ProviderStatus[] }>("/api/providers", {
-            signal: current.signal,
-          })
-        ).providers;
-      } else if (route) {
+      else if (route) {
         agent = await request<AgentDetail>(`/api/agents/${route[1]}`, {
           signal: current.signal,
         });
+        if (route[2] === "providers") {
+          try {
+            providerSettings = await request<ProviderSettingsState>(
+              `/api/agents/${route[1]}/providers`,
+              { signal: current.signal },
+            );
+          } catch (cause) {
+            if (
+              current.signal.aborted ||
+              (cause instanceof ApiError && cause.status === 401)
+            )
+              throw cause;
+            providerSettings = undefined;
+          }
+        }
         const view = route[2];
         missing =
           (view === "settings" && !agent.capabilities.edit) ||
@@ -281,15 +291,32 @@
       },
     );
   }
-  async function providerAction(id: string, kind: "save" | "remove", key = "") {
+  async function providerAction(
+    id: string,
+    kind: "save" | "remove" | "login" | "cancel",
+    value = "",
+  ) {
+    if (!agent) return;
+    const suffix =
+      kind === "login"
+        ? "/device-login"
+        : kind === "cancel"
+          ? `/device-login/${encodeURIComponent(value)}/cancel`
+          : kind === "remove"
+            ? "/remove"
+            : "";
     await mutate(
-      `/api/providers/${encodeURIComponent(id)}${kind === "remove" ? "/remove" : ""}`,
-      kind === "save" ? { key } : {},
+      `/api/agents/${encodeURIComponent(agent.id)}/providers/${encodeURIComponent(id)}${suffix}`,
+      kind === "save" ? { key: value } : {},
       () => {
         notice =
           kind === "save"
-            ? "API key saved. Changes apply to the next task."
-            : "API key removed. Running tasks keep their current key.";
+            ? "API key saved for this agent."
+            : kind === "remove"
+              ? "Provider disconnected from this agent."
+              : kind === "cancel"
+                ? "Login status updated."
+                : "Device login started. Complete authorization with OpenAI.";
         void load();
       },
     );
@@ -367,11 +394,6 @@
           aria-current={path === "/agents/new" ? "page" : undefined}
           ><Icon name="plus" size={15} /> New agent</a
         >{/if}
-      <a
-        href="/settings/providers"
-        aria-current={path === "/settings/providers" ? "page" : undefined}
-        >AI providers</a
-      >
     </nav>
     <div data-ui="header-actions">
       <span data-ui="installation"
@@ -439,12 +461,18 @@
       canCreate={session?.capabilities.createAgent ?? false}
       refresh={() => load()}
     />
-  {:else if path === "/settings/providers"}
-    <ProviderSettings {providers} {busy} action={providerAction} />
   {:else if path === "/agents/new"}
     {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
   {:else if agent && route}
-    {#if route[2] === "setup"}<AgentStatus
+    {#if route[2] === "providers"}
+      {#key agent.id}<ProviderSettings
+          {agent}
+          settings={providerSettings}
+          {busy}
+          action={providerAction}
+          refresh={() => load()}
+        />{/key}
+    {:else if route[2] === "setup"}<AgentStatus
         {agent}
         {busy}
         {action}

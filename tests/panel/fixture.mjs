@@ -1,13 +1,26 @@
+import { randomUUID } from "node:crypto";
+import { HostProviderError } from "../../apps/server/dist/host-providers.js";
 import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/index.mjs";
 import { Hono } from "../../apps/server/node_modules/hono/dist/index.js";
 import { createPanel } from "../../apps/server/dist/panel.js";
 import { hashPassword } from "../../apps/server/dist/panel-auth.js";
-import { providers } from "../../apps/server/dist/provider-credentials.js";
+import { providers } from "../../apps/server/dist/provider-contracts.js";
 
 const agents = new Map();
 const keys = new Map();
+const logins = new Map();
+const pendingLogin = (id) =>
+  ["starting", "awaiting_authorization"].includes(logins.get(id)?.state);
+function requireHost(id, mutate = false) {
+  const agent = agents.get(id);
+  if (!agent || agent.container !== "running") throw new HostProviderError(503);
+  if (mutate && (agent.authBusy || pendingLogin(id)))
+    throw new HostProviderError(409);
+}
+
 function reset() {
   keys.clear();
+  logins.clear();
   agents.clear();
   agents.set("dev", {
     name: "Developer",
@@ -27,16 +40,43 @@ const panel = createPanel(
   },
   {
     providers: {
-      list: async () =>
-        providers.map((provider) => ({
-          ...provider,
-          configured: keys.has(provider.id),
-        })),
-      save: async (id, key) => {
-        keys.set(id, key);
+      status: async (id) => {
+        requireHost(id);
+        return {
+          providers: providers.map((provider) => ({
+            ...provider,
+            method: keys.get(`${id}:${provider.id}`)?.method ?? null,
+          })),
+          busy: !!agents.get(id)?.authBusy || pendingLogin(id),
+          login: logins.get(id) ?? null,
+        };
       },
-      remove: async (id) => {
-        keys.delete(id);
+      save: async (id, provider, key) => {
+        requireHost(id, true);
+        keys.set(`${id}:${provider}`, { method: "api_key", key });
+      },
+      remove: async (id, provider) => {
+        requireHost(id, true);
+        keys.delete(`${id}:${provider}`);
+      },
+      startLogin: async (id) => {
+        requireHost(id, true);
+        const login = {
+          id: randomUUID(),
+          state: "awaiting_authorization",
+          url: "https://auth.openai.com/codex/device",
+          code: "ABCD-EFGH",
+        };
+        logins.set(id, login);
+        return login;
+      },
+      cancelLogin: async (id, attempt) => {
+        requireHost(id);
+        const login = logins.get(id);
+        if (!login || login.id !== attempt) throw new HostProviderError(404);
+        const result = { id: attempt, state: "cancelled" };
+        logins.set(id, result);
+        return result;
       },
     },
     discord: {
@@ -144,6 +184,31 @@ app.post("/__test/reset", (c) => {
 });
 app.post("/__test/fail/:id", (c) => {
   agents.get(c.req.param("id")).provisioning = "failed";
+  return c.json({ ok: true });
+});
+app.post("/__test/agent/:id", (c) => {
+  agents.set(c.req.param("id"), {
+    ...agents.get("dev"),
+    name: "Researcher",
+    container: "running",
+    authBusy: false,
+  });
+  return c.json({ ok: true });
+});
+app.post("/__test/providers/:id/:state", (c) => {
+  const id = c.req.param("id"),
+    state = c.req.param("state");
+  if (state === "offline") agents.get(id).container = "stopped";
+  else if (state === "busy") agents.get(id).authBusy = true;
+  else if (state === "idle") {
+    agents.get(id).authBusy = false;
+    agents.get(id).container = "running";
+  } else if (state === "restart") logins.delete(id);
+  else {
+    const login = logins.get(id);
+    logins.set(id, { id: login.id, state });
+    if (state === "completed") keys.set(`${id}:openai`, { method: "device" });
+  }
   return c.json({ ok: true });
 });
 app.route("/", panel);

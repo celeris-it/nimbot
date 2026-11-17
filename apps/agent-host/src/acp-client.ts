@@ -1,3 +1,4 @@
+import { openCodeEnvironment } from "./opencode-auth.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
@@ -212,11 +213,10 @@ export class AcpClient {
 export function spawnOpenCode(
   cwd: string,
   options?: AcpClientOptions,
-  authContent = "{}",
 ): { client: AcpClient; process: ChildProcess } {
   const child = spawn("opencode", ["acp"], {
     cwd,
-    env: { ...process.env, OPENCODE_AUTH_CONTENT: authContent },
+    env: openCodeEnvironment(),
     stdio: ["pipe", "pipe", "inherit"],
   });
   const client = new AcpClient(child.stdout, child.stdin, options);

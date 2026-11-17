@@ -5,6 +5,12 @@ import { bearerAuth } from "hono/bearer-auth";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import type { TaskRunner } from "./tasks.js";
+import {
+  EngineAuthError,
+  isProviderId,
+  isApiKey,
+  type EngineAuth,
+} from "./engine-auth.js";
 
 export interface HostConfig {
   token: string;
@@ -22,7 +28,11 @@ export function readHostConfig(env: NodeJS.ProcessEnv): HostConfig {
 }
 
 /** Container readiness only: does not start or validate the AI engine. */
-export function createHostApi(config: HostConfig, runner?: TaskRunner) {
+export function createHostApi(
+  config: HostConfig,
+  runner?: TaskRunner,
+  auth?: EngineAuth,
+) {
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store");
@@ -32,7 +42,7 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
   app.use(
     "/tasks",
     bodyLimit({
-      maxSize: 131_072,
+      maxSize: 32_768,
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );
@@ -57,29 +67,12 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
         : undefined;
     if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 16_000)
       return c.json({ error: "prompt must contain 1–16000 characters" }, 400);
-    const credentials =
-      (body as Record<string, unknown>).credentials === undefined
-        ? {}
-        : (body as Record<string, unknown>).credentials;
-    if (
-      typeof credentials !== "object" ||
-      credentials === null ||
-      Array.isArray(credentials) ||
-      Object.entries(credentials).some(
-        ([id, key]) =>
-          !["openai", "anthropic", "google", "openrouter"].includes(id) ||
-          typeof key !== "string" ||
-          !key.length ||
-          key.length > 4096 ||
-          /\s/.test(key) ||
-          key.includes("\0"),
-      )
-    )
-      return c.json({ error: "Invalid provider credentials" }, 400);
-    const id = await runner.submit(
-      prompt,
-      credentials as Record<string, string>,
-    );
+    if ("credentials" in (body as Record<string, unknown>))
+      return c.json(
+        { error: "Configure providers through this agent's provider settings" },
+        400,
+      );
+    const id = await runner.submit(prompt);
     return id
       ? c.json({ id, status: "accepted" }, 202)
       : c.json({ error: "Agent is busy" }, 409);
@@ -176,10 +169,61 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
       );
     }
   });
+  app.use(
+    "/providers/*",
+    bodyLimit({
+      maxSize: 16_384,
+      onError: (c) => c.json({ error: "Request too large" }, 413),
+    }),
+  );
+  app.get("/providers", async (c) => {
+    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
+    return c.json(await auth.status());
+  });
+  app.post("/providers/openai/device-login", (c) => {
+    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
+    return c.json(auth.startLogin(), 202);
+  });
+  app.post("/providers/openai/device-login/:attempt/cancel", async (c) => {
+    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
+    return c.json(await auth.cancelLogin(c.req.param("attempt")));
+  });
+  app.post("/providers/:provider", async (c) => {
+    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
+    const id = c.req.param("provider");
+    if (!isProviderId(id)) throw new EngineAuthError("invalid");
+    const body: unknown = await c.req.json().catch(() => null);
+    const key =
+      body && typeof body === "object" && "key" in body ? body.key : undefined;
+    if (!isApiKey(key)) throw new EngineAuthError("invalid");
+    await auth.save(id, key);
+    return c.json({ saved: true });
+  });
+  app.post("/providers/:provider/remove", async (c) => {
+    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
+    const id = c.req.param("provider");
+    if (!isProviderId(id)) throw new EngineAuthError("invalid");
+    await auth.remove(id);
+    return c.json({ removed: true });
+  });
   app.onError((error, c) =>
-    error instanceof HTTPException
-      ? error.getResponse()
-      : c.json({ error: "Agent Host request failed" }, 500),
+    error instanceof EngineAuthError
+      ? c.json(
+          {
+            error: {
+              busy: "Agent is busy. Try again after the task or login finishes.",
+              invalid: "Invalid provider or API key.",
+              not_found: "Login attempt not found. Start a new login.",
+              unavailable: "Provider settings unavailable.",
+            }[error.kind],
+          },
+          { busy: 409, invalid: 400, not_found: 404, unavailable: 503 }[
+            error.kind
+          ] as 409 | 400 | 404 | 503,
+        )
+      : error instanceof HTTPException
+        ? error.getResponse()
+        : c.json({ error: "Agent Host request failed" }, 500),
   );
   return app;
 }
