@@ -6,7 +6,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
  && rm -rf /var/lib/apt/lists/* \
- && npm install -g opencode-ai pnpm@10
+ && npm install -g opencode-ai@1.18.32 pnpm@10
 
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
