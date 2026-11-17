@@ -213,6 +213,7 @@ The following ideas are deferred, not supported features or delivery commitments
 
 - **AI engines:** native Codex, Claude Code, additional ACP providers, per-agent engine selection and switching.
 - **Messaging:** WhatsApp, Slack, shared agents, groups/topics, file and media attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
+- **Nimbot messaging app:** a dedicated messaging app with [Matrix](https://matrix.org/) connectivity.
 - **Agent capabilities:** agent-to-agent communication, delegation, shared tools, advanced memory retrieval, scheduled tasks, recurring automations, advanced approvals, and MCP integrations.
 - **User experience:** advanced dashboards and analytics, web chat, richer configuration, templates, browser terminals, workspace browsing, conversation search, and additional panel accounts.
 - **Operations:** multi-server and distributed execution, advanced monitoring, automated backups, image management, alternative runtimes, and stronger isolation.
