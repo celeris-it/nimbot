@@ -224,7 +224,7 @@ export function openScheduleStore(
         r.scheduled_for AS scheduledFor, r.outcome, r.task_id AS taskId,
         t.status AS taskStatus, r.created_at AS createdAt
       FROM schedule_runs r LEFT JOIN tasks t ON t.id = r.task_id
-      WHERE r.schedule_id = ? ORDER BY r.created_at DESC, r.rowid DESC LIMIT ?
+      WHERE r.schedule_id = ? ORDER BY r.rowid DESC LIMIT ?
     `,
       )
       .all(scheduleId, boundedLimit(limit)) as unknown as ScheduleRun[];
@@ -234,6 +234,94 @@ export function openScheduleStore(
       throw new Error("Limit must be a positive integer.");
     }
     return limit;
+  }
+
+  function sameSchedule(current: Schedule, snapshot: Schedule): boolean {
+    return (
+      current.id === snapshot.id &&
+      current.agentId === snapshot.agentId &&
+      current.createdAt === snapshot.createdAt &&
+      current.updatedAt === snapshot.updatedAt &&
+      current.enabled === snapshot.enabled &&
+      current.nextRunAt === snapshot.nextRunAt &&
+      current.name === snapshot.name &&
+      current.prompt === snapshot.prompt &&
+      current.timeZone === snapshot.timeZone &&
+      JSON.stringify(current.cadence) === JSON.stringify(snapshot.cadence)
+    );
+  }
+  function recordRun(
+    current: Schedule,
+    scheduledFor: number,
+    outcome: ScheduleRunOutcome,
+    origin: ScheduleOrigin | undefined,
+    at: number,
+    advance: boolean,
+  ): FireResult {
+    const previous = recentRuns(current.id, 1)[0];
+    let taskId: string | null = null;
+    if (outcome === "enqueued") {
+      if (
+        !origin ||
+        origin.platform !== "telegram" ||
+        !Number.isSafeInteger(origin.botId) ||
+        origin.botId <= 0 ||
+        !Number.isSafeInteger(origin.chatId) ||
+        origin.chatId <= 0
+      ) {
+        throw new ScheduleValidationError(
+          "Scheduled tasks require a Telegram bot and linked owner chat.",
+        );
+      }
+      taskId = randomUUID();
+      const prompt = `Scheduled task "${current.name}" (due ${new Date(scheduledFor).toISOString()}):\n\n${current.prompt}`;
+      db.prepare(
+        `INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt,
+            status, created_at, updated_at, schedule_id, schedule_name, scheduled_for)
+            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
+      ).run(
+        taskId,
+        current.agentId,
+        origin.botId,
+        origin.chatId,
+        prompt,
+        at,
+        at,
+        current.id,
+        current.name,
+        scheduledFor,
+      );
+    }
+    const runId = randomUUID();
+    db.prepare(
+      `INSERT INTO schedule_runs (id, schedule_id, agent_id, scheduled_for, outcome, task_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      runId,
+      current.id,
+      current.agentId,
+      scheduledFor,
+      outcome,
+      taskId,
+      at,
+    );
+    if (advance) {
+      const next = nextRun(current.cadence, current.timeZone, at) ?? null;
+      db.prepare(
+        "UPDATE schedules SET enabled = ?, next_run_at = ?, updated_at = ? WHERE id = ?",
+      ).run(next === null ? 0 : 1, next, at, current.id);
+    }
+    db.prepare(
+      `DELETE FROM schedule_runs WHERE schedule_id = ? AND id NOT IN (
+          SELECT id FROM schedule_runs WHERE schedule_id = ? ORDER BY rowid DESC LIMIT ?)`,
+    ).run(current.id, current.id, RUN_HISTORY_LIMIT);
+    return {
+      recorded: true,
+      run: recentRuns(current.id, 1)[0]!,
+      notifySkip:
+        outcome === "skipped_not_ready" &&
+        previous?.outcome !== "skipped_not_ready",
+    };
   }
 
   return {
@@ -376,68 +464,47 @@ export function openScheduleStore(
         ) {
           return { recorded: false };
         }
-        const previous = recentRuns(current.id, 1)[0];
-        let taskId: string | null = null;
-        if (outcome === "enqueued") {
-          if (
-            !origin ||
-            origin.platform !== "telegram" ||
-            !Number.isSafeInteger(origin.botId) ||
-            origin.botId <= 0 ||
-            !Number.isSafeInteger(origin.chatId) ||
-            origin.chatId <= 0
-          ) {
-            throw new ScheduleValidationError(
-              "Scheduled tasks require a Telegram bot and linked owner chat.",
-            );
-          }
-          taskId = randomUUID();
-          const prompt = `Scheduled task "${current.name}" (due ${new Date(scheduledFor).toISOString()}):\n\n${current.prompt}`;
-          db.prepare(
-            `INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt,
-            status, created_at, updated_at, schedule_id, schedule_name, scheduled_for)
-            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
-          ).run(
-            taskId,
-            current.agentId,
-            origin.botId,
-            origin.chatId,
-            prompt,
-            at,
-            at,
-            current.id,
-            current.name,
-            scheduledFor,
-          );
-        }
-        const runId = randomUUID();
-        db.prepare(
-          `INSERT INTO schedule_runs (id, schedule_id, agent_id, scheduled_for, outcome, task_id, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          runId,
-          current.id,
-          current.agentId,
-          scheduledFor,
-          outcome,
-          taskId,
-          at,
-        );
-        const next = nextRun(current.cadence, current.timeZone, at) ?? null;
-        db.prepare(
-          "UPDATE schedules SET enabled = ?, next_run_at = ?, updated_at = ? WHERE id = ?",
-        ).run(next === null ? 0 : 1, next, at, current.id);
-        db.prepare(
-          `DELETE FROM schedule_runs WHERE schedule_id = ? AND id NOT IN (
-          SELECT id FROM schedule_runs WHERE schedule_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?)`,
-        ).run(current.id, current.id, RUN_HISTORY_LIMIT);
-        return {
-          recorded: true,
-          run: recentRuns(current.id, 1)[0]!,
-          notifySkip:
-            outcome === "skipped_not_ready" &&
-            previous?.outcome !== "skipped_not_ready",
-        };
+        return recordRun(current, scheduledFor, outcome, origin, at, true);
+      });
+    },
+    /** Manual runs keep their own history entry and never consume a timed occurrence. */
+    runNow(
+      schedule: Schedule,
+      outcome: Exclude<ScheduleRunOutcome, "missed">,
+      origin?: ScheduleOrigin,
+    ): FireResult {
+      return transaction(() => {
+        const current = get(schedule.id);
+        if (!current || !sameSchedule(current, schedule))
+          return { recorded: false };
+        const at = now();
+        // Admission can yield to another manual run or scheduler tick. Check again
+        // under the writer lock before inserting a second task for this schedule.
+        if (
+          outcome === "enqueued" &&
+          db
+            .prepare(
+              "SELECT 1 FROM tasks WHERE schedule_id = ? AND status IN ('queued', 'running') LIMIT 1",
+            )
+            .get(current.id)
+        )
+          outcome = "skipped_overlap";
+        let scheduledFor = at;
+        // Reserve a distinct millisecond if a manual click coincides with a timed
+        // occurrence or another click. Tasks retain uniqueness after history pruning.
+        while (
+          scheduledFor === current.nextRunAt ||
+          db
+            .prepare(
+              `
+          SELECT 1 FROM schedule_runs WHERE schedule_id = ? AND scheduled_for = ?
+          UNION ALL SELECT 1 FROM tasks WHERE schedule_id = ? AND scheduled_for = ? LIMIT 1
+        `,
+            )
+            .get(current.id, scheduledFor, current.id, scheduledFor)
+        )
+          scheduledFor--;
+        return recordRun(current, scheduledFor, outcome, origin, at, false);
       });
     },
     close() {

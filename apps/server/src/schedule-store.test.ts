@@ -545,3 +545,105 @@ it("tracks the first not-ready skip of a streak durably across restart and histo
     notifySkip: true,
   });
 });
+
+it("reserves a distinct manual occurrence at the exact due time without consuming the timed run", () => {
+  const schedule = f.store.create(input);
+  f.clock.now = schedule.nextRunAt!;
+  const manual = f.store.runNow(schedule, "enqueued", origin);
+  expect(f.store.get(schedule.id)).toEqual(schedule);
+  expect(manual).toMatchObject({
+    recorded: true,
+    run: { outcome: "enqueued", scheduledFor: schedule.nextRunAt! - 1 },
+  });
+  const task = f.tasks.claimNextTask("a")!;
+  f.tasks.finish(task.id, "completed");
+  const timed = f.store.fire(schedule, schedule.nextRunAt!, "enqueued", origin);
+  expect(timed).toMatchObject({
+    recorded: true,
+    run: { scheduledFor: schedule.nextRunAt },
+  });
+  expect(f.store.get(schedule.id)?.nextRunAt).toBe(schedule.nextRunAt! + DAY);
+  expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(2);
+});
+
+it("checks manual overlap in the writer transaction across two store connections", () => {
+  const schedule = f.store.create(input);
+  const second = openScheduleStore(f.path, { now: () => f.clock.now });
+  try {
+    expect(f.store.runNow(schedule, "enqueued", origin)).toMatchObject({
+      recorded: true,
+      run: { outcome: "enqueued" },
+    });
+    expect(second.runNow(schedule, "enqueued", origin)).toMatchObject({
+      recorded: true,
+      run: { outcome: "skipped_overlap", taskId: null },
+    });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM tasks").get()!.n).toBe(1);
+    expect(f.store.get(schedule.id)).toEqual(schedule);
+  } finally {
+    second.close();
+  }
+});
+
+it("keeps manual task timestamps unique after history pruning even with a fixed clock", () => {
+  const schedule = f.store.create(input);
+  for (let i = 0; i < 25; i++) {
+    expect(f.store.runNow(schedule, "enqueued", origin)).toMatchObject({
+      recorded: true,
+      run: { outcome: "enqueued" },
+    });
+    const task = f.tasks.claimNextTask("a")!;
+    f.tasks.finish(task.id, "completed");
+  }
+  expect(f.store.recentRuns(schedule.id, 100)).toHaveLength(20);
+  expect(
+    f.db
+      .prepare(
+        "SELECT COUNT(DISTINCT scheduled_for) AS n FROM tasks WHERE schedule_id = ?",
+      )
+      .get(schedule.id)!.n,
+  ).toBe(25);
+  expect(f.store.get(schedule.id)).toEqual(schedule);
+});
+
+it("rolls back a manual task when run-history recording fails", () => {
+  const schedule = f.store.create(input);
+  f.db.exec(
+    "CREATE TRIGGER fail_manual BEFORE INSERT ON schedule_runs BEGIN SELECT RAISE(ABORT, 'manual failure'); END",
+  );
+  expect(() => f.store.runNow(schedule, "enqueued", origin)).toThrow(
+    "manual failure",
+  );
+  expect(f.store.get(schedule.id)).toEqual(schedule);
+  expect(f.store.recentRuns(schedule.id, 20)).toEqual([]);
+  expect(f.db.prepare("SELECT COUNT(*) AS n FROM tasks").get()!.n).toBe(0);
+});
+
+it("allows a manual run of a finished once schedule without re-enabling it", () => {
+  const schedule = f.store.create({
+    ...input,
+    cadence: { kind: "once", date: "2027-01-01", time: "09:00" },
+  });
+  f.fire(schedule, "missed");
+  const finished = f.store.get(schedule.id)!;
+  expect(f.store.runNow(finished, "enqueued", origin)).toMatchObject({
+    recorded: true,
+    run: { outcome: "enqueued" },
+  });
+  expect(f.store.get(schedule.id)).toEqual(finished);
+});
+
+it("keeps manual history and skip streaks in execution order when the server clock moves backward", () => {
+  const schedule = f.store.create(input);
+  f.clock.now += MINUTE;
+  f.store.runNow(schedule, "skipped_not_ready");
+  f.clock.now -= MINUTE;
+  const current = f.store.runNow(schedule, "enqueued", origin);
+  expect(current).toMatchObject({
+    recorded: true,
+    run: { outcome: "enqueued", createdAt: f.clock.now },
+  });
+  expect(f.store.recentRuns(schedule.id, 20).map((run) => run.outcome)).toEqual(
+    ["enqueued", "skipped_not_ready"],
+  );
+});

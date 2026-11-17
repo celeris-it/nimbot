@@ -1,5 +1,30 @@
 import type { PanelDeps } from "./panel.js";
+import type {
+  Schedule,
+  ScheduleRun,
+  SCHEDULE_LIMITS,
+} from "./schedule-store.js";
+import type { ScheduleCadence } from "./schedule-time.js";
+export type { Schedule, ScheduleRun } from "./schedule-store.js";
+export type { ScheduleRunNowResult } from "./scheduler.js";
 export type { ProviderSettings, DeviceLogin } from "./provider-contracts.js";
+
+export interface ScheduleSettings {
+  name: string;
+  prompt: string;
+  timeZone: string;
+  cadence:
+    | Exclude<ScheduleCadence, { kind: "interval" }>
+    | { kind: "interval"; minutes: number };
+}
+export interface ScheduleList {
+  schedules: (Schedule & {
+    lastRun: ScheduleRun | null;
+    recentRuns: ScheduleRun[];
+  })[];
+  limits: typeof SCHEDULE_LIMITS;
+  ownerLinked: boolean;
+}
 
 /** Browser-safe metadata. These imports are erased; no server runtime is bundled. */
 export type AgentSummary = NonNullable<

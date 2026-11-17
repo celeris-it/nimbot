@@ -306,6 +306,11 @@ async function main(): Promise<void> {
     notifySkip: createScheduleSkipNotifier(notifications),
   });
   const panel = createPanel(panelConfig, {
+    schedules: {
+      store: scheduleStore,
+      runNow: scheduler.runNow,
+      ownerLinked: (id) => registry.getOwnerChat(id) !== undefined,
+    },
     providers: hostCredentials
       ? createHostProviders((id) => hostCredentials!.read(id))
       : undefined,

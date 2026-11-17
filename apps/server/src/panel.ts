@@ -9,7 +9,20 @@ import { secureHeaders } from "hono/secure-headers";
 import { verifyPassword } from "./panel-auth.js";
 import type { HostStatus } from "./agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
-import type { AgentDetail, PanelSession } from "./panel-contracts.js";
+import type {
+  AgentDetail,
+  PanelSession,
+  ScheduleList,
+} from "./panel-contracts.js";
+import {
+  SCHEDULE_LIMITS,
+  ScheduleValidationError,
+  type Schedule,
+  type ScheduleInput,
+  type ScheduleStore,
+} from "./schedule-store.js";
+import { validateCadence } from "./schedule-time.js";
+import type { ScheduleRunNowResult } from "./scheduler.js";
 import { isDiscordId } from "./discord-identity.js";
 import { isProviderId, isApiKey } from "./provider-contracts.js";
 
@@ -27,6 +40,20 @@ export interface RegisteredAgentSettings {
   ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
 export interface PanelDeps {
+  schedules?: {
+    store: Pick<
+      ScheduleStore,
+      | "get"
+      | "create"
+      | "update"
+      | "setEnabled"
+      | "remove"
+      | "listByAgent"
+      | "recentRuns"
+    >;
+    runNow(schedule: Schedule): Promise<ScheduleRunNowResult>;
+    ownerLinked(agentId: string): boolean;
+  };
   providers?: ReturnType<
     typeof import("./host-providers.js").createHostProviders
   >;
@@ -235,6 +262,166 @@ export function createPanel(
   };
   app.post("/logout", signOut);
   app.post("/api/logout", signOut);
+  for (const path of [
+    "/api/agents/:id/schedules",
+    "/api/agents/:id/schedules/*",
+  ]) {
+    app.use(path, async (c, next) => {
+      if (!getAgentSetup?.(c.req.param("id")!))
+        return c.json({ error: "Agent not found." }, 404);
+      if (!deps.schedules)
+        return c.json({ error: "Schedules unavailable." }, 503);
+      await next();
+    });
+  }
+  const ownedSchedule = (c: Context) => {
+    const schedule = deps.schedules!.store.get(c.req.param("scheduleId")!);
+    return schedule?.agentId === c.req.param("id") ? schedule : undefined;
+  };
+  async function scheduleFields(c: Context): Promise<Record<string, unknown>> {
+    const type = c.req
+      .header("Content-Type")
+      ?.split(";")[0]
+      ?.trim()
+      .toLowerCase();
+    if (
+      type &&
+      !["application/x-www-form-urlencoded", "multipart/form-data"].includes(
+        type,
+      )
+    ) {
+      throw new ScheduleValidationError("Use form data for schedule requests.");
+    }
+    try {
+      return await c.req.parseBody({ all: true });
+    } catch {
+      throw new ScheduleValidationError("Invalid schedule form data.");
+    }
+  }
+  async function scheduleInput(c: Context): Promise<ScheduleInput> {
+    const body = await scheduleFields(c);
+    if (
+      Object.keys(body).some(
+        (key) => !["name", "prompt", "cadence", "timeZone"].includes(key),
+      )
+    ) {
+      throw new ScheduleValidationError("Unknown schedule field.");
+    }
+    if (
+      typeof body.name !== "string" ||
+      typeof body.prompt !== "string" ||
+      typeof body.cadence !== "string" ||
+      typeof body.timeZone !== "string"
+    ) {
+      throw new ScheduleValidationError(
+        "Enter a name, prompt, cadence, and time zone.",
+      );
+    }
+    let cadence: unknown;
+    try {
+      cadence = JSON.parse(body.cadence);
+    } catch {
+      throw new ScheduleValidationError("Cadence must be valid JSON.");
+    }
+    if (cadence && typeof cadence === "object" && "kind" in cadence) {
+      const kind = cadence.kind;
+      const keys =
+        kind === "interval"
+          ? ["kind", "minutes"]
+          : kind === "once"
+            ? ["kind", "date", "time"]
+            : kind === "weekly"
+              ? ["kind", "weekdays", "time"]
+              : ["kind", "time"];
+      if (Object.keys(cadence).some((key) => !keys.includes(key)))
+        throw new ScheduleValidationError("Unknown cadence field.");
+      if (kind === "interval") cadence = { ...cadence, anchor: now() };
+    }
+    try {
+      return {
+        name: body.name,
+        prompt: body.prompt,
+        timeZone: body.timeZone,
+        cadence: validateCadence(cadence, body.timeZone, now()),
+      };
+    } catch (error) {
+      throw new ScheduleValidationError(
+        error instanceof Error ? error.message : "Invalid cadence.",
+      );
+    }
+  }
+  app.get("/api/agents/:id/schedules", (c) => {
+    const id = c.req.param("id");
+    const store = deps.schedules!.store;
+    return c.json({
+      schedules: store.listByAgent(id).map((schedule) => {
+        const recentRuns = store.recentRuns(schedule.id, 5);
+        return { ...schedule, lastRun: recentRuns[0] ?? null, recentRuns };
+      }),
+      limits: SCHEDULE_LIMITS,
+      ownerLinked: deps.schedules!.ownerLinked(id),
+    } satisfies ScheduleList);
+  });
+  app.post("/api/agents/:id/schedules", async (c) => {
+    const input = await scheduleInput(c);
+    if (!getAgentSetup?.(c.req.param("id")))
+      return c.json({ error: "Agent not found." }, 404);
+    const schedule = deps.schedules!.store.create({
+      ...input,
+      agentId: c.req.param("id"),
+    });
+    return c.json({ schedule }, 201);
+  });
+  app.post("/api/agents/:id/schedules/:scheduleId", async (c) => {
+    const schedule = ownedSchedule(c);
+    if (!schedule) return c.json({ error: "Schedule not found." }, 404);
+    const input = await scheduleInput(c);
+    const updated = deps.schedules!.store.update(schedule.id, input);
+    return updated
+      ? c.json({ schedule: updated })
+      : c.json({ error: "Schedule not found." }, 404);
+  });
+  for (const action of ["pause", "resume", "remove", "run"] as const) {
+    app.post(`/api/agents/:id/schedules/:scheduleId/${action}`, async (c) => {
+      let schedule = ownedSchedule(c);
+      if (!schedule) return c.json({ error: "Schedule not found." }, 404);
+      if (Object.keys(await scheduleFields(c)).length)
+        throw new ScheduleValidationError(
+          "This action does not accept form fields.",
+        );
+      schedule = ownedSchedule(c);
+      if (!schedule) return c.json({ error: "Schedule not found." }, 404);
+      if (action === "remove")
+        return c.json({ removed: deps.schedules!.store.remove(schedule.id) });
+      if (action === "run") {
+        const result = await deps.schedules!.runNow(schedule);
+        if (result.outcome === "changed")
+          return c.json(
+            {
+              ...result,
+              error: "Schedule changed. Refresh before running it again.",
+            },
+            409,
+          );
+        if (result.outcome === "unavailable")
+          return c.json(
+            {
+              ...result,
+              error:
+                "Scheduled execution is unavailable. Refresh and try again.",
+            },
+            503,
+          );
+        return c.json(result);
+      }
+      return c.json({
+        schedule: deps.schedules!.store.setEnabled(
+          schedule.id,
+          action === "resume",
+        ),
+      });
+    });
+  }
   app.use("/api/agents/:id/providers", async (c, next) => {
     if (!getAgentSetup?.(c.req.param("id")!))
       return c.json({ error: "Agent not found." }, 404);
@@ -692,6 +879,7 @@ export function createPanel(
   for (const suffix of [
     "setup",
     "providers",
+    "schedules",
     "settings",
     "token",
     "container/stop",
@@ -701,6 +889,7 @@ export function createPanel(
       const id = c.req.param("id");
       if (
         !getAgentSetup?.(id) ||
+        (suffix === "schedules" && !deps.schedules) ||
         (suffix === "settings" && !agentSettings?.get(id)) ||
         (suffix === "token" &&
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||
@@ -713,19 +902,21 @@ export function createPanel(
     });
   }
   app.onError((error, c) =>
-    error instanceof HostProviderError
-      ? c.json(
-          {
-            error: {
-              400: "Invalid provider request.",
-              404: "Login attempt not found. Start a new login.",
-              409: "Agent is busy. Try again after the task or login finishes.",
-              503: "Provider settings unavailable. Start the agent and refresh to try again.",
-            }[error.status],
-          },
-          error.status,
-        )
-      : c.json({ error: "The request could not be completed." }, 500),
+    error instanceof ScheduleValidationError
+      ? c.json({ error: error.message }, 400)
+      : error instanceof HostProviderError
+        ? c.json(
+            {
+              error: {
+                400: "Invalid provider request.",
+                404: "Login attempt not found. Start a new login.",
+                409: "Agent is busy. Try again after the task or login finishes.",
+                503: "Provider settings unavailable. Start the agent and refresh to try again.",
+              }[error.status],
+            },
+            error.status,
+          )
+        : c.json({ error: "The request could not be completed." }, 500),
   );
   return app;
 }

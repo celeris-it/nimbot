@@ -292,6 +292,30 @@ it("fires through the Host API, sends only the named final result to the owner, 
   }
 });
 
+it("runs a manual occurrence through the same Host and leaves the future timed occurrence intact", async () => {
+  const f = await fixture();
+  try {
+    const schedule = f.create();
+    expect(await f.scheduler.runNow(schedule)).toMatchObject({
+      outcome: "enqueued",
+    });
+    await f.tasks.idle();
+    expect(f.schedules.get(schedule.id)).toEqual(schedule);
+    expect(f.sent.at(-1)?.text).toBe(
+      'Scheduled task "Summary":\n\nScheduled result',
+    );
+    f.clock.now = schedule.nextRunAt!;
+    await f.scheduler.tick();
+    await f.tasks.idle();
+    expect(
+      f.schedules.recentRuns(schedule.id, 20).map((run) => run.taskStatus),
+    ).toEqual(["completed", "completed"]);
+    expect(f.sent).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
 it("does not lose or duplicate occurrences when the scheduler and queue restart between runs", async () => {
   const f = await fixture();
   try {

@@ -222,8 +222,13 @@ only their final result is sent, with the saved schedule name. Approvals and `/s
 use the owner's Telegram chat as usual. The first not-ready skip of a consecutive
 streak uses the durable notification path. Deleting an agent removes its schedules
 and run history before retiring its identity, while retaining queued task metadata
-and preserving volumes unless data deletion was requested. Panel management and
-Telegram schedule listing are not available yet.
+and preserving volumes unless data deletion was requested. The authenticated panel
+API supports listing, creating, editing, pausing, resuming, removing, and running
+schedules. Manual runs use the same admission and overlap checks, are recorded in
+history, and leave the next timed occurrence unchanged. Schedule settings use form
+fields `name`, `prompt`, `timeZone` (IANA), and `cadence` (a JSON object with its kind
+and matching fields); interval anchors are assigned by the server. The panel UI
+and Telegram schedule listing are not available yet.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

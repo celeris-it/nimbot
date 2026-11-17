@@ -9,6 +9,7 @@ import {
 import { log as defaultLog, type Logger } from "./logger.js";
 import type {
   Schedule,
+  FireResult,
   ScheduleOrigin,
   ScheduleRun,
   ScheduleRunOutcome,
@@ -60,7 +61,7 @@ export function createScheduleAdmission(
 }
 
 interface SchedulerDeps {
-  store: Pick<ScheduleStore, "listDue" | "fire">;
+  store: Pick<ScheduleStore, "listDue" | "fire" | "runNow">;
   now?: () => number;
   admit(schedule: Schedule): Promise<ScheduleOrigin | undefined>;
   isOverlapping(scheduleId: string): boolean;
@@ -70,6 +71,13 @@ interface SchedulerDeps {
   log?: Logger;
 }
 
+export type ScheduleRunNowResult =
+  | {
+      outcome: "enqueued" | "skipped_not_ready" | "skipped_overlap";
+      run: ScheduleRun;
+    }
+  | { outcome: "changed" | "unavailable" };
+
 /** Durable occurrences use the ordinary queue. This component never executes tasks. */
 export function createScheduler(deps: SchedulerDeps) {
   const now = deps.now ?? Date.now;
@@ -78,6 +86,30 @@ export function createScheduler(deps: SchedulerDeps) {
   let started = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let active: Promise<void> | undefined;
+
+  async function dispatch(schedule: Schedule, result: FireResult) {
+    if (!result.recorded) return;
+    const fields = {
+      agentId: schedule.agentId,
+      scheduleId: schedule.id,
+      outcome: result.run.outcome,
+    };
+    try {
+      if (result.run.outcome === "enqueued") {
+        log.info("schedule.fired", fields);
+        await deps.kick(schedule.agentId);
+      } else {
+        log.info("schedule.skipped", fields);
+        if (result.notifySkip) await deps.notifySkip(schedule, result.run);
+      }
+    } catch {
+      // The task is already durable even when its runner cannot be woken yet.
+      log.error("schedule.failed", {
+        agentId: schedule.agentId,
+        scheduleId: schedule.id,
+      });
+    }
+  }
 
   async function run() {
     if (closed) return;
@@ -106,19 +138,7 @@ export function createScheduler(deps: SchedulerDeps) {
                   : "enqueued";
         }
         const result = deps.store.fire(schedule, scheduledFor, outcome, origin);
-        if (!result.recorded) continue;
-        const fields = {
-          agentId: schedule.agentId,
-          scheduleId: schedule.id,
-          outcome,
-        };
-        if (outcome === "enqueued") {
-          log.info("schedule.fired", fields);
-          await deps.kick(schedule.agentId);
-        } else {
-          log.info("schedule.skipped", fields);
-          if (result.notifySkip) await deps.notifySkip(schedule, result.run);
-        }
+        await dispatch(schedule, result);
       } catch {
         // Never log exception messages: callbacks may include prompts or secrets.
         log.error("schedule.failed", {
@@ -145,6 +165,23 @@ export function createScheduler(deps: SchedulerDeps) {
   }
   return {
     tick,
+    async runNow(schedule: Schedule): Promise<ScheduleRunNowResult> {
+      if (closed) return { outcome: "unavailable" };
+      const origin = await deps.admit(schedule);
+      if (closed) return { outcome: "unavailable" };
+      const outcome = !origin
+        ? "skipped_not_ready"
+        : deps.isOverlapping(schedule.id)
+          ? "skipped_overlap"
+          : "enqueued";
+      const result = deps.store.runNow(schedule, outcome, origin);
+      if (!result.recorded) return { outcome: "changed" };
+      await dispatch(schedule, result);
+      return {
+        outcome: result.run.outcome as Exclude<ScheduleRunOutcome, "missed">,
+        run: result.run,
+      };
+    },
     start(): Promise<void> {
       if (closed || started) return active ?? Promise.resolve();
       started = true;
