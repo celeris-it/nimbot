@@ -4,6 +4,10 @@
     AgentDetail,
     PanelSession,
     PanelStatus,
+    ScheduleList,
+    ScheduleSettings,
+    Schedule,
+    ScheduleRunNowResult,
     ProviderSettings as ProviderSettingsState,
   } from "../../server/src/panel-contracts.js";
   import { ApiError, post, request } from "./api.js";
@@ -12,12 +16,15 @@
   import AgentForm from "./AgentForm.svelte";
   import AgentStatus from "./AgentStatus.svelte";
   import ProviderSettings from "./ProviderSettings.svelte";
+  import Schedules from "./Schedules.svelte";
+  import { scheduleText } from "./labels.js";
 
   let path = $state(location.pathname);
   let session = $state<PanelSession>();
   let status = $state<PanelStatus>({ agents: [] });
   let agent = $state<AgentDetail>();
   let providerSettings = $state<ProviderSettingsState>();
+  let schedules = $state<ScheduleList>();
   let loaded = $state(false);
   let contentAvailable = $state(false);
   let missing = $state(false);
@@ -31,7 +38,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|schedules|token|delete|container\/stop)$/,
     ),
   );
   let title = $derived(
@@ -39,19 +46,21 @@
       ? "Sign in"
       : path === "/"
         ? "Agents"
-        : route?.[2] === "providers"
-          ? "AI providers"
-          : path === "/agents/new"
-            ? "Create agent"
-            : route?.[2] === "settings"
-              ? "Edit agent"
-              : route?.[2] === "token"
-                ? "Bot token"
-                : route?.[2] === "delete"
-                  ? "Delete agent"
-                  : route?.[2] === "container/stop"
-                    ? "Stop agent"
-                    : "Agent setup",
+        : route?.[2] === "schedules"
+          ? scheduleText.pageTitle
+          : route?.[2] === "providers"
+            ? "AI providers"
+            : path === "/agents/new"
+              ? "Create agent"
+              : route?.[2] === "settings"
+                ? "Edit agent"
+                : route?.[2] === "token"
+                  ? "Bot token"
+                  : route?.[2] === "delete"
+                    ? "Delete agent"
+                    : route?.[2] === "container/stop"
+                      ? "Stop agent"
+                      : "Agent setup",
   );
 
   async function focusHeading() {
@@ -67,6 +76,7 @@
     path = new URL(next, location.origin).pathname;
     agent = undefined;
     providerSettings = undefined;
+    schedules = undefined;
     loaded = false;
     contentAvailable = false;
     missing = false;
@@ -120,6 +130,11 @@
           }
         }
         const view = route[2];
+        if (view === "schedules")
+          schedules = await request<ScheduleList>(
+            `/api/agents/${route[1]}/schedules`,
+            { signal: current.signal },
+          );
         missing =
           (view === "settings" && !agent.capabilities.edit) ||
           (view === "token" && !agent.capabilities.replaceToken) ||
@@ -321,6 +336,53 @@
       },
     );
   }
+  async function saveSchedule(
+    settings: ScheduleSettings,
+    id?: string,
+  ): Promise<boolean> {
+    if (!agent) return false;
+    let saved = false;
+    await mutate(
+      `/api/agents/${encodeURIComponent(agent.id)}/schedules${id ? `/${encodeURIComponent(id)}` : ""}`,
+      { ...settings, cadence: JSON.stringify(settings.cadence) },
+      () => {
+        saved = true;
+        notice = scheduleText.saved;
+        void load();
+      },
+    );
+    return saved;
+  }
+  async function scheduleAction(
+    id: string,
+    kind: "pause" | "resume" | "run" | "remove",
+  ): Promise<boolean> {
+    if (!agent) return false;
+    let saved = false;
+    await mutate<
+      ScheduleRunNowResult | { schedule: Schedule } | { removed: boolean }
+    >(
+      `/api/agents/${encodeURIComponent(agent.id)}/schedules/${encodeURIComponent(id)}/${kind}`,
+      {},
+      (result) => {
+        saved = true;
+        notice =
+          "outcome" in result
+            ? scheduleText.outcomes[
+                result.outcome as keyof typeof scheduleText.outcomes
+              ]
+            : kind === "remove"
+              ? scheduleText.removed
+              : kind === "pause"
+                ? scheduleText.pauseDone
+                : "schedule" in result && !result.schedule.enabled
+                  ? scheduleText.expired
+                  : scheduleText.resumeDone;
+        void load();
+      },
+    );
+    return saved;
+  }
   function click(event: MouseEvent) {
     if (event.defaultPrevented) return;
     const link =
@@ -354,7 +416,11 @@
     window.addEventListener("popstate", pop);
     document.addEventListener("visibilitychange", visible);
     const timer = setInterval(() => {
-      if (!document.hidden && !busy && (path === "/" || route?.[2] === "setup"))
+      if (
+        !document.hidden &&
+        !busy &&
+        (path === "/" || route?.[2] === "setup" || route?.[2] === "schedules")
+      )
         void load();
     }, 5000);
     void load();
@@ -464,7 +530,16 @@
   {:else if path === "/agents/new"}
     {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
   {:else if agent && route}
-    {#if route[2] === "providers"}
+    {#if route[2] === "schedules" && schedules}
+      {#key agent.id}<Schedules
+          {agent}
+          data={schedules}
+          {busy}
+          save={saveSchedule}
+          action={scheduleAction}
+          refresh={() => load()}
+        />{/key}
+    {:else if route[2] === "providers"}
       {#key agent.id}<ProviderSettings
           {agent}
           settings={providerSettings}

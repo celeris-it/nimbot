@@ -227,8 +227,11 @@ API supports listing, creating, editing, pausing, resuming, removing, and runnin
 schedules. Manual runs use the same admission and overlap checks, are recorded in
 history, and leave the next timed occurrence unchanged. Schedule settings use form
 fields `name`, `prompt`, `timeZone` (IANA), and `cadence` (a JSON object with its kind
-and matching fields); interval anchors are assigned by the server. The panel UI
-and Telegram schedule listing are not available yet.
+and matching fields); interval anchors are assigned by the server. The panel's
+Schedules page is linked from each agent and supports all schedule actions, a time
+zone prefilled from the browser, and recent run history. It explains AI credit use
+and Telegram delivery and warns when the owner chat is not linked. Telegram
+schedule listing is not available yet.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

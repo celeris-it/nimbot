@@ -24,6 +24,260 @@ async function openProviders(page: Page) {
   ).toBeVisible();
 }
 
+async function openSchedules(page: Page) {
+  await login(page);
+  await page.getByRole("link", { name: "Manage", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Start container", exact: true })
+    .click();
+  await page.getByRole("link", { name: "Manage schedules" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Schedules for Developer" }),
+  ).toBeVisible();
+}
+
+async function scheduleDraft(page: Page, name = "Daily summary") {
+  await page.getByRole("button", { name: "New schedule", exact: true }).click();
+  await expect(page.getByLabel("Schedule name", { exact: true })).toBeFocused();
+  await page.getByLabel("Schedule name", { exact: true }).fill(name);
+  await page
+    .getByLabel("Prompt", { exact: true })
+    .fill("Summarize the latest workspace changes.");
+}
+
+test("creates, edits, pauses, resumes, runs and deletes schedules with confirmation", async ({
+  page,
+  request,
+}) => {
+  await openSchedules(page);
+  await expect(page.getByText(/^Owner chat is not linked\./)).toBeVisible();
+  await expect(
+    page.getByText("Every run uses this agent's AI provider credits.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await scheduleDraft(page);
+  const browserZone = await page.evaluate(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+  );
+  await expect(page.getByLabel("Time zone", { exact: true })).toHaveValue(
+    browserZone,
+  );
+  await page.getByLabel("Time zone", { exact: true }).fill("Europe/Madrid");
+  await page.getByLabel("Time of day").fill("10:30");
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  let card = page.getByRole("region", { name: "Daily summary", exact: true });
+  await expect(card).toBeVisible();
+  await expect(card.getByText("Daily at 10:30", { exact: true })).toBeVisible();
+  await expect(card.locator("dd").first()).toContainText("Europe/Madrid");
+  await card.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(card.getByText("Paused", { exact: true })).toBeVisible();
+  await card.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect(card.getByText("Enabled", { exact: true })).toBeVisible();
+  await card.getByRole("button", { name: "Run now", exact: true }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Not run:" }),
+  ).toContainText("owner chat is not linked");
+  await request.post("/__test/owner/dev");
+  await page
+    .getByRole("button", { name: "Refresh schedules", exact: true })
+    .click();
+  await expect(page.getByText(/^Owner chat is not linked\./)).not.toBeVisible();
+  await card.getByRole("button", { name: "Run now", exact: true }).click();
+  await expect(card.locator("dd").last()).toHaveText("Completed");
+  await card.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    card.getByText("Skipped: agent unavailable or owner chat unlinked"),
+  ).toBeVisible();
+  await card.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Schedule name", { exact: true }).fill("Weekly review");
+  await page.getByLabel("Cadence", { exact: true }).selectOption("weekly");
+  await page.getByLabel("Monday", { exact: true }).check();
+  await page.getByLabel("Friday", { exact: true }).check();
+  await page
+    .getByRole("button", { name: "Save schedule", exact: true })
+    .click();
+  card = page.getByRole("region", { name: "Weekly review", exact: true });
+  await expect(
+    card.getByText("Every Monday, Friday at 10:30", { exact: true }),
+  ).toBeVisible();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await card.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(card).toBeVisible();
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain('Delete schedule "Weekly review"');
+    return dialog.accept();
+  });
+  await card.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(card).not.toBeVisible();
+  await expect(
+    page.getByText("No schedules yet.", { exact: false }),
+  ).toBeVisible();
+});
+
+for (const kind of ["once", "interval"] as const) {
+  test(`creates ${kind} schedules and restores the matching form fields`, async ({
+    page,
+  }) => {
+    await openSchedules(page);
+    await scheduleDraft(page, `${kind} schedule`);
+    await page.getByLabel("Cadence", { exact: true }).selectOption(kind);
+    await page.getByLabel("Time zone", { exact: true }).fill("UTC");
+    const date = new Date(Date.now() + 2 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    if (kind === "once") {
+      await page.getByLabel("Date", { exact: true }).fill(date);
+      await page.getByLabel("Time of day").fill("12:45");
+    } else await page.getByLabel("Interval in minutes").fill("30");
+    await page
+      .getByRole("button", { name: "Create schedule", exact: true })
+      .click();
+    const card = page.getByRole("region", {
+      name: `${kind} schedule`,
+      exact: true,
+    });
+    await expect(card).toContainText(
+      kind === "once" ? `Once on ${date} at 12:45` : "Every 30 minutes",
+    );
+    await page.reload();
+    await card.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByLabel("Cadence", { exact: true })).toHaveValue(kind);
+    if (kind === "once")
+      await expect(page.getByLabel("Date", { exact: true })).toHaveValue(date);
+    else await expect(page.getByLabel("Interval in minutes")).toHaveValue("30");
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "New schedule", exact: true }),
+    ).toBeFocused();
+  });
+}
+
+test("preserves schedule drafts through refresh and errors with keyboard focus on validation", async ({
+  page,
+}) => {
+  await openSchedules(page);
+  await page.getByRole("button", { name: "New schedule", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Schedule name", { exact: true })).toBeFocused();
+  await page.getByLabel("Schedule name", { exact: true }).fill("Draft to keep");
+  await page.getByLabel("Prompt", { exact: true }).fill("Keep this prompt");
+  await page.getByLabel("Cadence", { exact: true }).selectOption("weekly");
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  await expect(page.locator("#schedule-form-error")).toHaveText(
+    "Select at least one weekday.",
+  );
+  await expect(page.locator("#schedule-form-error")).toBeFocused();
+  await page.getByLabel("Tuesday", { exact: true }).check();
+  await expect(page.getByLabel("Tuesday", { exact: true })).toHaveAttribute(
+    "aria-invalid",
+    "false",
+  );
+  await page.getByLabel("Time zone", { exact: true }).fill("Not/AZone");
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  await expect(page.locator("#schedule-form-error")).toContainText(
+    "valid IANA time zone",
+  );
+  await expect(page.getByLabel("Time zone", { exact: true })).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await page.getByLabel("Time zone", { exact: true }).fill("UTC");
+  await page
+    .getByRole("button", { name: "Refresh schedules", exact: true })
+    .click();
+  await expect(page.getByLabel("Schedule name", { exact: true })).toHaveValue(
+    "Draft to keep",
+  );
+  await expect(page.getByLabel("Tuesday", { exact: true })).toBeChecked();
+  await page.route("**/api/agents/dev/schedules", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    return route.fulfill({
+      status: 400,
+      json: { error: "Schedule could not be saved. Try again." },
+    });
+  });
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  await expect(page.locator("#form-error")).toContainText(
+    "Schedule could not be saved",
+  );
+  await expect(page.locator("#form-error")).toBeFocused();
+  await expect(page.getByLabel("Prompt", { exact: true })).toHaveValue(
+    "Keep this prompt",
+  );
+  await page.unroute("**/api/agents/dev/schedules");
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Draft to keep", exact: true }),
+  ).toBeVisible();
+});
+
+test("keeps schedules isolated when navigating between agents", async ({
+  page,
+  request,
+}) => {
+  await openSchedules(page);
+  await scheduleDraft(page);
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Daily summary", exact: true }),
+  ).toBeVisible();
+  await request.post("/__test/agent/research");
+  await page.goto("/agents/research/schedules");
+  await expect(
+    page.getByRole("heading", { name: "Schedules for Researcher" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("No schedules yet.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Daily summary", exact: true }),
+  ).not.toBeVisible();
+});
+
+test("reflows the schedule list and form at desktop and narrow mobile widths", async ({
+  page,
+}, info) => {
+  await openSchedules(page);
+  await scheduleDraft(page, "A".repeat(60));
+  await page
+    .getByLabel("Time zone", { exact: true })
+    .fill("America/Argentina/Catamarca");
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  const card = page.getByRole("region", { name: "A".repeat(60), exact: true });
+  await card.getByRole("button", { name: "Edit", exact: true }).click();
+  for (const width of [1280, 375, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(
+      page.getByLabel("Schedule name", { exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: info.outputPath(`schedules-${width}.png`),
+      fullPage: true,
+    });
+  }
+});
+
 test("manages per-agent API keys with keyboard navigation and blank secret fields", async ({
   page,
   request,

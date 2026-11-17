@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import process from "node:process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openTaskStore } from "../../apps/server/dist/task-queue.js";
+import { openScheduleStore } from "../../apps/server/dist/schedule-store.js";
+import { createScheduler } from "../../apps/server/dist/scheduler.js";
 import { HostProviderError } from "../../apps/server/dist/host-providers.js";
 import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/index.mjs";
 import { Hono } from "../../apps/server/node_modules/hono/dist/index.js";
@@ -9,6 +16,27 @@ import { providers } from "../../apps/server/dist/provider-contracts.js";
 const agents = new Map();
 const keys = new Map();
 const logins = new Map();
+const stateDir = mkdtempSync(join(tmpdir(), "nimbot-panel-fixture-"));
+const statePath = join(stateDir, "server.sqlite");
+const tasks = openTaskStore(statePath);
+const schedules = openScheduleStore(statePath);
+const scheduler = createScheduler({
+  store: schedules,
+  admit: async (schedule) => {
+    const agent = agents.get(schedule.agentId);
+    return agent?.ownerLinked &&
+      agent.container === "running" &&
+      agent.provisioning === "ready"
+      ? { platform: "telegram", botId: 123, chatId: 42 }
+      : undefined;
+  },
+  isOverlapping: tasks.isScheduleOverlapping,
+  kick: async (id) => {
+    const task = tasks.claimNextTask(id);
+    if (task) tasks.finish(task.id, "completed");
+  },
+  notifySkip: async () => {},
+});
 const pendingLogin = (id) =>
   ["starting", "awaiting_authorization"].includes(logins.get(id)?.state);
 function requireHost(id, mutate = false) {
@@ -19,6 +47,7 @@ function requireHost(id, mutate = false) {
 }
 
 function reset() {
+  for (const id of agents.keys()) schedules.removeByAgent(id);
   keys.clear();
   logins.clear();
   agents.clear();
@@ -39,6 +68,11 @@ const panel = createPanel(
     port: 3199,
   },
   {
+    schedules: {
+      store: schedules,
+      runNow: scheduler.runNow,
+      ownerLinked: (id) => !!agents.get(id)?.ownerLinked,
+    },
     providers: {
       status: async (id) => {
         requireHost(id);
@@ -112,7 +146,10 @@ const panel = createPanel(
             cancellationRequested: agent.cancelled,
             canCancelProvisioning: agent.provisioning === "provisioning",
             botConnection: { status: "polling" },
-            setupAccess: { bot: "linked", owner: "pending" },
+            setupAccess: {
+              bot: "linked",
+              owner: agent.ownerLinked ? "verified" : "pending",
+            },
             containerOperation: agent.operation,
           }
         : undefined;
@@ -173,6 +210,7 @@ const panel = createPanel(
       agent.provisioning = "ready";
     },
     deleteAgent: async (id) => {
+      schedules.removeByAgent(id);
       agents.delete(id);
     },
   },
@@ -195,6 +233,10 @@ app.post("/__test/agent/:id", (c) => {
   });
   return c.json({ ok: true });
 });
+app.post("/__test/owner/:id", (c) => {
+  agents.get(c.req.param("id")).ownerLinked = true;
+  return c.json({ ok: true });
+});
 app.post("/__test/providers/:id/:state", (c) => {
   const id = c.req.param("id"),
     state = c.req.param("state");
@@ -212,4 +254,12 @@ app.post("/__test/providers/:id/:state", (c) => {
   return c.json({ ok: true });
 });
 app.route("/", panel);
-serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 3199 });
+const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 3199 });
+process.once("SIGTERM", () => {
+  void scheduler.close();
+  server.close(() => {
+    schedules.close();
+    tasks.close();
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+});
