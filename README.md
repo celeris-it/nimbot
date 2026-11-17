@@ -33,6 +33,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Optionally connect a Discord bot and owner DM to the same agent, workspace, AI context, and durable task queue. Configure, replace, test, and remove the connection from the panel.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
+- Schedule saved prompts once, daily, weekly, or at fixed intervals from the panel, with results delivered to the owner's Telegram chat.
 - Cancel a running task without affecting other agents or blocking later queued tasks.
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
 - Replace revoked bot tokens securely and retain persistent volumes by default when deleting an agent.
@@ -68,6 +69,7 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
               | Telegram Adapter |
               | Agent Registry   |
               | Task Router      |
+              | Scheduler        |
               | Container Manager|
               | SQLite Database  |
               +--------+---------+
@@ -88,7 +90,7 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
    Persistent Volumes        Persistent Volumes
 ```
 
-- **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing, container lifecycle, and diagnostics. Agent-generated commands never run on the host OS.
+- **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing and scheduling, container lifecycle, and diagnostics. Agent-generated commands never run on the host OS.
 - **Agent Host:** one container per agent, running the AI engine, tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
 - **Panel:** Svelte 5, TypeScript, Vite, and daisyUI. Hono serves compiled assets and the same-origin API from one process. JavaScript is required; visible views refresh every five seconds and forms submit without document reloads.
 - **Storage:** SQLite and Docker named volumes. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
@@ -117,9 +119,60 @@ The Agent Host saves its OpenCode session ID in its task-state volume and loads 
 
 Terminal and filesystem tools run through OpenCode inside the container. Browser automation uses headless Chromium through terminal execution with the bundled Playwright tooling; no external browser service is required. Client-side ACP filesystem and terminal capabilities remain disabled.
 
+### Scheduled tasks
+
+Open **Manage schedules** on an agent's page to create, edit, pause, resume, run,
+or delete saved prompts. Each schedule has an IANA time zone, prefilled from the
+browser. The panel shows its next local run time, enabled state, and recent run
+outcomes; `/schedules` lists it in the owner's Telegram chat even if the container
+is stopped. Creating and editing schedules stays in the panel.
+
+| Cadence | Timing |
+|---|---|
+| Once | One local date and time; disabled after its due occurrence is handled, including a skipped or missed run |
+| Daily | The same local time each day |
+| Weekly | The same local time on one or more selected weekdays |
+| Interval | Every N minutes, anchored to creation time across pauses, edits, and restarts |
+
+Limits are 20 schedules per agent, an interval of at least 15 minutes, a name of
+up to 60 characters, and a prompt of up to 4000 characters. A local time skipped
+by daylight saving runs at the next valid instant; a repeated time runs only at
+its first occurrence. Intervals use elapsed minutes. These are fixed rules, with
+no scheduler-specific environment variables.
+
+The same operations are available under the authenticated
+`/api/agents/:id/schedules` API. Mutations use POST. Schedule settings are form
+fields `name`, `prompt`, `timeZone`, and `cadence` (a JSON object with its kind and
+matching fields); interval anchors are assigned by the server.
+
+The scheduler runs inside the Nimbot Server, once at startup and every 30 seconds.
+It records each occurrence, enqueues its task, and advances the next run in one
+SQLite transaction. A repeated tick or server restart cannot enqueue the same
+timed occurrence twice. A saved due occurrence up to 10 minutes late is considered
+once; older occurrences are recorded as `missed`. The next run advances past the
+current server time, without replaying a backlog. A previous task from the same
+schedule still queued or running produces `skipped_overlap`. A stopped or
+unavailable Host, incomplete setup, or unlinked owner chat produces
+`skipped_not_ready`. Containers never start automatically. The server attempts a
+durable notification only for the first not-ready skip of a consecutive streak.
+
+Each executed run uses the agent's AI provider credits and shares its existing conversation
+context and FIFO queue with chat messages. Only the final result or failure is
+sent, prefixed with the schedule name saved at enqueue time; there are no
+`Working: …` messages. Approvals and `/stop` use the owner's Telegram chat as
+usual. Scheduled delivery is Telegram-only.
+
+**Run now** uses the same readiness and overlap checks and records its outcome
+without changing the next timed occurrence. A paused schedule can still be run
+manually. Resume recomputes the first future occurrence; an expired once schedule
+needs a future date before it can resume. Deleting a schedule removes its run
+history and stops future runs; already queued or running tasks are kept.
+Deleting an agent removes its schedules and run history while preserving volumes
+unless data deletion was explicitly requested.
+
 ### Persistence and diagnostics
 
-Server state includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, and the durable task queue. Private `bot-secrets`, `discord-secrets`, and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
+Server state in `server.sqlite` includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, the durable task queue, and schedules with their saved prompts, cadences, time zones, and UTC next-run timestamps. It retains the latest 20 run records per schedule and reads execution status from the associated task row. Private `bot-secrets`, `discord-secrets`, and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
 
 Provider credentials are stored only in each agent's private engine-state volume. The panel forwards authentication operations over that agent's authenticated internal API; OAuth tokens never return to the server or browser. OpenAI supports an API key or ChatGPT device login; Anthropic, Google, and OpenRouter support API keys. The container must be running and idle to change authentication. Device login blocks new tasks for that agent as busy until it completes, is cancelled, or reaches its ten-minute local deadline; resend rejected tasks afterwards. Other agents remain independent. OpenCode renews OAuth tokens locally and still chooses the model automatically. Saving credentials does not verify balance or model access. Disconnecting removes the local credential without revoking it at the provider.
 
@@ -210,37 +263,13 @@ replayed events, cross-channel deduplication and context, and restored FIFO work
 
 ## Future work
 
-Scheduled tasks are in development. Cadence and time-zone calculation and the
-SQLite schedule store are implemented and tested. The store shares `server.sqlite`
-with the task queue: each occurrence records its history, enqueues its Telegram
-task, and advances the next run in one transaction. It retains 20 history entries
-per schedule and reads execution status from the task row. The scheduler component
-checks due schedules every 30 seconds, skips unavailable agents and overlapping
-runs, and records occurrences more than 10 minutes late as missed without replaying
-a backlog. It starts after the bot connections and stops admitting work at server
-shutdown. Scheduled runs use the agent's existing queue and conversation context;
-only their final result is sent, with the saved schedule name. Approvals and `/stop`
-use the owner's Telegram chat as usual. The first not-ready skip of a consecutive
-streak uses the durable notification path. Deleting an agent removes its schedules
-and run history before retiring its identity, while retaining queued task metadata
-and preserving volumes unless data deletion was requested. The authenticated panel
-API supports listing, creating, editing, pausing, resuming, removing, and running
-schedules. Manual runs use the same admission and overlap checks, are recorded in
-history, and leave the next timed occurrence unchanged. Schedule settings use form
-fields `name`, `prompt`, `timeZone` (IANA), and `cadence` (a JSON object with its kind
-and matching fields); interval anchors are assigned by the server. The panel's
-Schedules page is linked from each agent and supports all schedule actions, a time
-zone prefilled from the browser, and recent run history. It explains AI credit use
-and Telegram delivery and warns when the owner chat is not linked. The owner can
-list this agent's schedules with `/schedules`, even while its container is stopped.
-Creating and editing schedules stays in the panel.
-
 The following ideas are deferred, not supported features or delivery commitments:
 
 - **AI engines:** native Codex, Claude Code, additional ACP providers, per-agent engine selection and switching.
 - **Messaging:** WhatsApp, Slack, shared agents, groups/topics, file and media attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
 - **Nimbot messaging app:** a dedicated messaging app with [Matrix](https://matrix.org/) connectivity.
-- **Agent capabilities:** agent-to-agent communication, delegation, shared tools, advanced memory retrieval, scheduled tasks, recurring automations, advanced approvals, and MCP integrations.
+- **Agent capabilities:** agent-to-agent communication, delegation, shared tools, advanced memory retrieval, advanced approvals, and MCP integrations.
+- **Scheduled automation:** chat-created schedules, Discord delivery, cron expressions, event triggers, and chained automations.
 - **User experience:** advanced dashboards and analytics, web chat, richer configuration, templates, browser terminals, workspace browsing, conversation search, and additional panel accounts.
 - **Operations:** multi-server and distributed execution, advanced monitoring, automated backups, image management, alternative runtimes, and stronger isolation.
 - **Managed hosting:** a separate paid offering; hosted accounts, billing, subscriptions, public registration, public multi-tenant hosting, organizations, marketplaces, and automatic external infrastructure provisioning remain outside the self-hosted product's current scope.

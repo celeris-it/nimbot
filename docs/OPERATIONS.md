@@ -13,6 +13,7 @@ Use the same Docker context/socket used during installation. The installer print
 | Data | Where |
 |---|---|
 | Agents, owners, instructions, bot identities, chat bindings, provisioning state, task metadata | SQLite in the server state volume |
+| Schedules, saved prompts, cadences, time zones, next-run timestamps, and the latest 20 run records per schedule | `server.sqlite` in the same server state volume |
 | Telegram and Discord bot tokens, and Agent Host API tokens | Private files in the same server state volume (`bot-secrets`, `discord-secrets`, `host-secrets`) |
 | Agent files | Per-agent workspace volume |
 | OpenCode sessions, history, and provider credentials | Per-agent engine-state volume |
@@ -24,10 +25,15 @@ Treat backups as secrets: they contain bot tokens, Agent Host tokens, and AI pro
 
 ## Backup
 
-Stop everything first so SQLite and the agents' files are consistent:
+Stop everything first so SQLite and the agents' files are consistent.
+
+Schedules and their history are included in the server-state backup; there is no
+separate scheduler volume or configuration file. Stop the server as well as agent
+containers: the scheduler remains active when only agent containers are stopped
+and continues writing skipped-run records.
 
 ```sh
-docker compose stop            # or: docker stop nimbot-<agent-id> for panel-created agents
+docker compose stop            # also stop panel-created agents: docker stop nimbot-<agent-id>
 mkdir -p backup
 for v in $(docker volume ls -q | grep -E 'server-state|agent-workspace|agent-engine-state|agent-task-state|^nimbot-.*-(workspace|engine|tasks)$'); do
   docker run --rm -v "$v":/data:ro -v "$PWD/backup":/backup node:22-bookworm-slim \
@@ -62,13 +68,19 @@ docker compose up -d
 
 Extraction preserves file owners (the containers run as UID 1000). Restoring into volumes that already hold data merges files; restore into new, empty volumes unless you intend to overwrite. After startup, each registered bot reconnects with its original owner and saved chat binding.
 
+Schedules and run history return with the server database. The scheduler considers
+each saved due occurrence once: up to 10 minutes late can still run if admissible;
+older occurrences become missed. It advances past the current time instead of
+replaying a backlog. Queued work remains in the ordinary task queue; interrupted
+running tasks are not replayed automatically.
+
 Limits of restoring on a different host: the server state is restored. Agents created in the panel keep their volumes and registry entries, but their containers and networks do not exist on the new host, and the panel cannot yet recreate them (it can start and stop existing containers, but it has no recreate action). Prefer restoring on the same Docker host, or keep the volumes and recreate those agents. Do not delete data from the panel while recovering.
 
 ## Troubleshooting
 
 Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Logs are JSON lines with `event`, `agentId`, and `taskId`; secrets are redacted and prompts and results are never logged.
 
-**The server exits at startup.** The log shows `server.config_invalid`, `server.state_init_failed`, or `server.docker_unavailable`. For `server.docker_unavailable`, follow its message: `permission denied` means `DOCKER_SOCKET_GID` does not match the socket's group, `socket not found` means `DOCKER_SOCKET_PATH` or the socket mount is wrong, and `not responding` means Docker is down. If `AGENT_HOST_IMAGE` is reported as not found locally, build the Agent Host image first. Check `PANEL_PASSWORD_HASH`, `AGENT_HOST_IMAGE`, Docker deployment settings, and writable server state. Telegram settings are managed through the panel and are not required for startup. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value. Development builds before `v0.1.0` may change the database schema without migrating it: if the server cannot open an existing state volume after an update, remove that volume (`docker volume rm <project>_server-state`) and set up again.
+**The server exits at startup.** The log shows `server.config_invalid`, `server.state_init_failed`, or `server.docker_unavailable`. For `server.docker_unavailable`, follow its message: `permission denied` means `DOCKER_SOCKET_GID` does not match the socket's group, `socket not found` means `DOCKER_SOCKET_PATH` or the socket mount is wrong, and `not responding` means Docker is down. If `AGENT_HOST_IMAGE` is reported as not found locally, build the Agent Host image first. Check `PANEL_PASSWORD_HASH`, `AGENT_HOST_IMAGE`, Docker deployment settings, and writable server state. Telegram settings are managed through the panel and are not required for startup. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value. Pre-stable releases initialize the current schema directly and do not migrate older databases or persisted state. If an update cannot open an older state volume, keep a protected backup and prepare a fresh installation. Restoring an older schema does not upgrade it; do not delete the existing volume without explicitly choosing to discard that state.
 
 **The panel rejects my login or forms.** Five failed logins within fifteen minutes block further attempts until the window passes. Sessions last eight hours and end when the server restarts. If sign-in works but actions fail, `PANEL_URL` does not match the address in your browser (scheme, host, and port must match); fix it and recreate the server (`docker compose up -d`).
 
@@ -87,6 +99,57 @@ Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Lo
 **Browser tasks fail.** Agents drive headless Chromium through the terminal inside their own container. Confirm the container has outbound network access and enough memory (1 GiB limit).
 
 **Unexpected state.** Resources the server did not create, or that disagree with its registry, appear as *untracked* or *missing* in the status inventory. Nimbot never adopts or deletes them automatically; inspect them with `docker ps -a --filter label=io.nimbot.agent-id`.
+
+### Scheduled tasks
+
+Open **Manage schedules** on the agent page for the last run outcome, execution
+status, and recent history. The owner can use `/schedules` to check next run times
+and enabled state without contacting the Host. The server checks schedules at
+startup and every 30 seconds, so admission is not guaranteed at the exact second
+shown in the panel. Once enqueued, a task can also wait behind earlier work in the
+agent's FIFO queue.
+
+**Skipped: agent unavailable or owner chat unlinked.** Check that provisioning is
+complete, the container is running, the Host is reachable, and the owner's private
+Telegram chat is linked. The owner must send that bot a private message; a
+connected polling loop alone does not link the chat. Nimbot never starts a stopped
+container for a schedule. Only the first not-ready skip of a consecutive streak
+attempts a notice through durable notifications; a missing owner chat, unavailable
+bot, or notification quota can prevent that notice. Further skips remain visible
+in history.
+
+**Skipped: previous run still queued or running.** The same schedule already has
+unfinished work. Let it finish, inspect queue and bot availability, or increase
+the interval. `/stop` cancels only the owner's running task; it does not remove
+queued work. A different schedule or chat task for the same agent shares that
+queue and may delay execution.
+
+**Missed: more than 10 minutes late.** Check server downtime and clock accuracy.
+Missed occurrences are not replayed. When the agent is ready, **Run now** can
+request a manual run without changing the next scheduled time and uses AI
+provider credits as usual. A once schedule is disabled after handling its due
+occurrence even if it was skipped or missed; edit its date before resuming it.
+
+**Enqueued but no result.** Check the associated task's status and Telegram polling
+before submitting again. Scheduled runs send only a named final result or failure,
+without working updates. Approvals still require the owner; the Host denies an
+unanswered request after its existing timeout. Provider authentication, credits,
+and task timeout troubleshooting are the same as for chat tasks.
+
+Logs use `schedule.fired` and `schedule.skipped` with `agentId`, `scheduleId`, and
+`outcome`, or `schedule.failed` and `schedule.tick_failed` when processing fails.
+Prompts are never logged. The latest 20 runs per schedule are retained; deleting
+a schedule or agent removes that schedule history, while already queued task
+metadata is retained.
+
+Keep the Docker host's clock synchronized. Due instants are stored as UTC
+milliseconds and evaluated against the server clock. Each calendar schedule uses
+its own IANA time zone; changing the browser or server's local time zone does not
+change an existing schedule. The browser's zone is only the form's initial
+default. A skipped daylight-saving local time moves to the next valid instant;
+a repeated local time uses its first occurrence only. Intervals use elapsed
+minutes anchored to creation time. See [Scheduled tasks](../README.md#scheduled-tasks)
+for cadence rules and limits.
 
 ## Security limitations
 
