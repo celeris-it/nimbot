@@ -9,6 +9,7 @@ import { createBot } from "./bot.js";
 import { createHostApprovals, createHostTasks } from "./host-tasks.js";
 import { createBotTasks } from "./bot-tasks.js";
 import type { TaskStore } from "./task-queue.js";
+import type { ScheduleStore } from "./schedule-store.js";
 import { getHostStatus } from "./agent-host.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 import { DEFAULT_RETRY_DELAYS_MS, retryTransient } from "./retry.js";
@@ -39,6 +40,7 @@ export function createRegisteredBots(
   config: {
     statePath: string;
     taskStore: TaskStore;
+    schedules?: Pick<ScheduleStore, "listByAgent">;
     /** Upper bound for waiting on one task; omit for the default. */
     taskWaitMs?: number;
     /** Shared agent runner owned outside the Telegram polling lifecycle. */
@@ -96,6 +98,9 @@ export function createRegisteredBots(
       const bot = makeBot(
         {
           telegramBotToken: token,
+          schedules: config.schedules
+            ? () => config.schedules!.listByAgent(id)
+            : undefined,
           agent: {
             id,
             ownerId: agent.ownerId,

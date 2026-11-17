@@ -5,6 +5,7 @@ import { splitTelegramText } from "./telegram-text.js";
 import type { TaskOutcome } from "./task-queue.js";
 import { Bot, type Api } from "grammy";
 import type { BotAccess } from "./agent-access.js";
+import type { Schedule } from "./schedule-store.js";
 
 const failureMessages = {
   busy: "The agent is busy. Try again when the current task finishes.",
@@ -51,6 +52,11 @@ export type SubmitTask = (
 export interface BotConfig {
   telegramBotToken: string;
   agent: { id: string; name: string; ownerId: number };
+  /** Server-owned, scoped to this agent. Prompts are never included in replies. */
+  schedules?: () => Pick<
+    Schedule,
+    "name" | "enabled" | "nextRunAt" | "timeZone"
+  >[];
 }
 
 export function createBot(
@@ -166,8 +172,43 @@ export function createBot(
   });
   bot.command("help", async (ctx) => {
     await ctx.reply(
-      `${config.agent.name}: your user is authorized. Use /status to check the status and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
+      `${config.agent.name}: your user is authorized. Use /status to check the status, /schedules to list scheduled tasks, and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
     );
+  });
+  bot.command("schedules", async (ctx) => {
+    if (!config.schedules) {
+      await ctx.reply(
+        "Schedules are unavailable. Open this agent's panel to check its setup.",
+      );
+      return;
+    }
+    let text: string;
+    try {
+      const schedules = config.schedules();
+      const manage = "Create and manage schedules in this agent's panel.";
+      text =
+        schedules.length === 0
+          ? `No schedules for ${config.agent.name}. ${manage}`
+          : `Schedules for ${config.agent.name}:\n\n${schedules
+              .map((schedule) => {
+                const next =
+                  schedule.nextRunAt === null
+                    ? "No upcoming run"
+                    : new Intl.DateTimeFormat("en", {
+                        timeZone: schedule.timeZone,
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(schedule.nextRunAt);
+                return `${schedule.name} — ${schedule.enabled ? "Enabled" : "Disabled"}\nNext run: ${next} (${schedule.timeZone})`;
+              })
+              .join("\n\n")}\n\n${manage}`;
+    } catch {
+      await ctx.reply(
+        "I could not load schedules. Check the panel and try again.",
+      );
+      return;
+    }
+    for (const part of splitTelegramText(text)) await ctx.reply(part);
   });
   bot.command("stop", async (ctx) => {
     if (!stopTask?.isRunning(ctx.me.id, ctx.chat.id)) {

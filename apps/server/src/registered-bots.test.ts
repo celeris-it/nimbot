@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { openAgentRegistry } from "./agent-registry.js";
 import { openTaskStore } from "./task-queue.js";
+import { openScheduleStore } from "./schedule-store.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";
 
@@ -156,12 +157,14 @@ async function fixture() {
     })),
   };
   let taskStore = openTaskStore(statePath);
+  let scheduleStore = openScheduleStore(statePath);
   const open = () =>
     createRegisteredBots(
       registry,
       {
         statePath,
         taskStore,
+        schedules: scheduleStore,
       },
       secrets,
       hosts,
@@ -199,13 +202,18 @@ async function fixture() {
     get manager() {
       return manager;
     },
+    get schedules() {
+      return scheduleStore;
+    },
     /** Simulates a server restart: only on-disk state survives. */
     async restart() {
       await manager.close();
+      scheduleStore.close();
       taskStore.close();
       registry.close();
       registry = openAgentRegistry(statePath);
       taskStore = openTaskStore(statePath);
+      scheduleStore = openScheduleStore(statePath);
       manager = open();
     },
     secrets,
@@ -222,12 +230,58 @@ async function fixture() {
     send,
     close: async () => {
       await manager.close();
+      scheduleStore.close();
       taskStore.close();
       registry.close();
       await rm(dir, { recursive: true, force: true });
     },
   };
 }
+
+it("lists only each bot's persisted schedules for its owner, including after restart with a stopped Host", async () => {
+  const f = await fixture();
+  try {
+    const a = f.schedules.create({
+      agentId: "a",
+      name: "A summary",
+      prompt: "Private A prompt",
+      cadence: { kind: "daily", time: "09:00" },
+      timeZone: "UTC",
+    });
+    f.schedules.create({
+      agentId: "b",
+      name: "B summary",
+      prompt: "Private B prompt",
+      cadence: { kind: "daily", time: "10:00" },
+      timeZone: "Europe/Madrid",
+    });
+    f.down.add("a");
+    f.manager.start("a");
+    f.manager.start("b");
+    await f.send("a", "/schedules", 73);
+    expect(f.sent).toEqual([]);
+    await f.send("a", "/schedules", 42);
+    const first = f.sent.find((entry) => entry.bot === "a")!;
+    expect(first).toMatchObject({ chat: 42 });
+    expect(first.text).toContain("A summary — Enabled");
+    expect(first.text).not.toContain("B summary");
+    await f.send("b", "/schedules", 73);
+    const second = f.sent.find((entry) => entry.bot === "b")!;
+    expect(second).toMatchObject({ chat: 73 });
+    expect(second.text).toContain("B summary — Enabled");
+    expect(second.text).not.toContain("A summary");
+    expect(f.calls).toEqual([]);
+    f.schedules.setEnabled(a.id, false);
+    await f.restart();
+    f.manager.start("a");
+    await f.send("a", "/schedules", 42);
+    expect(f.sent.at(-1)?.text).toContain("A summary — Disabled");
+    expect(f.sent.at(-1)?.text).toContain("No upcoming run (UTC)");
+    expect(JSON.stringify(f.sent)).not.toMatch(/Private [AB] prompt/);
+  } finally {
+    await f.close();
+  }
+});
 
 it("sends notifications through the existing owner-bound connection", async () => {
   const f = await fixture();

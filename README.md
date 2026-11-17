@@ -46,6 +46,7 @@ The panel uses one locally configured administrator account. Each agent has one 
 | `/start` | Show an optional welcome message |
 | `/help` | Show this agent's help |
 | `/status` | Show chat and runtime status |
+| `/schedules` | List this agent's scheduled tasks, next run times, and enabled state |
 | `/stop` | Cancel only this agent's running task |
 | Text message | Queue a task for this bot's agent |
 
@@ -230,8 +231,9 @@ fields `name`, `prompt`, `timeZone` (IANA), and `cadence` (a JSON object with it
 and matching fields); interval anchors are assigned by the server. The panel's
 Schedules page is linked from each agent and supports all schedule actions, a time
 zone prefilled from the browser, and recent run history. It explains AI credit use
-and Telegram delivery and warns when the owner chat is not linked. Telegram
-schedule listing is not available yet.
+and Telegram delivery and warns when the owner chat is not linked. The owner can
+list this agent's schedules with `/schedules`, even while its container is stopped.
+Creating and editing schedules stays in the panel.
 
 The following ideas are deferred, not supported features or delivery commitments:
 

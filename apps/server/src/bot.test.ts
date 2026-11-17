@@ -1,6 +1,6 @@
 import { openChatBinding, type ChatBinding } from "./chat-binding.js";
 import { describe, expect, it, vi } from "vitest";
-import { createBot } from "./bot.js";
+import { createBot, type BotConfig } from "./bot.js";
 import { HostTaskError } from "./host-tasks.js";
 import { createBotTasks } from "./bot-tasks.js";
 import { openTaskStore } from "./task-queue.js";
@@ -23,6 +23,7 @@ function setup(
     approvalId: string,
     allow: boolean,
   ) => Promise<boolean>,
+  schedules?: BotConfig["schedules"],
 ) {
   const activations: number[] = [];
   const tasks = execute
@@ -39,6 +40,7 @@ function setup(
     {
       telegramBotToken: "123:fake_test_token",
       agent: { id: "test", name: "Test agent", ownerId: 42 },
+      schedules,
     },
     (chatId) => activations.push(chatId),
     tasks?.submit,
@@ -328,6 +330,120 @@ describe("Telegram access", () => {
     const { bot, sent } = setup();
     await bot.handleUpdate(message("create a file"));
     expect(sent[0]).toContain("was not sent");
+  });
+});
+
+describe("scheduled task listing", () => {
+  const next = Date.parse("2027-01-02T08:00:00Z");
+  const records = () => [
+    {
+      name: "Morning summary",
+      enabled: true,
+      nextRunAt: next,
+      timeZone: "Europe/Madrid",
+    },
+    { name: "Paused check", enabled: false, nextRunAt: null, timeZone: "UTC" },
+  ];
+  const listing = (
+    read: NonNullable<BotConfig["schedules"]>,
+    access?: BotAccess,
+  ) => setup(undefined, undefined, undefined, access, undefined, read);
+
+  it("lists next local run times and enabled state, even with an unavailable Host", async () => {
+    const execute = vi.fn(async () => "never");
+    const hostStatus = vi.fn(async () => "unavailable" as const);
+    const read = vi.fn(records);
+    const f = setup(execute, undefined, hostStatus, undefined, undefined, read);
+    await f.bot.handleUpdate(message("/schedules"));
+    expect(f.sent).toEqual([
+      "Schedules for Test agent:\n\nMorning summary — Enabled\nNext run: Jan 2, 2027, 9:00 AM (Europe/Madrid)\n\nPaused check — Disabled\nNext run: No upcoming run (UTC)\n\nCreate and manage schedules in this agent's panel.",
+    ]);
+    expect(f.destinations).toEqual([42]);
+    expect(read).toHaveBeenCalledOnce();
+    expect(hostStatus).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("explains an empty list and points to panel management", async () => {
+    const f = listing(() => []);
+    await f.bot.handleUpdate(message("/schedules"));
+    expect(f.sent).toEqual([
+      "No schedules for Test agent. Create and manage schedules in this agent's panel.",
+    ]);
+  });
+
+  it.each(["foreign_owner", "group", "unverified_bot"])(
+    "does not read schedules for %s",
+    async (state) => {
+      const read = vi.fn(records);
+      const f = listing(
+        read,
+        state === "unverified_bot"
+          ? { canActivate: () => false, canExecute: () => false }
+          : undefined,
+      );
+      await f.bot.handleUpdate(
+        message(
+          "/schedules",
+          state === "foreign_owner" ? 73 : 42,
+          state === "group" ? "group" : "private",
+        ),
+      );
+      expect(read).not.toHaveBeenCalled();
+      expect(f.sent.join("")).not.toContain("Morning summary");
+      if (state !== "unverified_bot") expect(f.sent).toEqual([]);
+    },
+  );
+
+  it("reads current state for each request and never includes stored prompts", async () => {
+    const schedules = [
+      {
+        ...records()[0]!,
+        prompt: "Private saved prompt",
+        name: "<b>Plain & private</b>",
+      },
+    ];
+    const f = listing(() => schedules);
+    await f.bot.handleUpdate(message("/schedules"));
+    expect(f.sent[0]).toContain("<b>Plain & private</b>");
+    schedules[0]!.name = "Renamed";
+    schedules[0]!.enabled = false;
+    await f.bot.handleUpdate(message("/schedules"));
+    expect(f.sent.at(-1)).toContain("Renamed — Disabled");
+    expect(f.sent.join("")).not.toContain("Private saved prompt");
+  });
+
+  it("keeps a full list within Telegram's plain-text message limit", async () => {
+    const schedules = Array.from({ length: 20 }, (_, index) => ({
+      name: `${index}: ${"🙂".repeat(28)}`,
+      enabled: true,
+      nextRunAt: next,
+      timeZone: "America/Argentina/Catamarca",
+    }));
+    const f = listing(() => schedules);
+    await f.bot.handleUpdate(message("/schedules"));
+    expect(f.sent.every((part) => part.length <= 4096)).toBe(true);
+    for (const schedule of schedules)
+      expect(f.sent.join("")).toContain(schedule.name);
+  });
+
+  it("reports missing or failed schedule storage without pretending the list is empty", async () => {
+    const missing = setup();
+    await missing.bot.handleUpdate(message("/schedules"));
+    expect(missing.sent[0]).toContain("Schedules are unavailable");
+    const failed = listing(() => {
+      throw new Error("Private database path and credentials");
+    });
+    await failed.bot.handleUpdate(message("/schedules"));
+    expect(failed.sent).toEqual([
+      "I could not load schedules. Check the panel and try again.",
+    ]);
+  });
+
+  it("mentions the command in help", async () => {
+    const f = listing(records);
+    await f.bot.handleUpdate(message("/help"));
+    expect(f.sent[0]).toContain("/schedules to list scheduled tasks");
   });
 });
 

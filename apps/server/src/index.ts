@@ -203,6 +203,7 @@ async function main(): Promise<void> {
         {
           statePath,
           taskStore,
+          schedules: scheduleStore,
           tasks: (id) => taskServices.get(id),
           taskWaitMs: taskWaitMs(taskTimeoutSeconds),
         },
