@@ -25,14 +25,14 @@ export async function sendTaskOutcome(
   api: Pick<Api, "sendMessage">,
   chatId: number,
   outcome: TaskOutcome,
+  scheduleName?: string,
 ) {
-  if (!outcome.ok) {
-    await api.sendMessage(chatId, failureMessages[outcome.kind]);
-    return;
-  }
-  for (const part of splitTelegramText(
-    outcome.output || "The task finished without a text response.",
-  ))
+  const prefix =
+    scheduleName === undefined ? "" : `Scheduled task "${scheduleName}":\n\n`;
+  const text = outcome.ok
+    ? outcome.output || "The task finished without a text response."
+    : failureMessages[outcome.kind];
+  for (const part of splitTelegramText(prefix + text))
     await api.sendMessage(chatId, part);
 }
 

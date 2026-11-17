@@ -17,6 +17,12 @@ import { createAgentRegistration } from "./agent-registration.js";
 import { createResourceReconciliation } from "./resource-reconciliation.js";
 import { createAgentContainerAction } from "./agent-container-action.js";
 import { openTaskStore } from "./task-queue.js";
+import { openScheduleStore } from "./schedule-store.js";
+import {
+  createScheduleAdmission,
+  createScheduleSkipNotifier,
+  createScheduler,
+} from "./scheduler.js";
 import { createAgentDeletion } from "./agent-deletion.js";
 import { createAgentResourceRemoval } from "./agent-resource-removal.js";
 import {
@@ -88,6 +94,7 @@ async function main(): Promise<void> {
   }
   let statePath;
   let taskStore;
+  let scheduleStore;
   let notificationStore;
   let discordInbox!: ReturnType<typeof openDiscordInbox>;
   let registry!: ReturnType<typeof openAgentRegistry>;
@@ -112,9 +119,12 @@ async function main(): Promise<void> {
     discordInbox = openDiscordInbox(statePath);
     notificationStore = openNotificationStore(statePath);
     taskStore = openTaskStore(statePath);
+    scheduleStore = openScheduleStore(statePath);
     // A task left running by the previous process cannot be proven finished.
     taskStore.markRunningInterrupted();
   } catch {
+    scheduleStore?.close();
+    taskStore?.close();
     discordInbox?.close();
     notificationStore?.close();
     registry?.close();
@@ -125,6 +135,7 @@ async function main(): Promise<void> {
     return;
   }
   process.once("exit", () => {
+    scheduleStore.close();
     discordInbox.close();
     notificationStore.close();
     taskStore.close();
@@ -227,6 +238,7 @@ async function main(): Promise<void> {
     removeResources && hostCredentials
       ? createAgentDeletion({
           registry,
+          schedules: scheduleStore,
           stopBot: async (id) => {
             await registeredBots!.stop(id);
             taskServices.stop(id);
@@ -282,6 +294,17 @@ async function main(): Promise<void> {
       ...(registeredBots ? { telegram: registeredBots.notifications } : {}),
     }),
   );
+  const scheduler = createScheduler({
+    store: scheduleStore,
+    admit: hostCredentials
+      ? createScheduleAdmission(registry, hostCredentials)
+      : async () => undefined,
+    isOverlapping: taskStore.isScheduleOverlapping,
+    kick: async (id) => {
+      (await taskServices.get(id)).resume();
+    },
+    notifySkip: createScheduleSkipNotifier(notifications),
+  });
   const panel = createPanel(panelConfig, {
     providers: hostCredentials
       ? createHostProviders((id) => hostCredentials!.read(id))
@@ -428,6 +451,7 @@ async function main(): Promise<void> {
   });
   log.info("server.panel_listening", { origin: panelConfig.origin });
   const stop = () => {
+    void scheduler.close();
     registeredDiscord.close();
     taskServices.close();
     provisioningShutdown.abort();
@@ -443,6 +467,7 @@ async function main(): Promise<void> {
   for (const id of registry.listIds()) void registeredDiscord.start(id);
   for (const agent of registry.listResourceReferences())
     registeredBots?.start(agent.id);
+  void scheduler.start();
 }
 
 await main();

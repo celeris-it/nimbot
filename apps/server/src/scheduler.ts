@@ -1,4 +1,5 @@
 import { createAgentAccess } from "./agent-access.js";
+import type { createDurableNotifications } from "./durable-notifications.js";
 import type { openAgentRegistry } from "./agent-registry.js";
 import {
   getHostStatus,
@@ -16,6 +17,20 @@ import type {
 
 const TICK_MS = 30_000;
 const MAX_LATENESS_MS = 10 * 60_000;
+
+/** Stable request IDs keep a skip notice idempotent in the existing outbox. */
+export function createScheduleSkipNotifier(
+  notifications: Pick<ReturnType<typeof createDurableNotifications>, "send">,
+) {
+  return async (schedule: Schedule, run: ScheduleRun): Promise<void> => {
+    await notifications.send(
+      schedule.agentId,
+      `schedule-skip-${run.id}`,
+      "telegram",
+      `Scheduled task "${schedule.name}" was skipped because the agent is stopped or not ready, or its owner chat is not linked. Check the panel. Further skips will not send another notice until this streak ends.`,
+    );
+  };
+}
 
 /** A busy, reachable Host can receive queued work; an unavailable one cannot. */
 export function createScheduleAdmission(

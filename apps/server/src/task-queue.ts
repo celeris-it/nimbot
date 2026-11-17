@@ -14,6 +14,7 @@ export interface QueuedTask {
   chatId: number;
   prompt: string;
   scheduleId?: string;
+  scheduleName?: string;
   scheduledFor?: number;
 }
 
@@ -34,7 +35,7 @@ export type RoutedTask = (
   | (QueuedTask & {
       origin: { platform: "telegram"; botId: number; chatId: number };
     })
-) & { scheduleId?: string; scheduledFor?: number };
+) & { scheduleId?: string; scheduleName?: string; scheduledFor?: number };
 
 export type TaskOutcome =
   | { ok: true; output: string }
@@ -63,6 +64,7 @@ export function openTaskStore(path: string) {
       updated_at INTEGER NOT NULL,
       update_id INTEGER,
       schedule_id TEXT,
+      schedule_name TEXT,
       scheduled_for INTEGER,
       CHECK ((schedule_id IS NULL AND scheduled_for IS NULL) OR
         (schedule_id IS NOT NULL AND scheduled_for IS NOT NULL AND platform = 'telegram')),
@@ -93,12 +95,15 @@ export function openTaskStore(path: string) {
     throw error;
   }
   const columns =
-    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, scheduled_for AS scheduledFor";
+    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, schedule_name AS scheduleName, scheduled_for AS scheduledFor";
   function scheduleMetadata(row: Record<string, unknown>) {
     return row.scheduleId == null
       ? {}
       : {
           scheduleId: String(row.scheduleId),
+          ...(row.scheduleName == null
+            ? {}
+            : { scheduleName: String(row.scheduleName) }),
           scheduledFor: Number(row.scheduledFor),
         };
   }
@@ -176,7 +181,10 @@ export function openTaskStore(path: string) {
      * duplicate and creates nothing.
      */
     enqueue(
-      task: Omit<QueuedTask, "id" | "scheduleId" | "scheduledFor"> & {
+      task: Omit<
+        QueuedTask,
+        "id" | "scheduleId" | "scheduleName" | "scheduledFor"
+      > & {
         updateId?: number;
       },
     ): {
@@ -237,6 +245,7 @@ export function openTaskStore(path: string) {
           ? {}
           : {
               scheduleId: task.scheduleId,
+              scheduleName: task.scheduleName,
               scheduledFor: task.scheduledFor,
             }),
       };

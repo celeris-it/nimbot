@@ -395,8 +395,8 @@ export function openScheduleStore(
           const prompt = `Scheduled task "${current.name}" (due ${new Date(scheduledFor).toISOString()}):\n\n${current.prompt}`;
           db.prepare(
             `INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt,
-            status, created_at, updated_at, schedule_id, scheduled_for)
-            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
+            status, created_at, updated_at, schedule_id, schedule_name, scheduled_for)
+            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
           ).run(
             taskId,
             current.agentId,
@@ -406,6 +406,7 @@ export function openScheduleStore(
             at,
             at,
             current.id,
+            current.name,
             scheduledFor,
           );
         }

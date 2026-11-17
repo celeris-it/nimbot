@@ -101,6 +101,7 @@ export function createBotTasks(config: {
         void request.catch(() => {});
       }),
     progress: async (task, message) => {
+      if (task.scheduleId !== undefined) return;
       if (task.origin.platform === "discord") {
         const discordTask = task as DiscordQueuedTask;
         if (config.discord?.admit(discordTask))
@@ -125,7 +126,12 @@ export function createBotTasks(config: {
         await config.discord.deliver(discordTask, outcome);
       } else {
         if (!bot) throw new Error("Bot is not attached");
-        await sendTaskOutcome(bot.api, task.origin.chatId, outcome);
+        await sendTaskOutcome(
+          bot.api,
+          task.origin.chatId,
+          outcome,
+          task.scheduleName,
+        );
       }
     },
   });

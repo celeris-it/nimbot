@@ -216,8 +216,14 @@ task, and advances the next run in one transaction. It retains 20 history entrie
 per schedule and reads execution status from the task row. The scheduler component
 checks due schedules every 30 seconds, skips unavailable agents and overlapping
 runs, and records occurrences more than 10 minutes late as missed without replaying
-a backlog. It is not wired into server startup yet; scheduled execution, delivery,
-and management are not available yet.
+a backlog. It starts after the bot connections and stops admitting work at server
+shutdown. Scheduled runs use the agent's existing queue and conversation context;
+only their final result is sent, with the saved schedule name. Approvals and `/stop`
+use the owner's Telegram chat as usual. The first not-ready skip of a consecutive
+streak uses the durable notification path. Deleting an agent removes its schedules
+and run history before retiring its identity, while retaining queued task metadata
+and preserving volumes unless data deletion was requested. Panel management and
+Telegram schedule listing are not available yet.
 
 The following ideas are deferred, not supported features or delivery commitments:
 
