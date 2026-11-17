@@ -1,3 +1,6 @@
+/** Ephemeral execution input; never persisted with a task or included in its prompt. */
+export type ProviderCredentials = Record<string, string>;
+
 /** Engine boundary: no Telegram or HTTP concerns. */
 export interface Engine {
   /**
@@ -10,6 +13,7 @@ export interface Engine {
     onText: (text: string) => void,
     onProgress?: (message: string) => void,
     requestApproval?: (title: string) => Promise<boolean>,
+    credentials?: ProviderCredentials,
   ): Promise<string>;
   stop(): Promise<void>;
 }

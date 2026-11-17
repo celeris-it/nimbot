@@ -1,4 +1,5 @@
 import type { PanelDeps } from "./panel.js";
+export type { ProviderStatus } from "./provider-credentials.js";
 
 /** Browser-safe metadata. These imports are erased; no server runtime is bundled. */
 export type AgentSummary = NonNullable<

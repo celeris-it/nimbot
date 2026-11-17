@@ -212,9 +212,11 @@ export class AcpClient {
 export function spawnOpenCode(
   cwd: string,
   options?: AcpClientOptions,
+  authContent = "{}",
 ): { client: AcpClient; process: ChildProcess } {
   const child = spawn("opencode", ["acp"], {
     cwd,
+    env: { ...process.env, OPENCODE_AUTH_CONTENT: authContent },
     stdio: ["pipe", "pipe", "inherit"],
   });
   const client = new AcpClient(child.stdout, child.stdin, options);

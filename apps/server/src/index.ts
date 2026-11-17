@@ -1,6 +1,7 @@
 import { createAgentTaskServices } from "./agent-task-services.js";
 import { createHostTasks, createHostApprovals } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
+import { openProviderCredentials } from "./provider-credentials.js";
 import type { DiscordQueuedTask } from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
@@ -91,6 +92,7 @@ async function main(): Promise<void> {
   let discordInbox!: ReturnType<typeof openDiscordInbox>;
   let registry!: ReturnType<typeof openAgentRegistry>;
   let botSecrets;
+  let providerCredentials;
   let discordSecrets;
   let hostCredentials:
     Awaited<ReturnType<typeof openHostCredentials>> | undefined;
@@ -100,6 +102,9 @@ async function main(): Promise<void> {
     statePath = resolve(stateDir, "server.sqlite");
     registry = openAgentRegistry(statePath);
     botSecrets = await openBotSecrets(resolve(stateDir, "bot-secrets"));
+    providerCredentials = await openProviderCredentials(
+      resolve(stateDir, "provider-secrets"),
+    );
     discordSecrets = await openDiscordSecrets(
       resolve(stateDir, "discord-secrets"),
     );
@@ -163,7 +168,13 @@ async function main(): Promise<void> {
       store: taskStore,
       ownerId: () => registry.get(id)?.ownerId ?? 0,
       run: withAgentInstructions(
-        createHostTasks(host, fetch, undefined, taskWaitMs(taskTimeoutSeconds)),
+        createHostTasks(
+          host,
+          fetch,
+          undefined,
+          taskWaitMs(taskTimeoutSeconds),
+          providerCredentials.snapshot,
+        ),
         () => registry.get(id)?.instructions ?? "",
       ),
       decide: createHostApprovals(host),
@@ -282,6 +293,7 @@ async function main(): Promise<void> {
     }),
   );
   const panel = createPanel(panelConfig, {
+    providers: providerCredentials,
     discord: {
       status: (id) => ({
         state: registeredDiscord.getState(id),

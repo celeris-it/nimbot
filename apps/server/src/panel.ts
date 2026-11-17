@@ -10,6 +10,7 @@ import type { HostStatus } from "./agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 import type { AgentDetail, PanelSession } from "./panel-contracts.js";
 import { isDiscordId } from "./discord-identity.js";
+import { isProviderId, isApiKey } from "./provider-credentials.js";
 
 export interface RegisteredAgentSettings {
   cancelProvisioning?(id: string): void;
@@ -25,6 +26,14 @@ export interface RegisteredAgentSettings {
   ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
 export interface PanelDeps {
+  providers?: Pick<
+    Awaited<
+      ReturnType<
+        typeof import("./provider-credentials.js").openProviderCredentials
+      >
+    >,
+    "list" | "save" | "remove"
+  >;
   discord?: {
     status?(
       id: string,
@@ -230,6 +239,33 @@ export function createPanel(
   };
   app.post("/logout", signOut);
   app.post("/api/logout", signOut);
+  app.get("/api/providers", async (c) => {
+    if (!deps.providers)
+      return c.json({ error: "Provider settings unavailable." }, 503);
+    return c.json({ providers: await deps.providers.list() });
+  });
+  app.post("/api/providers/:id", async (c) => {
+    if (!deps.providers)
+      return c.json({ error: "Provider settings unavailable." }, 503);
+    const id = c.req.param("id");
+    if (!isProviderId(id)) return c.json({ error: "Unknown provider." }, 400);
+    const body = await c.req.parseBody({ all: true });
+    if (!isApiKey(body.key))
+      return c.json(
+        { error: "Enter an API key of 1–4096 characters without whitespace." },
+        400,
+      );
+    await deps.providers.save(id, body.key);
+    return c.json({ saved: true });
+  });
+  app.post("/api/providers/:id/remove", async (c) => {
+    if (!deps.providers)
+      return c.json({ error: "Provider settings unavailable." }, 503);
+    const id = c.req.param("id");
+    if (!isProviderId(id)) return c.json({ error: "Unknown provider." }, 400);
+    await deps.providers.remove(id);
+    return c.json({ removed: true });
+  });
   app.get("/api/agents/:id", async (c) => {
     const id = c.req.param("id");
     const setup = getAgentSetup?.(id);
@@ -632,6 +668,7 @@ export function createPanel(
       return c.redirect(back(id), 303);
     });
   app.get("/", entry);
+  app.get("/settings/providers", entry);
   app.get("/agents/new", (c) => (registerAgent ? entry(c) : c.notFound()));
   for (const suffix of [
     "setup",

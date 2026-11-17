@@ -9,7 +9,8 @@ export interface Logger {
   child(fields: LogFields): Logger;
 }
 
-const SECRET_KEY = /token|password|secret|authorization|credential|cookie/i;
+const SECRET_KEY =
+  /token|password|secret|authorization|credential|cookie|api.?key|auth.?content/i;
 const PATTERNS: [RegExp, string][] = [
   [/\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g, "[redacted]"],
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]"],

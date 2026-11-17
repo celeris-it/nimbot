@@ -47,6 +47,7 @@ import { createOpenCodeEngine, createSessionFile } from "./opencode-engine.js";
 const fakeOpenCode = `#!/usr/bin/env node
 const lines = require("node:readline").createInterface({ input: process.stdin });
 const fs = require("node:fs");
+if (process.env.FAKE_AUTH_LOG) fs.writeFileSync(process.env.FAKE_AUTH_LOG, process.env.OPENCODE_AUTH_CONTENT || "missing");
 const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\\n");
 const chunk = (sessionId, text) => send({ method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } } });
 const known = process.env.FAKE_KNOWN_SESSION;
@@ -95,6 +96,35 @@ describe("session continuity", () => {
     await engine.run("hi", (chunk) => (text += chunk));
     return text;
   }
+
+  it("injects each task's complete API credentials into ACP without changing parent environment or writing engine auth state", async () => {
+    await setup();
+    vi.stubEnv("FAKE_AUTH_LOG", join(dir, "auth-capture"));
+    vi.stubEnv("OPENCODE_AUTH_CONTENT", "stale-parent-credentials");
+    const engine = createOpenCodeEngine(dir);
+    await engine.run("hi", () => {}, undefined, undefined, {
+      openai: "private-key",
+      google: "google-key",
+    });
+    expect(
+      JSON.parse(await readFile(join(dir, "auth-capture"), "utf8")),
+    ).toEqual({
+      openai: { type: "api", key: "private-key" },
+      google: { type: "api", key: "google-key" },
+    });
+    await engine.run("hi", () => {}, undefined, undefined, {
+      openai: "replacement",
+    });
+    expect(
+      JSON.parse(await readFile(join(dir, "auth-capture"), "utf8")),
+    ).toEqual({ openai: { type: "api", key: "replacement" } });
+    await engine.run("hi", () => {}, undefined, undefined, {});
+    expect(await readFile(join(dir, "auth-capture"), "utf8")).toBe("{}");
+    expect(process.env.OPENCODE_AUTH_CONTENT).toBe("stale-parent-credentials");
+    await expect(readFile(join(dir, "auth.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
 
   it("creates and remembers a session, then loads it for the next task without replayed history", async () => {
     const { sessions, log } = await setup();

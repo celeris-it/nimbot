@@ -4,17 +4,20 @@
     AgentDetail,
     PanelSession,
     PanelStatus,
+    ProviderStatus,
   } from "../../server/src/panel-contracts.js";
   import { ApiError, post, request } from "./api.js";
   import Dashboard from "./Dashboard.svelte";
   import { Icon } from "./components/index.js";
   import AgentForm from "./AgentForm.svelte";
   import AgentStatus from "./AgentStatus.svelte";
+  import ProviderSettings from "./ProviderSettings.svelte";
 
   let path = $state(location.pathname);
   let session = $state<PanelSession>();
   let status = $state<PanelStatus>({ agents: [] });
   let agent = $state<AgentDetail>();
+  let providers = $state<ProviderStatus[]>([]);
   let loaded = $state(false);
   let contentAvailable = $state(false);
   let missing = $state(false);
@@ -36,17 +39,19 @@
       ? "Sign in"
       : path === "/"
         ? "Agents"
-        : path === "/agents/new"
-          ? "Create agent"
-          : route?.[2] === "settings"
-            ? "Edit agent"
-            : route?.[2] === "token"
-              ? "Bot token"
-              : route?.[2] === "delete"
-                ? "Delete agent"
-                : route?.[2] === "container/stop"
-                  ? "Stop agent"
-                  : "Agent setup",
+        : path === "/settings/providers"
+          ? "AI providers"
+          : path === "/agents/new"
+            ? "Create agent"
+            : route?.[2] === "settings"
+              ? "Edit agent"
+              : route?.[2] === "token"
+                ? "Bot token"
+                : route?.[2] === "delete"
+                  ? "Delete agent"
+                  : route?.[2] === "container/stop"
+                    ? "Stop agent"
+                    : "Agent setup",
   );
 
   async function focusHeading() {
@@ -94,7 +99,13 @@
         status = await request<PanelStatus>("/api/status", {
           signal: current.signal,
         });
-      else if (route) {
+      else if (path === "/settings/providers") {
+        providers = (
+          await request<{ providers: ProviderStatus[] }>("/api/providers", {
+            signal: current.signal,
+          })
+        ).providers;
+      } else if (route) {
         agent = await request<AgentDetail>(`/api/agents/${route[1]}`, {
           signal: current.signal,
         });
@@ -270,6 +281,19 @@
       },
     );
   }
+  async function providerAction(id: string, kind: "save" | "remove", key = "") {
+    await mutate(
+      `/api/providers/${encodeURIComponent(id)}${kind === "remove" ? "/remove" : ""}`,
+      kind === "save" ? { key } : {},
+      () => {
+        notice =
+          kind === "save"
+            ? "API key saved. Changes apply to the next task."
+            : "API key removed. Running tasks keep their current key.";
+        void load();
+      },
+    );
+  }
   function click(event: MouseEvent) {
     if (event.defaultPrevented) return;
     const link =
@@ -343,6 +367,11 @@
           aria-current={path === "/agents/new" ? "page" : undefined}
           ><Icon name="plus" size={15} /> New agent</a
         >{/if}
+      <a
+        href="/settings/providers"
+        aria-current={path === "/settings/providers" ? "page" : undefined}
+        >AI providers</a
+      >
     </nav>
     <div data-ui="header-actions">
       <span data-ui="installation"
@@ -410,6 +439,8 @@
       canCreate={session?.capabilities.createAgent ?? false}
       refresh={() => load()}
     />
+  {:else if path === "/settings/providers"}
+    <ProviderSettings {providers} {busy} action={providerAction} />
   {:else if path === "/agents/new"}
     {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
   {:else if agent && route}

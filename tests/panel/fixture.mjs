@@ -2,9 +2,12 @@ import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/ind
 import { Hono } from "../../apps/server/node_modules/hono/dist/index.js";
 import { createPanel } from "../../apps/server/dist/panel.js";
 import { hashPassword } from "../../apps/server/dist/panel-auth.js";
+import { providers } from "../../apps/server/dist/provider-credentials.js";
 
 const agents = new Map();
+const keys = new Map();
 function reset() {
+  keys.clear();
   agents.clear();
   agents.set("dev", {
     name: "Developer",
@@ -23,6 +26,19 @@ const panel = createPanel(
     port: 3199,
   },
   {
+    providers: {
+      list: async () =>
+        providers.map((provider) => ({
+          ...provider,
+          configured: keys.has(provider.id),
+        })),
+      save: async (id, key) => {
+        keys.set(id, key);
+      },
+      remove: async (id) => {
+        keys.delete(id);
+      },
+    },
     discord: {
       status: (id) => ({
         state: agents.get(id)?.discord ? "ready" : "stopped",

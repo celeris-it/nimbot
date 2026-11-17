@@ -9,6 +9,73 @@ const config = { url: "http://agent-host:3001", token: "x".repeat(32) };
 const accepted = () =>
   Response.json({ id: "task-1", status: "accepted" }, { status: 202 });
 describe("internal task client", () => {
+  it("loads global credentials for every task across agents, including replacements and removal", async () => {
+    const { openProviderCredentials } =
+      await import("./provider-credentials.js");
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = await mkdtemp(join(tmpdir(), "host-global-keys-"));
+    try {
+      const store = await openProviderCredentials(dir);
+      const submitted: unknown[] = [];
+      const request = vi.fn<typeof fetch>(async (_url, init) => {
+        if (init?.method === "POST") {
+          submitted.push(JSON.parse(String(init.body)));
+          return accepted();
+        }
+        return Response.json({
+          id: "task-1",
+          events: [{ sequence: 1, status: "completed", output: "Done" }],
+        });
+      });
+      const a = createHostTasks(
+        config,
+        request,
+        undefined,
+        undefined,
+        store.snapshot,
+      );
+      const b = createHostTasks(
+        { ...config, url: "http://agent-b:3001" },
+        request,
+        undefined,
+        undefined,
+        store.snapshot,
+      );
+      await store.save("openai", "first-key");
+      await Promise.all([a("a"), b("b")]);
+      expect(submitted).toEqual([
+        { prompt: "a", credentials: { openai: "first-key" } },
+        { prompt: "b", credentials: { openai: "first-key" } },
+      ]);
+      await store.save("openai", "replacement");
+      await a("next");
+      expect(submitted.at(-1)).toEqual({
+        prompt: "next",
+        credentials: { openai: "replacement" },
+      });
+      await store.remove("openai");
+      await b("empty");
+      expect(submitted.at(-1)).toEqual({ prompt: "empty", credentials: {} });
+      const broken = createHostTasks(
+        config,
+        request,
+        undefined,
+        undefined,
+        async () => {
+          throw new Error("private-key");
+        },
+      );
+      request.mockClear();
+      await expect(broken("must not run")).rejects.toEqual(
+        new HostTaskError("unavailable"),
+      );
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
   it("submits once and polls persisted state until completion", async () => {
     const request = vi
       .fn<typeof fetch>()

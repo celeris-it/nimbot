@@ -14,6 +14,56 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("manages global API keys with keyboard navigation, blank secret fields and accessible errors", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "AI providers", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/providers$/);
+  const openai = page.getByRole("region", { name: "OpenAI", exact: true });
+  const key = page.getByLabel("OpenAI API key", { exact: true });
+  await expect(
+    openai.getByText("Not configured", { exact: true }),
+  ).toBeVisible();
+  await key.fill("private-first");
+  await page.keyboard.press("Tab");
+  await expect(
+    openai.getByRole("button", { name: "Save API key" }),
+  ).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(openai.getByText("Configured", { exact: true })).toBeVisible();
+  await expect(key).toHaveValue("");
+  await key.fill("private-replacement");
+  await openai.getByRole("button", { name: "Replace API key" }).click();
+  await expect(page.getByRole("status")).toContainText("API key saved.");
+  await expect(key).toHaveValue("");
+  await page.reload();
+  await expect(openai.getByText("Configured", { exact: true })).toBeVisible();
+  await expect(key).toHaveValue("");
+  await key.fill("invalid key");
+  await openai.getByRole("button", { name: "Replace API key" }).click();
+  await expect(page.getByRole("alert")).toContainText("without whitespace");
+  await expect(page.getByRole("alert")).toBeFocused();
+  await expect(key).toHaveValue("");
+  await expect(openai.getByText("Configured", { exact: true })).toBeVisible();
+  await openai.getByRole("button", { name: "Remove API key" }).click();
+  await expect(
+    openai.getByText("Not configured", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    openai.getByRole("button", { name: "Remove API key" }),
+  ).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText("private-first");
+  await expect(page.locator("main")).not.toContainText("private-replacement");
+  await page.goto("/agents/dev/setup");
+  await page
+    .getByRole("link", { name: "Configure global AI providers" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "AI providers", exact: true }),
+  ).toBeVisible();
+});
+
 test("logs in, follows deep links and browser history, and signs out", async ({
   page,
 }) => {

@@ -36,10 +36,19 @@ it("removes Telegram tokens, bearer credentials, Host tokens, and secret-named f
     detail: `Authorization: Bearer ${host} and ${telegram}`,
     botToken: "plain",
     password: "hunter2",
+    apiKey: "private-provider-key",
+    OPENCODE_AUTH_CONTENT: "private-auth-content",
     agentId: "x",
   });
   const text = JSON.stringify(lines);
-  for (const secret of [telegram, host, "plain", "hunter2"])
+  for (const secret of [
+    telegram,
+    host,
+    "plain",
+    "hunter2",
+    "private-provider-key",
+    "private-auth-content",
+  ])
     expect(text).not.toContain(secret);
   expect(lines[0]!.entry).toMatchObject({
     botToken: "[redacted]",

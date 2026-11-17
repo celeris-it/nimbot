@@ -45,15 +45,10 @@ The installer does not install a proxy or configure DNS. The port stays bound to
 1. In Telegram, open `@BotFather`, send `/newbot`, and copy the new bot's token.
 2. Sign in to the panel, choose **Create agent**, and enter its name, optional instructions, your numeric Telegram user ID, and the token. You can find your ID by messaging `@userinfobot`.
 3. Wait for setup to finish. Each agent gets its own container, volumes, and bot. Incomplete or failed setup cannot execute tasks; use **Retry setup** after fixing the reported problem.
-4. Authenticate the AI provider inside the agent's container. The agent ID appears in the panel:
-
-   ```sh
-   docker exec -it nimbot-<agent-id> opencode auth login
-   ```
-
+4. Open **AI providers** in the panel and save an API key for OpenAI, Anthropic, Google, or OpenRouter. This configuration is global and applies to all current and future agents. Keys are never shown again after saving. OAuth login is not supported through the panel.
 5. Open the bot link from the panel and send a task. Your first private message links the chat automatically.
 
-Every agent needs its own BotFather bot and provider authentication. Only its owner can use it; their first private message links the chat automatically. No Telegram or per-agent environment variables are needed. Credentials stay in that agent's engine-state volume. Readiness does not verify provider access; use `opencode auth list` inside the container if tasks fail.
+Every agent needs its own BotFather bot. Only its owner can use it; their first private message links the chat automatically. No Telegram or per-agent environment variables are needed. Provider API keys are stored privately in the server state volume and supplied in memory for each task. Saving, replacing, or removing a key affects subsequent tasks without restarting containers; running tasks keep their current key. Saving a key and Host readiness do not verify its validity, balance, or model access. OpenCode chooses the model automatically.
 
 To replace a revoked token, open the agent's token form, enter a replacement for the same bot, and restart the server with `docker restart nimbot-server`.
 

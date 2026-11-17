@@ -32,7 +32,7 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
   app.use(
     "/tasks",
     bodyLimit({
-      maxSize: 32_768,
+      maxSize: 131_072,
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );
@@ -57,7 +57,29 @@ export function createHostApi(config: HostConfig, runner?: TaskRunner) {
         : undefined;
     if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 16_000)
       return c.json({ error: "prompt must contain 1–16000 characters" }, 400);
-    const id = await runner.submit(prompt);
+    const credentials =
+      (body as Record<string, unknown>).credentials === undefined
+        ? {}
+        : (body as Record<string, unknown>).credentials;
+    if (
+      typeof credentials !== "object" ||
+      credentials === null ||
+      Array.isArray(credentials) ||
+      Object.entries(credentials).some(
+        ([id, key]) =>
+          !["openai", "anthropic", "google", "openrouter"].includes(id) ||
+          typeof key !== "string" ||
+          !key.length ||
+          key.length > 4096 ||
+          /\s/.test(key) ||
+          key.includes("\0"),
+      )
+    )
+      return c.json({ error: "Invalid provider credentials" }, 400);
+    const id = await runner.submit(
+      prompt,
+      credentials as Record<string, string>,
+    );
     return id
       ? c.json({ id, status: "accepted" }, 202)
       : c.json({ error: "Agent is busy" }, 409);
