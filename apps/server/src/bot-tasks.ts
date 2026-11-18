@@ -65,6 +65,8 @@ export function createBotTasks(config: {
   /** Server-owned handoff policy. Worker activation happens only after durable finalization. */
   delegation?: {
     canHandoff: Parameters<TaskStore["finishWithDelegations"]>[2];
+    /** Live Server-owned target readiness, grant and saved parent checks. Omit to leave children queued. */
+    canExecute?(task: RoutedTask): boolean;
     wake(targetAgentIds: readonly string[]): Promise<void>;
   };
   run: (
@@ -97,7 +99,7 @@ export function createBotTasks(config: {
   let bot: Bot | undefined;
   const admit = (task: RoutedTask) =>
     task.origin.platform === "delegated"
-      ? false
+      ? (config.delegation?.canExecute?.(task) ?? false)
       : task.origin.platform === "discord"
         ? !!config.discord?.admit(task as DiscordQueuedTask)
         : !config.access ||
@@ -223,6 +225,7 @@ export function createBotTasks(config: {
     agentId: config.agentId,
     store: config.store,
     isActive: (task) =>
+      admit(task) &&
       config.store.getTask(task.id)?.status === "running" &&
       queue.isRunning(task.origin),
     forward: (...args) => {
@@ -309,8 +312,15 @@ export function createBotTasks(config: {
         }
       : {}),
     ready: (task) =>
-      task.origin.platform !== "delegated" &&
-      (task.origin.platform !== "telegram" || !!bot),
+      task.origin.platform === "delegated"
+        ? !!(
+            config.delegation?.canExecute &&
+            config.delegationResult &&
+            config.approvalRelay &&
+            config.decide &&
+            config.notificationStore
+          )
+        : task.origin.platform !== "telegram" || !!bot,
     execute: async (task, report, signal) => {
       // Resolve correlation and callback origin from Server state, never the prompt
       // or a Host-provided identity. A missing policy grants no application tools.
@@ -343,6 +353,9 @@ export function createBotTasks(config: {
           },
           {
             identity: { agentId: saved.agentId, serverTaskId: saved.id },
+            ...(saved.origin.platform === "delegated"
+              ? { sessionMode: "fresh" as const }
+              : {}),
             ...(tools ? { tools } : {}),
             onTool: (request, toolSignal) =>
               tools

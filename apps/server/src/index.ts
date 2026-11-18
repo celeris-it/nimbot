@@ -7,9 +7,10 @@ import { openApprovalStore } from "./approval-store.js";
 import { openAgentGrants } from "./agent-grants.js";
 import { openAgentNotes } from "./agent-notes.js";
 import { createPeerTools } from "./peer-tools.js";
+import { createDelegationExecution } from "./delegation-execution.js";
 import { openApprovalRules } from "./approval-rules.js";
 import { MEMORY_OPERATIONS } from "./memory-operations.js";
-import type { DiscordQueuedTask, RoutedTask } from "./task-queue.js";
+import type { ChatTask, DiscordQueuedTask, RoutedTask } from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
 import { openNotificationStore } from "./notification-store.js";
@@ -218,6 +219,34 @@ async function main(): Promise<void> {
       name: (agentId) => registry.get(agentId)?.name,
       canReach,
     });
+    const canHandoff = (parent: ChatTask, target: string) =>
+      canReach(parent) &&
+      agentGrants.allows(
+        parent.agentId,
+        target,
+        "delegate",
+        parent.origin.platform,
+      );
+    const delegatedExecution = createDelegationExecution({
+      agentId: id,
+      tasks: taskStore,
+      ready: () => {
+        const agent = registry.get(id);
+        const chatId = registry.getOwnerChat(id);
+        return (
+          !!agent &&
+          agent.botId !== null &&
+          chatId !== undefined &&
+          createAgentAccess(registry, id).canExecute(
+            agent.botId,
+            agent.ownerId,
+            chatId,
+          )
+        );
+      },
+      canReach,
+      allowed: canHandoff,
+    });
     return {
       agentId: id,
       store: taskStore,
@@ -225,6 +254,10 @@ async function main(): Promise<void> {
       approvals: { store: approvalStore, rules: approvalRules },
       notificationStore,
       approvalReach: canReach,
+      approvalRoute: (task) =>
+        task.origin.platform === "delegated"
+          ? delegatedExecution.parent(task)
+          : task,
       toolPolicy: {
         canExecute: (task) => task.agentId === id && canReach(task),
         allowedOperations: (task) => [
@@ -234,14 +267,8 @@ async function main(): Promise<void> {
       },
       toolHandlers: peerTools.handlers,
       delegation: {
-        canHandoff: (parent, target) =>
-          canReach(parent) &&
-          agentGrants.allows(
-            parent.agentId,
-            target,
-            "delegate",
-            parent.origin.platform,
-          ),
+        canHandoff,
+        canExecute: delegatedExecution.canExecute,
         wake,
       },
       run: withAgentInstructions(
