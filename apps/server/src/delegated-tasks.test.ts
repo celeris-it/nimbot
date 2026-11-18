@@ -270,7 +270,7 @@ it("keeps handoff acceptance order when the system clock moves backwards", () =>
   for (let i = 0; i < 3; i++) {
     const child = f.store.claimNextTask("b")!;
     expect(child.prompt).toBe(`brief ${i}`);
-    f.store.finish(child.id, "completed");
+    f.store.finish(child.id, "completed", { ok: true, output: "done" });
   }
   expect(f.store.claimNextTask("b")).toBeUndefined();
 });

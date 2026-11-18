@@ -52,7 +52,11 @@ export type RoutedTask = (ChatTask | DelegatedTask) & {
   scheduleName?: string;
   scheduledFor?: number;
 };
-export const DELEGATION_LIMITS = { perParent: 3, brief: 2_000 } as const;
+export const DELEGATION_LIMITS = {
+  perParent: 3,
+  brief: 2_000,
+  resultBytes: 8_192,
+} as const;
 export interface Delegation {
   id: string;
   sourceTaskId: string;
@@ -65,6 +69,8 @@ export interface Delegation {
   reason: string | null;
   createdAt: number;
   childStatus?: TaskStatus;
+  /** Untrusted output from the child; never permission or instructions for the requester. */
+  result?: DelegationResult;
 }
 type DelegationPolicy = (parent: ChatTask, targetAgentId: string) => boolean;
 
@@ -72,7 +78,96 @@ export type TaskOutcome =
   | { ok: true; output: string }
   | { ok: false; kind: HostTaskError["kind"] | "not_ready" };
 
-/** Server-side task metadata. Results stay on the Agent Host; bot tokens never enter this database. */
+export type DelegationResult =
+  | { ok: true; output: string; truncated: boolean }
+  | Extract<TaskOutcome, { ok: false }>;
+const failureKinds = new Set([
+  "busy",
+  "unavailable",
+  "failed",
+  "interrupted",
+  "timeout",
+  "cancelled",
+  "not_ready",
+]);
+function encodeDelegationResult(
+  status: TaskStatus,
+  outcome?: TaskOutcome,
+): string {
+  if (status !== "completed") {
+    const kind =
+      status === "cancelled" || status === "interrupted"
+        ? status
+        : outcome?.ok === false &&
+            failureKinds.has(outcome.kind) &&
+            outcome.kind !== "cancelled" &&
+            outcome.kind !== "interrupted"
+          ? outcome.kind
+          : "failed";
+    return JSON.stringify({ ok: false, kind });
+  }
+  if (outcome?.ok !== true || typeof outcome.output !== "string")
+    throw new Error("Completed child result is missing");
+  let output = "";
+  let truncated = false;
+  let bytes = Buffer.byteLength(
+    JSON.stringify({ ok: true, output, truncated }),
+  );
+  // Count serialized bytes, including JSON escapes, without splitting a Unicode code point.
+  for (const character of outcome.output) {
+    const size = Buffer.byteLength(JSON.stringify(character)) - 2;
+    if (bytes + size > DELEGATION_LIMITS.resultBytes) {
+      truncated = true;
+      break;
+    }
+    output += character;
+    bytes += size;
+  }
+  return JSON.stringify({ ok: true, output, truncated });
+}
+function readDelegationResult(
+  value: unknown,
+  status: unknown,
+): DelegationResult | undefined {
+  if (
+    typeof value !== "string" ||
+    Buffer.byteLength(value) > DELEGATION_LIMITS.resultBytes
+  )
+    return undefined;
+  try {
+    const result = JSON.parse(value) as Record<string, unknown>;
+    if (!result || typeof result !== "object" || Array.isArray(result))
+      return undefined;
+    if (
+      status === "completed" &&
+      result.ok === true &&
+      typeof result.output === "string" &&
+      typeof result.truncated === "boolean" &&
+      Object.keys(result).length === 3
+    )
+      return { ok: true, output: result.output, truncated: result.truncated };
+    if (
+      ["failed", "cancelled", "interrupted"].includes(String(status)) &&
+      result.ok === false &&
+      typeof result.kind === "string" &&
+      failureKinds.has(result.kind) &&
+      (status !== "cancelled" || result.kind === "cancelled") &&
+      (status !== "interrupted" || result.kind === "interrupted") &&
+      (status !== "failed" ||
+        (result.kind !== "cancelled" && result.kind !== "interrupted")) &&
+      Object.keys(result).length === 2
+    )
+      return {
+        ok: false,
+        kind: result.kind as Extract<TaskOutcome, { ok: false }>["kind"],
+      };
+  } catch {
+    /* Malformed stored output is never returned as context. */
+  }
+  return undefined;
+}
+
+/** Chat results stay on the Host; bounded delegation results are retained here. Bot tokens never enter this database. */
 export function openTaskStore(path: string) {
   const db = new DatabaseSync(path);
   try {
@@ -121,6 +216,7 @@ export function openTaskStore(path: string) {
       brief TEXT NOT NULL CHECK(length(brief) BETWEEN 1 AND ${DELEGATION_LIMITS.brief}),
       state TEXT NOT NULL CHECK(state IN ('pending', 'admitted', 'discarded')),
       child_task_id TEXT UNIQUE, reason TEXT,
+      result_json TEXT CHECK(result_json IS NULL OR (state = 'admitted' AND length(CAST(result_json AS BLOB)) <= ${DELEGATION_LIMITS.resultBytes})),
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
       UNIQUE(source_task_id, invocation_id), CHECK(source_agent_id != target_agent_id),
       CHECK((state = 'admitted' AND child_task_id IS NOT NULL AND reason IS NULL)
@@ -250,22 +346,26 @@ export function openTaskStore(path: string) {
       throw error;
     }
   }
-  const readDelegation = (row: Record<string, unknown>): Delegation => ({
-    id: String(row.id),
-    sourceTaskId: String(row.source_task_id),
-    sourceAgentId: String(row.source_agent_id),
-    targetAgentId: String(row.target_agent_id),
-    invocationId: String(row.invocation_id),
-    brief: String(row.brief),
-    state: row.state as Delegation["state"],
-    childTaskId:
-      typeof row.child_task_id === "string" ? row.child_task_id : null,
-    reason: typeof row.reason === "string" ? row.reason : null,
-    createdAt: Number(row.created_at),
-    ...(typeof row.child_status === "string"
-      ? { childStatus: row.child_status as TaskStatus }
-      : {}),
-  });
+  const readDelegation = (row: Record<string, unknown>): Delegation => {
+    const result = readDelegationResult(row.result_json, row.child_status);
+    return {
+      id: String(row.id),
+      sourceTaskId: String(row.source_task_id),
+      sourceAgentId: String(row.source_agent_id),
+      targetAgentId: String(row.target_agent_id),
+      invocationId: String(row.invocation_id),
+      brief: String(row.brief),
+      state: row.state as Delegation["state"],
+      childTaskId:
+        typeof row.child_task_id === "string" ? row.child_task_id : null,
+      reason: typeof row.reason === "string" ? row.reason : null,
+      createdAt: Number(row.created_at),
+      ...(typeof row.child_status === "string"
+        ? { childStatus: row.child_status as TaskStatus }
+        : {}),
+      ...(result ? { result } : {}),
+    };
+  };
   const parentRow = (id: string) =>
     db
       .prepare(
@@ -277,6 +377,7 @@ export function openTaskStore(path: string) {
     status: "completed" | "failed" | "interrupted" | "cancelled",
     allowed: DelegationPolicy,
     cancelled = false,
+    outcome?: TaskOutcome,
   ): string[] {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -286,9 +387,31 @@ export function openTaskStore(path: string) {
         return [];
       }
       const parent = routed(row);
+      const terminalStatus =
+        parent.origin.platform === "delegated" && cancelled
+          ? "cancelled"
+          : status;
       db.prepare(
         "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = 'running'",
-      ).run(status, Date.now(), id);
+      ).run(terminalStatus, Date.now(), id);
+      if (parent.origin.platform === "delegated") {
+        const saved = db
+          .prepare(
+            `UPDATE delegations SET result_json = ?, updated_at = ? WHERE id = ? AND state = 'admitted'
+          AND child_task_id = ? AND source_task_id = ? AND source_agent_id = ? AND target_agent_id = ? AND result_json IS NULL`,
+          )
+          .run(
+            encodeDelegationResult(terminalStatus, outcome),
+            Date.now(),
+            parent.origin.delegationId,
+            parent.id,
+            parent.origin.parentTaskId,
+            parent.origin.sourceAgentId,
+            parent.agentId,
+          );
+        if (saved.changes !== 1)
+          throw new Error("Child result correlation is unavailable");
+      }
       const targets = new Set<string>();
       for (const entry of db
         .prepare(
@@ -431,10 +554,16 @@ export function openTaskStore(path: string) {
         throw error;
       }
     },
+    /** Internal lookup only; receiving services must recheck grants and the saved source origin before exposing results. */
     getDelegation(sourceAgentId: string, id: string): Delegation | undefined {
       const row = db
         .prepare(
-          "SELECT d.*, t.status AS child_status FROM delegations d LEFT JOIN tasks t ON t.id = d.child_task_id WHERE d.source_agent_id = ? AND d.id = ?",
+          `SELECT d.id, d.source_task_id, d.source_agent_id, d.target_agent_id, d.invocation_id, d.brief, d.state, d.child_task_id, d.reason, d.created_at,
+            CASE WHEN length(CAST(d.result_json AS BLOB)) <= ${DELEGATION_LIMITS.resultBytes} THEN d.result_json ELSE NULL END AS result_json,
+            t.status AS child_status FROM delegations d LEFT JOIN tasks t ON d.state = 'admitted' AND t.id = d.child_task_id
+            AND t.platform = 'delegated' AND t.delegation_id = d.id AND t.parent_task_id = d.source_task_id
+            AND t.agent_id = d.target_agent_id AND t.source_agent_id = d.source_agent_id
+            WHERE d.source_agent_id = ? AND d.id = ?`,
         )
         .get(sourceAgentId, id);
       return row ? readDelegation(row) : undefined;
@@ -670,9 +799,10 @@ export function openTaskStore(path: string) {
     finish(
       id: string,
       status: "completed" | "failed" | "interrupted" | "cancelled",
+      outcome?: TaskOutcome,
     ) {
       // Unconfigured callers cannot release a pending handoff.
-      finishWithDelegations(id, status, () => false);
+      finishWithDelegations(id, status, () => false, false, outcome);
     },
     /** A task left running by a stopped server cannot be proven finished. */
     markRunningInterrupted() {
@@ -680,6 +810,14 @@ export function openTaskStore(path: string) {
       try {
         db.prepare(
           "UPDATE tasks SET status = 'interrupted', updated_at = ? WHERE status = 'running'",
+        ).run(Date.now());
+        db.prepare(
+          `UPDATE delegations SET result_json = '{"ok":false,"kind":"interrupted"}', updated_at = ?
+          WHERE state = 'admitted' AND result_json IS NULL AND child_task_id IN (
+            SELECT id FROM tasks WHERE status = 'interrupted' AND platform = 'delegated'
+            AND delegation_id = delegations.id AND parent_task_id = delegations.source_task_id
+            AND source_agent_id = delegations.source_agent_id AND agent_id = delegations.target_agent_id
+          )`,
         ).run(Date.now());
         db.prepare(
           "UPDATE delegations SET state = 'discarded', reason = 'parent_interrupted', updated_at = ? WHERE state = 'pending' AND source_task_id IN (SELECT id FROM tasks WHERE status IN ('completed', 'failed', 'cancelled', 'interrupted'))",
@@ -752,6 +890,7 @@ interface QueueConfig<T extends { id: string; prompt: string }> {
     task: T,
     status: Parameters<TaskStore["finish"]>[1],
     signal: AbortSignal,
+    outcome: TaskOutcome,
   ) => void;
   conversation(task: T): string;
   execute: (
@@ -839,13 +978,23 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
           status: finalStatus,
           ...(outcome.ok ? {} : { reason: outcome.kind }),
         });
+        let finalized = true;
         try {
           if (config.finalize)
-            config.finalize(task, finalStatus, controller.signal);
+            config.finalize(task, finalStatus, controller.signal, outcome);
           else config.finish(task.id, finalStatus);
         } catch {
-          /* The store may be closed during shutdown. */
+          finalized = false;
+          /* The store may be closed during shutdown; uncertain work is never replayed. */
         }
+        // A child outcome must be committed before it can be published to its requester.
+        if (
+          !finalized &&
+          "origin" in task &&
+          (task.origin as { platform?: unknown } | undefined)?.platform ===
+            "delegated"
+        )
+          continue;
         try {
           await config.deliver(task, outcome);
         } catch {
@@ -946,6 +1095,19 @@ export function createRoutedTaskQueue(
 ) {
   const queue = createAgentQueue({
     ...config,
+    execute: async (task, report, signal) => {
+      const output = await config.execute(task, report, signal);
+      if (task.origin.platform === "delegated" && signal.aborted)
+        throw new HostTaskError("cancelled");
+      return output;
+    },
+    finalize:
+      config.finalize ??
+      ((task, status, _signal, outcome) => {
+        if (task.origin.platform === "delegated")
+          config.store.finish(task.id, status, outcome);
+        else config.store.finish(task.id, status);
+      }),
     claim: () => config.store.claimNextTask(config.agentId, config.ready),
     finish: config.store.finish,
     conversation: (task: RoutedTask) => taskOriginKey(task.origin),

@@ -1,6 +1,12 @@
 import { expect, it, vi } from "vitest";
-import { createRoutedTaskQueue, openTaskStore } from "./task-queue.js";
+import {
+  createRoutedTaskQueue,
+  openTaskStore,
+  type RoutedTask,
+  type TaskOutcome,
+} from "./task-queue.js";
 import { HostTaskError } from "./host-tasks.js";
+import { randomUUID } from "node:crypto";
 
 it("executes both platforms through one ordered context and routes progress and results", async () => {
   const store = openTaskStore(":memory:");
@@ -90,6 +96,164 @@ it("requires the originating platform, bot, owner, and channel when cancelling",
     expect(store.getTask(first.id)?.status).toBe("cancelled");
     expect(delivered).toEqual(["cancelled", "done"]);
   } finally {
+    queue.close();
+    store.close();
+  }
+});
+
+function childFixture() {
+  const store = openTaskStore(":memory:");
+  const parent = store.enqueue({
+    agentId: "a",
+    botId: 1,
+    chatId: 42,
+    prompt: "parent",
+  });
+  store.claimNextTask("a");
+  const handoff = store.stageDelegation(
+    {
+      parentTaskId: parent.id,
+      targetAgentId: "b",
+      invocationId: randomUUID(),
+      brief: "brief",
+    },
+    () => true,
+  );
+  store.finishWithDelegations(parent.id, "completed", () => true);
+  return { store, handoff };
+}
+
+it("saves a child result before delivering its outcome", async () => {
+  const f = childFixture();
+  const deliver = vi.fn(async () => {
+    expect(f.store.getDelegation("a", f.handoff.id)).toMatchObject({
+      childStatus: "completed",
+      result: { ok: true, output: "child result", truncated: false },
+    });
+  });
+  const queue = createRoutedTaskQueue({
+    agentId: "b",
+    store: f.store,
+    execute: async () => "child result",
+    deliver,
+  });
+  try {
+    queue.resume();
+    await queue.idle();
+    expect(deliver).toHaveBeenCalledOnce();
+  } finally {
+    queue.close();
+    f.store.close();
+  }
+});
+
+it("does not publish a late child success after accepted cancellation", async () => {
+  const f = childFixture();
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const deliver = vi.fn<
+    (task: RoutedTask, outcome: TaskOutcome) => Promise<void>
+  >(async () => {});
+  const queue = createRoutedTaskQueue({
+    agentId: "b",
+    store: f.store,
+    execute: async () => {
+      await hold;
+      return "late private output";
+    },
+    deliver,
+  });
+  try {
+    queue.resume();
+    const child = f.store.getTask(
+      f.store.getDelegation("a", f.handoff.id)!.childTaskId!,
+    )!;
+    await vi.waitFor(() => expect(queue.isRunning(child.origin)).toBe(true));
+    expect(queue.stop(child.origin)).toBe(true);
+    release();
+    await queue.idle();
+    expect(deliver.mock.calls[0]?.[1]).toEqual({
+      ok: false,
+      kind: "cancelled",
+    });
+    expect(f.store.getDelegation("a", f.handoff.id)).toMatchObject({
+      childStatus: "cancelled",
+      result: { ok: false, kind: "cancelled" },
+    });
+  } finally {
+    release();
+    queue.close();
+    f.store.close();
+  }
+});
+
+it("does not deliver a child outcome when its durable finalization fails", async () => {
+  const f = childFixture();
+  const fail = vi.spyOn(f.store, "finish").mockImplementationOnce(() => {
+    throw new Error("storage unavailable");
+  });
+  const deliver = vi.fn(async () => {});
+  const queue = createRoutedTaskQueue({
+    agentId: "b",
+    store: f.store,
+    execute: async () => "must not be published",
+    deliver,
+  });
+  try {
+    queue.resume();
+    await queue.idle();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(f.store.getDelegation("a", f.handoff.id)).toMatchObject({
+      childStatus: "running",
+    });
+    expect(f.store.getDelegation("a", f.handoff.id)?.result).toBeUndefined();
+    fail.mockRestore();
+    f.store.markRunningInterrupted();
+    expect(f.store.getDelegation("a", f.handoff.id)?.result).toEqual({
+      ok: false,
+      kind: "interrupted",
+    });
+  } finally {
+    fail.mockRestore();
+    queue.close();
+    f.store.close();
+  }
+});
+
+it("preserves ordinary chat completion semantics after a Host cancellation race", async () => {
+  const store = openTaskStore(":memory:");
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const deliver = vi.fn<
+    (task: RoutedTask, outcome: TaskOutcome) => Promise<void>
+  >(async () => {});
+  const queue = createRoutedTaskQueue({
+    agentId: "a",
+    store,
+    execute: async () => {
+      await hold;
+      return "already completed";
+    },
+    deliver,
+  });
+  const origin = { platform: "telegram" as const, botId: 1, chatId: 42 };
+  try {
+    const task = queue.submitTelegram(1, 42, "owner task");
+    await vi.waitFor(() => expect(queue.isRunning(origin)).toBe(true));
+    expect(queue.stop(origin)).toBe(true);
+    release();
+    await queue.idle();
+    expect(store.getTask(task.id)?.status).toBe("completed");
+    expect(deliver.mock.calls[0]?.[1]).toEqual({
+      ok: true,
+      output: "already completed",
+    });
+  } finally {
+    release();
     queue.close();
     store.close();
   }

@@ -199,12 +199,13 @@ export function createBotTasks(config: {
     store: config.store,
     ...(config.delegation
       ? {
-          finalize(task, status, signal) {
+          finalize(task, status, signal, outcome) {
             const targets = config.store.finishWithDelegations(
               task.id,
               status,
               config.delegation!.canHandoff,
               signal.aborted,
+              outcome,
             );
             if (targets.length)
               void Promise.resolve()
