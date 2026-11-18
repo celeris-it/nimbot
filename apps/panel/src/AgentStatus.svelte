@@ -43,6 +43,7 @@
 <h1 tabindex="-1">{agent.name}</h1>
 <a class="btn" href={`${base}/providers`}>Configure AI providers</a>
 <a class="btn" href={`${base}/memory`}>Review memory</a>
+<a class="btn" href={`${base}/approvals`}>Approvals</a>
 <a class="btn" href={`${base}/schedules`}>{scheduleText.link}</a>
 {#if agent.capabilities.edit}<a class="btn" href={`${base}/settings`}
     >Edit agent</a

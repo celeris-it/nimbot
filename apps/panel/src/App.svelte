@@ -17,6 +17,9 @@
   import AgentStatus from "./AgentStatus.svelte";
   import ProviderSettings from "./ProviderSettings.svelte";
   import Memory from "./Memory.svelte";
+  import Approvals from "./Approvals.svelte";
+  import type { ApprovalRequest } from "../../server/src/approval-store.js";
+  import type { ApprovalRule } from "../../server/src/approval-rules.js";
   import type { MemoryEntry } from "../../server/src/host-memories.js";
   import Schedules from "./Schedules.svelte";
   import { scheduleText } from "./labels.js";
@@ -29,6 +32,11 @@
   let schedules = $state<ScheduleList>();
   let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
   let memoryPage = $state(1);
+  let approvalHistory = $state<{
+    requests: ApprovalRequest[];
+    hasMore: boolean;
+  }>();
+  let approvalRules = $state<{ rules: ApprovalRule[]; hasMore: boolean }>();
   let loaded = $state(false);
   let contentAvailable = $state(false);
   let missing = $state(false);
@@ -42,7 +50,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|schedules|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|approvals|schedules|token|delete|container\/stop)$/,
     ),
   );
   let title = $derived(
@@ -52,21 +60,23 @@
         ? "Agents"
         : route?.[2] === "schedules"
           ? scheduleText.pageTitle
-          : route?.[2] === "memory"
-            ? "Memory"
-            : route?.[2] === "providers"
-              ? "AI providers"
-              : path === "/agents/new"
-                ? "Create agent"
-                : route?.[2] === "settings"
-                  ? "Edit agent"
-                  : route?.[2] === "token"
-                    ? "Bot token"
-                    : route?.[2] === "delete"
-                      ? "Delete agent"
-                      : route?.[2] === "container/stop"
-                        ? "Stop agent"
-                        : "Agent setup",
+          : route?.[2] === "approvals"
+            ? "Approvals"
+            : route?.[2] === "memory"
+              ? "Memory"
+              : route?.[2] === "providers"
+                ? "AI providers"
+                : path === "/agents/new"
+                  ? "Create agent"
+                  : route?.[2] === "settings"
+                    ? "Edit agent"
+                    : route?.[2] === "token"
+                      ? "Bot token"
+                      : route?.[2] === "delete"
+                        ? "Delete agent"
+                        : route?.[2] === "container/stop"
+                          ? "Stop agent"
+                          : "Agent setup",
   );
 
   async function focusHeading() {
@@ -133,6 +143,28 @@
             )
               throw cause;
             providerSettings = undefined;
+          }
+        }
+        if (route[2] === "approvals") {
+          try {
+            [approvalHistory, approvalRules] = await Promise.all([
+              request<typeof approvalHistory>(
+                `/api/agents/${route[1]}/approvals`,
+                { signal: current.signal },
+              ),
+              request<typeof approvalRules>(
+                `/api/agents/${route[1]}/approvals/rules`,
+                { signal: current.signal },
+              ),
+            ]);
+          } catch (cause) {
+            if (
+              current.signal.aborted ||
+              (cause instanceof ApiError && cause.status === 401)
+            )
+              throw cause;
+            approvalHistory = undefined;
+            approvalRules = undefined;
           }
         }
         if (route[2] === "memory") {
@@ -353,6 +385,33 @@
               : kind === "cancel"
                 ? "Login status updated."
                 : "Device login started. Complete authorization with OpenAI.";
+        void load();
+      },
+    );
+  }
+  async function createApprovalRule(
+    fields: Record<string, string>,
+  ): Promise<boolean> {
+    if (!agent) return false;
+    let saved = false;
+    await mutate(
+      `/api/agents/${encodeURIComponent(agent.id)}/approvals/rules`,
+      fields,
+      () => {
+        saved = true;
+        notice = "Rule added.";
+        void load();
+      },
+    );
+    return saved;
+  }
+  async function revokeApprovalRule(id: string) {
+    if (!agent) return;
+    await mutate(
+      `/api/agents/${encodeURIComponent(agent.id)}/approvals/rules/${encodeURIComponent(id)}/revoke`,
+      {},
+      () => {
+        notice = "Rule revoked.";
         void load();
       },
     );
@@ -583,6 +642,15 @@
           save={saveSchedule}
           action={scheduleAction}
           refresh={() => load()}
+        />{/key}
+    {:else if route[2] === "approvals"}
+      {#key agent.id}<Approvals
+          {agent}
+          history={approvalHistory}
+          rules={approvalRules}
+          {busy}
+          createRule={createApprovalRule}
+          revokeRule={revokeApprovalRule}
         />{/key}
     {:else if route[2] === "memory"}
       {#key agent.id}<Memory

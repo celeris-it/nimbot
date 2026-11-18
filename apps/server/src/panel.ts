@@ -67,6 +67,13 @@ export interface PanelDeps {
   providers?: ReturnType<
     typeof import("./host-providers.js").createHostProviders
   >;
+  approvals?: {
+    rules: Pick<
+      import("./approval-rules.js").ApprovalRules,
+      "create" | "revoke" | "list"
+    >;
+    history: Pick<import("./approval-store.js").ApprovalStore, "listByAgent">;
+  };
   memoryAccess?: {
     get(id: string): boolean;
     set(id: string, enabled: boolean): boolean;
@@ -595,6 +602,79 @@ export function createPanel(
     await deps.providers!.remove(c.req.param("id"), provider);
     return c.json({ removed: true });
   });
+  app.use("/api/agents/:id/approvals", async (c, next) => {
+    if (!getAgentSetup?.(c.req.param("id")!))
+      return c.json({ error: "Agent not found." }, 404);
+    if (!deps.approvals)
+      return c.json({ error: "Approvals unavailable." }, 503);
+    await next();
+  });
+  app.use("/api/agents/:id/approvals/*", async (c, next) => {
+    if (!getAgentSetup?.(c.req.param("id")!))
+      return c.json({ error: "Agent not found." }, 404);
+    if (!deps.approvals)
+      return c.json({ error: "Approvals unavailable." }, 503);
+    await next();
+  });
+  const pageOf = (value: string | undefined) => {
+    const page = Number(value ?? "1");
+    return Number.isSafeInteger(page) && page >= 1 && page <= 1000 ? page : 1;
+  };
+  app.get("/api/agents/:id/approvals", (c) =>
+    c.json(
+      deps.approvals!.history.listByAgent(
+        c.req.param("id"),
+        pageOf(c.req.query("page")),
+      ),
+    ),
+  );
+  app.get("/api/agents/:id/approvals/rules", (c) =>
+    c.json(
+      deps.approvals!.rules.list(
+        c.req.param("id"),
+        pageOf(c.req.query("page")),
+      ),
+    ),
+  );
+  app.post("/api/agents/:id/approvals/rules", async (c) => {
+    const body = await c.req.parseBody({ all: true });
+    const days = body.ttlDays === "" ? undefined : Number(body.ttlDays);
+    if (
+      typeof body.actionType !== "string" ||
+      typeof body.target !== "string" ||
+      !["ask", "deny", "allow"].includes(String(body.effect)) ||
+      (days !== undefined &&
+        (!Number.isInteger(days) || days < 1 || days > 365))
+    )
+      return c.json({ error: "Invalid rule." }, 400);
+    try {
+      return c.json(
+        deps.approvals!.rules.create({
+          agentId: c.req.param("id"),
+          actionType: body.actionType.trim(),
+          target: body.target.trim(),
+          effect: body.effect as "ask" | "deny" | "allow",
+          ...(days === undefined ? {} : { ttlMs: days * 86_400_000 }),
+        }),
+        201,
+      );
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error && /read-only|Too many/.test(error.message)
+              ? error.message
+              : "Invalid rule.",
+        },
+        400,
+      );
+    }
+  });
+  app.post("/api/agents/:id/approvals/rules/:ruleId/revoke", (c) =>
+    deps.approvals!.rules.revoke(c.req.param("id"), c.req.param("ruleId"))
+      ? c.json({ revoked: true })
+      : c.json({ error: "Rule not found." }, 404),
+  );
   app.post("/api/agents/:id/memory-access", async (c) => {
     const id = c.req.param("id");
     if (!getAgentSetup?.(id)) return c.json({ error: "Agent not found." }, 404);
@@ -1041,6 +1121,7 @@ export function createPanel(
     "setup",
     "providers",
     "memory",
+    "approvals",
     "schedules",
     "settings",
     "token",
@@ -1053,6 +1134,7 @@ export function createPanel(
         !getAgentSetup?.(id) ||
         (suffix === "schedules" && !deps.schedules) ||
         (suffix === "memory" && !deps.memories) ||
+        (suffix === "approvals" && !deps.approvals) ||
         (suffix === "settings" && !agentSettings?.get(id)) ||
         (suffix === "token" &&
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||

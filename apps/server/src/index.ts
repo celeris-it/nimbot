@@ -3,6 +3,8 @@ import { createHostTasks, createHostApprovals } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 import { createHostProviders } from "./host-providers.js";
 import { createHostMemories } from "./host-memories.js";
+import { openApprovalStore } from "./approval-store.js";
+import { openApprovalRules } from "./approval-rules.js";
 import { memoryToolPolicy } from "./memory-operations.js";
 import type { DiscordQueuedTask } from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
@@ -97,6 +99,8 @@ async function main(): Promise<void> {
   let statePath;
   let taskStore;
   let scheduleStore;
+  let approvalStore;
+  let approvalRules;
   let notificationStore;
   let discordInbox!: ReturnType<typeof openDiscordInbox>;
   let registry!: ReturnType<typeof openAgentRegistry>;
@@ -122,9 +126,14 @@ async function main(): Promise<void> {
     notificationStore = openNotificationStore(statePath);
     taskStore = openTaskStore(statePath);
     scheduleStore = openScheduleStore(statePath);
+    approvalStore = openApprovalStore(statePath);
+    // No operation is verified read-only yet, so persistent allow rules are unavailable.
+    approvalRules = openApprovalRules(statePath, () => false);
     // A task left running by the previous process cannot be proven finished.
     taskStore.markRunningInterrupted();
   } catch {
+    approvalRules?.close();
+    approvalStore?.close();
     scheduleStore?.close();
     taskStore?.close();
     discordInbox?.close();
@@ -137,6 +146,8 @@ async function main(): Promise<void> {
     return;
   }
   process.once("exit", () => {
+    approvalRules.close();
+    approvalStore.close();
     scheduleStore.close();
     discordInbox.close();
     notificationStore.close();
@@ -319,6 +330,7 @@ async function main(): Promise<void> {
     providers: hostCredentials
       ? createHostProviders((id) => hostCredentials!.read(id))
       : undefined,
+    approvals: { rules: approvalRules, history: approvalStore },
     memoryAccess: {
       get: (id) => registry.getMemoryEnabled(id),
       set: (id, enabled) => registry.setMemoryEnabled(id, enabled),
