@@ -3,6 +3,7 @@ import { createHostTasks, createHostApprovals } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 import { createHostProviders } from "./host-providers.js";
 import { createHostMemories } from "./host-memories.js";
+import { memoryToolPolicy } from "./memory-operations.js";
 import type { DiscordQueuedTask } from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
@@ -175,6 +176,8 @@ async function main(): Promise<void> {
       agentId: id,
       store: taskStore,
       ownerId: () => registry.get(id)?.ownerId ?? 0,
+      // Only the administrator-enabled memory tools; nothing else is granted.
+      toolPolicy: memoryToolPolicy(id, () => registry.getMemoryEnabled(id)),
       run: withAgentInstructions(
         createHostTasks(host, fetch, undefined, taskWaitMs(taskTimeoutSeconds)),
         () => registry.get(id)?.instructions ?? "",
@@ -316,6 +319,10 @@ async function main(): Promise<void> {
     providers: hostCredentials
       ? createHostProviders((id) => hostCredentials!.read(id))
       : undefined,
+    memoryAccess: {
+      get: (id) => registry.getMemoryEnabled(id),
+      set: (id, enabled) => registry.setMemoryEnabled(id, enabled),
+    },
     memories: hostCredentials
       ? createHostMemories((id) => hostCredentials!.read(id))
       : undefined,

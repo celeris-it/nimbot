@@ -228,4 +228,12 @@ describe("memory store", () => {
     for (const text of ['"', "* OR 1", "NEAR(", "a\u0000b", "x".repeat(10_000)])
       expect(() => store.search(text)).not.toThrow();
   });
+
+  it("keeps each agent's notes private to its own store file", () => {
+    const a = make().store;
+    const b = make().store;
+    a.create({ title: "Secret", content: "only for agent a" }, null);
+    expect(b.search("secret")).toEqual([]);
+    expect(b.list().memories).toEqual([]);
+  });
 });

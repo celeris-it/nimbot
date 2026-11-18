@@ -7,7 +7,11 @@
     busy,
     remove,
     go,
+    enabled,
+    setEnabled,
   }: {
+    enabled: boolean | undefined;
+    setEnabled: (enabled: boolean) => Promise<void>;
     agent: { id: string; name: string };
     memories: { memories: MemoryEntry[]; hasMore: boolean } | undefined;
     page: number;
@@ -25,6 +29,15 @@
   search entry, but earlier chat transcripts and backups may still contain
   copies.
 </p>
+{#if enabled !== undefined}
+  <p>
+    Memory tools are <strong>{enabled ? "on" : "off"}</strong> for chat tasks of this
+    agent. Scheduled and webhook tasks never get them.
+  </p>
+  <button class="btn" disabled={busy} onclick={() => setEnabled(!enabled)}
+    >{enabled ? "Turn memory off" : "Turn memory on"}</button
+  >
+{/if}
 {#if !memories}
   <p role="status">
     Memory unavailable. Start the agent and refresh to try again.

@@ -44,6 +44,8 @@ export interface AgentDetail extends AgentSummary {
     connection: { botId: string; botUsername: string; ownerId: string } | null;
   };
   settings?: { name: string; instructions: string };
+  /** Present when the memory tools can be switched for this agent. */
+  memoryEnabled?: boolean;
   containerState?: "running" | "stopped" | "missing" | "unavailable";
   hostState?: "ready" | "busy" | "unavailable";
   stopObservation?: {

@@ -85,6 +85,10 @@ export function openAgentRegistry(path: string) {
         owner_id TEXT NOT NULL,
         credential_ref TEXT NOT NULL UNIQUE
       );
+      CREATE TABLE IF NOT EXISTS agent_memory_access (
+        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+        enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
+      );
       CREATE TABLE IF NOT EXISTS container_operations (
         agent_id TEXT PRIMARY KEY REFERENCES agents(id),
         action TEXT NOT NULL CHECK(action IN ('start', 'stop')),
@@ -289,6 +293,28 @@ export function openAgentRegistry(path: string) {
         volumeRef: string | null;
         networkRef: string | null;
       }[];
+    },
+    /** Opt-in per agent; off unless the administrator enabled it. */
+    getMemoryEnabled(id: string): boolean {
+      return (
+        db
+          .prepare(
+            "SELECT enabled FROM agent_memory_access WHERE agent_id = ? AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND deleted_at IS NULL)",
+          )
+          .get(id, id)?.enabled === 1
+      );
+    },
+    setMemoryEnabled(id: string, enabled: boolean): boolean {
+      if (
+        !db
+          .prepare("SELECT id FROM agents WHERE id = ? AND deleted_at IS NULL")
+          .get(id)
+      )
+        return false;
+      db.prepare(
+        "INSERT INTO agent_memory_access (agent_id, enabled) VALUES (?, ?) ON CONFLICT(agent_id) DO UPDATE SET enabled = excluded.enabled",
+      ).run(id, enabled ? 1 : 0);
+      return true;
     },
     getHostCredentialRef(id: string): string | undefined {
       return db
@@ -676,6 +702,9 @@ export function openAgentRegistry(path: string) {
           )
           .get(id);
         db.prepare("DELETE FROM chat_bindings WHERE agent_id = ?").run(id);
+        db.prepare("DELETE FROM agent_memory_access WHERE agent_id = ?").run(
+          id,
+        );
         db.prepare("DELETE FROM agent_host_credentials WHERE agent_id = ?").run(
           id,
         );
