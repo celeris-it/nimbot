@@ -1,3 +1,6 @@
+import { createApprovalGate, type GateAction } from "./approval-gate.js";
+import type { ApprovalRules } from "./approval-rules.js";
+import type { ApprovalStore } from "./approval-store.js";
 import {
   createDiscordApprovals,
   type DiscordApprovalInteraction,
@@ -35,6 +38,10 @@ export function createBotTasks(config: {
   /** Server-registered operations the Host may relay; none by default. */
   toolHandlers?: readonly ServerToolHandler[];
   toolLifetimeMs?: number;
+  /** Structured approvals for service-validated actions; omit to disable the gate. */
+  approvals?: { store: ApprovalStore; rules: ApprovalRules };
+  /** Original conversation for a delegated child, from its saved parent link. */
+  approvalRoute?: (task: RoutedTask) => RoutedTask | undefined;
   run: (
     prompt: string,
     onProgress?: (message: string) => void,
@@ -86,6 +93,42 @@ export function createBotTasks(config: {
     handlers: config.toolHandlers ?? [],
   });
   const book = createApprovalBook();
+  const gate = config.approvals
+    ? createApprovalGate({
+        store: config.approvals.store,
+        rules: config.approvals.rules,
+        ...(config.approvalRoute ? { route: config.approvalRoute } : {}),
+        isActive: (task) =>
+          admit(task) &&
+          config.store.getTask(task.id)?.status === "running" &&
+          queue.isRunning(task.origin),
+        canReach: (destination) => admit(destination),
+        deliver: async (destination, text, keys) => {
+          if (destination.origin.platform === "discord") {
+            if (!config.discord) throw new Error("Discord is unavailable");
+            return config.discord.sendApproval(
+              destination as DiscordQueuedTask,
+              text,
+              [
+                {
+                  label: "Approve",
+                  customId: `ap:${keys.approve}:y`,
+                  allow: true,
+                },
+                { label: "Deny", customId: `ap:${keys.deny}:n`, allow: false },
+              ],
+            );
+          }
+          if (!bot) throw new Error("Bot is not attached");
+          await bot.api.sendMessage(destination.origin.chatId, text, {
+            reply_markup: new InlineKeyboard()
+              .text("Approve", `ap:${keys.approve}:y`)
+              .text("Deny", `ap:${keys.deny}:n`),
+          });
+          return undefined;
+        },
+      })
+    : undefined;
   /** Asks the owner, in the chat that sent the task; any failure means deny. */
   async function askOwner(
     task: { botId: number; chatId: number },
@@ -216,6 +259,16 @@ export function createBotTasks(config: {
   return {
     /** Internal tool-dispatch guard; returns the persisted task only when authorized. */
     authorizeToolCall: capabilities.verify,
+    /** Runs a structured action only after policy and, when needed, the owner approve it. */
+    guardAction: <T>(
+      task: RoutedTask,
+      action: GateAction,
+      run: (signal: AbortSignal) => Promise<T>,
+      signal: AbortSignal,
+    ) => {
+      if (!gate) throw new Error("Approvals are unavailable");
+      return gate.guard(task, action, run, signal);
+    },
     submit: queue.submitTelegram,
     submitDiscord: queue.submitDiscord,
     discordControl: {
@@ -231,6 +284,17 @@ export function createBotTasks(config: {
         ))
       )
         return "expired" as const;
+      const key = /^ap:([A-Za-z0-9_-]{12}):(y|n)$/.exec(interaction.customId);
+      if (key && gate) {
+        const result = gate.answer(`${key[1]}`, {
+          platform: "discord",
+          botId: interaction.botId,
+          ownerId: interaction.ownerId,
+          channelId: interaction.channelId,
+          messageId: interaction.messageId,
+        });
+        if (result !== "unknown") return result;
+      }
       return discordApprovals.answer(config.agentId, interaction);
     },
     control: {
@@ -243,6 +307,7 @@ export function createBotTasks(config: {
     idle: queue.idle,
     close() {
       capabilities.close();
+      gate?.close();
       discordApprovals.close();
       queue.close();
     },
@@ -258,6 +323,12 @@ export function createBotTasks(config: {
           !config.access.canExecute(who.botId, config.ownerId(), who.chatId)
         )
           return "expired";
+        const structured = gate?.answer(key, {
+          platform: "telegram",
+          botId: who.botId,
+          chatId: who.chatId,
+        });
+        if (structured && structured !== "unknown") return structured;
         const entry = book.take(key, who);
         if (!entry || !config.decide) return "expired";
         return (await config.decide(entry.hostTaskId, entry.approvalId, allow))

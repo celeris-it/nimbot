@@ -188,6 +188,7 @@ async function main(): Promise<void> {
       store: taskStore,
       ownerId: () => registry.get(id)?.ownerId ?? 0,
       // Only the administrator-enabled memory tools; nothing else is granted.
+      approvals: { store: approvalStore, rules: approvalRules },
       toolPolicy: memoryToolPolicy(id, () => registry.getMemoryEnabled(id)),
       run: withAgentInstructions(
         createHostTasks(host, fetch, undefined, taskWaitMs(taskTimeoutSeconds)),
