@@ -5,6 +5,13 @@ export interface EngineTaskContext {
   hostTaskId: string;
   identity?: TaskIdentity;
   tools?: TaskToolAccess;
+  /** Host outbox transport; the receiving Server must enforce its own authorization. */
+  requestTool?: (
+    operation: string,
+    args: Record<string, unknown>,
+    invocationId: string,
+    signal: AbortSignal,
+  ) => Promise<unknown>;
 }
 
 /** Engine boundary: no Telegram or HTTP concerns. */

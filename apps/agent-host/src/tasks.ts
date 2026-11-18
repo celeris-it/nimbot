@@ -8,6 +8,7 @@ import {
   type TaskIdentity,
   type TaskToolAccess,
 } from "./task-identity.js";
+import { createToolRequests, type ToolOutcome } from "./tool-requests.js";
 
 const MAX_PROGRESS_EVENTS = 100;
 
@@ -29,6 +30,7 @@ export function createTaskRunner(
   let running: Promise<void> = Promise.resolve();
   let currentId: string | undefined;
   let cancelNow: (() => void) | undefined;
+  let toolRequests: ReturnType<typeof createToolRequests> | undefined;
   function reserve() {
     if (busy || closing) return undefined;
     busy = true;
@@ -73,6 +75,15 @@ export function createTaskRunner(
       let cancelRequested = false;
       let approvalCount = 0;
       let progressWrites: Promise<unknown> = Promise.resolve();
+      const requests = toolAccess
+        ? createToolRequests({
+            store,
+            hostTaskId: id,
+            access: toolAccess,
+            isActive: () => currentId === id && !cancelRequested && !closing,
+          })
+        : undefined;
+      toolRequests = requests;
       const denyPending = (reason: string) => {
         for (const entry of [...approvals.values()])
           if (entry.taskId === id) entry.settle(false, reason);
@@ -123,6 +134,7 @@ export function createTaskRunner(
         cancelNow = () => {
           cancelRequested = true;
           denyPending("task cancelled");
+          void requests?.close();
           reject(new Error("Task cancelled"));
         };
       });
@@ -161,6 +173,7 @@ export function createTaskRunner(
                         ...toolAccess,
                         operations: [...toolAccess.operations],
                       },
+                      requestTool: requests!.request,
                     }
                   : {}),
               },
@@ -174,12 +187,14 @@ export function createTaskRunner(
             }),
           ]);
           denyPending("task ended");
+          await requests?.close();
           await progressWrites;
           const status = closing ? "interrupted" : "completed";
           log.info("task.finished", { taskId: id, status, stopReason: reason });
           await store.update(id, { status, output, stopReason: reason });
         } catch {
           denyPending("task ended");
+          await requests?.close();
           await progressWrites;
           const status = closing
             ? "interrupted"
@@ -192,6 +207,7 @@ export function createTaskRunner(
           if (timer) clearTimeout(timer);
           currentId = undefined;
           cancelNow = undefined;
+          toolRequests = undefined;
           try {
             await engine.stop();
           } finally {
@@ -218,6 +234,23 @@ export function createTaskRunner(
       entry.settle(allow, "by the owner");
       return true;
     },
+    async replyTool(
+      taskId: string,
+      invocationId: string,
+      outcome: ToolOutcome,
+    ): Promise<boolean> {
+      return currentId === taskId
+        ? ((await toolRequests?.reply(invocationId, outcome)) ?? false)
+        : false;
+    },
+    async isToolPending(
+      taskId: string,
+      invocationId: string,
+    ): Promise<boolean> {
+      return currentId === taskId
+        ? ((await toolRequests?.isPending(invocationId)) ?? false)
+        : false;
+    },
     getCurrent: store.getCurrent,
     get: store.get,
     getEvents: store.getEvents,
@@ -227,6 +260,7 @@ export function createTaskRunner(
       for (const entry of [...approvals.values()])
         entry.settle(false, "host stopping");
       await inserting.catch(() => {});
+      await toolRequests?.close();
       await engine.stop();
       await running;
     },

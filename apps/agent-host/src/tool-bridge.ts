@@ -9,7 +9,10 @@ import type { EngineTaskContext } from "./engine.js";
 import { isTaskIdentity, isTaskToolAccess } from "./task-identity.js";
 
 export interface ToolInvocation {
-  context: Required<EngineTaskContext>;
+  context: Required<
+    Pick<EngineTaskContext, "hostTaskId" | "identity" | "tools">
+  > &
+    Pick<EngineTaskContext, "requestTool">;
   invocationId: string;
   signal: AbortSignal;
 }
@@ -55,10 +58,11 @@ export async function createToolBridge(
   const timeout = options.callTimeoutMs ?? 60_000;
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 60_000)
     throw new Error("Invalid tool timeout");
-  const snapshot: Required<EngineTaskContext> = {
+  const snapshot: ToolInvocation["context"] = {
     hostTaskId: context.hostTaskId,
     identity: { ...context.identity },
     tools: { ...context.tools, operations: [...context.tools.operations] },
+    ...(context.requestTool ? { requestTool: context.requestTool } : {}),
   };
   const tools = new Map<string, BridgeTool>();
   for (const definition of definitions) {

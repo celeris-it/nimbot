@@ -7,6 +7,12 @@ import { bodyLimit } from "hono/body-limit";
 import type { TaskRunner } from "./tasks.js";
 import { isTaskIdentity, isTaskToolAccess } from "./task-identity.js";
 import {
+  isInvocationId,
+  isToolOutcome,
+  toolJson,
+  TOOL_RESULT_BYTES,
+} from "./tool-requests.js";
+import {
   EngineAuthError,
   isProviderId,
   isApiKey,
@@ -54,6 +60,44 @@ export function createHostApi(
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );
+  app.use(
+    "/tasks/:id/tool-requests/:invocationId/result",
+    bodyLimit({
+      maxSize: TOOL_RESULT_BYTES,
+      onError: (c) => c.json({ error: "Request too large" }, 413),
+    }),
+  );
+  app.get("/tasks/:id/tool-requests/:invocationId", async (c) => {
+    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
+    if (!isInvocationId(c.req.param("invocationId")))
+      return c.json({ error: "Invalid invocation ID" }, 400);
+    return c.json({
+      pending: await runner.isToolPending(
+        c.req.param("id"),
+        c.req.param("invocationId"),
+      ),
+    });
+  });
+  app.post("/tasks/:id/tool-requests/:invocationId/result", async (c) => {
+    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
+    if (!isInvocationId(c.req.param("invocationId")))
+      return c.json({ error: "Invalid invocation ID" }, 400);
+    const body: unknown = await c.req.json().catch(() => null);
+    if (!isToolOutcome(body))
+      return c.json({ error: "Invalid tool outcome" }, 400);
+    try {
+      toolJson(body, TOOL_RESULT_BYTES);
+    } catch {
+      return c.json({ error: "Invalid or oversized tool outcome" }, 400);
+    }
+    return (await runner.replyTool(
+      c.req.param("id"),
+      c.req.param("invocationId"),
+      body,
+    ))
+      ? c.json({ status: "recorded" })
+      : c.json({ error: "Tool request is not awaiting this outcome" }, 409);
+  });
   app.post("/tasks", async (c) => {
     if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
     let body: unknown;
