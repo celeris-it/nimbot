@@ -196,7 +196,7 @@ async function main(): Promise<void> {
     if (result.status !== "delivered")
       throw new Error("Discord delivery could not be confirmed");
   }
-  const taskServices = createAgentTaskServices(async (id) => {
+  const taskServices = createAgentTaskServices(async (id, { wake }) => {
     if (!hostCredentials || !registry.get(id))
       throw new Error("Agent is unavailable");
     const host = await hostCredentials.read(id);
@@ -231,6 +231,17 @@ async function main(): Promise<void> {
         ],
       },
       toolHandlers: peerTools.handlers,
+      delegation: {
+        canHandoff: (parent, target) =>
+          canReach(parent) &&
+          agentGrants.allows(
+            parent.agentId,
+            target,
+            "delegate",
+            parent.origin.platform,
+          ),
+        wake,
+      },
       run: withAgentInstructions(
         createHostTasks(host, fetch, undefined, taskWaitMs(taskTimeoutSeconds)),
         () => registry.get(id)?.instructions ?? "",
@@ -553,6 +564,9 @@ async function main(): Promise<void> {
   for (const id of registry.listIds()) void registeredDiscord.start(id);
   for (const agent of registry.listResourceReferences())
     registeredBots?.start(agent.id);
+  void taskServices.resumeDelegations(taskStore).catch(() => {
+    log.warn("server.delegation_resume_failed");
+  });
   void scheduler.start();
 }
 

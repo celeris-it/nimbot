@@ -48,6 +48,11 @@ export function createBotTasks(config: {
   approvals?: { store: ApprovalStore; rules: ApprovalRules };
   /** Original conversation for a delegated child, from its saved parent link. */
   approvalRoute?: (task: RoutedTask) => RoutedTask | undefined;
+  /** Server-owned handoff policy. Worker activation happens only after durable finalization. */
+  delegation?: {
+    canHandoff: Parameters<TaskStore["finishWithDelegations"]>[2];
+    wake(targetAgentIds: readonly string[]): Promise<void>;
+  };
   run: (
     prompt: string,
     onProgress?: (message: string) => void,
@@ -192,6 +197,24 @@ export function createBotTasks(config: {
   const queue = createRoutedTaskQueue({
     agentId: config.agentId,
     store: config.store,
+    ...(config.delegation
+      ? {
+          finalize(task, status, signal) {
+            const targets = config.store.finishWithDelegations(
+              task.id,
+              status,
+              config.delegation!.canHandoff,
+              signal.aborted,
+            );
+            if (targets.length)
+              void Promise.resolve()
+                .then(() => config.delegation!.wake(targets))
+                .catch(() => {
+                  /* The queued children remain durable for explicit resume or startup reconciliation. */
+                });
+          },
+        }
+      : {}),
     ready: (task) =>
       task.origin.platform !== "delegated" &&
       (task.origin.platform !== "telegram" || !!bot),

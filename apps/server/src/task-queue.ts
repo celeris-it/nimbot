@@ -276,6 +276,7 @@ export function openTaskStore(path: string) {
     id: string,
     status: "completed" | "failed" | "interrupted" | "cancelled",
     allowed: DelegationPolicy,
+    cancelled = false,
   ): string[] {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -296,6 +297,7 @@ export function openTaskStore(path: string) {
         .all(id)) {
         const target = String(entry.target_agent_id);
         if (
+          cancelled ||
           status !== "completed" ||
           parent.origin.platform === "delegated" ||
           parent.scheduleId !== undefined ||
@@ -304,7 +306,11 @@ export function openTaskStore(path: string) {
           db.prepare(
             "UPDATE delegations SET state = 'discarded', reason = ?, updated_at = ? WHERE id = ? AND state = 'pending'",
           ).run(
-            status !== "completed" ? `parent_${status}` : "access_revoked",
+            cancelled
+              ? "parent_cancelled"
+              : status !== "completed"
+                ? `parent_${status}`
+                : "access_revoked",
             Date.now(),
             String(entry.id),
           );
@@ -432,6 +438,18 @@ export function openTaskStore(path: string) {
         )
         .get(sourceAgentId, id);
       return row ? readDelegation(row) : undefined;
+    },
+    /** Recovery after commit but before a target worker was kicked. Never resumes running work. */
+    pendingDelegationTargets(): string[] {
+      return db
+        .prepare(
+          `SELECT DISTINCT t.agent_id FROM delegations d JOIN tasks t ON t.id = d.child_task_id
+        WHERE d.state = 'admitted' AND t.status = 'queued' AND t.platform = 'delegated'
+        AND t.delegation_id = d.id AND t.parent_task_id = d.source_task_id
+        AND t.source_agent_id = d.source_agent_id AND t.agent_id = d.target_agent_id ORDER BY t.agent_id`,
+        )
+        .all()
+        .map((row) => String(row.agent_id));
     },
     /** Rechecks the grant and source origin in the same transaction as parent completion and child admission. */
     finishWithDelegations,
@@ -729,6 +747,12 @@ interface QueueConfig<T extends { id: string; prompt: string }> {
   agentId: string;
   claim(): T | undefined;
   finish: TaskStore["finish"];
+  /** Synchronous durable finalization, with the accepted cancellation signal still available. */
+  finalize?: (
+    task: T,
+    status: Parameters<TaskStore["finish"]>[1],
+    signal: AbortSignal,
+  ) => void;
   conversation(task: T): string;
   execute: (
     task: T,
@@ -816,7 +840,9 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
           ...(outcome.ok ? {} : { reason: outcome.kind }),
         });
         try {
-          config.finish(task.id, finalStatus);
+          if (config.finalize)
+            config.finalize(task, finalStatus, controller.signal);
+          else config.finish(task.id, finalStatus);
         } catch {
           /* The store may be closed during shutdown. */
         }
