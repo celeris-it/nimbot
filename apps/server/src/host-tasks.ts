@@ -27,6 +27,8 @@ export interface HostApproval {
 export interface HostTaskExecution {
   identity: { agentId: string; serverTaskId: string };
   tools?: TaskCapability;
+  /** Server-selected isolation for a delegated turn; never inferred from prompt text. */
+  sessionMode?: "fresh";
   /**
    * Answers one Host-relayed tool request. The signal aborts on `tool_cancel` and
    * when the task ends. Without it, requests are answered "denied".
@@ -163,6 +165,9 @@ export function createHostTasks(
           prompt,
           ...(execution ? { execution: execution.identity } : {}),
           ...(execution?.tools ? { tools: execution.tools } : {}),
+          ...(execution?.sessionMode
+            ? { sessionMode: execution.sessionMode }
+            : {}),
         }),
       );
       if (

@@ -48,6 +48,9 @@ it.skipIf(!image)(
     expect(output).toContain(
       "Verified private memory retrieval in a fresh OpenCode session.",
     );
+    expect(output).toContain(
+      "Verified fresh delegated sessions preserve the owner conversation.",
+    );
   },
   190000,
 );

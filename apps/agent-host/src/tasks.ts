@@ -48,11 +48,14 @@ export function createTaskRunner(
       prompt: string,
       identity?: TaskIdentity,
       tools?: TaskToolAccess,
+      sessionMode?: "fresh",
     ): Promise<string | undefined> {
       if (identity !== undefined && !isTaskIdentity(identity))
         throw new Error("Invalid task identity");
       if (tools !== undefined && (!identity || !isTaskToolAccess(tools)))
         throw new Error("Invalid task tool access");
+      if (sessionMode !== undefined && (sessionMode !== "fresh" || !identity))
+        throw new Error("Invalid session mode");
       // Copy before the first await: caller mutation cannot change the running turn.
       const executionIdentity =
         identity === undefined ? undefined : { ...identity };
@@ -64,7 +67,7 @@ export function createTaskRunner(
       if (!release) return undefined;
       const id = randomUUID();
       try {
-        inserting = store.insert(id, prompt, executionIdentity);
+        inserting = store.insert(id, prompt, executionIdentity, sessionMode);
         await inserting;
       } catch (error) {
         release();
@@ -164,6 +167,7 @@ export function createTaskRunner(
               requestApproval,
               {
                 hostTaskId: id,
+                ...(sessionMode ? { sessionMode } : {}),
                 ...(executionIdentity
                   ? { identity: { ...executionIdentity } }
                   : {}),

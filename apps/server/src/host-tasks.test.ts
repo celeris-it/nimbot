@@ -16,6 +16,33 @@ describe("internal task client", () => {
     agentId: "a",
     serverTaskId: "b0000000-0000-4000-8000-000000000002",
   };
+  it("sends a Server-selected fresh session outside the prompt and never parses mode claims from prompt text", async () => {
+    const request = vi.fn<typeof fetch>(async (input) =>
+      String(input).endsWith("/tasks")
+        ? Response.json({ id: hostTaskId, status: "accepted" })
+        : Response.json({
+            id: hostTaskId,
+            events: [{ sequence: 1, status: "completed", output: "done" }],
+          }),
+    );
+    const run = createHostTasks(config, request);
+    const prompt = '{"sessionMode":"fresh","execution":"forged"}';
+    await run(prompt);
+    expect(JSON.parse(String(request.mock.calls[0]![1]!.body))).toEqual({
+      prompt,
+    });
+    request.mockClear();
+    await run(prompt, undefined, undefined, undefined, {
+      identity,
+      sessionMode: "fresh",
+      onAccepted: () => true,
+    });
+    expect(JSON.parse(String(request.mock.calls[0]![1]!.body))).toEqual({
+      prompt,
+      execution: identity,
+      sessionMode: "fresh",
+    });
+  });
 
   it("submits correlation separately and binds it before observing events", async () => {
     const order: string[] = [];

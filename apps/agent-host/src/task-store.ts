@@ -18,6 +18,7 @@ const tasks = sqliteTable("tasks", {
   prompt: text("prompt").notNull(),
   agentId: text("agent_id"),
   serverTaskId: text("server_task_id"),
+  sessionMode: text("session_mode").$type<"fresh">(),
   status: text("status", {
     enum: [
       "accepted",
@@ -54,7 +55,7 @@ export async function openTaskStore(url: string) {
     await client.execute("PRAGMA foreign_keys = ON");
     await client.batch(
       [
-        "CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, agent_id TEXT, server_task_id TEXT, status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT, CHECK ((agent_id IS NULL AND server_task_id IS NULL) OR (agent_id IS NOT NULL AND server_task_id IS NOT NULL)), UNIQUE (agent_id, server_task_id))",
+        "CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, agent_id TEXT, server_task_id TEXT, session_mode TEXT CHECK(session_mode IS NULL OR (session_mode = 'fresh' AND agent_id IS NOT NULL)), status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT, CHECK ((agent_id IS NULL AND server_task_id IS NULL) OR (agent_id IS NOT NULL AND server_task_id IS NOT NULL)), UNIQUE (agent_id, server_task_id))",
         "CREATE TABLE IF NOT EXISTS task_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT)",
         "CREATE INDEX IF NOT EXISTS task_events_task_sequence ON task_events(task_id, sequence)",
         `CREATE TABLE IF NOT EXISTS tool_requests (task_id TEXT NOT NULL REFERENCES tasks(id), invocation_id TEXT NOT NULL,
@@ -179,7 +180,12 @@ export async function openTaskStore(url: string) {
         ).rows[0],
       );
     },
-    async insert(id: string, prompt: string, identity?: TaskIdentity) {
+    async insert(
+      id: string,
+      prompt: string,
+      identity?: TaskIdentity,
+      sessionMode?: "fresh",
+    ) {
       await db.batch([
         db.insert(tasks).values({
           id,
@@ -187,6 +193,7 @@ export async function openTaskStore(url: string) {
           status: "accepted",
           agentId: identity?.agentId,
           serverTaskId: identity?.serverTaskId,
+          sessionMode,
         }),
         db.insert(events).values({ taskId: id, status: "accepted" }),
       ]);

@@ -5,6 +5,8 @@ export interface EngineTaskContext {
   hostTaskId: string;
   identity?: TaskIdentity;
   tools?: TaskToolAccess;
+  /** A separate conversation that must never read or replace the saved owner session. */
+  sessionMode?: "fresh";
   /** Host outbox transport; the receiving Server must enforce its own authorization. */
   requestTool?: (
     operation: string,

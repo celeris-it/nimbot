@@ -105,6 +105,14 @@ export function createOpenCodeEngine(
         finishTurn = resolve;
       });
       try {
+        if (
+          context?.sessionMode !== undefined &&
+          context.sessionMode !== "fresh"
+        )
+          throw new Error("Invalid session mode");
+        // Capture before bridge startup awaits; a caller cannot change the mode mid-turn.
+        const sessionStore =
+          context?.sessionMode === "fresh" ? undefined : sessions;
         if (context?.tools)
           activeBridge = await createToolBridge(context, tools, {
             signal: controller.signal,
@@ -145,7 +153,7 @@ export function createOpenCodeEngine(
           active = engine;
           try {
             await engine.client.initialize();
-            let session = await sessions?.read();
+            let session = await sessionStore?.read();
             if (session) {
               replaying = true;
               try {
@@ -160,7 +168,7 @@ export function createOpenCodeEngine(
             if (!session) {
               session = await engine.client.newSession(workspace, mcpServers);
               // Losing continuity must not fail the task.
-              await sessions?.write(session).catch(() => undefined);
+              await sessionStore?.write(session).catch(() => undefined);
             }
             return { engine, session };
           } catch (error) {

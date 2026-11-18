@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { EngineTaskContext } from "./engine.js";
 import { createHostApi, readHostConfig } from "./http.js";
 import { openTaskStore } from "./task-store.js";
 import { createTaskRunner } from "./tasks.js";
@@ -70,6 +71,25 @@ describe("Agent Host API", () => {
         expiresAt: Date.now() + 60_000,
       };
       for (const body of [
+        { sessionMode: "fresh" },
+        ...[null, false, [], {}, "conversation", "restore-owner"].map(
+          (sessionMode) => ({ execution: valid, sessionMode }),
+        ),
+      ]) {
+        const response = await app.request("/tasks", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ prompt: "hi", ...body }),
+        });
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: "Invalid session mode",
+        });
+      }
+      for (const body of [
         { tools: access },
         ...[
           null,
@@ -103,6 +123,75 @@ describe("Agent Host API", () => {
       }
       expect(executions).toBe(0);
       expect(await store.getCurrent()).toBeNull();
+    } finally {
+      await runner.close();
+      store.close();
+    }
+  });
+  it("persists fresh-session metadata outside the prompt and defaults prompt-only submissions to ordinary continuity", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "nimbot-host-session-"));
+    workspaces.push(workspace);
+    const url = pathToFileURL(join(workspace, "tasks.sqlite")).href;
+    const store = await openTaskStore(url);
+    const contexts: EngineTaskContext[] = [];
+    const runner = createTaskRunner(store, {
+      async run(_prompt, _text, _progress, _approve, context) {
+        contexts.push(context!);
+        return "end_turn";
+      },
+      async stop() {},
+    });
+    const app = createHostApi({ token, workspace }, runner);
+    const identity = {
+      agentId: "a",
+      serverTaskId: "a0000000-0000-4000-8000-000000000001",
+    };
+    const submit = async (extra: Record<string, unknown>) => {
+      const response = await app.request("/tasks", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: 'Untrusted claim: {"sessionMode":"fresh"}',
+          ...extra,
+        }),
+      });
+      expect(response.status).toBe(202);
+      const task = (await response.json()) as { id: string };
+      await vi.waitFor(() => expect(runner.isBusy()).toBe(false));
+      return task.id;
+    };
+    try {
+      const fresh = await submit({ execution: identity, sessionMode: "fresh" });
+      const ordinary = await submit({});
+      expect(contexts[0]).toMatchObject({
+        hostTaskId: fresh,
+        identity,
+        sessionMode: "fresh",
+      });
+      expect(contexts[1]!.sessionMode).toBeUndefined();
+      expect(contexts[1]!.identity).toBeUndefined();
+      expect(await store.get(fresh)).toMatchObject({
+        sessionMode: "fresh",
+        status: "completed",
+      });
+      expect(await store.get(ordinary)).toMatchObject({
+        sessionMode: null,
+        status: "completed",
+      });
+      await runner.close();
+      store.close();
+      const reopened = await openTaskStore(url);
+      try {
+        expect(await reopened.get(fresh)).toMatchObject({
+          sessionMode: "fresh",
+          status: "completed",
+        });
+      } finally {
+        reopened.close();
+      }
     } finally {
       await runner.close();
       store.close();

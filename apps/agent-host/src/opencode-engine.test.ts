@@ -321,6 +321,44 @@ describe("session continuity", () => {
     expect(replacement).toMatch(/^fresh-/);
   });
 
+  it("isolates fresh turns without reading or replacing the owner session, then resumes its conversation", async () => {
+    const { sessions, log } = await setup({
+      FAKE_KNOWN_SESSION: "owner-session",
+    });
+    await sessions.write("owner-session");
+    const read = vi.spyOn(sessions, "read");
+    const write = vi.spyOn(sessions, "write");
+    const engine = createOpenCodeEngine(dir, sessions, []);
+    const isolated: EngineTaskContext = {
+      hostTaskId: context().hostTaskId,
+      identity: context().identity,
+      sessionMode: "fresh",
+    };
+    expect(await run(engine, isolated)).toMatch(/^answer from fresh-/);
+    expect(await run(engine, isolated)).toMatch(/^answer from fresh-/);
+    expect(read).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(await run(engine)).toBe("answer from owner-session");
+    expect(await log()).toEqual(["new", "new", "load:owner-session"]);
+    expect(write).not.toHaveBeenCalled();
+    expect(await sessions.read()).toBe("owner-session");
+  });
+
+  it("preserves the owner session when a fresh turn is cancelled", async () => {
+    const { sessions, log } = await setup({ FAKE_HOLD_PROMPT: "1" });
+    await sessions.write("owner-session");
+    const engine = createOpenCodeEngine(dir, sessions, []);
+    const running = run(engine, {
+      hostTaskId: context().hostTaskId,
+      identity: context().identity,
+      sessionMode: "fresh",
+    }).catch(() => undefined);
+    await vi.waitFor(async () => expect(await log()).toEqual(["new"]));
+    await engine.stop();
+    await running;
+    expect(await sessions.read()).toBe("owner-session");
+  });
+
   it("ignores a malformed session file and works without a store", async () => {
     const { sessions } = await setup();
     await writeFile(join(dir, "bad.json"), "{nope");

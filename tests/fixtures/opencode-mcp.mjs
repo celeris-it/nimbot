@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 
 const { createToolBridge } =
   await import("/app/apps/agent-host/dist/tool-bridge.js");
-const { createOpenCodeEngine } =
+const { createOpenCodeEngine, createSessionFile } =
   await import("/app/apps/agent-host/dist/opencode-engine.js");
 const { openMemoryStore } =
   await import("/app/apps/agent-host/dist/memory-store.js");
@@ -35,6 +35,7 @@ let mode = "echo";
 let discovered = 0;
 let modelCalls = 0;
 const memoryResults = [];
+const isolationCalls = [];
 const bridges = [];
 const signals = [];
 async function adapter() {
@@ -106,10 +107,11 @@ const server = createServer(async (req, res) => {
     return;
   }
   const memoryMode = mode.startsWith("memory_");
+  const plainMode = mode === "plain" || mode.startsWith("isolation_");
   const tool = message.tools?.find((t) =>
     t.function.name.endsWith(memoryMode ? mode : "echo"),
   );
-  if (mode === "plain")
+  if (plainMode)
     assert.equal(
       tool,
       undefined,
@@ -120,8 +122,8 @@ const server = createServer(async (req, res) => {
     discovered++;
   }
   const last = message.messages.at(-1);
-  const finished = mode === "plain" || last.role === "tool";
-  if (finished && mode !== "plain") {
+  const finished = plainMode || last.role === "tool";
+  if (finished && !plainMode) {
     assert.match(
       JSON.stringify(last),
       memoryMode ? /violet lighthouse/ : /echoed/,
@@ -140,9 +142,26 @@ const server = createServer(async (req, res) => {
       false,
     );
   }
+  if (mode.startsWith("isolation_")) {
+    isolationCalls.push(mode);
+    const history = JSON.stringify(message.messages);
+    if (mode === "isolation_child")
+      assert.doesNotMatch(history, /OWNER_CONVERSATION_SENTINEL/);
+    if (mode === "isolation_resume") {
+      assert.match(history, /OWNER_CONVERSATION_SENTINEL/);
+      assert.doesNotMatch(history, /CHILD_CONVERSATION_SENTINEL/);
+    }
+  }
   res.writeHead(200, { "content-type": "text/event-stream" });
   const delta = finished
-    ? { content: "Fixture complete" }
+    ? {
+        content:
+          mode === "isolation_owner"
+            ? "OWNER_CONVERSATION_SENTINEL"
+            : mode === "isolation_child"
+              ? "CHILD_CONVERSATION_SENTINEL"
+              : "Fixture complete",
+      }
     : {
         tool_calls: [
           {
@@ -333,6 +352,56 @@ try {
   } finally {
     await direct.stop();
   }
+  const ownerSessions = createSessionFile(join(root, "owner-session.json"));
+  let ownerId;
+  for (const phase of ["owner", "child", "resume"]) {
+    mode = `isolation_${phase}`;
+    const engine = createOpenCodeEngine(root, ownerSessions, []);
+    let text = "";
+    try {
+      assert.equal(
+        await engine.run(
+          "Run the session isolation fixture.",
+          (chunk) => {
+            text += chunk;
+          },
+          undefined,
+          undefined,
+          phase === "child"
+            ? {
+                hostTaskId: randomUUID(),
+                identity: { agentId: "fixture", serverTaskId: randomUUID() },
+                sessionMode: "fresh",
+              }
+            : undefined,
+        ),
+        "end_turn",
+      );
+      assert.match(
+        text,
+        phase === "owner"
+          ? /OWNER_CONVERSATION_SENTINEL/
+          : phase === "child"
+            ? /CHILD_CONVERSATION_SENTINEL/
+            : /Fixture complete/,
+      );
+      if (phase === "owner") {
+        ownerId = await ownerSessions.read();
+        assert.ok(ownerId);
+      }
+      assert.equal(await ownerSessions.read(), ownerId);
+    } finally {
+      await engine.stop();
+    }
+  }
+  assert.deepEqual(isolationCalls, [
+    "isolation_owner",
+    "isolation_child",
+    "isolation_resume",
+  ]);
+  console.log(
+    "Verified fresh delegated sessions preserve the owner conversation.",
+  );
   const memoryPath = join(root, "memory.sqlite");
   const memorySessions = [];
   for (const operation of ["memory.create", "memory.search"]) {

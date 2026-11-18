@@ -125,7 +125,10 @@ export function createHostApi(
     const tools = (body as Record<string, unknown>).tools;
     if (tools !== undefined && (!execution || !isTaskToolAccess(tools)))
       return c.json({ error: "Invalid task tool access" }, 400);
-    const id = await runner.submit(prompt, execution, tools);
+    const sessionMode = (body as Record<string, unknown>).sessionMode;
+    if (sessionMode !== undefined && (sessionMode !== "fresh" || !execution))
+      return c.json({ error: "Invalid session mode" }, 400);
+    const id = await runner.submit(prompt, execution, tools, sessionMode);
     return id
       ? c.json({ id, status: "accepted" }, 202)
       : c.json({ error: "Agent is busy" }, 409);
