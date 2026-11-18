@@ -23,6 +23,68 @@ function fakeAgent(handler: (msg: Rpc, send: (m: unknown) => void) => void) {
 }
 
 describe("AcpClient", () => {
+  it("registers HTTP MCP on both new and loaded sessions when supported", async () => {
+    const seen: Rpc[] = [];
+    const { input, output } = fakeAgent((msg, send) => {
+      seen.push(msg);
+      send({
+        id: msg.id,
+        result:
+          msg.method === "initialize"
+            ? {
+                agentCapabilities: {
+                  loadSession: true,
+                  mcpCapabilities: { http: true },
+                },
+              }
+            : { sessionId: "s1" },
+      });
+    });
+    const client = new AcpClient(input, output);
+    const servers = [
+      {
+        type: "http" as const,
+        name: "nimbot",
+        url: "http://127.0.0.1:1234/mcp",
+        headers: [{ name: "Authorization", value: "Bearer per-turn" }],
+      },
+    ];
+    await client.initialize();
+    await client.newSession("/workspace", servers);
+    await client.loadSession("s1", "/workspace", servers);
+    expect(seen.slice(1).map((msg) => msg.params?.mcpServers)).toEqual([
+      servers,
+      servers,
+    ]);
+  });
+
+  it("does not submit a tool-enabled session when HTTP MCP is unsupported", async () => {
+    const seen: Rpc[] = [];
+    const { input, output } = fakeAgent((msg, send) => {
+      seen.push(msg);
+      send({
+        id: msg.id,
+        result: { agentCapabilities: { loadSession: true } },
+      });
+    });
+    const client = new AcpClient(input, output);
+    await client.initialize();
+    const servers = [
+      {
+        type: "http" as const,
+        name: "nimbot",
+        url: "http://127.0.0.1:1234/mcp",
+        headers: [],
+      },
+    ];
+    await expect(client.newSession("/workspace", servers)).rejects.toThrow(
+      "does not support HTTP MCP",
+    );
+    await expect(
+      client.loadSession("saved", "/workspace", servers),
+    ).rejects.toThrow("does not support HTTP MCP");
+    expect(seen).toHaveLength(1);
+  });
   it("runs a session and streams updates", async () => {
     const { input, output } = fakeAgent((msg, send) => {
       if (msg.method === "initialize")

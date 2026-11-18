@@ -22,6 +22,14 @@ export interface PermissionOption {
   kind: string;
 }
 
+/** The bundled adapter uses only HTTP; no model-supplied commands or endpoints. */
+export interface AcpHttpMcpServer {
+  type: "http";
+  name: string;
+  url: string;
+  headers: { name: string; value: string }[];
+}
+
 export interface AcpClientOptions {
   /** Called for every `session/update` notification (message chunks, tool calls, ...). */
   onUpdate?: (sessionId: string, update: SessionUpdate) => void;
@@ -51,6 +59,7 @@ interface RpcMessage {
 export class AcpClient {
   private nextId = 1;
   private supportsLoadSession = false;
+  private supportsHttpMcp = false;
   private closedWith: Error | undefined;
   private readonly pending = new Map<number | string, Pending>();
 
@@ -85,23 +94,43 @@ export class AcpClient {
     this.supportsLoadSession =
       (result as { agentCapabilities?: { loadSession?: boolean } })
         .agentCapabilities?.loadSession === true;
+    this.supportsHttpMcp =
+      (
+        result as {
+          agentCapabilities?: { mcpCapabilities?: { http?: boolean } };
+        }
+      ).agentCapabilities?.mcpCapabilities?.http === true;
     return result;
   }
 
   /** Restore an existing session only when the engine advertises support. */
-  async loadSession(sessionId: string, cwd: string): Promise<void> {
+  async loadSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers: readonly AcpHttpMcpServer[] = [],
+  ): Promise<void> {
     if (!this.supportsLoadSession) {
       throw new Error("The ACP engine does not support loading sessions");
     }
-    await this.request("session/load", { sessionId, cwd, mcpServers: [] });
+    this.checkMcp(mcpServers);
+    await this.request("session/load", { sessionId, cwd, mcpServers });
   }
 
-  async newSession(cwd: string): Promise<string> {
+  async newSession(
+    cwd: string,
+    mcpServers: readonly AcpHttpMcpServer[] = [],
+  ): Promise<string> {
+    this.checkMcp(mcpServers);
     const result = (await this.request("session/new", {
       cwd,
-      mcpServers: [],
+      mcpServers,
     })) as { sessionId: string };
     return result.sessionId;
+  }
+
+  private checkMcp(servers: readonly AcpHttpMcpServer[]) {
+    if (servers.length && !this.supportsHttpMcp)
+      throw new Error("The ACP engine does not support HTTP MCP servers");
   }
 
   /** Sends a text prompt; resolves with the stop reason once the turn ends. */

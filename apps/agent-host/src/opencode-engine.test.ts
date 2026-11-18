@@ -49,6 +49,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, vi } from "vitest";
 import { createOpenCodeEngine, createSessionFile } from "./opencode-engine.js";
+import type { EngineTaskContext } from "./engine.js";
+import type { BridgeTool } from "./tool-bridge.js";
 
 // A fake `opencode acp`: new sessions are s1, s2, ...; loading replays history first.
 const fakeOpenCode = `#!/usr/bin/env node
@@ -72,14 +74,15 @@ lines.on("line", (line) => {
     const n = fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8")) : 0;
     if (n < Number(process.env.FAKE_FAIL_STARTS)) { fs.writeFileSync(file, String(n + 1)); process.exit(1); }
   }
-  if (m.method === "initialize") send({ id: m.id, result: { agentCapabilities: { loadSession: process.env.FAKE_NO_LOAD !== "1" } } });
+  if ((m.method === "session/new" || m.method === "session/load") && process.env.FAKE_MCP_LOG) fs.appendFileSync(process.env.FAKE_MCP_LOG, JSON.stringify(m.params.mcpServers) + "\\n");
+  if (m.method === "initialize") send({ id: m.id, result: { agentCapabilities: { loadSession: process.env.FAKE_NO_LOAD !== "1", mcpCapabilities: { http: process.env.FAKE_NO_MCP !== "1" } } } });
   else if (m.method === "session/new") { fs.appendFileSync(process.env.FAKE_LOG, "new\\n"); send({ id: m.id, result: { sessionId: "fresh-" + process.pid } }); }
   else if (m.method === "session/load") {
     fs.appendFileSync(process.env.FAKE_LOG, "load:" + m.params.sessionId + "\\n");
     if (m.params.sessionId !== known) return send({ id: m.id, error: { code: -32602, message: "unknown session" } });
     chunk(m.params.sessionId, "OLD HISTORY");
     send({ id: m.id, result: null });
-  } else if (m.method === "session/prompt") { chunk(m.params.sessionId, "answer from " + m.params.sessionId); send({ id: m.id, result: { stopReason: "end_turn" } }); }
+  } else if (m.method === "session/prompt" && process.env.FAKE_HOLD_PROMPT !== "1") { chunk(m.params.sessionId, "answer from " + m.params.sessionId); send({ id: m.id, result: { stopReason: "end_turn" } }); }
 });
 `;
 
@@ -105,11 +108,150 @@ describe("session continuity", () => {
         (await readFile(join(dir, "log"), "utf8")).trim().split("\n"),
     };
   }
-  async function run(engine: ReturnType<typeof createOpenCodeEngine>) {
+  async function run(
+    engine: ReturnType<typeof createOpenCodeEngine>,
+    context?: EngineTaskContext,
+  ) {
     let text = "";
-    await engine.run("hi", (chunk) => (text += chunk));
+    await engine.run(
+      "hi",
+      (chunk) => (text += chunk),
+      undefined,
+      undefined,
+      context,
+    );
     return text;
   }
+
+  const context = (): EngineTaskContext => ({
+    hostTaskId: "a0000000-0000-4000-8000-000000000001",
+    identity: {
+      agentId: "a",
+      serverTaskId: "b0000000-0000-4000-8000-000000000002",
+    },
+    tools: {
+      token: "c".repeat(64),
+      operations: ["fixture.echo"],
+      expiresAt: Date.now() + 60_000,
+    },
+  });
+  const tool = (
+    invoke: BridgeTool["invoke"] = async () => ({}),
+  ): BridgeTool => ({
+    operation: "fixture.echo",
+    name: "echo",
+    description: "Fixture",
+    inputSchema: { type: "object" },
+    invoke,
+  });
+  async function registrations() {
+    return (await readFile(join(dir, "mcp-log"), "utf8"))
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          JSON.parse(line) as { url: string; headers: { value: string }[] }[],
+      );
+  }
+
+  it("registers a fresh per-turn adapter on new and restored sessions and closes both endpoints", async () => {
+    const { sessions } = await setup();
+    vi.stubEnv("FAKE_MCP_LOG", join(dir, "mcp-log"));
+    const engine = createOpenCodeEngine(dir, sessions, [], [tool()]);
+    await run(engine, context());
+    vi.stubEnv("FAKE_KNOWN_SESSION", (await sessions.read())!);
+    await run(engine, context());
+    const servers = (await registrations()).flat();
+    expect(servers).toHaveLength(2);
+    expect(servers[0]?.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+    expect(servers[0]?.headers[0]?.value).not.toBe(
+      servers[1]?.headers[0]?.value,
+    );
+    for (const server of servers)
+      await expect(fetch(server.url)).rejects.toThrow();
+    expect(await readFile(join(dir, "mcp-log"), "utf8")).not.toContain(
+      "c".repeat(64),
+    );
+  });
+
+  it("leaves prompt-only sessions without MCP even when handlers are installed", async () => {
+    await setup();
+    vi.stubEnv("FAKE_MCP_LOG", join(dir, "mcp-log"));
+    await run(createOpenCodeEngine(dir, undefined, [], [tool()]));
+    expect(await registrations()).toEqual([[]]);
+  });
+
+  it("fails before prompting for a missing handler, stale context, or unsupported HTTP MCP", async () => {
+    const { log } = await setup();
+    await expect(
+      run(createOpenCodeEngine(dir, undefined, []), context()),
+    ).rejects.toThrow("Task tools unavailable");
+    const stale = context();
+    stale.tools!.expiresAt = 0;
+    await expect(
+      run(createOpenCodeEngine(dir, undefined, [], [tool()]), stale),
+    ).rejects.toThrow("Invalid task tool context");
+    expect(await log()).toEqual([""]);
+    vi.stubEnv("FAKE_NO_MCP", "1");
+    const engine = createOpenCodeEngine(dir, undefined, [], [tool()]);
+    await expect(run(engine, context())).rejects.toThrow(
+      "does not support HTTP MCP",
+    );
+    expect(await log()).toEqual([""]);
+    await run(engine);
+  });
+
+  it("aborts a pending bridge call on stop and frees the engine for the next turn", async () => {
+    await setup({ FAKE_HOLD_PROMPT: "1" });
+    vi.stubEnv("FAKE_MCP_LOG", join(dir, "mcp-log"));
+    let signal: AbortSignal | undefined;
+    const engine = createOpenCodeEngine(
+      dir,
+      undefined,
+      [],
+      [
+        tool(async (_args, invocation) => {
+          signal = invocation.signal;
+          return new Promise(() => {});
+        }),
+      ],
+    );
+    const running = run(engine, context()).catch((error: Error) => error);
+    await vi.waitFor(async () =>
+      expect((await registrations()).flat()).toHaveLength(1),
+    );
+    const server = (await registrations())[0]![0]!;
+    const pending = fetch(server.url, {
+      method: "POST",
+      headers: {
+        Authorization: server.headers[0]!.value,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "echo", arguments: {} },
+      }),
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    await engine.stop();
+    expect(signal?.aborted).toBe(true);
+    expect(await running).toBeInstanceOf(Error);
+    await pending;
+    vi.stubEnv("FAKE_HOLD_PROMPT", "0");
+    expect(await run(engine, context())).toMatch(/^answer/);
+  });
+
+  it("waits for a bridge cancelled during startup before accepting another turn", async () => {
+    const { log } = await setup();
+    const engine = createOpenCodeEngine(dir, undefined, [], [tool()]);
+    const pending = run(engine, context()).catch((error: Error) => error);
+    await engine.stop();
+    expect(await pending).toBeInstanceOf(Error);
+    expect(await log()).toEqual([""]);
+    expect(await run(engine, context())).toMatch(/^answer/);
+  });
 
   it("removes inherited shared credentials from every ACP process", async () => {
     await setup();
