@@ -49,6 +49,7 @@ export function createDelegatedHostApprovals(config: {
       parent.agentId !== saved.origin.sourceAgentId ||
       !delegation ||
       delegation.state !== "admitted" ||
+      delegation.cancellationRequested ||
       delegation.childTaskId !== saved.id ||
       delegation.sourceTaskId !== parent.id ||
       delegation.targetAgentId !== config.agentId

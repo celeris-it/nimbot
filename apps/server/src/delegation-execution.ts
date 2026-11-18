@@ -37,6 +37,7 @@ export function createDelegationExecution(config: {
       source.agentId !== child.origin.sourceAgentId ||
       !handoff ||
       handoff.state !== "admitted" ||
+      handoff.cancellationRequested ||
       handoff.sourceTaskId !== source.id ||
       handoff.childTaskId !== child.id ||
       handoff.targetAgentId !== config.agentId ||

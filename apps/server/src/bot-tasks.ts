@@ -470,6 +470,18 @@ export function createBotTasks(config: {
       return delegationDelivery.deliver(id);
     },
     resumeDelegationResults,
+    cancelDelegation(id: string): boolean {
+      const accepted = config.store.cancelDelegation(config.agentId, id);
+      if (!accepted) return false;
+      if (accepted.status === "running") queue.stop(accepted.task.origin);
+      else if (config.delegationResult)
+        void Promise.resolve()
+          .then(() => config.delegationResult!(accepted.task))
+          .catch(() => {
+            /* A committed cancelled outcome remains available for authorized recovery. */
+          });
+      return true;
+    },
     submit: queue.submitTelegram,
     submitDiscord: queue.submitDiscord,
     discordControl: {

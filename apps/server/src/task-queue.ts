@@ -69,6 +69,7 @@ export interface Delegation {
   reason: string | null;
   createdAt: number;
   childStatus?: TaskStatus;
+  cancellationRequested?: true;
   /** Untrusted output from the child; never permission or instructions for the requester. */
   result?: DelegationResult;
 }
@@ -216,6 +217,7 @@ export function openTaskStore(path: string) {
       brief TEXT NOT NULL CHECK(length(brief) BETWEEN 1 AND ${DELEGATION_LIMITS.brief}),
       state TEXT NOT NULL CHECK(state IN ('pending', 'admitted', 'discarded')),
       child_task_id TEXT UNIQUE, reason TEXT,
+      cancel_requested_at INTEGER CHECK(cancel_requested_at IS NULL OR state = 'admitted'),
       result_json TEXT CHECK(result_json IS NULL OR (state = 'admitted' AND length(CAST(result_json AS BLOB)) <= ${DELEGATION_LIMITS.resultBytes})),
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
       UNIQUE(source_task_id, invocation_id), CHECK(source_agent_id != target_agent_id),
@@ -366,6 +368,9 @@ export function openTaskStore(path: string) {
         ? { childStatus: row.child_status as TaskStatus }
         : {}),
       ...(result ? { result } : {}),
+      ...(typeof row.cancel_requested_at === "number"
+        ? { cancellationRequested: true as const }
+        : {}),
     };
   };
   const parentRow = (id: string) =>
@@ -389,8 +394,17 @@ export function openTaskStore(path: string) {
         return [];
       }
       const parent = routed(row);
+      const cancellationRequested =
+        parent.origin.platform === "delegated" &&
+        db
+          .prepare(
+            "SELECT cancel_requested_at FROM delegations WHERE id = ? AND child_task_id = ?",
+          )
+          .get(parent.origin.delegationId, parent.id)?.cancel_requested_at !=
+          null;
       const terminalStatus =
-        parent.origin.platform === "delegated" && cancelled
+        parent.origin.platform === "delegated" &&
+        (cancelled || cancellationRequested)
           ? "cancelled"
           : status;
       db.prepare(
@@ -560,7 +574,7 @@ export function openTaskStore(path: string) {
     getDelegation(sourceAgentId: string, id: string): Delegation | undefined {
       const row = db
         .prepare(
-          `SELECT d.id, d.source_task_id, d.source_agent_id, d.target_agent_id, d.invocation_id, d.brief, d.state, d.child_task_id, d.reason, d.created_at,
+          `SELECT d.id, d.source_task_id, d.source_agent_id, d.target_agent_id, d.invocation_id, d.brief, d.state, d.child_task_id, d.reason, d.created_at, d.cancel_requested_at,
             CASE WHEN length(CAST(d.result_json AS BLOB)) <= ${DELEGATION_LIMITS.resultBytes} THEN d.result_json ELSE NULL END AS result_json,
             t.status AS child_status FROM delegations d LEFT JOIN tasks t ON d.state = 'admitted' AND t.id = d.child_task_id
             AND t.platform = 'delegated' AND t.delegation_id = d.id AND t.parent_task_id = d.source_task_id
@@ -569,6 +583,58 @@ export function openTaskStore(path: string) {
         )
         .get(sourceAgentId, id);
       return row ? readDelegation(row) : undefined;
+    },
+    /** Administrator cancellation, scoped to an exact destination and admitted child. Commit before aborting the runtime. */
+    cancelDelegation(
+      targetAgentId: string,
+      id: string,
+    ): { task: RoutedTask; status: "queued" | "running" } | undefined {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const handoff = db
+          .prepare(
+            "SELECT * FROM delegations WHERE id = ? AND target_agent_id = ? AND state = 'admitted'",
+          )
+          .get(id, targetAgentId);
+        const row =
+          typeof handoff?.child_task_id === "string"
+            ? parentRow(handoff.child_task_id)
+            : undefined;
+        const child = row ? routed(row) : undefined;
+        if (
+          !handoff ||
+          !row ||
+          !child ||
+          !["queued", "running"].includes(String(row.status)) ||
+          child.agentId !== targetAgentId ||
+          child.origin.platform !== "delegated" ||
+          child.origin.delegationId !== id ||
+          child.origin.sourceAgentId !== handoff.source_agent_id ||
+          child.origin.parentTaskId !== handoff.source_task_id
+        ) {
+          db.exec("COMMIT");
+          return undefined;
+        }
+        if (handoff.result_json !== null)
+          throw new Error("Child outcome is already recorded");
+        const now = Date.now();
+        db.prepare(
+          "UPDATE delegations SET cancel_requested_at = COALESCE(cancel_requested_at, ?), updated_at = ? WHERE id = ?",
+        ).run(now, now, id);
+        if (row.status === "queued") {
+          db.prepare(
+            "UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'queued'",
+          ).run(now, child.id);
+          db.prepare(
+            "UPDATE delegations SET result_json = ? WHERE id = ? AND result_json IS NULL",
+          ).run(encodeDelegationResult("cancelled"), id);
+        }
+        db.exec("COMMIT");
+        return { task: child, status: row.status as "queued" | "running" };
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
     /** Recovery after commit but before a target worker was kicked. Never resumes running work. */
     pendingDelegationTargets(): string[] {
@@ -841,12 +907,18 @@ export function openTaskStore(path: string) {
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare(
-          "UPDATE tasks SET status = 'interrupted', updated_at = ? WHERE status = 'running'",
+          `UPDATE tasks SET status = CASE WHEN platform = 'delegated' AND EXISTS (
+            SELECT 1 FROM delegations d WHERE d.id = tasks.delegation_id AND d.child_task_id = tasks.id
+            AND d.source_task_id = tasks.parent_task_id AND d.source_agent_id = tasks.source_agent_id
+            AND d.target_agent_id = tasks.agent_id AND d.cancel_requested_at IS NOT NULL
+          ) THEN 'cancelled' ELSE 'interrupted' END, updated_at = ? WHERE status = 'running'`,
         ).run(Date.now());
         db.prepare(
-          `UPDATE delegations SET result_json = '{"ok":false,"kind":"interrupted"}', updated_at = ?
+          `UPDATE delegations SET result_json = CASE WHEN cancel_requested_at IS NOT NULL THEN '{"ok":false,"kind":"cancelled"}' ELSE '{"ok":false,"kind":"interrupted"}' END, updated_at = ?
           WHERE state = 'admitted' AND result_json IS NULL AND child_task_id IN (
-            SELECT id FROM tasks WHERE status = 'interrupted' AND platform = 'delegated'
+            SELECT id FROM tasks WHERE platform = 'delegated' AND
+              ((status = 'interrupted' AND delegations.cancel_requested_at IS NULL)
+                OR (status = 'cancelled' AND delegations.cancel_requested_at IS NOT NULL))
             AND delegation_id = delegations.id AND parent_task_id = delegations.source_task_id
             AND source_agent_id = delegations.source_agent_id AND agent_id = delegations.target_agent_id
           )`,

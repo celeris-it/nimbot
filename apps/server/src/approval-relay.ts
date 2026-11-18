@@ -62,6 +62,7 @@ export function createApprovalRelay(config: {
     if (
       !handoff ||
       handoff.state !== "admitted" ||
+      handoff.cancellationRequested ||
       handoff.childTaskId !== child.id ||
       handoff.targetAgentId !== child.agentId ||
       handoff.sourceTaskId !== parent.id ||

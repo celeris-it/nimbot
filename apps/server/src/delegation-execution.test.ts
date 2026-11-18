@@ -59,6 +59,16 @@ it("resolves only the admitted child's persisted original parent", () => {
   expect(f.policy.canExecute(f.child)).toBe(false);
 });
 
+it("denies further execution authority as soon as cancellation is committed", () => {
+  const f = fixture();
+  if (f.child.origin.platform !== "delegated")
+    throw new Error("Expected child");
+  expect(f.policy.canExecute(f.child)).toBe(true);
+  f.tasks.cancelDelegation("b", f.child.origin.delegationId);
+  expect(f.tasks.getTask(f.child.id)?.status).toBe("running");
+  expect(f.policy.canExecute(f.child)).toBe(false);
+});
+
 it.each(["ready", "origin", "grant"] as const)(
   "rechecks live %s on every use",
   (field) => {

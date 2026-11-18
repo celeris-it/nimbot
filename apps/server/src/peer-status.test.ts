@@ -114,6 +114,18 @@ it("returns pending without waiting and exposes only status and bounded results 
   expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(9000);
 });
 
+it("reports a durable cancellation request before a running child returns", async () => {
+  const f = fixture();
+  f.tasks.finishWithDelegations(f.parent.id, "completed", () => true);
+  const later = f.start("a");
+  f.tasks.claimNextTask("b");
+  f.tasks.cancelDelegation("b", f.delegation.id);
+  expect(await f.read(later)).toMatchObject({
+    status: "running",
+    cancellationRequested: true,
+  });
+});
+
 it.each(["failed", "cancelled", "interrupted"] as const)(
   "exposes a %s child outcome",
   async (status) => {

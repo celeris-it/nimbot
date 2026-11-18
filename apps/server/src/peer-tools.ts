@@ -246,6 +246,9 @@ export function createPeerTools(config: {
                   ? (delegation.childStatus ?? "unavailable")
                   : delegation.state,
               ...(delegation.result ? { result: delegation.result } : {}),
+              ...(delegation.cancellationRequested
+                ? { cancellationRequested: true }
+                : {}),
             };
           },
         },

@@ -375,6 +375,76 @@ it.each(["telegram", "discord"] as const)(
   },
 );
 
+it("cancels a queued child without stopping the target's older ordinary task", async () => {
+  const f = await fixture("telegram");
+  await f.submit("b", "target-private");
+  await vi.waitFor(() => expect(f.started).toHaveLength(1));
+  await f.submit("a", "parent-private");
+  await vi.waitFor(() =>
+    expect(f.sent.filter((message) => message.key)).toHaveLength(1),
+  );
+  await f.answer(f.sent.find((message) => message.key)!);
+  await vi.waitFor(() => expect(f.delegation()?.state).toBe("pending"));
+  f.parentHold.release();
+  await (await f.services.get("a")).idle();
+  const target = await f.services.get("b");
+  expect(target.cancelDelegation(f.delegation()!.id)).toBe(true);
+  expect(f.delegation()).toMatchObject({
+    childStatus: "cancelled",
+    cancellationRequested: true,
+  });
+  expect(f.histories.b).toEqual([]);
+  f.targetHold.release();
+  await target.idle();
+  await vi.waitFor(() =>
+    expect(f.sent.some((message) => message.text.includes("(cancelled)"))).toBe(
+      true,
+    ),
+  );
+  expect(f.histories.b).toEqual(["target-private"]);
+  expect(f.started.some((task) => task.context.sessionMode === "fresh")).toBe(
+    false,
+  );
+});
+
+it.each(["telegram", "discord"] as const)(
+  "cancels a running child and invalidates its pending %s permission",
+  async (platform) => {
+    const f = await fixture(platform);
+    await f.submit("a", "parent-private");
+    await vi.waitFor(() =>
+      expect(f.sent.filter((message) => message.key)).toHaveLength(1),
+    );
+    await f.answer(f.sent.find((message) => message.key)!);
+    await vi.waitFor(() => expect(f.delegation()?.state).toBe("pending"));
+    f.parentHold.release();
+    await vi.waitFor(() =>
+      expect(f.sent.filter((message) => message.key)).toHaveLength(2),
+    );
+    const permission = f.sent.filter((message) => message.key)[1]!;
+    const target = await f.services.get("b");
+    expect(
+      (await f.services.get("a")).cancelDelegation(f.delegation()!.id),
+    ).toBe(false);
+    expect(target.cancelDelegation(f.delegation()!.id)).toBe(true);
+    expect(await f.answer(permission)).toBe("expired");
+    await target.idle();
+    expect(f.delegation()).toMatchObject({
+      childStatus: "cancelled",
+      result: { ok: false, kind: "cancelled" },
+    });
+    expect(
+      f.sent.some((message) => message.text.includes("Child result for")),
+    ).toBe(false);
+    expect(
+      f.sent.filter((message) => message.text.includes("(cancelled)")),
+    ).toHaveLength(1);
+    await f.submit("b", "target-after");
+    await target.idle();
+    expect(f.histories.b).toEqual(["target-after"]);
+  },
+);
+
 it.each(["target", "grant"] as const)(
   "rechecks the %s before a queued child reaches its Host",
   async (change) => {

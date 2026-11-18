@@ -254,6 +254,7 @@ it.each([
   "grant",
   "binding",
   "child",
+  "cancel_request",
   "cancel",
   "source_close",
   "target_close",
@@ -267,6 +268,8 @@ it.each([
     if (change === "grant") f.revoke();
     if (change === "binding") f.unbind();
     if (change === "child") f.store.finish(f.child.id, "cancelled");
+    if (change === "cancel_request" && f.child.origin.platform === "delegated")
+      f.store.cancelDelegation("b", f.child.origin.delegationId);
     if (change === "cancel") f.controller.abort();
     if (change === "source_close") f.source.close();
     if (change === "target_close") f.native.close();
@@ -375,7 +378,7 @@ it.each(["telegram", "discord"] as const)(
   },
 );
 
-it.each(["grant", "binding", "child"] as const)(
+it.each(["grant", "binding", "child", "cancel_request"] as const)(
   "denies a relayed decision after the %s changes",
   async (change) => {
     const f = await setup();
@@ -385,6 +388,8 @@ it.each(["grant", "binding", "child"] as const)(
     if (change === "binding") f.unbind();
     if (change === "child")
       f.store.finish(f.child.id, "cancelled", { ok: false, kind: "cancelled" });
+    if (change === "cancel_request" && f.child.origin.platform === "delegated")
+      f.store.cancelDelegation("b", f.child.origin.delegationId);
     expect(await f.answer(f.sent[0]!.key)).toBe("expired");
     // A revoked Telegram binding rejects before looking up any key. Closing the
     // source also releases the child's pending wait without waiting for its TTL.
