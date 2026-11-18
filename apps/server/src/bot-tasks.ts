@@ -4,6 +4,10 @@ import {
 } from "./discord-approvals.js";
 import { acknowledgeDiscordApproval } from "./discord-interactions.js";
 import { createTaskCapabilities } from "./task-capabilities.js";
+import {
+  createToolDispatcher,
+  type ServerToolHandler,
+} from "./tool-dispatch.js";
 import { InlineKeyboard, type Bot } from "grammy";
 import type { BotAccess } from "./agent-access.js";
 import { createApprovalBook } from "./approvals.js";
@@ -28,6 +32,8 @@ export function createBotTasks(config: {
   ownerId: () => number;
   /** Internal service policy: must resolve exact operations from Server-owned grants. */
   toolPolicy?: Parameters<typeof createTaskCapabilities>[0]["policy"];
+  /** Server-registered operations the Host may relay; none by default. */
+  toolHandlers?: readonly ServerToolHandler[];
   toolLifetimeMs?: number;
   run: (
     prompt: string,
@@ -73,6 +79,11 @@ export function createBotTasks(config: {
           },
         }
       : {}),
+  });
+  const dispatcher = createToolDispatcher({
+    store: config.store,
+    authorize: capabilities.verify,
+    handlers: config.toolHandlers ?? [],
   });
   const book = createApprovalBook();
   /** Asks the owner, in the chat that sent the task; any failure means deny. */
@@ -155,6 +166,18 @@ export function createBotTasks(config: {
           {
             identity: { agentId: saved.agentId, serverTaskId: saved.id },
             ...(tools ? { tools } : {}),
+            onTool: (request, toolSignal) =>
+              tools
+                ? dispatcher.dispatch(
+                    {
+                      agentId: saved.agentId,
+                      serverTaskId: saved.id,
+                      token: tools.token,
+                    },
+                    request,
+                    toolSignal,
+                  )
+                : Promise.resolve({ ok: false, error: "denied" }),
             onAccepted: (hostTaskId) =>
               config.store.bindHostTask(saved.agentId, saved.id, hostTaskId),
           },

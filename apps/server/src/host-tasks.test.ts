@@ -431,3 +431,119 @@ describe("Agent Host restart while a task is observed", () => {
     expect(request.mock.calls.length).toBeGreaterThan(2);
   });
 });
+
+describe("tool relay", () => {
+  const hostTaskId = "a0000000-0000-4000-8000-000000000001";
+  const invocationId = "c0000000-0000-4000-8000-000000000003";
+  const identity = {
+    agentId: "a",
+    serverTaskId: "b0000000-0000-4000-8000-000000000002",
+  };
+  function host(events: unknown[][]) {
+    let poll = 0;
+    const replies: { url: string; body: unknown }[] = [];
+    const request = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/tasks"))
+        return Response.json({ id: hostTaskId, status: "accepted" });
+      if (url.includes("/tool-requests/")) {
+        replies.push({ url, body: JSON.parse(String(init?.body)) });
+        return Response.json({ status: "recorded" });
+      }
+      return Response.json({ id: hostTaskId, events: events[poll++] ?? [] });
+    });
+    return { request, replies };
+  }
+  const toolEvent = {
+    sequence: 1,
+    status: "tool_request",
+    output: JSON.stringify({
+      invocationId,
+      operation: "x.op",
+      arguments: { a: 1 },
+      deadline: 1,
+    }),
+  };
+
+  it("answers a tool request through the Host result endpoint", async () => {
+    const f = host([
+      [toolEvent],
+      [{ sequence: 2, status: "completed", output: "done" }],
+    ]);
+    const onTool = vi.fn(async (_request: unknown, _signal: AbortSignal) => ({
+      ok: true as const,
+      result: 7,
+    }));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const run = createHostTasks(config, f.request, () => gate)(
+      "p",
+      undefined,
+      undefined,
+      undefined,
+      { identity, onTool, onAccepted: () => true },
+    );
+    await vi.waitFor(() => expect(f.replies).toHaveLength(1));
+    release();
+    expect(await run).toBe("done");
+    expect(onTool.mock.calls[0]?.[0]).toEqual({
+      hostTaskId,
+      invocationId,
+      operation: "x.op",
+      arguments: { a: 1 },
+    });
+    expect(f.replies[0]).toEqual({
+      url: `${config.url}/tasks/${hostTaskId}/tool-requests/${invocationId}/result`,
+      body: { ok: true, result: 7 },
+    });
+  });
+
+  it("denies tool requests when no handler is attached", async () => {
+    const f = host([
+      [toolEvent],
+      [{ sequence: 2, status: "completed", output: "done" }],
+    ]);
+    await createHostTasks(config, f.request, () => Promise.resolve())(
+      "p",
+      undefined,
+      undefined,
+      undefined,
+      { identity, onAccepted: () => true },
+    );
+    await vi.waitFor(() => expect(f.replies).toHaveLength(1));
+    expect(f.replies[0]?.body).toEqual({ ok: false, error: "denied" });
+  });
+
+  it("aborts the call on tool_cancel and sends no reply", async () => {
+    const f = host([
+      [toolEvent],
+      [
+        {
+          sequence: 2,
+          status: "tool_cancel",
+          output: JSON.stringify({ invocationId }),
+        },
+      ],
+      [{ sequence: 3, status: "completed", output: "done" }],
+    ]);
+    let aborted = false;
+    const onTool = vi.fn(
+      (_request: unknown, signal: AbortSignal) =>
+        new Promise<never>((_, reject) =>
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(new Error("aborted"));
+          }),
+        ),
+    );
+    await createHostTasks(config, f.request, () => Promise.resolve())(
+      "p",
+      undefined,
+      undefined,
+      undefined,
+      { identity, onTool, onAccepted: () => true },
+    );
+    await vi.waitFor(() => expect(aborted).toBe(true));
+    expect(f.replies).toHaveLength(0);
+  });
+});

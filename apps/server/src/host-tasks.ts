@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { AgentHostConfig } from "./agent-host.js";
 import type { TaskCapability } from "./task-capabilities.js";
+import type { ToolOutcome } from "./tool-dispatch.js";
 
 export class HostTaskError extends Error {
   constructor(
@@ -26,8 +27,41 @@ export interface HostApproval {
 export interface HostTaskExecution {
   identity: { agentId: string; serverTaskId: string };
   tools?: TaskCapability;
+  /**
+   * Answers one Host-relayed tool request. The signal aborts on `tool_cancel` and
+   * when the task ends. Without it, requests are answered "denied".
+   */
+  onTool?(
+    request: {
+      hostTaskId: string;
+      invocationId: string;
+      operation: string;
+      arguments: unknown;
+    },
+    signal: AbortSignal,
+  ): Promise<ToolOutcome>;
   /** Must durably bind the accepted Host ID before any events are handled. */
   onAccepted(hostTaskId: string): boolean;
+}
+
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+
+function parseToolRequest(output: unknown) {
+  try {
+    const data = JSON.parse(String(output)) as Record<string, unknown>;
+    return typeof data.invocationId === "string" &&
+      UUID.test(data.invocationId) &&
+      typeof data.operation === "string" &&
+      /^[a-z][a-z0-9_.:-]{0,127}$/.test(data.operation)
+      ? {
+          invocationId: data.invocationId,
+          operation: data.operation,
+          arguments: data.arguments,
+        }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseApproval(taskId: string, output: unknown): HostApproval | null {
@@ -113,6 +147,7 @@ export function createHostTasks(
     }
     let removeCancelListener = () => {};
     let acceptedId: string | undefined;
+    const toolCalls = new Map<string, AbortController>();
     const cancelOnHost = (id: string) => {
       void request(`${config.url}/tasks/${encodeURIComponent(id)}/cancel`, {
         method: "POST",
@@ -163,6 +198,46 @@ export function createHostTasks(
           throw new HostTaskError("unavailable");
         }
       }
+      const hostId = accepted.id;
+      const replyTool = async (invocationId: string, outcome: ToolOutcome) => {
+        try {
+          await request(
+            `${config.url}/tasks/${encodeURIComponent(hostId)}/tool-requests/${encodeURIComponent(invocationId)}/result`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${config.token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(outcome),
+              signal: AbortSignal.timeout(5000),
+              redirect: "error",
+            },
+          );
+        } catch {
+          /* The Host times the request out by itself. */
+        }
+      };
+      const startTool = (event: { output?: unknown }) => {
+        const tool = parseToolRequest(event.output);
+        if (!tool || toolCalls.has(tool.invocationId)) return;
+        const controller = new AbortController();
+        toolCalls.set(tool.invocationId, controller);
+        void (async () => {
+          let outcome: ToolOutcome = { ok: false, error: "denied" };
+          try {
+            if (execution?.onTool)
+              outcome = await execution.onTool(
+                { hostTaskId: hostId, ...tool },
+                controller.signal,
+              );
+          } catch {
+            outcome = { ok: false, error: "failed" };
+          }
+          if (!controller.signal.aborted)
+            await replyTool(tool.invocationId, outcome);
+        })();
+      };
       let sequence = 0;
       let failedPolls = 0;
       while (!deadline.aborted) {
@@ -216,6 +291,21 @@ export function createHostTasks(
             }
             continue;
           }
+          if (event.status === "tool_request") {
+            startTool(event);
+            continue;
+          }
+          if (event.status === "tool_cancel") {
+            try {
+              const id = (
+                JSON.parse(String(event.output)) as { invocationId?: unknown }
+              ).invocationId;
+              if (typeof id === "string") toolCalls.get(id)?.abort();
+            } catch {
+              /* A malformed cancel names no call. */
+            }
+            continue;
+          }
           if (event.status === "progress") {
             if (typeof event.output !== "string")
               throw new HostTaskError("unavailable");
@@ -249,6 +339,7 @@ export function createHostTasks(
       throw new HostTaskError(deadline.aborted ? "timeout" : "unavailable");
     } finally {
       removeCancelListener();
+      for (const controller of toolCalls.values()) controller.abort();
     }
   };
 }

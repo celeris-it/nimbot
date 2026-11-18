@@ -88,6 +88,16 @@ export function openTaskStore(path: string) {
     db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS tasks_schedule_occurrence ON tasks (schedule_id, scheduled_for) WHERE schedule_id IS NOT NULL",
     );
+    // Durable write replay protection for Server-side tool operations.
+    db.exec(`CREATE TABLE IF NOT EXISTS tool_invocations (
+      task_id TEXT NOT NULL,
+      invocation_id TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      arguments_json TEXT NOT NULL,
+      result_json TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (task_id, invocation_id)
+    )`);
     db.exec("COMMIT");
   } catch (error) {
     try {
@@ -340,6 +350,50 @@ export function openTaskStore(path: string) {
         // Includes a Host ID already associated with another task of this agent.
         return false;
       }
+    },
+    /**
+     * Records the intent of a write before it runs. A saved outcome is returned on
+     * replay; an intent without an outcome means the side effect is uncertain.
+     */
+    beginToolInvocation(
+      taskId: string,
+      invocationId: string,
+      operation: string,
+      argumentsJson: string,
+    ):
+      | { state: "new" }
+      | { state: "uncertain" }
+      | { state: "conflict" }
+      | { state: "replay"; resultJson: string } {
+      const inserted = db
+        .prepare(
+          "INSERT INTO tool_invocations (task_id, invocation_id, operation, arguments_json, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+        )
+        .run(taskId, invocationId, operation, argumentsJson, Date.now());
+      if (inserted.changes === 1) return { state: "new" };
+      const row = db
+        .prepare(
+          "SELECT operation, arguments_json, result_json FROM tool_invocations WHERE task_id = ? AND invocation_id = ?",
+        )
+        .get(taskId, invocationId);
+      if (
+        !row ||
+        row.operation !== operation ||
+        row.arguments_json !== argumentsJson
+      )
+        return { state: "conflict" };
+      return typeof row.result_json === "string"
+        ? { state: "replay", resultJson: row.result_json }
+        : { state: "uncertain" };
+    },
+    settleToolInvocation(
+      taskId: string,
+      invocationId: string,
+      resultJson: string,
+    ): void {
+      db.prepare(
+        "UPDATE tool_invocations SET result_json = ? WHERE task_id = ? AND invocation_id = ? AND result_json IS NULL",
+      ).run(resultJson, taskId, invocationId);
     },
     getHostTaskId(agentId: string, taskId: string): string | undefined {
       const row = db
