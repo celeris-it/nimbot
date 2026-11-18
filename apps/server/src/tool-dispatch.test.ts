@@ -4,7 +4,7 @@ import {
   type ServerToolHandler,
 } from "./tool-dispatch.js";
 import { openTaskStore, type RoutedTask } from "./task-queue.js";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -88,7 +88,7 @@ describe("tool dispatcher", () => {
     expect(f.execute).toHaveBeenCalledTimes(1);
   });
 
-  it("never replays a write whose outcome is uncertain", async () => {
+  it("replays a saved failure without leaking handler errors", async () => {
     const f = setup({
       execute: vi.fn(async () => {
         throw new Error("secret detail");
@@ -97,6 +97,67 @@ describe("tool dispatcher", () => {
     expect(await f.call()).toEqual({ ok: false, error: "failed" });
     // A failure is a saved outcome and replays as such.
     expect(await f.call()).toEqual({ ok: false, error: "failed" });
+  });
+
+  it("preserves saved outcomes across restart and never repeats a write whose outcome could not be saved", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "td-restart-"));
+    const path = join(dir, "server.sqlite");
+    let store = openTaskStore(path);
+    const execute = vi.fn(async () => ({ done: true }));
+    const dispatcher = () =>
+      createToolDispatcher({
+        store,
+        authorize: () => task,
+        handlers: [
+          {
+            operation: "test.write",
+            write: true,
+            validate: (args) => args as Record<string, unknown>,
+            execute,
+          },
+        ],
+      });
+    const call = (id: string, args = { n: 1 }) =>
+      dispatcher().dispatch(
+        identity,
+        {
+          hostTaskId,
+          invocationId: id,
+          operation: "test.write",
+          arguments: args,
+        },
+        new AbortController().signal,
+      );
+    const savedId = "d0000000-0000-4000-8000-000000000004";
+    try {
+      const failedSave = vi
+        .spyOn(store, "settleToolInvocation")
+        .mockImplementation(() => {
+          throw new Error("storage unavailable");
+        });
+      expect(await call(invocationId)).toEqual({
+        ok: true,
+        result: { done: true },
+      });
+      failedSave.mockRestore();
+      expect(await call(savedId)).toEqual({ ok: true, result: { done: true } });
+      expect(execute).toHaveBeenCalledTimes(2);
+      store.close();
+      store = openTaskStore(path);
+      expect(await call(invocationId)).toEqual({
+        ok: false,
+        error: "interrupted",
+      });
+      expect(await call(savedId)).toEqual({ ok: true, result: { done: true } });
+      expect(await call(savedId, { n: 2 })).toEqual({
+        ok: false,
+        error: "failed",
+      });
+      expect(execute).toHaveBeenCalledTimes(2);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("reports a timeout and does not leak handler errors", async () => {
