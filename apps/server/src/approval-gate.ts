@@ -12,6 +12,8 @@ export interface GateAction {
   summary: string;
   /** Exact arguments; only their digest is stored. */
   arguments: unknown;
+  /** Service-owned approval budget, capped by the gate's lifetime. Never model input. */
+  ttlMs?: number;
 }
 export type DeniedReason =
   | "rule"
@@ -109,6 +111,7 @@ export function createApprovalGate(config: {
     signal: AbortSignal,
   ): Promise<GateResult<T>> {
     const destination = config.route?.(task) ?? task;
+    const lifetime = Math.min(action.ttlMs ?? ttlMs, ttlMs);
     const fingerprint = actionFingerprint(
       task.agentId,
       action.actionType,
@@ -121,7 +124,7 @@ export function createApprovalGate(config: {
       origin: label(destination.origin),
       actor: label(task.origin),
       ...action,
-      ttlMs,
+      ttlMs: lifetime,
     });
     const ruleNow = () =>
       config.rules.evaluate(task.agentId, action.actionType, action.target);
@@ -137,7 +140,14 @@ export function createApprovalGate(config: {
     if (first.decision === "allow") {
       config.store.decide(request.id, true, `rule:${first.ruleId}`);
     } else {
-      const outcome = await ask(task, destination, request.id, action, signal);
+      const outcome = await ask(
+        task,
+        destination,
+        request.id,
+        action,
+        signal,
+        lifetime,
+      );
       if (outcome !== "approved")
         return { status: "denied", requestId: request.id, reason: outcome };
     }
@@ -184,6 +194,7 @@ export function createApprovalGate(config: {
     requestId: string,
     action: GateAction,
     signal: AbortSignal,
+    ttlMs: number,
   ): Promise<"approved" | "owner" | "expired" | "cancelled" | "delivery"> {
     const keys: [string, string] = [
       randomBytes(9).toString("base64url"),
@@ -209,9 +220,10 @@ export function createApprovalGate(config: {
     signal.addEventListener("abort", onAbort, { once: true });
     try {
       try {
+        const seconds = Math.ceil(ttlMs / 1000);
         entry.messageId = await config.deliver(
           destination,
-          `Approval needed: ${action.summary.slice(0, 300)}\nTarget: ${action.target.slice(0, 120)}\nNo answer counts as deny.`,
+          `Approval needed: ${action.summary.slice(0, 300)}\nTarget: ${action.target.slice(0, 120)}\nReply within ${seconds} second${seconds === 1 ? "" : "s"}. No answer counts as deny.`,
           { approve: keys[0], deny: keys[1] },
         );
       } catch {

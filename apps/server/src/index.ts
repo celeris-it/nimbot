@@ -5,9 +5,11 @@ import { createHostProviders } from "./host-providers.js";
 import { createHostMemories } from "./host-memories.js";
 import { openApprovalStore } from "./approval-store.js";
 import { openAgentGrants } from "./agent-grants.js";
+import { openAgentNotes } from "./agent-notes.js";
+import { createPeerTools } from "./peer-tools.js";
 import { openApprovalRules } from "./approval-rules.js";
-import { memoryToolPolicy } from "./memory-operations.js";
-import type { DiscordQueuedTask } from "./task-queue.js";
+import { MEMORY_OPERATIONS } from "./memory-operations.js";
+import type { DiscordQueuedTask, RoutedTask } from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
 import { openNotificationStore } from "./notification-store.js";
@@ -103,6 +105,7 @@ async function main(): Promise<void> {
   let approvalStore;
   let approvalRules;
   let agentGrants;
+  let agentNotes;
   let notificationStore;
   let discordInbox!: ReturnType<typeof openDiscordInbox>;
   let registry!: ReturnType<typeof openAgentRegistry>;
@@ -136,11 +139,13 @@ async function main(): Promise<void> {
       telegramOwner: (id) => registry.get(id)?.ownerId,
       discordOwner: (id) => registry.getDiscordConnection(id)?.ownerId,
     });
+    agentNotes = openAgentNotes(statePath);
     // A task left running by the previous process cannot be proven finished.
     taskStore.markRunningInterrupted();
     // Grants that no longer qualify (changed owner, removed agent) do not survive a restart.
     agentGrants.prune();
   } catch {
+    agentNotes?.close();
     agentGrants?.close();
     approvalRules?.close();
     approvalStore?.close();
@@ -156,6 +161,7 @@ async function main(): Promise<void> {
     return;
   }
   process.once("exit", () => {
+    agentNotes.close();
     agentGrants.close();
     approvalRules.close();
     approvalStore.close();
@@ -194,13 +200,35 @@ async function main(): Promise<void> {
     if (!hostCredentials || !registry.get(id))
       throw new Error("Agent is unavailable");
     const host = await hostCredentials.read(id);
+    const canReach = (task: RoutedTask) =>
+      task.origin.platform === "discord"
+        ? discordAdmit(task as DiscordQueuedTask)
+        : createAgentAccess(registry, task.agentId).canExecute(
+            task.origin.botId,
+            registry.get(task.agentId)?.ownerId ?? 0,
+            task.origin.chatId,
+          );
+    const peerTools = createPeerTools({
+      agentId: id,
+      grants: agentGrants,
+      notes: agentNotes,
+      tasks: taskStore,
+      name: (agentId) => registry.get(agentId)?.name,
+      canReach,
+    });
     return {
       agentId: id,
       store: taskStore,
       ownerId: () => registry.get(id)?.ownerId ?? 0,
-      // Only the administrator-enabled memory tools; nothing else is granted.
       approvals: { store: approvalStore, rules: approvalRules },
-      toolPolicy: memoryToolPolicy(id, () => registry.getMemoryEnabled(id)),
+      toolPolicy: {
+        canExecute: (task) => task.agentId === id && canReach(task),
+        allowedOperations: (task) => [
+          ...(registry.getMemoryEnabled(id) ? MEMORY_OPERATIONS : []),
+          ...peerTools.operations(task),
+        ],
+      },
+      toolHandlers: peerTools.handlers,
       run: withAgentInstructions(
         createHostTasks(host, fetch, undefined, taskWaitMs(taskTimeoutSeconds)),
         () => registry.get(id)?.instructions ?? "",

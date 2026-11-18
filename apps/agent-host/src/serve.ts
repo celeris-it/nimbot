@@ -12,6 +12,7 @@ import { createOpenCodeAuth } from "./opencode-auth.js";
 import { homedir } from "node:os";
 import { openMemoryStore } from "./memory-store.js";
 import { createMemoryTools } from "./memory-tools.js";
+import { createPeerToolDefinitions } from "./peer-tools.js";
 
 try {
   const config = readHostConfig(process.env);
@@ -28,7 +29,7 @@ try {
       config.workspace,
       createSessionFile(resolve(stateDir, "engine-session.json")),
       undefined,
-      createMemoryTools(memory),
+      [...createMemoryTools(memory), ...createPeerToolDefinitions()],
     ),
     readTaskTimeoutMs(process.env),
   );

@@ -38,7 +38,7 @@ export function openAgentGrants(
       created_at INTEGER NOT NULL,
       PRIMARY KEY (source_agent_id, target_agent_id, permission),
       CHECK (source_agent_id != target_agent_id)
-    )`);
+    ); CREATE INDEX IF NOT EXISTS agent_grants_incoming ON agent_grants(target_agent_id, permission, source_agent_id)`);
   } catch (error) {
     db.close();
     throw error;
@@ -136,6 +136,20 @@ export function openAgentGrants(
         .all(sourceAgentId, permission, GRANT_LIMITS.perAgent)
         .map((r) => String(r.target_agent_id))
         .filter((target) => sameOwners(sourceAgentId, target, origin));
+    },
+    /** Sources that may send to this recipient, rechecked for the current channel owners. */
+    sources(
+      targetAgentId: string,
+      permission: PeerPermission,
+      origin: PeerOrigin,
+    ): string[] {
+      return db
+        .prepare(
+          "SELECT source_agent_id FROM agent_grants WHERE target_agent_id = ? AND permission = ? ORDER BY source_agent_id",
+        )
+        .all(targetAgentId, permission)
+        .map((row) => String(row.source_agent_id))
+        .filter((source) => sameOwners(source, targetAgentId, origin));
     },
     /** Deletes grants that no longer qualify, e.g. after an owner or binding change. */
     prune(): number {

@@ -37,6 +37,8 @@ it("has no grants by default and rejects self-targeting and foreign owners", () 
 it("is directed and separate per permission", () => {
   const { grants } = setup();
   grants.grant("a", "b", "note");
+  expect(grants.sources("b", "note", "telegram")).toEqual(["a"]);
+  expect(grants.sources("a", "note", "telegram")).toEqual([]);
   expect(grants.allows("a", "b", "note", "telegram")).toBe(true);
   expect(grants.allows("b", "a", "note", "telegram")).toBe(false);
   expect(grants.allows("a", "b", "delegate", "telegram")).toBe(false);
@@ -66,6 +68,8 @@ it("also needs matching Discord owners for requests that began in Discord", () =
   grants.grant("a", "b", "note");
   expect(grants.allows("a", "b", "note", "discord")).toBe(true);
   state.discord.b = "d2";
+  expect(grants.sources("b", "note", "discord")).toEqual([]);
+  expect(grants.sources("b", "note", "telegram")).toEqual(["a"]);
   expect(grants.allows("a", "b", "note", "discord")).toBe(false);
   expect(grants.allows("a", "b", "note", "telegram")).toBe(true);
   state.discord.b = undefined;

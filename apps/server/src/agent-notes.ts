@@ -181,6 +181,15 @@ export function openAgentNotes(path: string, now: () => number = Date.now) {
         return notes;
       });
     },
+    /** Server-only lookup for reauthorizing saved tool results, scoped to their recipient. */
+    get(targetAgentId: string, id: string): AgentNote | undefined {
+      const row = db
+        .prepare(
+          "SELECT * FROM agent_notes WHERE target_agent_id = ? AND id = ?",
+        )
+        .get(targetAgentId, id);
+      return row ? map(row) : undefined;
+    },
     close() {
       db.close();
     },

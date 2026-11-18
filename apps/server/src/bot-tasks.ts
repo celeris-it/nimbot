@@ -1,4 +1,8 @@
-import { createApprovalGate, type GateAction } from "./approval-gate.js";
+import {
+  createApprovalGate,
+  type GateAction,
+  type ApprovalGate,
+} from "./approval-gate.js";
 import type { ApprovalRules } from "./approval-rules.js";
 import type { ApprovalStore } from "./approval-store.js";
 import {
@@ -36,7 +40,9 @@ export function createBotTasks(config: {
   /** Internal service policy: must resolve exact operations from Server-owned grants. */
   toolPolicy?: Parameters<typeof createTaskCapabilities>[0]["policy"];
   /** Server-registered operations the Host may relay; none by default. */
-  toolHandlers?: readonly ServerToolHandler[];
+  toolHandlers?:
+    | readonly ServerToolHandler[]
+    | ((guard: ApprovalGate["guard"]) => readonly ServerToolHandler[]);
   toolLifetimeMs?: number;
   /** Structured approvals for service-validated actions; omit to disable the gate. */
   approvals?: { store: ApprovalStore; rules: ApprovalRules };
@@ -87,11 +93,6 @@ export function createBotTasks(config: {
         }
       : {}),
   });
-  const dispatcher = createToolDispatcher({
-    store: config.store,
-    authorize: capabilities.verify,
-    handlers: config.toolHandlers ?? [],
-  });
   const book = createApprovalBook();
   const gate = config.approvals
     ? createApprovalGate({
@@ -129,6 +130,18 @@ export function createBotTasks(config: {
         },
       })
     : undefined;
+  const guardAction: ApprovalGate["guard"] = (...args) => {
+    if (!gate) throw new Error("Approvals are unavailable");
+    return gate.guard(...args);
+  };
+  const dispatcher = createToolDispatcher({
+    store: config.store,
+    authorize: capabilities.verify,
+    handlers:
+      typeof config.toolHandlers === "function"
+        ? config.toolHandlers(guardAction)
+        : (config.toolHandlers ?? []),
+  });
   /** Asks the owner, in the chat that sent the task; any failure means deny. */
   async function askOwner(
     task: { botId: number; chatId: number },

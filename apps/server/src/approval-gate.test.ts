@@ -213,6 +213,30 @@ describe("approval gate", () => {
     expect(f.store.listByAgent("a").requests[0]!.status).toBe("expired");
   });
 
+  it.each([100, 10_000])(
+    "caps a service approval budget of %s milliseconds by the gate deadline",
+    async (ttlMs) => {
+      vi.useFakeTimers();
+      const f = setup({ ttlMs: 1000 });
+      const pending = f.gate.guard(
+        telegram(),
+        { ...action, ttlMs },
+        f.run,
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(Math.min(ttlMs, 1000) + 1);
+      expect(await pending).toMatchObject({
+        status: "denied",
+        reason: "expired",
+      });
+      expect(f.run).not.toHaveBeenCalled();
+      expect(f.sent[0]!.text).toContain("Reply within 1 second");
+      f.gate.close();
+      f.rules.close();
+      f.store.close();
+    },
+  );
+
   it("denies when delivery fails", async () => {
     const f = setup({
       deliver: async () => {

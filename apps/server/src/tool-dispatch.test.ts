@@ -88,6 +88,31 @@ describe("tool dispatcher", () => {
     expect(f.execute).toHaveBeenCalledTimes(1);
   });
 
+  it("rechecks a service's target permission even when replaying a saved result", async () => {
+    let allowed = true;
+    const f = setup({ authorize: () => allowed });
+    expect(await f.call()).toEqual({ ok: true, result: { done: true } });
+    allowed = false;
+    expect(await f.call()).toEqual({ ok: false, error: "denied" });
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed on service authorization errors without executing or leaking details", async () => {
+    const f = setup({
+      authorize: () => {
+        throw new Error("private grant lookup");
+      },
+    });
+    expect(await f.call()).toEqual({ ok: false, error: "denied" });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+
+  it("suppresses a result that its service no longer authorizes", async () => {
+    const f = setup({ authorize: (_task, _args, outcome) => !outcome?.ok });
+    expect(await f.call()).toEqual({ ok: false, error: "cancelled" });
+    expect(f.execute).toHaveBeenCalledTimes(1);
+  });
+
   it("replays a saved failure without leaking handler errors", async () => {
     const f = setup({
       execute: vi.fn(async () => {

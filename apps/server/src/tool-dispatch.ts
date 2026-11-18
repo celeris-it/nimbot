@@ -25,6 +25,12 @@ export interface ServerToolHandler {
   write: boolean;
   /** Returns the normalized arguments, or undefined when they are invalid. */
   validate(args: unknown): Record<string, unknown> | undefined;
+  /** Rechecks service-owned target grants and any saved result before delivery or replay. */
+  authorize?(
+    task: RoutedTask,
+    args: Record<string, unknown>,
+    outcome?: ToolOutcome,
+  ): boolean;
   execute(
     task: RoutedTask,
     args: Record<string, unknown>,
@@ -106,6 +112,14 @@ export function createToolDispatcher(config: {
       } catch {
         return { ok: false, error: "failed" };
       }
+      const authorized = (outcome?: ToolOutcome) => {
+        try {
+          return !handler.authorize || handler.authorize(task, args!, outcome);
+        } catch {
+          return false;
+        }
+      };
+      if (!authorized()) return { ok: false, error: "denied" };
       const finish = (outcome: ToolOutcome): ToolOutcome => {
         let json: string;
         try {
@@ -135,8 +149,12 @@ export function createToolDispatcher(config: {
             request.operation,
             argumentsJson,
           );
-          if (begun.state === "replay")
-            return JSON.parse(begun.resultJson) as ToolOutcome;
+          if (begun.state === "replay") {
+            const outcome = JSON.parse(begun.resultJson) as ToolOutcome;
+            return authorized(outcome)
+              ? outcome
+              : { ok: false, error: "denied" };
+          }
           if (begun.state !== "new")
             return {
               ok: false,
@@ -177,7 +195,8 @@ export function createToolDispatcher(config: {
                 ...identity,
                 hostTaskId: request.hostTaskId,
                 operation: request.operation,
-              })
+              }) ||
+              !authorized()
             )
               throw denied;
             return handler.execute(task, args, {
@@ -194,7 +213,8 @@ export function createToolDispatcher(config: {
             ...identity,
             hostTaskId: request.hostTaskId,
             operation: request.operation,
-          })
+          }) ||
+          !authorized({ ok: true, result })
         )
           return finish({ ok: false, error: "cancelled" });
         return finish({ ok: true, result });
