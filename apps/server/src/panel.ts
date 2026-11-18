@@ -1,4 +1,5 @@
 import { HostProviderError } from "./host-providers.js";
+import { HostMemoryError } from "./host-memories.js";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -66,6 +67,7 @@ export interface PanelDeps {
   providers?: ReturnType<
     typeof import("./host-providers.js").createHostProviders
   >;
+  memories?: ReturnType<typeof import("./host-memories.js").createHostMemories>;
   discord?: {
     status?(
       id: string,
@@ -589,6 +591,30 @@ export function createPanel(
     await deps.providers!.remove(c.req.param("id"), provider);
     return c.json({ removed: true });
   });
+  app.use("/api/agents/:id/memories", async (c, next) => {
+    if (!getAgentSetup?.(c.req.param("id")!))
+      return c.json({ error: "Agent not found." }, 404);
+    if (!deps.memories) return c.json({ error: "Memory unavailable." }, 503);
+    await next();
+  });
+  app.use("/api/agents/:id/memories/*", async (c, next) => {
+    if (!getAgentSetup?.(c.req.param("id")!))
+      return c.json({ error: "Agent not found." }, 404);
+    if (!deps.memories) return c.json({ error: "Memory unavailable." }, 503);
+    await next();
+  });
+  app.get("/api/agents/:id/memories", async (c) =>
+    c.json(
+      await deps.memories!.list(
+        c.req.param("id"),
+        Number(c.req.query("page") ?? "1"),
+      ),
+    ),
+  );
+  app.post("/api/agents/:id/memories/:memoryId/delete", async (c) => {
+    await deps.memories!.remove(c.req.param("id"), c.req.param("memoryId"));
+    return c.json({ deleted: true });
+  });
   app.get("/api/agents/:id", async (c) => {
     const id = c.req.param("id");
     const setup = getAgentSetup?.(id);
@@ -995,6 +1021,7 @@ export function createPanel(
   for (const suffix of [
     "setup",
     "providers",
+    "memory",
     "schedules",
     "settings",
     "token",
@@ -1006,6 +1033,7 @@ export function createPanel(
       if (
         !getAgentSetup?.(id) ||
         (suffix === "schedules" && !deps.schedules) ||
+        (suffix === "memory" && !deps.memories) ||
         (suffix === "settings" && !agentSettings?.get(id)) ||
         (suffix === "token" &&
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||
@@ -1020,19 +1048,30 @@ export function createPanel(
   app.onError((error, c) =>
     error instanceof ScheduleValidationError
       ? c.json({ error: error.message }, 400)
-      : error instanceof HostProviderError
+      : error instanceof HostMemoryError
         ? c.json(
             {
               error: {
-                400: "Invalid provider request.",
-                404: "Login attempt not found. Start a new login.",
-                409: "Agent is busy. Try again after the task or login finishes.",
-                503: "Provider settings unavailable. Start the agent and refresh to try again.",
+                400: "Invalid memory request.",
+                404: "Memory not found. Refresh the list.",
+                503: "Memory unavailable. Start the agent and refresh to try again.",
               }[error.status],
             },
             error.status,
           )
-        : c.json({ error: "The request could not be completed." }, 500),
+        : error instanceof HostProviderError
+          ? c.json(
+              {
+                error: {
+                  400: "Invalid provider request.",
+                  404: "Login attempt not found. Start a new login.",
+                  409: "Agent is busy. Try again after the task or login finishes.",
+                  503: "Provider settings unavailable. Start the agent and refresh to try again.",
+                }[error.status],
+              },
+              error.status,
+            )
+          : c.json({ error: "The request could not be completed." }, 500),
   );
   return app;
 }

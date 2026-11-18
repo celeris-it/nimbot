@@ -18,6 +18,7 @@ Use the same Docker context/socket used during installation. The installer print
 | Agent files | Per-agent workspace volume |
 | OpenCode sessions, history, and provider credentials | Per-agent engine-state volume |
 | Task records and results, tool request outbox, and saved tool outcomes | Per-agent task-state volume |
+| Agent memory notes (`memory.sqlite`) | Per-agent task-state volume; included in backups of it, and removed only when the volume is explicitly purged |
 
 Compose stores server state in `<project>_server-state`. Every panel-created agent uses `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks` volumes.
 

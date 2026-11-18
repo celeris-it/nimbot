@@ -3,6 +3,7 @@ import {
   createHostApprovals,
   createHostTasks,
   HostTaskError,
+  type HostTaskExecution,
 } from "./host-tasks.js";
 
 const config = { url: "http://agent-host:3001", token: "x".repeat(32) };
@@ -470,10 +471,9 @@ describe("tool relay", () => {
       [toolEvent],
       [{ sequence: 2, status: "completed", output: "done" }],
     ]);
-    const onTool = vi.fn(async (_request: unknown, _signal: AbortSignal) => ({
-      ok: true as const,
-      result: 7,
-    }));
+    const onTool = vi.fn<NonNullable<HostTaskExecution["onTool"]>>(
+      async () => ({ ok: true, result: 7 }),
+    );
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const run = createHostTasks(config, f.request, () => gate)(

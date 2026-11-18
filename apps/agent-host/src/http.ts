@@ -5,6 +5,7 @@ import { bearerAuth } from "hono/bearer-auth";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import type { TaskRunner } from "./tasks.js";
+import type { MemoryStore } from "./memory-store.js";
 import { isTaskIdentity, isTaskToolAccess } from "./task-identity.js";
 import {
   isInvocationId,
@@ -39,6 +40,7 @@ export function createHostApi(
   config: HostConfig,
   runner?: TaskRunner,
   auth?: EngineAuth,
+  memory?: Pick<MemoryStore, "list" | "delete">,
 ) {
   const app = new Hono();
   app.use("*", async (c, next) => {
@@ -219,6 +221,19 @@ export function createHostApi(
         503,
       );
     }
+  });
+  app.get("/memories", (c) => {
+    if (!memory) return c.json({ error: "Memory unavailable" }, 503);
+    const page = Number(c.req.query("page") ?? "1");
+    if (!Number.isSafeInteger(page) || page < 1 || page > 1000)
+      return c.json({ error: "Invalid page" }, 400);
+    return c.json(memory.list(page));
+  });
+  app.post("/memories/:id/delete", (c) => {
+    if (!memory) return c.json({ error: "Memory unavailable" }, 503);
+    return memory.delete(c.req.param("id"))
+      ? c.json({ deleted: true })
+      : c.json({ error: "Memory not found" }, 404);
   });
   app.use(
     "/providers/*",

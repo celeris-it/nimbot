@@ -10,6 +10,8 @@ import { log } from "./logger.js";
 import { readTaskTimeoutMs } from "./task-timeout.js";
 import { createOpenCodeAuth } from "./opencode-auth.js";
 import { homedir } from "node:os";
+import { openMemoryStore } from "./memory-store.js";
+import { createMemoryTools } from "./memory-tools.js";
 
 try {
   const config = readHostConfig(process.env);
@@ -19,11 +21,14 @@ try {
   const store = await openTaskStore(
     pathToFileURL(resolve(stateDir, "tasks.sqlite")).href,
   );
+  const memory = openMemoryStore(resolve(stateDir, "memory.sqlite"));
   const runner = createTaskRunner(
     store,
     createOpenCodeEngine(
       config.workspace,
       createSessionFile(resolve(stateDir, "engine-session.json")),
+      undefined,
+      createMemoryTools(memory),
     ),
     readTaskTimeoutMs(process.env),
   );
@@ -35,7 +40,7 @@ try {
     runner.reserve,
     runner.isBusy,
   );
-  const app = createHostApi(config, runner, auth);
+  const app = createHostApi(config, runner, auth, memory);
   const server = serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 3001 });
   server.on("error", () => {
     log.error("host.http_start_failed");
@@ -53,6 +58,7 @@ try {
         await auth.close();
       } finally {
         await runner.close();
+        memory.close();
       }
     } catch {
       log.error("host.shutdown_finalize_failed");

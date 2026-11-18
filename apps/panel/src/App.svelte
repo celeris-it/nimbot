@@ -16,6 +16,8 @@
   import AgentForm from "./AgentForm.svelte";
   import AgentStatus from "./AgentStatus.svelte";
   import ProviderSettings from "./ProviderSettings.svelte";
+  import Memory from "./Memory.svelte";
+  import type { MemoryEntry } from "../../server/src/host-memories.js";
   import Schedules from "./Schedules.svelte";
   import { scheduleText } from "./labels.js";
 
@@ -25,6 +27,8 @@
   let agent = $state<AgentDetail>();
   let providerSettings = $state<ProviderSettingsState>();
   let schedules = $state<ScheduleList>();
+  let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
+  let memoryPage = $state(1);
   let loaded = $state(false);
   let contentAvailable = $state(false);
   let missing = $state(false);
@@ -38,7 +42,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|schedules|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|schedules|token|delete|container\/stop)$/,
     ),
   );
   let title = $derived(
@@ -48,19 +52,21 @@
         ? "Agents"
         : route?.[2] === "schedules"
           ? scheduleText.pageTitle
-          : route?.[2] === "providers"
-            ? "AI providers"
-            : path === "/agents/new"
-              ? "Create agent"
-              : route?.[2] === "settings"
-                ? "Edit agent"
-                : route?.[2] === "token"
-                  ? "Bot token"
-                  : route?.[2] === "delete"
-                    ? "Delete agent"
-                    : route?.[2] === "container/stop"
-                      ? "Stop agent"
-                      : "Agent setup",
+          : route?.[2] === "memory"
+            ? "Memory"
+            : route?.[2] === "providers"
+              ? "AI providers"
+              : path === "/agents/new"
+                ? "Create agent"
+                : route?.[2] === "settings"
+                  ? "Edit agent"
+                  : route?.[2] === "token"
+                    ? "Bot token"
+                    : route?.[2] === "delete"
+                      ? "Delete agent"
+                      : route?.[2] === "container/stop"
+                        ? "Stop agent"
+                        : "Agent setup",
   );
 
   async function focusHeading() {
@@ -127,6 +133,21 @@
             )
               throw cause;
             providerSettings = undefined;
+          }
+        }
+        if (route[2] === "memory") {
+          try {
+            memories = await request(
+              `/api/agents/${route[1]}/memories?page=${memoryPage}`,
+              { signal: current.signal },
+            );
+          } catch (cause) {
+            if (
+              current.signal.aborted ||
+              (cause instanceof ApiError && cause.status === 401)
+            )
+              throw cause;
+            memories = undefined;
           }
         }
         const view = route[2];
@@ -336,6 +357,17 @@
       },
     );
   }
+  async function deleteMemory(id: string) {
+    if (!agent) return;
+    await mutate(
+      `/api/agents/${encodeURIComponent(agent.id)}/memories/${encodeURIComponent(id)}/delete`,
+      {},
+      () => {
+        notice = "Note deleted.";
+        void load();
+      },
+    );
+  }
   async function saveSchedule(
     settings: ScheduleSettings,
     id?: string,
@@ -538,6 +570,18 @@
           save={saveSchedule}
           action={scheduleAction}
           refresh={() => load()}
+        />{/key}
+    {:else if route[2] === "memory"}
+      {#key agent.id}<Memory
+          {agent}
+          {memories}
+          page={memoryPage}
+          {busy}
+          remove={deleteMemory}
+          go={(next) => {
+            memoryPage = next;
+            void load();
+          }}
         />{/key}
     {:else if route[2] === "providers"}
       {#key agent.id}<ProviderSettings

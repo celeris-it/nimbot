@@ -2,6 +2,7 @@ import { createAgentTaskServices } from "./agent-task-services.js";
 import { createHostTasks, createHostApprovals } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 import { createHostProviders } from "./host-providers.js";
+import { createHostMemories } from "./host-memories.js";
 import type { DiscordQueuedTask } from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
@@ -314,6 +315,9 @@ async function main(): Promise<void> {
     },
     providers: hostCredentials
       ? createHostProviders((id) => hostCredentials!.read(id))
+      : undefined,
+    memories: hostCredentials
+      ? createHostMemories((id) => hostCredentials!.read(id))
       : undefined,
     discord: {
       status: (id) => ({
