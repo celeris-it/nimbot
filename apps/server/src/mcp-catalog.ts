@@ -19,6 +19,12 @@ export interface McpDefinition extends McpDefinitionSettings {
   revision: number;
 }
 
+interface CredentialBinding {
+  scope: string;
+  revision: number;
+  reference: string | null;
+}
+
 const MAX_DEFINITIONS = 64;
 const MAX_TOOLS = 32;
 const MAX_SCHEMA_BYTES = 16_384;
@@ -112,9 +118,23 @@ export function openMcpCatalog(
       CREATE TABLE IF NOT EXISTS mcp_grants (
         agent_id TEXT NOT NULL,
         definition_id TEXT NOT NULL REFERENCES mcp_definitions(id) ON DELETE CASCADE,
+        scope TEXT NOT NULL UNIQUE,
+        secret_ref TEXT,
         PRIMARY KEY (agent_id, definition_id)
       );
+      CREATE TABLE IF NOT EXISTS mcp_retired_secrets (ref TEXT PRIMARY KEY);
       CREATE INDEX IF NOT EXISTS mcp_grants_definition ON mcp_grants(definition_id);
+      CREATE TRIGGER IF NOT EXISTS mcp_grant_revoked
+      AFTER DELETE ON mcp_grants WHEN OLD.secret_ref IS NOT NULL
+      BEGIN
+        INSERT INTO mcp_retired_secrets (ref) VALUES (OLD.secret_ref);
+      END;
+      CREATE TRIGGER IF NOT EXISTS mcp_secret_replaced
+      AFTER UPDATE OF secret_ref ON mcp_grants
+      WHEN OLD.secret_ref IS NOT NULL AND OLD.secret_ref IS NOT NEW.secret_ref
+      BEGIN
+        INSERT INTO mcp_retired_secrets (ref) VALUES (OLD.secret_ref);
+      END;
       CREATE TRIGGER IF NOT EXISTS mcp_endpoint_change
       AFTER UPDATE OF endpoint ON mcp_definitions
       WHEN OLD.endpoint <> NEW.endpoint
@@ -178,11 +198,11 @@ export function openMcpCatalog(
       return (
         db
           .prepare(
-            `INSERT INTO mcp_grants (agent_id, definition_id)
-         SELECT ?, id FROM mcp_definitions WHERE id = ? AND revision = ?
+            `INSERT INTO mcp_grants (agent_id, definition_id, scope)
+         SELECT ?, id, ? FROM mcp_definitions WHERE id = ? AND revision = ?
          ON CONFLICT DO NOTHING`,
           )
-          .run(agentId, id, revision).changes === 1
+          .run(agentId, randomUUID(), id, revision).changes === 1
       );
     },
     revoke(agentId: string, id: string): boolean {
@@ -202,6 +222,68 @@ export function openMcpCatalog(
         )
         .all(agentId)
         .map((row) => String(row.definition_id));
+    },
+    revokeAgent(agentId: string): void {
+      db.prepare("DELETE FROM mcp_grants WHERE agent_id = ?").run(agentId);
+    },
+    credentialBinding(
+      agentId: string,
+      id: string,
+    ): CredentialBinding | undefined {
+      if (!agentExists(agentId)) return undefined;
+      const row = db
+        .prepare(
+          `SELECT g.scope, g.secret_ref, d.revision FROM mcp_grants g
+         JOIN mcp_definitions d ON d.id = g.definition_id
+         WHERE g.agent_id = ? AND g.definition_id = ?`,
+        )
+        .get(agentId, id);
+      return (
+        row && {
+          scope: String(row.scope),
+          revision: Number(row.revision),
+          reference: typeof row.secret_ref === "string" ? row.secret_ref : null,
+        }
+      );
+    },
+    replaceCredential(
+      agentId: string,
+      id: string,
+      previous: CredentialBinding,
+      reference: string | null,
+    ): boolean {
+      if (!agentExists(agentId)) return false;
+      return (
+        db
+          .prepare(
+            `UPDATE mcp_grants SET secret_ref = ?
+         WHERE agent_id = ? AND definition_id = ? AND scope = ? AND secret_ref IS ?
+         AND EXISTS (SELECT 1 FROM mcp_definitions WHERE id = ? AND revision = ?)`,
+          )
+          .run(
+            reference,
+            agentId,
+            id,
+            previous.scope,
+            previous.reference,
+            id,
+            previous.revision,
+          ).changes === 1
+      );
+    },
+    retiredCredentials(): string[] {
+      return db
+        .prepare("SELECT ref FROM mcp_retired_secrets ORDER BY rowid LIMIT 64")
+        .all()
+        .map((row) => String(row.ref));
+    },
+    forgetRetiredCredential(reference: string): void {
+      db.prepare("DELETE FROM mcp_retired_secrets WHERE ref = ?").run(
+        reference,
+      );
+    },
+    hasRetiredCredentials(): boolean {
+      return !!db.prepare("SELECT 1 FROM mcp_retired_secrets LIMIT 1").get();
     },
     close() {
       db.close();
