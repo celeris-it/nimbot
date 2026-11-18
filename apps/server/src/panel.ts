@@ -67,6 +67,14 @@ export interface PanelDeps {
   providers?: ReturnType<
     typeof import("./host-providers.js").createHostProviders
   >;
+  peers?: {
+    grants: Pick<
+      import("./agent-grants.js").AgentGrants,
+      "grant" | "revoke" | "list"
+    >;
+    /** Other agents with the same configured owner, for the target picker. */
+    candidates(id: string): { id: string; name: string }[];
+  };
   approvals?: {
     rules: Pick<
       import("./approval-rules.js").ApprovalRules,
@@ -602,6 +610,45 @@ export function createPanel(
     await deps.providers!.remove(c.req.param("id"), provider);
     return c.json({ removed: true });
   });
+  for (const path of ["/api/agents/:id/peers", "/api/agents/:id/peers/*"])
+    app.use(path, async (c, next) => {
+      if (!getAgentSetup?.(c.req.param("id")!))
+        return c.json({ error: "Agent not found." }, 404);
+      if (!deps.peers) return c.json({ error: "Peers unavailable." }, 503);
+      await next();
+    });
+  app.get("/api/agents/:id/peers", (c) =>
+    c.json({
+      grants: deps.peers!.grants.list(c.req.param("id")),
+      candidates: deps.peers!.candidates(c.req.param("id")),
+    }),
+  );
+  for (const action of ["grant", "revoke"] as const)
+    app.post(`/api/agents/:id/peers/${action}`, async (c) => {
+      const body = await c.req.parseBody({ all: true });
+      if (
+        typeof body.target !== "string" ||
+        !["note", "delegate"].includes(String(body.permission))
+      )
+        return c.json({ error: "Invalid grant." }, 400);
+      const id = c.req.param("id");
+      const permission = body.permission as "note" | "delegate";
+      if (action === "revoke")
+        return deps.peers!.grants.revoke(id, body.target, permission)
+          ? c.json({ revoked: true })
+          : c.json({ error: "Grant not found." }, 404);
+      try {
+        return c.json(
+          deps.peers!.grants.grant(id, body.target, permission),
+          201,
+        );
+      } catch {
+        return c.json(
+          { error: "Choose a different agent that shares the same owner." },
+          400,
+        );
+      }
+    });
   app.use("/api/agents/:id/approvals", async (c, next) => {
     if (!getAgentSetup?.(c.req.param("id")!))
       return c.json({ error: "Agent not found." }, 404);
@@ -1122,6 +1169,7 @@ export function createPanel(
     "providers",
     "memory",
     "approvals",
+    "peers",
     "schedules",
     "settings",
     "token",
@@ -1135,6 +1183,7 @@ export function createPanel(
         (suffix === "schedules" && !deps.schedules) ||
         (suffix === "memory" && !deps.memories) ||
         (suffix === "approvals" && !deps.approvals) ||
+        (suffix === "peers" && !deps.peers) ||
         (suffix === "settings" && !agentSettings?.get(id)) ||
         (suffix === "token" &&
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||

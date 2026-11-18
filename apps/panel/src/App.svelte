@@ -18,6 +18,8 @@
   import ProviderSettings from "./ProviderSettings.svelte";
   import Memory from "./Memory.svelte";
   import Approvals from "./Approvals.svelte";
+  import Peers from "./Peers.svelte";
+  import type { PeerGrant } from "../../server/src/agent-grants.js";
   import type { ApprovalRequest } from "../../server/src/approval-store.js";
   import type { ApprovalRule } from "../../server/src/approval-rules.js";
   import type { MemoryEntry } from "../../server/src/host-memories.js";
@@ -32,6 +34,10 @@
   let schedules = $state<ScheduleList>();
   let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
   let memoryPage = $state(1);
+  let peers = $state<{
+    grants: PeerGrant[];
+    candidates: { id: string; name: string }[];
+  }>();
   let approvalHistory = $state<{
     requests: ApprovalRequest[];
     hasMore: boolean;
@@ -50,7 +56,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|approvals|schedules|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|approvals|peers|schedules|token|delete|container\/stop)$/,
     ),
   );
   let title = $derived(
@@ -60,23 +66,25 @@
         ? "Agents"
         : route?.[2] === "schedules"
           ? scheduleText.pageTitle
-          : route?.[2] === "approvals"
-            ? "Approvals"
-            : route?.[2] === "memory"
-              ? "Memory"
-              : route?.[2] === "providers"
-                ? "AI providers"
-                : path === "/agents/new"
-                  ? "Create agent"
-                  : route?.[2] === "settings"
-                    ? "Edit agent"
-                    : route?.[2] === "token"
-                      ? "Bot token"
-                      : route?.[2] === "delete"
-                        ? "Delete agent"
-                        : route?.[2] === "container/stop"
-                          ? "Stop agent"
-                          : "Agent setup",
+          : route?.[2] === "peers"
+            ? "Agent access"
+            : route?.[2] === "approvals"
+              ? "Approvals"
+              : route?.[2] === "memory"
+                ? "Memory"
+                : route?.[2] === "providers"
+                  ? "AI providers"
+                  : path === "/agents/new"
+                    ? "Create agent"
+                    : route?.[2] === "settings"
+                      ? "Edit agent"
+                      : route?.[2] === "token"
+                        ? "Bot token"
+                        : route?.[2] === "delete"
+                          ? "Delete agent"
+                          : route?.[2] === "container/stop"
+                            ? "Stop agent"
+                            : "Agent setup",
   );
 
   async function focusHeading() {
@@ -143,6 +151,21 @@
             )
               throw cause;
             providerSettings = undefined;
+          }
+        }
+        if (route[2] === "peers") {
+          try {
+            peers = await request<typeof peers>(
+              `/api/agents/${route[1]}/peers`,
+              { signal: current.signal },
+            );
+          } catch (cause) {
+            if (
+              current.signal.aborted ||
+              (cause instanceof ApiError && cause.status === 401)
+            )
+              throw cause;
+            peers = undefined;
           }
         }
         if (route[2] === "approvals") {
@@ -388,6 +411,24 @@
         void load();
       },
     );
+  }
+  async function peerAction(
+    kind: "grant" | "revoke",
+    target: string,
+    permission: string,
+  ): Promise<boolean> {
+    if (!agent) return false;
+    let done = false;
+    await mutate(
+      `/api/agents/${encodeURIComponent(agent.id)}/peers/${kind}`,
+      { target, permission },
+      () => {
+        done = true;
+        notice = kind === "grant" ? "Grant added." : "Grant revoked.";
+        void load();
+      },
+    );
+    return done;
   }
   async function createApprovalRule(
     fields: Record<string, string>,
@@ -642,6 +683,17 @@
           save={saveSchedule}
           action={scheduleAction}
           refresh={() => load()}
+        />{/key}
+    {:else if route[2] === "peers"}
+      {#key agent.id}<Peers
+          {agent}
+          data={peers}
+          {busy}
+          grant={(target, permission) =>
+            peerAction("grant", target, permission)}
+          revoke={async (target, permission) => {
+            await peerAction("revoke", target, permission);
+          }}
         />{/key}
     {:else if route[2] === "approvals"}
       {#key agent.id}<Approvals

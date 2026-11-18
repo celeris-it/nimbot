@@ -4,6 +4,7 @@ import { withAgentInstructions } from "./agent-instructions.js";
 import { createHostProviders } from "./host-providers.js";
 import { createHostMemories } from "./host-memories.js";
 import { openApprovalStore } from "./approval-store.js";
+import { openAgentGrants } from "./agent-grants.js";
 import { openApprovalRules } from "./approval-rules.js";
 import { memoryToolPolicy } from "./memory-operations.js";
 import type { DiscordQueuedTask } from "./task-queue.js";
@@ -101,6 +102,7 @@ async function main(): Promise<void> {
   let scheduleStore;
   let approvalStore;
   let approvalRules;
+  let agentGrants;
   let notificationStore;
   let discordInbox!: ReturnType<typeof openDiscordInbox>;
   let registry!: ReturnType<typeof openAgentRegistry>;
@@ -129,9 +131,17 @@ async function main(): Promise<void> {
     approvalStore = openApprovalStore(statePath);
     // No operation is verified read-only yet, so persistent allow rules are unavailable.
     approvalRules = openApprovalRules(statePath, () => false);
+    agentGrants = openAgentGrants(statePath, {
+      exists: (id) => !!registry.get(id),
+      telegramOwner: (id) => registry.get(id)?.ownerId,
+      discordOwner: (id) => registry.getDiscordConnection(id)?.ownerId,
+    });
     // A task left running by the previous process cannot be proven finished.
     taskStore.markRunningInterrupted();
+    // Grants that no longer qualify (changed owner, removed agent) do not survive a restart.
+    agentGrants.prune();
   } catch {
+    agentGrants?.close();
     approvalRules?.close();
     approvalStore?.close();
     scheduleStore?.close();
@@ -146,6 +156,7 @@ async function main(): Promise<void> {
     return;
   }
   process.once("exit", () => {
+    agentGrants.close();
     approvalRules.close();
     approvalStore.close();
     scheduleStore.close();
@@ -332,6 +343,21 @@ async function main(): Promise<void> {
       ? createHostProviders((id) => hostCredentials!.read(id))
       : undefined,
     approvals: { rules: approvalRules, history: approvalStore },
+    peers: {
+      grants: agentGrants,
+      candidates: (id) => {
+        const owner = registry.get(id)?.ownerId;
+        return registry
+          .listIds()
+          .filter((other) => other !== id)
+          .flatMap((other) => {
+            const agent = registry.get(other);
+            return agent && agent.ownerId === owner
+              ? [{ id: other, name: agent.name }]
+              : [];
+          });
+      },
+    },
     memoryAccess: {
       get: (id) => registry.getMemoryEnabled(id),
       set: (id, enabled) => registry.setMemoryEnabled(id, enabled),
