@@ -70,6 +70,61 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 const tg = { platform: "telegram" as const, botId: 1, chatId: 2 };
 
 describe("approval gate", () => {
+  it("requires a saved owner conversation route for an internal delegated origin", async () => {
+    const f = setup();
+    const child: RoutedTask = {
+      id: "child",
+      agentId: "b",
+      prompt: "brief",
+      origin: {
+        platform: "delegated",
+        delegationId: "handoff",
+        parentTaskId: "parent",
+        sourceAgentId: "a",
+      },
+    };
+    await expect(
+      f.gate.guard(child, action, f.run, new AbortController().signal),
+    ).rejects.toThrow("conversation");
+    expect(f.sent).toEqual([]);
+    expect(f.run).not.toHaveBeenCalled();
+    f.gate.close();
+    f.rules.close();
+    f.store.close();
+  });
+
+  it("routes an internal child's approval to its resolved parent conversation", async () => {
+    const parent = telegram(2, "parent", "a");
+    const f = setup({ route: () => parent });
+    const child: RoutedTask = {
+      id: "child",
+      agentId: "b",
+      prompt: "brief",
+      origin: {
+        platform: "delegated",
+        delegationId: "handoff",
+        parentTaskId: parent.id,
+        sourceAgentId: "a",
+      },
+    };
+    const pending = f.gate.guard(
+      child,
+      action,
+      f.run,
+      new AbortController().signal,
+    );
+    await tick();
+    expect(f.sent[0]!.to).toEqual(parent);
+    expect(f.gate.answer(f.sent[0]!.keys.approve, tg)).toBe("ok");
+    expect(await pending).toMatchObject({ status: "executed" });
+    expect(f.store.listByAgent("b").requests[0]).toMatchObject({
+      origin: "telegram:1:2",
+      actor: "delegated:a:parent",
+    });
+    f.gate.close();
+    f.rules.close();
+    f.store.close();
+  });
   it("runs the action once after the owner approves and records the outcome", async () => {
     const f = setup();
     const pending = f.gate.guard(

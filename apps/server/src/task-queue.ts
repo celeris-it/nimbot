@@ -30,12 +30,43 @@ export interface DiscordQueuedTask {
     messageId: string;
   };
 }
-export type RoutedTask = (
+export type ChatTask = (
   | DiscordQueuedTask
   | (QueuedTask & {
       origin: { platform: "telegram"; botId: number; chatId: number };
     })
 ) & { scheduleId?: string; scheduleName?: string; scheduledFor?: number };
+export interface DelegatedTask {
+  id: string;
+  agentId: string;
+  prompt: string;
+  origin: {
+    platform: "delegated";
+    delegationId: string;
+    parentTaskId: string;
+    sourceAgentId: string;
+  };
+}
+export type RoutedTask = (ChatTask | DelegatedTask) & {
+  scheduleId?: string;
+  scheduleName?: string;
+  scheduledFor?: number;
+};
+export const DELEGATION_LIMITS = { perParent: 3, brief: 2_000 } as const;
+export interface Delegation {
+  id: string;
+  sourceTaskId: string;
+  sourceAgentId: string;
+  targetAgentId: string;
+  invocationId: string;
+  brief: string;
+  state: "pending" | "admitted" | "discarded";
+  childTaskId: string | null;
+  reason: string | null;
+  createdAt: number;
+  childStatus?: TaskStatus;
+}
+type DelegationPolicy = (parent: ChatTask, targetAgentId: string) => boolean;
 
 export type TaskOutcome =
   | { ok: true; output: string }
@@ -51,7 +82,7 @@ export function openTaskStore(path: string) {
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       id TEXT NOT NULL UNIQUE,
       agent_id TEXT NOT NULL,
-      platform TEXT NOT NULL DEFAULT 'telegram' CHECK(platform IN ('telegram', 'discord')),
+      platform TEXT NOT NULL DEFAULT 'telegram' CHECK(platform IN ('telegram', 'discord', 'delegated')),
       bot_id INTEGER,
       chat_id INTEGER,
       discord_bot_id TEXT,
@@ -67,14 +98,35 @@ export function openTaskStore(path: string) {
       schedule_name TEXT,
       scheduled_for INTEGER,
       host_task_id TEXT,
+      delegation_id TEXT,
+      parent_task_id TEXT,
+      source_agent_id TEXT,
       CHECK ((schedule_id IS NULL AND scheduled_for IS NULL) OR
         (schedule_id IS NOT NULL AND scheduled_for IS NOT NULL AND platform = 'telegram')),
       CHECK ((platform = 'telegram' AND bot_id IS NOT NULL AND chat_id IS NOT NULL AND discord_bot_id IS NULL AND discord_owner_id IS NULL AND discord_channel_id IS NULL AND discord_message_id IS NULL)
-        OR (platform = 'discord' AND bot_id IS NULL AND chat_id IS NULL AND update_id IS NULL AND discord_bot_id IS NOT NULL AND discord_owner_id IS NOT NULL AND discord_channel_id IS NOT NULL AND discord_message_id IS NOT NULL))
+        OR (platform = 'discord' AND bot_id IS NULL AND chat_id IS NULL AND update_id IS NULL AND discord_bot_id IS NOT NULL AND discord_owner_id IS NOT NULL AND discord_channel_id IS NOT NULL AND discord_message_id IS NOT NULL)
+        OR (platform = 'delegated' AND bot_id IS NULL AND chat_id IS NULL AND update_id IS NULL AND discord_bot_id IS NULL AND discord_owner_id IS NULL AND discord_channel_id IS NULL AND discord_message_id IS NULL)),
+      CHECK ((platform = 'delegated' AND delegation_id IS NOT NULL AND parent_task_id IS NOT NULL AND source_agent_id IS NOT NULL AND source_agent_id != agent_id AND parent_task_id != id AND schedule_id IS NULL AND schedule_name IS NULL AND scheduled_for IS NULL)
+        OR (platform != 'delegated' AND delegation_id IS NULL AND parent_task_id IS NULL AND source_agent_id IS NULL))
     )`);
     db.exec(
       "CREATE INDEX IF NOT EXISTS tasks_agent_queue ON tasks (agent_id, status, seq)",
     );
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS tasks_delegation ON tasks (delegation_id) WHERE delegation_id IS NOT NULL",
+    );
+    db.exec(`CREATE TABLE IF NOT EXISTS delegations (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, source_task_id TEXT NOT NULL, source_agent_id TEXT NOT NULL,
+      target_agent_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
+      brief TEXT NOT NULL CHECK(length(brief) BETWEEN 1 AND ${DELEGATION_LIMITS.brief}),
+      state TEXT NOT NULL CHECK(state IN ('pending', 'admitted', 'discarded')),
+      child_task_id TEXT UNIQUE, reason TEXT,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      UNIQUE(source_task_id, invocation_id), CHECK(source_agent_id != target_agent_id),
+      CHECK((state = 'admitted' AND child_task_id IS NOT NULL AND reason IS NULL)
+        OR (state = 'pending' AND child_task_id IS NULL AND reason IS NULL)
+        OR (state = 'discarded' AND child_task_id IS NULL AND reason IS NOT NULL))
+    ); CREATE INDEX IF NOT EXISTS delegations_parent ON delegations(source_task_id, state, seq)`);
     db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS tasks_host_identity ON tasks (agent_id, host_task_id) WHERE host_task_id IS NOT NULL",
     );
@@ -109,7 +161,7 @@ export function openTaskStore(path: string) {
     throw error;
   }
   const columns =
-    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, schedule_name AS scheduleName, scheduled_for AS scheduledFor";
+    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, schedule_name AS scheduleName, scheduled_for AS scheduledFor, delegation_id, parent_task_id, source_agent_id";
   function scheduleMetadata(row: Record<string, unknown>) {
     return row.scheduleId == null
       ? {}
@@ -128,6 +180,16 @@ export function openTaskStore(path: string) {
       prompt: String(row.prompt),
       ...scheduleMetadata(row),
     };
+    if (row.platform === "delegated")
+      return {
+        ...base,
+        origin: {
+          platform: "delegated",
+          delegationId: String(row.delegation_id),
+          parentTaskId: String(row.parent_task_id),
+          sourceAgentId: String(row.source_agent_id),
+        },
+      };
     if (row.platform === "discord")
       return {
         ...base,
@@ -188,7 +250,191 @@ export function openTaskStore(path: string) {
       throw error;
     }
   }
+  const readDelegation = (row: Record<string, unknown>): Delegation => ({
+    id: String(row.id),
+    sourceTaskId: String(row.source_task_id),
+    sourceAgentId: String(row.source_agent_id),
+    targetAgentId: String(row.target_agent_id),
+    invocationId: String(row.invocation_id),
+    brief: String(row.brief),
+    state: row.state as Delegation["state"],
+    childTaskId:
+      typeof row.child_task_id === "string" ? row.child_task_id : null,
+    reason: typeof row.reason === "string" ? row.reason : null,
+    createdAt: Number(row.created_at),
+    ...(typeof row.child_status === "string"
+      ? { childStatus: row.child_status as TaskStatus }
+      : {}),
+  });
+  const parentRow = (id: string) =>
+    db
+      .prepare(
+        `SELECT ${columns}, platform, discord_bot_id, discord_owner_id, discord_channel_id, discord_message_id, status FROM tasks WHERE id = ?`,
+      )
+      .get(id);
+  function finishWithDelegations(
+    id: string,
+    status: "completed" | "failed" | "interrupted" | "cancelled",
+    allowed: DelegationPolicy,
+  ): string[] {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = parentRow(id);
+      if (!row || row.status !== "running") {
+        db.exec("COMMIT");
+        return [];
+      }
+      const parent = routed(row);
+      db.prepare(
+        "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = 'running'",
+      ).run(status, Date.now(), id);
+      const targets = new Set<string>();
+      for (const entry of db
+        .prepare(
+          "SELECT * FROM delegations WHERE source_task_id = ? AND state = 'pending' ORDER BY seq",
+        )
+        .all(id)) {
+        const target = String(entry.target_agent_id);
+        if (
+          status !== "completed" ||
+          parent.origin.platform === "delegated" ||
+          parent.scheduleId !== undefined ||
+          !allowed(parent as ChatTask, target)
+        ) {
+          db.prepare(
+            "UPDATE delegations SET state = 'discarded', reason = ?, updated_at = ? WHERE id = ? AND state = 'pending'",
+          ).run(
+            status !== "completed" ? `parent_${status}` : "access_revoked",
+            Date.now(),
+            String(entry.id),
+          );
+          continue;
+        }
+        const child = randomUUID();
+        const now = Date.now();
+        db.prepare(
+          `INSERT INTO tasks (id, agent_id, platform, prompt, status, created_at, updated_at, delegation_id, parent_task_id, source_agent_id)
+          VALUES (?, ?, 'delegated', ?, 'queued', ?, ?, ?, ?, ?)`,
+        ).run(
+          child,
+          target,
+          String(entry.brief),
+          now,
+          now,
+          String(entry.id),
+          parent.id,
+          parent.agentId,
+        );
+        db.prepare(
+          "UPDATE delegations SET state = 'admitted', child_task_id = ?, updated_at = ? WHERE id = ? AND state = 'pending'",
+        ).run(child, now, String(entry.id));
+        targets.add(target);
+      }
+      db.exec("COMMIT");
+      // The caller may kick workers only after this transaction has committed.
+      return [...targets];
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   return {
+    /** Stages a one-hop brief without enqueuing any work. Identity comes from the saved parent. */
+    stageDelegation(
+      input: {
+        parentTaskId: string;
+        targetAgentId: string;
+        invocationId: string;
+        brief: string;
+      },
+      allowed: DelegationPolicy,
+    ): Delegation {
+      const uuid =
+        /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+      if (
+        typeof input.parentTaskId !== "string" ||
+        typeof input.invocationId !== "string" ||
+        typeof input.targetAgentId !== "string" ||
+        !uuid.test(input.parentTaskId) ||
+        !uuid.test(input.invocationId) ||
+        !/^[a-z0-9][a-z0-9-]{0,47}$/.test(input.targetAgentId) ||
+        typeof input.brief !== "string" ||
+        !input.brief.trim() ||
+        input.brief.length > DELEGATION_LIMITS.brief
+      )
+        throw new Error("Invalid delegation");
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const row = parentRow(input.parentTaskId);
+        const parent = row ? routed(row) : undefined;
+        if (
+          !parent ||
+          row!.status !== "running" ||
+          parent.origin.platform === "delegated" ||
+          parent.scheduleId !== undefined ||
+          parent.agentId === input.targetAgentId ||
+          !allowed(parent as ChatTask, input.targetAgentId)
+        )
+          throw new Error("Delegation is not authorized");
+        const existing = db
+          .prepare(
+            "SELECT * FROM delegations WHERE source_task_id = ? AND invocation_id = ?",
+          )
+          .get(parent.id, input.invocationId);
+        const brief = input.brief.trim();
+        if (existing) {
+          if (
+            existing.target_agent_id !== input.targetAgentId ||
+            existing.brief !== brief
+          )
+            throw new Error("Delegation invocation conflict");
+          db.exec("COMMIT");
+          return readDelegation(existing);
+        }
+        if (
+          Number(
+            db
+              .prepare(
+                "SELECT count(*) AS n FROM delegations WHERE source_task_id = ?",
+              )
+              .get(parent.id)!.n,
+          ) >= DELEGATION_LIMITS.perParent
+        )
+          throw new Error("Too many delegations");
+        const id = randomUUID();
+        const now = Date.now();
+        db.prepare(
+          "INSERT INTO delegations (id, source_task_id, source_agent_id, target_agent_id, invocation_id, brief, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+        ).run(
+          id,
+          parent.id,
+          parent.agentId,
+          input.targetAgentId,
+          input.invocationId,
+          brief,
+          now,
+          now,
+        );
+        const result = readDelegation(
+          db.prepare("SELECT * FROM delegations WHERE id = ?").get(id)!,
+        );
+        db.exec("COMMIT");
+        return result;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    getDelegation(sourceAgentId: string, id: string): Delegation | undefined {
+      const row = db
+        .prepare(
+          "SELECT d.*, t.status AS child_status FROM delegations d LEFT JOIN tasks t ON t.id = d.child_task_id WHERE d.source_agent_id = ? AND d.id = ?",
+        )
+        .get(sourceAgentId, id);
+      return row ? readDelegation(row) : undefined;
+    },
+    /** Rechecks the grant and source origin in the same transaction as parent completion and child admission. */
+    finishWithDelegations,
     /**
      * Saves the message before any execution; returns how many tasks are ahead
      * of it. A Telegram update already saved for this bot is reported as a
@@ -407,15 +653,24 @@ export function openTaskStore(path: string) {
       id: string,
       status: "completed" | "failed" | "interrupted" | "cancelled",
     ) {
-      db.prepare(
-        "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = 'running'",
-      ).run(status, Date.now(), id);
+      // Unconfigured callers cannot release a pending handoff.
+      finishWithDelegations(id, status, () => false);
     },
     /** A task left running by a stopped server cannot be proven finished. */
     markRunningInterrupted() {
-      db.prepare(
-        "UPDATE tasks SET status = 'interrupted', updated_at = ? WHERE status = 'running'",
-      ).run(Date.now());
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(
+          "UPDATE tasks SET status = 'interrupted', updated_at = ? WHERE status = 'running'",
+        ).run(Date.now());
+        db.prepare(
+          "UPDATE delegations SET state = 'discarded', reason = 'parent_interrupted', updated_at = ? WHERE state = 'pending' AND source_task_id IN (SELECT id FROM tasks WHERE status IN ('completed', 'failed', 'cancelled', 'interrupted'))",
+        ).run(Date.now());
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
     pendingConversations(agentId: string): { botId: number; chatId: number }[] {
       return db
@@ -645,6 +900,8 @@ export function createTaskQueue(
 }
 
 export function taskOriginKey(origin: RoutedTask["origin"]) {
+  if (origin.platform === "delegated")
+    return `delegated:${origin.delegationId}`;
   return origin.platform === "telegram"
     ? `telegram:${origin.botId}:${origin.chatId}`
     : `discord:${origin.botId}:${origin.ownerId}:${origin.channelId}`;

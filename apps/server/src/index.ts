@@ -201,13 +201,15 @@ async function main(): Promise<void> {
       throw new Error("Agent is unavailable");
     const host = await hostCredentials.read(id);
     const canReach = (task: RoutedTask) =>
-      task.origin.platform === "discord"
-        ? discordAdmit(task as DiscordQueuedTask)
-        : createAgentAccess(registry, task.agentId).canExecute(
-            task.origin.botId,
-            registry.get(task.agentId)?.ownerId ?? 0,
-            task.origin.chatId,
-          );
+      task.origin.platform === "delegated"
+        ? false
+        : task.origin.platform === "discord"
+          ? discordAdmit(task as DiscordQueuedTask)
+          : createAgentAccess(registry, task.agentId).canExecute(
+              task.origin.botId,
+              registry.get(task.agentId)?.ownerId ?? 0,
+              task.origin.chatId,
+            );
     const peerTools = createPeerTools({
       agentId: id,
       grants: agentGrants,

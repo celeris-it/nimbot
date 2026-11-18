@@ -72,14 +72,16 @@ export function createBotTasks(config: {
 }) {
   let bot: Bot | undefined;
   const admit = (task: RoutedTask) =>
-    task.origin.platform === "discord"
-      ? !!config.discord?.admit(task as DiscordQueuedTask)
-      : !config.access ||
-        config.access.canExecute(
-          task.origin.botId,
-          config.ownerId(),
-          task.origin.chatId,
-        );
+    task.origin.platform === "delegated"
+      ? false
+      : task.origin.platform === "discord"
+        ? !!config.discord?.admit(task as DiscordQueuedTask)
+        : !config.access ||
+          config.access.canExecute(
+            task.origin.botId,
+            config.ownerId(),
+            task.origin.chatId,
+          );
   const capabilities = createTaskCapabilities({
     store: config.store,
     ...(config.toolPolicy
@@ -190,7 +192,9 @@ export function createBotTasks(config: {
   const queue = createRoutedTaskQueue({
     agentId: config.agentId,
     store: config.store,
-    ready: (task) => task.origin.platform !== "telegram" || !!bot,
+    ready: (task) =>
+      task.origin.platform !== "delegated" &&
+      (task.origin.platform !== "telegram" || !!bot),
     execute: async (task, report, signal) => {
       // Resolve correlation and callback origin from Server state, never the prompt
       // or a Host-provided identity. A missing policy grants no application tools.
@@ -198,7 +202,8 @@ export function createBotTasks(config: {
       if (
         !saved ||
         saved.agentId !== config.agentId ||
-        saved.status !== "running"
+        saved.status !== "running" ||
+        saved.origin.platform === "delegated"
       )
         throw new HostTaskError("unavailable");
       const tools = capabilities.issue(
@@ -243,6 +248,7 @@ export function createBotTasks(config: {
       }
     },
     progress: async (task, message) => {
+      if (task.origin.platform === "delegated") return;
       if (task.scheduleId !== undefined) return;
       if (task.origin.platform === "discord") {
         const discordTask = task as DiscordQueuedTask;
@@ -253,6 +259,8 @@ export function createBotTasks(config: {
     },
     admit,
     deliver: async (task, outcome) => {
+      if (task.origin.platform === "delegated")
+        throw new Error("Delegated delivery is unavailable");
       if (task.origin.platform === "discord") {
         const discordTask = task as DiscordQueuedTask;
         if (!config.discord?.admit(discordTask))

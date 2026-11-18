@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { ApprovalRules } from "./approval-rules.js";
 import { actionFingerprint, type ApprovalStore } from "./approval-store.js";
-import type { RoutedTask } from "./task-queue.js";
+import type { RoutedTask, ChatTask } from "./task-queue.js";
 
 export interface GateAction {
   /** Trusted operation identifier; never model text. */
@@ -30,7 +30,7 @@ export type GateResult<T> =
   | { status: "denied"; requestId: string | null; reason: DeniedReason };
 
 /** Where a decision may be given; the callback must come from exactly here. */
-export type Conversation = RoutedTask["origin"];
+export type Conversation = ChatTask["origin"];
 export type Responder =
   | { platform: "telegram"; botId: number; chatId: number }
   | {
@@ -41,10 +41,12 @@ export type Responder =
       messageId: string;
     };
 
-const label = (origin: Conversation) =>
-  origin.platform === "telegram"
-    ? `telegram:${origin.botId}:${origin.chatId}`
-    : `discord:${origin.botId}:${origin.ownerId}:${origin.channelId}`;
+const label = (origin: RoutedTask["origin"]) =>
+  origin.platform === "delegated"
+    ? `delegated:${origin.sourceAgentId}:${origin.parentTaskId}`
+    : origin.platform === "telegram"
+      ? `telegram:${origin.botId}:${origin.chatId}`
+      : `discord:${origin.botId}:${origin.ownerId}:${origin.channelId}`;
 
 /**
  * Applies the approval policy to structured actions. Rules and the owner's
@@ -72,7 +74,7 @@ export function createApprovalGate(config: {
    * The conversation that gets the question still belongs to its verified owner
    * and binding. Defaults to isActive; a delegated child's parent has finished.
    */
-  canReach?(destination: RoutedTask): boolean;
+  canReach?(destination: ChatTask): boolean;
   /**
    * Conversation that receives the question. A delegated child resolves to the
    * original conversation through its saved parent link; default is its own.
@@ -80,7 +82,7 @@ export function createApprovalGate(config: {
   route?(task: RoutedTask): RoutedTask | undefined;
   /** Sends the question with its two keys; returns a message ID when the channel has one. */
   deliver(
-    destination: RoutedTask,
+    destination: ChatTask,
     text: string,
     keys: { approve: string; deny: string },
   ): Promise<string | undefined>;
@@ -88,12 +90,12 @@ export function createApprovalGate(config: {
   now?: () => number;
 }) {
   const now = config.now ?? Date.now;
-  const reach = (destination: RoutedTask) =>
+  const reach = (destination: ChatTask) =>
     (config.canReach ?? config.isActive)(destination);
   const ttlMs = config.ttlMs ?? 600_000;
   type Waiting = {
     requestId: string;
-    destination: RoutedTask;
+    destination: ChatTask;
     messageId: string | undefined;
     expires: number;
     keys: [string, string];
@@ -110,7 +112,10 @@ export function createApprovalGate(config: {
     run: (signal: AbortSignal) => Promise<T>,
     signal: AbortSignal,
   ): Promise<GateResult<T>> {
-    const destination = config.route?.(task) ?? task;
+    const routed = config.route?.(task) ?? task;
+    if (routed.origin.platform === "delegated")
+      throw new Error("Approval conversation is unavailable");
+    const destination = routed as ChatTask;
     const lifetime = Math.min(action.ttlMs ?? ttlMs, ttlMs);
     const fingerprint = actionFingerprint(
       task.agentId,
@@ -190,7 +195,7 @@ export function createApprovalGate(config: {
 
   async function ask(
     task: RoutedTask,
-    destination: RoutedTask,
+    destination: ChatTask,
     requestId: string,
     action: GateAction,
     signal: AbortSignal,

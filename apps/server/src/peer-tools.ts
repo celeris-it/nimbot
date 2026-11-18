@@ -33,6 +33,7 @@ export function createPeerTools(config: {
   const active = (task: RoutedTask) => {
     const saved = config.tasks.getTask(task.id);
     return (
+      task.origin.platform !== "delegated" &&
       task.agentId === config.agentId &&
       task.scheduleId === undefined &&
       saved?.status === "running" &&
@@ -42,13 +43,16 @@ export function createPeerTools(config: {
     );
   };
   const canSend = (task: RoutedTask, target: string) =>
+    task.origin.platform !== "delegated" &&
     active(task) &&
     config.grants.allows(task.agentId, target, "note", task.origin.platform);
   const canRead = (task: RoutedTask, note: AgentNote) => {
     const source = config.tasks.getTask(note.sourceTaskId);
     return (
+      task.origin.platform !== "delegated" &&
       note.targetAgentId === task.agentId &&
       !!source &&
+      source.origin.platform !== "delegated" &&
       source.agentId === note.sourceAgentId &&
       source.scheduleId === undefined &&
       config.canReach(source) &&
@@ -67,19 +71,25 @@ export function createPeerTools(config: {
     );
   };
   const targets = (task: RoutedTask) =>
-    [
-      ...new Set([
-        ...config.grants.targets(task.agentId, "note", task.origin.platform),
-        ...config.grants.targets(
-          task.agentId,
-          "delegate",
-          task.origin.platform,
-        ),
-      ]),
-    ].sort();
+    task.origin.platform === "delegated"
+      ? []
+      : [
+          ...new Set([
+            ...config.grants.targets(
+              task.agentId,
+              "note",
+              task.origin.platform,
+            ),
+            ...config.grants.targets(
+              task.agentId,
+              "delegate",
+              task.origin.platform,
+            ),
+          ]),
+        ].sort();
   return {
     operations(task: RoutedTask): string[] {
-      if (!active(task)) return [];
+      if (task.origin.platform === "delegated" || !active(task)) return [];
       return [
         ...(targets(task).length ? ["agent.list"] : []),
         ...(config.grants.targets(task.agentId, "note", task.origin.platform)
