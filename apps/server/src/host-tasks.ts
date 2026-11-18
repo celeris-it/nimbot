@@ -176,7 +176,10 @@ export function createHostTasks(
       )
         throw new HostTaskError("unavailable");
       acceptedId = accepted.id;
-      const requestCancel = () => cancelOnHost(accepted.id as string);
+      const requestCancel = () => {
+        for (const controller of toolCalls.values()) controller.abort();
+        cancelOnHost(accepted.id as string);
+      };
       // The signal may have fired while the submission was in flight.
       if (cancelSignal?.aborted) requestCancel();
       else
@@ -219,6 +222,7 @@ export function createHostTasks(
         }
       };
       const startTool = (event: { output?: unknown }) => {
+        if (cancelSignal?.aborted || deadline.aborted) return;
         const tool = parseToolRequest(event.output);
         if (!tool || toolCalls.has(tool.invocationId)) return;
         const controller = new AbortController();

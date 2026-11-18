@@ -147,20 +147,43 @@ export function createToolDispatcher(config: {
         }
       }
       const controller = new AbortController();
-      const onAbort = () => controller.abort();
+      let rejectCancellation = () => {};
+      const cancelled = new Promise<never>((_, reject) => {
+        rejectCancellation = () => reject(new Error("cancelled"));
+      });
+      const onAbort = () => {
+        // Reject before notifying the handler: a handler may ignore abort or
+        // resolve from its abort listener, but neither should delay cancellation.
+        rejectCancellation();
+        controller.abort();
+      };
       signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+      const denied = new Error("denied");
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const timedOut = new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
-            controller.abort();
             reject(new Error("timeout"));
+            controller.abort();
           }, timeoutMs);
         });
         const result = await Promise.race([
-          handler.execute(task, args, {
-            invocationId: request.invocationId,
-            signal: controller.signal,
+          cancelled,
+          Promise.resolve().then(() => {
+            controller.signal.throwIfAborted();
+            if (
+              !config.authorize({
+                ...identity,
+                hostTaskId: request.hostTaskId,
+                operation: request.operation,
+              })
+            )
+              throw denied;
+            return handler.execute(task, args, {
+              invocationId: request.invocationId,
+              signal: controller.signal,
+            });
           }),
           timedOut,
         ]);
@@ -179,15 +202,18 @@ export function createToolDispatcher(config: {
         return finish({
           ok: false,
           error:
-            error instanceof Error && error.message === "timeout"
-              ? "timeout"
-              : signal.aborted
-                ? "cancelled"
-                : "failed",
+            error === denied
+              ? "denied"
+              : error instanceof Error && error.message === "timeout"
+                ? "timeout"
+                : signal.aborted
+                  ? "cancelled"
+                  : "failed",
         });
       } finally {
         if (timer) clearTimeout(timer);
         signal.removeEventListener("abort", onAbort);
+        controller.abort();
       }
     },
   };

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createToolDispatcher,
   type ServerToolHandler,
@@ -13,6 +13,8 @@ const serverTaskId = "b0000000-0000-4000-8000-000000000002";
 const invocationId = "c0000000-0000-4000-8000-000000000003";
 const identity = { agentId: "a", serverTaskId, token: "t".repeat(64) };
 const task = { id: serverTaskId, agentId: "a" } as RoutedTask;
+
+afterEach(() => vi.useRealTimers());
 
 function setup(handler: Partial<ServerToolHandler> = {}, authorized = true) {
   const store = openTaskStore(join(mkdtempSync(join(tmpdir(), "td-")), "t.db"));
@@ -114,6 +116,57 @@ describe("tool dispatcher", () => {
       ok: false,
       error: "cancelled",
     });
+  });
+
+  it("settles cancellation immediately even if the handler ignores abort, and never replays the write", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    let finishWork!: (value: unknown) => void;
+    let workSignal!: AbortSignal;
+    const execute = vi.fn<ServerToolHandler["execute"]>(
+      (_task, _args, context) => {
+        workSignal = context.signal;
+        return new Promise((resolve) => {
+          finishWork = resolve;
+        });
+      },
+    );
+    const f = setup({ execute });
+    const pending = f.call({ n: 1 }, controller.signal);
+    await Promise.resolve();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(workSignal.aborted).toBe(false);
+    controller.abort();
+    expect(await pending).toEqual({ ok: false, error: "cancelled" });
+    expect(workSignal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(await f.call()).toEqual({ ok: false, error: "cancelled" });
+    finishWork({ secret: "late result" });
+    await Promise.resolve();
+    expect(await f.call()).toEqual({ ok: false, error: "cancelled" });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops pending helpers after a handler finishes and removes its timer", async () => {
+    vi.useFakeTimers();
+    let workSignal!: AbortSignal;
+    const f = setup({
+      execute: async (_task, _args, context) => {
+        workSignal = context.signal;
+        return "done";
+      },
+    });
+    expect(await f.call()).toEqual({ ok: true, result: "done" });
+    expect(workSignal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rechecks authorization before entering a handler", async () => {
+    const f = setup();
+    const pending = f.call();
+    f.authorize.mockReturnValue(undefined);
+    expect(await pending).toEqual({ ok: false, error: "denied" });
+    expect(f.execute).not.toHaveBeenCalled();
   });
 
   it("drops oversized results", async () => {

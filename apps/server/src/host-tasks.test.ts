@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ToolOutcome } from "./tool-dispatch.js";
 import {
   createHostApprovals,
   createHostTasks,
@@ -447,6 +448,8 @@ describe("tool relay", () => {
       const url = String(input);
       if (url.endsWith("/tasks"))
         return Response.json({ id: hostTaskId, status: "accepted" });
+      if (url.endsWith("/cancel"))
+        return Response.json({ id: hostTaskId, status: "cancelling" });
       if (url.includes("/tool-requests/")) {
         replies.push({ url, body: JSON.parse(String(init?.body)) });
         return Response.json({ status: "recorded" });
@@ -545,5 +548,54 @@ describe("tool relay", () => {
     );
     await vi.waitFor(() => expect(aborted).toBe(true));
     expect(f.replies).toHaveLength(0);
+  });
+
+  it("aborts tools as soon as the Server cancels, without waiting for another Host poll", async () => {
+    const f = host([
+      [toolEvent],
+      [
+        {
+          ...toolEvent,
+          sequence: 2,
+          output: JSON.stringify({
+            invocationId: "d0000000-0000-4000-8000-000000000004",
+            operation: "x.op",
+            arguments: { a: 2 },
+          }),
+        },
+      ],
+      [{ sequence: 3, status: "cancelled" }],
+    ]);
+    const controller = new AbortController();
+    let workSignal!: AbortSignal;
+    let finishWork!: (outcome: ToolOutcome) => void;
+    const onTool = vi.fn<NonNullable<HostTaskExecution["onTool"]>>(
+      (_request, signal) => {
+        workSignal = signal;
+        return new Promise((resolve) => {
+          finishWork = resolve;
+        });
+      },
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pending = createHostTasks(config, f.request, () => gate)(
+      "p",
+      undefined,
+      controller.signal,
+      undefined,
+      { identity, onTool, onAccepted: () => true },
+    );
+    const ended = expect(pending).rejects.toMatchObject({ kind: "cancelled" });
+    await vi.waitFor(() => expect(onTool).toHaveBeenCalledTimes(1));
+    controller.abort();
+    expect(workSignal.aborted).toBe(true);
+    finishWork({ ok: true, result: "late" });
+    release();
+    await ended;
+    expect(onTool).toHaveBeenCalledTimes(1);
+    expect(f.replies).toEqual([]);
   });
 });
