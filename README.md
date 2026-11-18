@@ -91,7 +91,7 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
 ```
 
 - **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing and scheduling, container lifecycle, and diagnostics. Agent-generated commands never run on the host OS.
-- **Agent Host:** one container per agent, running the AI engine, tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
+- **Agent Host:** one container per agent, using OpenCode as its sole AI engine and running the tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
 - **Panel:** Svelte 5, TypeScript, Vite, and daisyUI. Hono serves compiled assets and the same-origin API from one process. JavaScript is required; visible views refresh every five seconds and forms submit without document reloads.
 - **Storage:** SQLite and Docker named volumes. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
 
@@ -315,7 +315,6 @@ replayed events, cross-channel deduplication and context, and restored FIFO work
 
 The following ideas are deferred, not supported features or delivery commitments:
 
-- **AI engines:** native Codex, Claude Code, additional ACP providers, per-agent engine selection and switching.
 - **Messaging:** WhatsApp, Slack, shared agents, groups/topics, file and media attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
 - **Nimbot messaging app:** a dedicated messaging app with [Matrix](https://matrix.org/) connectivity.
 - **Agent capabilities:** agent-to-agent communication, delegation, shared tools, advanced memory retrieval, advanced approvals, and MCP integrations.
