@@ -5,6 +5,10 @@ import {
 } from "./approval-gate.js";
 import { createApprovalRelay, type ApprovalForward } from "./approval-relay.js";
 import { createDelegatedHostApprovals } from "./delegated-host-approvals.js";
+import { createDelegationDelivery } from "./delegation-delivery.js";
+import type { openNotificationStore } from "./notification-store.js";
+import type { NotificationResult } from "./notifications.js";
+import { createTelegramNotifications } from "./telegram-notifications.js";
 import type { ApprovalRules } from "./approval-rules.js";
 import type { ApprovalStore } from "./approval-store.js";
 import {
@@ -47,6 +51,9 @@ export function createBotTasks(config: {
     | readonly ServerToolHandler[]
     | ((guard: ApprovalGate["guard"]) => readonly ServerToolHandler[]);
   toolLifetimeMs?: number;
+  notificationStore?: ReturnType<typeof openNotificationStore>;
+  /** Server relay for a child's committed result; never accepts model-supplied output. */
+  delegationResult?: (task: RoutedTask) => Promise<void>;
   /** Structured approvals for service-validated actions; omit to disable the gate. */
   approvals?: { store: ApprovalStore; rules: ApprovalRules };
   /** Original conversation for a delegated child, from its saved parent link. */
@@ -78,6 +85,11 @@ export function createBotTasks(config: {
     admit(task: DiscordQueuedTask): boolean;
     progress(task: DiscordQueuedTask, message: string): Promise<void>;
     deliver(task: DiscordQueuedTask, outcome: TaskOutcome): Promise<void>;
+    sendDelegation?(
+      task: DiscordQueuedTask,
+      text: string,
+      canSend: () => boolean,
+    ): Promise<NotificationResult>;
     sendApproval: Parameters<typeof createDiscordApprovals>[0]["send"];
     acknowledge?: typeof acknowledgeDiscordApproval;
   };
@@ -142,6 +154,39 @@ export function createBotTasks(config: {
       config.delegation?.canHandoff(parent, target) ?? false,
     send: sendStructuredApproval,
   });
+  const delegationDelivery = config.notificationStore
+    ? createDelegationDelivery({
+        agentId: config.agentId,
+        tasks: config.store,
+        notifications: config.notificationStore,
+        canReach: admit,
+        allowed: (parent, target) =>
+          config.delegation?.canHandoff(parent, target) ?? false,
+        async send(parent, text, canSend) {
+          if (parent.origin.platform === "discord")
+            return (
+              config.discord?.sendDelegation?.(
+                parent as DiscordQueuedTask,
+                text,
+                canSend,
+              ) ?? { status: "failed", sentParts: 0, reason: "not_configured" }
+            );
+          const origin = parent.origin;
+          const sourceBot = bot;
+          return createTelegramNotifications(() =>
+            sourceBot
+              ? {
+                  async send(part) {
+                    if (!canSend() || bot !== sourceBot) return false;
+                    await sourceBot.api.sendMessage(origin.chatId, part);
+                    return true;
+                  },
+                }
+              : undefined,
+          ).send(config.agentId, text);
+        },
+      })
+    : undefined;
   const gate: ApprovalGate | undefined = config.approvals
     ? createApprovalGate({
         store: config.approvals.store,
@@ -332,8 +377,12 @@ export function createBotTasks(config: {
     },
     admit,
     deliver: async (task, outcome) => {
-      if (task.origin.platform === "delegated")
-        throw new Error("Delegated delivery is unavailable");
+      if (task.origin.platform === "delegated") {
+        if (!config.delegationResult)
+          throw new Error("Delegated delivery is unavailable");
+        await config.delegationResult(task);
+        return;
+      }
       if (task.origin.platform === "discord") {
         const discordTask = task as DiscordQueuedTask;
         if (!config.discord?.admit(discordTask))
@@ -364,6 +413,11 @@ export function createBotTasks(config: {
       return gate.guard(task, action, run, signal);
     },
     forwardStructuredApproval: relay.forward,
+    deliverDelegationResult: (id: string) => {
+      if (!delegationDelivery)
+        throw new Error("Delegated delivery is unavailable");
+      return delegationDelivery.deliver(id);
+    },
     submit: queue.submitTelegram,
     submitDiscord: queue.submitDiscord,
     discordControl: {
@@ -413,6 +467,7 @@ export function createBotTasks(config: {
     close() {
       capabilities.close();
       relay.close();
+      delegationDelivery?.close();
       delegatedHostApprovals.close();
       gate?.close();
       discordApprovals.close();

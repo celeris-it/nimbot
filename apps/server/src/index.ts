@@ -223,6 +223,7 @@ async function main(): Promise<void> {
       store: taskStore,
       ownerId: () => registry.get(id)?.ownerId ?? 0,
       approvals: { store: approvalStore, rules: approvalRules },
+      notificationStore,
       approvalReach: canReach,
       toolPolicy: {
         canExecute: (task) => task.agentId === id && canReach(task),
@@ -263,6 +264,8 @@ async function main(): Promise<void> {
                 : "The task could not be completed. Check the agent status before trying again.",
           ),
         sendApproval: discordDelivery.sendApproval,
+        sendDelegation: (task, text, canSend) =>
+          discordDelivery.sendTask(task, text, canSend),
       },
     };
   });

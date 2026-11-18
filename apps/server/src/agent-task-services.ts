@@ -1,6 +1,6 @@
 import type { ApprovalForward } from "./approval-relay.js";
 import { createBotTasks } from "./bot-tasks.js";
-import type { TaskStore } from "./task-queue.js";
+import type { RoutedTask, TaskStore } from "./task-queue.js";
 
 /** Own one task runner per agent independently of Telegram/Discord transport lifetimes. */
 export function createAgentTaskServices(
@@ -27,6 +27,7 @@ export function createAgentTaskServices(
         return createBotTasks({
           ...config,
           approvalRelay: config.approvalRelay ?? relayApproval,
+          delegationResult: config.delegationResult ?? relayDelegationResult,
         });
       });
     services.set(id, pending);
@@ -40,6 +41,16 @@ export function createAgentTaskServices(
       destination,
       ...args,
     );
+  async function relayDelegationResult(task: RoutedTask): Promise<void> {
+    if (task.origin.platform !== "delegated")
+      throw new Error("Invalid delegated result");
+    const source = await get(task.origin.sourceAgentId);
+    const outcome = await source.deliverDelegationResult(
+      task.origin.delegationId,
+    );
+    if (outcome?.status !== "delivered")
+      throw new Error("Delegated delivery could not be confirmed");
+  }
   async function wake(targetAgentIds: readonly string[]): Promise<void> {
     if (closed) return;
     // Failed credential loads never undo an admitted child or resubmit its parent.
@@ -59,6 +70,7 @@ export function createAgentTaskServices(
     get,
     wake,
     relayApproval,
+    relayDelegationResult,
     async resumeDelegations(
       store: Pick<TaskStore, "pendingDelegationTargets">,
     ) {

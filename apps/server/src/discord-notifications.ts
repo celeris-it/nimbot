@@ -34,6 +34,7 @@ export function createDiscordNotifications(
     text: string,
     approval?: {
       task: DiscordQueuedTask;
+      canSend?: () => boolean;
       buttons?: { label: string; customId: string; allow: boolean }[];
     },
   ): Promise<NotificationResult & { messageId?: string }> {
@@ -85,6 +86,7 @@ export function createDiscordNotifications(
       return { response, data };
     }
     function available() {
+      if (approval?.canSend && !approval.canSend()) return fail("unavailable");
       if (!target.isCurrent()) return fail("unavailable");
       if ((cooldowns.get(target.botId) ?? 0) > now())
         return fail("rate_limited");
@@ -178,6 +180,7 @@ export function createDiscordNotifications(
     text: string,
     approval?: {
       task: DiscordQueuedTask;
+      canSend?: () => boolean;
       buttons?: { label: string; customId: string; allow: boolean }[];
     },
   ): Promise<NotificationResult & { messageId?: string }> {
@@ -216,8 +219,15 @@ export function createDiscordNotifications(
   }
   return {
     send,
-    async sendTask(task: DiscordQueuedTask, content: string) {
-      return send(task.agentId, content, { task });
+    async sendTask(
+      task: DiscordQueuedTask,
+      content: string,
+      canSend?: () => boolean,
+    ) {
+      return send(task.agentId, content, {
+        task,
+        ...(canSend ? { canSend } : {}),
+      });
     },
     async sendApproval(
       task: DiscordQueuedTask,
