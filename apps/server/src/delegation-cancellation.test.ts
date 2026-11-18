@@ -85,6 +85,14 @@ it("persists running cancellation before abort and suppresses even an unobserved
   expect(f.child(1).childStatus).toBe("queued");
 });
 
+it("rejects a Host acceptance that arrives after durable cancellation", () => {
+  const f = setup();
+  const child = f.store.claimNextTask("b")!;
+  f.store.cancelDelegation("b", f.handoffs[0]!.id);
+  expect(f.store.bindHostTask("b", child.id, randomUUID())).toBe(false);
+  expect(f.store.getHostTaskId("b", child.id)).toBeUndefined();
+});
+
 it("recovers accepted cancellation after restart without rerunning the child or cancelling its sibling", () => {
   const f = setup();
   const first = f.store.claimNextTask("b")!;

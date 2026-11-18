@@ -82,6 +82,13 @@ export interface PanelDeps {
     >;
     history: Pick<import("./approval-store.js").ApprovalStore, "listByAgent">;
   };
+  delegations?: {
+    store: Pick<
+      import("./task-queue.js").TaskStore,
+      "listDelegations" | "getDelegation"
+    >;
+    cancel(sourceAgentId: string, id: string): Promise<boolean>;
+  };
   memoryAccess?: {
     get(id: string): boolean;
     set(id: string, enabled: boolean): boolean;
@@ -667,6 +674,47 @@ export function createPanel(
     const page = Number(value ?? "1");
     return Number.isSafeInteger(page) && page >= 1 && page <= 1000 ? page : 1;
   };
+  for (const path of [
+    "/api/agents/:id/delegations",
+    "/api/agents/:id/delegations/*",
+  ])
+    app.use(path, async (c, next) => {
+      if (!getAgentSetup?.(c.req.param("id")!))
+        return c.json({ error: "Agent not found." }, 404);
+      if (!deps.delegations)
+        return c.json({ error: "Delegations unavailable." }, 503);
+      await next();
+    });
+  app.get("/api/agents/:id/delegations", (c) =>
+    c.json(
+      deps.delegations!.store.listDelegations(
+        c.req.param("id"),
+        pageOf(c.req.query("page")),
+      ),
+    ),
+  );
+  app.post("/api/agents/:id/delegations/:delegationId/cancel", async (c) => {
+    const id = c.req.param("delegationId");
+    if (
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)
+    )
+      return c.json({ error: "Invalid delegation ID." }, 400);
+    const source = c.req.param("id");
+    const saved = deps.delegations!.store.getDelegation(source, id);
+    if (!saved) return c.json({ error: "Delegation not found." }, 404);
+    if (
+      saved.cancellationRequested ||
+      !["queued", "running"].includes(saved.childStatus ?? "")
+    )
+      return c.json({ error: "Delegation is no longer cancellable." }, 409);
+    try {
+      return (await deps.delegations!.cancel(source, id))
+        ? c.json({ cancellationRequested: true })
+        : c.json({ error: "Delegation is no longer cancellable." }, 409);
+    } catch {
+      return c.json({ error: "Delegation cancellation unavailable." }, 503);
+    }
+  });
   app.get("/api/agents/:id/approvals", (c) =>
     c.json(
       deps.approvals!.history.listByAgent(

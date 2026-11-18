@@ -3,6 +3,7 @@ import type { ToolOutcome } from "./tool-dispatch.js";
 import {
   createHostApprovals,
   createHostTasks,
+  createHostCancellation,
   HostTaskError,
   type HostTaskExecution,
 } from "./host-tasks.js";
@@ -10,6 +11,27 @@ import {
 const config = { url: "http://agent-host:3001", token: "x".repeat(32) };
 const accepted = () =>
   Response.json({ id: "task-1", status: "accepted" }, { status: 202 });
+it("cancels only a validated exact Host ID with a bounded authenticated request", async () => {
+  const id = "a0000000-0000-4000-8000-000000000001";
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(Response.json({ private: "hidden" }));
+  const cancel = createHostCancellation(config, request);
+  expect(await cancel("../foreign")).toBe(false);
+  expect(request).not.toHaveBeenCalled();
+  expect(await cancel(id)).toBe(true);
+  expect(request).toHaveBeenCalledExactlyOnceWith(
+    `${config.url}/tasks/${id}/cancel`,
+    expect.objectContaining({
+      method: "POST",
+      redirect: "error",
+      signal: expect.any(AbortSignal),
+      headers: { Authorization: `Bearer ${config.token}` },
+    }),
+  );
+  request.mockRejectedValueOnce(new Error("private provider failure"));
+  expect(await cancel(id)).toBe(false);
+});
 describe("internal task client", () => {
   const hostTaskId = "a0000000-0000-4000-8000-000000000001";
   const identity = {

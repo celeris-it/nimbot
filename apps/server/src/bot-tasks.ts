@@ -485,6 +485,21 @@ export function createBotTasks(config: {
           });
       return true;
     },
+    /** The manager calls this only after persisting the exact child's cancellation. */
+    abortDelegation(taskId: string): boolean {
+      const task = config.store.getTask(taskId);
+      return (
+        !!task &&
+        task.agentId === config.agentId &&
+        task.origin.platform === "delegated" &&
+        task.status === "running" &&
+        !!config.store.getDelegation(
+          task.origin.sourceAgentId,
+          task.origin.delegationId,
+        )?.cancellationRequested &&
+        queue.stop(task.origin)
+      );
+    },
     submit: queue.submitTelegram,
     submitDiscord: queue.submitDiscord,
     discordControl: {

@@ -243,6 +243,30 @@ it("does not finalize queued work after shutdown during target loading", async (
   expect(f.run).not.toHaveBeenCalled();
 });
 
+it("accepts cancellation without waiting on a target service that is still loading", async () => {
+  const f = await fixture();
+  f.store.claimNextTask("b");
+  let release!: () => void;
+  f.holdLoad(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const loading = f.services.get("b");
+  await vi.waitFor(() => expect(f.load).toHaveBeenCalledOnce());
+  try {
+    expect(await f.services.cancelDelegation("a", f.handoff.id)).toBe(true);
+    expect(f.child()).toMatchObject({
+      childStatus: "running",
+      cancellationRequested: true,
+    });
+    expect(f.run).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await loading;
+  }
+});
+
 it("never rewrites running or completed work when reconciling a deleted target", async () => {
   const f = await fixture();
   const child = f.store.claimNextTask("b")!;

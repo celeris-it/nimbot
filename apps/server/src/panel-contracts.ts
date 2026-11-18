@@ -8,6 +8,10 @@ import type { ScheduleCadence } from "./schedule-time.js";
 export type { Schedule, ScheduleRun } from "./schedule-store.js";
 export type { ScheduleRunNowResult } from "./scheduler.js";
 export type { ProviderSettings, DeviceLogin } from "./provider-contracts.js";
+export type { DelegationHistoryEntry } from "./task-queue.js";
+export type DelegationHistory = ReturnType<
+  import("./task-queue.js").TaskStore["listDelegations"]
+>;
 
 export interface ScheduleSettings {
   name: string;

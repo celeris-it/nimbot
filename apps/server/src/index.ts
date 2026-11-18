@@ -1,5 +1,9 @@
 import { createAgentTaskServices } from "./agent-task-services.js";
-import { createHostTasks, createHostApprovals } from "./host-tasks.js";
+import {
+  createHostTasks,
+  createHostApprovals,
+  createHostCancellation,
+} from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 import { createHostProviders } from "./host-providers.js";
 import { createHostMemories } from "./host-memories.js";
@@ -304,6 +308,23 @@ async function main(): Promise<void> {
     },
     {
       store: taskStore,
+      cancelHostTask: async (id, serverTaskId) => {
+        const hostTaskId = taskStore.getHostTaskId(id, serverTaskId);
+        if (!hostTaskId || !hostCredentials) return;
+        const host = await hostCredentials.read(id);
+        const task = taskStore.getTask(serverTaskId);
+        if (
+          task?.agentId !== id ||
+          task.status !== "running" ||
+          task.origin.platform !== "delegated" ||
+          !taskStore.getDelegation(
+            task.origin.sourceAgentId,
+            task.origin.delegationId,
+          )?.cancellationRequested
+        )
+          return;
+        await createHostCancellation(host)(hostTaskId);
+      },
       targetStatus: (id) => {
         if (!registry.get(id)) return "deleted";
         const operation = registry.getContainerOperation(id);
@@ -434,6 +455,10 @@ async function main(): Promise<void> {
       ? createHostProviders((id) => hostCredentials!.read(id))
       : undefined,
     approvals: { rules: approvalRules, history: approvalStore },
+    delegations: {
+      store: taskStore,
+      cancel: (sourceId, id) => taskServices.cancelDelegation(sourceId, id),
+    },
     peers: {
       grants: agentGrants,
       candidates: (id) => {

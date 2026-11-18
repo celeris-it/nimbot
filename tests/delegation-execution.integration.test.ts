@@ -21,6 +21,7 @@ import { createDelegationExecution } from "../apps/server/src/delegation-executi
 import {
   createHostTasks,
   createHostApprovals,
+  createHostCancellation,
 } from "../apps/server/src/host-tasks.js";
 import { openNotificationStore } from "../apps/server/src/notification-store.js";
 import { createPeerTools } from "../apps/server/src/peer-tools.js";
@@ -96,6 +97,7 @@ async function fixture(platform: "telegram" | "discord") {
     {
       run: ReturnType<typeof createHostTasks>;
       decide: ReturnType<typeof createHostApprovals>;
+      cancel: ReturnType<typeof createHostCancellation>;
     }
   >();
   for (const agentId of ["a", "b"]) {
@@ -151,78 +153,99 @@ async function fixture(platform: "telegram" | "discord") {
         () => new Promise((resolve) => setTimeout(resolve, 1)),
       ),
       decide: createHostApprovals(host, request),
+      cancel: createHostCancellation(host, request),
     });
   }
-  const services = createAgentTaskServices(async (agentId, { wake }) => {
-    const policy = createDelegationExecution({
-      agentId,
-      tasks,
-      ready: () => !!ready[agentId],
-      canReach,
-      allowed: canHandoff,
-    });
-    const peers = createPeerTools({
-      agentId,
-      tasks,
-      notes,
-      grants,
-      canReach,
-      name: (id) => id,
-    });
-    return {
-      agentId,
+  const cancelledHosts: {
+    agentId: string;
+    serverTaskId: string;
+    hostTaskId: string;
+  }[] = [];
+  const services = createAgentTaskServices(
+    async (agentId, { wake }) => {
+      const policy = createDelegationExecution({
+        agentId,
+        tasks,
+        ready: () => !!ready[agentId],
+        canReach,
+        allowed: canHandoff,
+      });
+      const peers = createPeerTools({
+        agentId,
+        tasks,
+        notes,
+        grants,
+        canReach,
+        name: (id) => id,
+      });
+      return {
+        agentId,
+        store: tasks,
+        ownerId: () => 42,
+        approvals: { store: approvals, rules },
+        notificationStore: notifications,
+        approvalReach: canReach,
+        approvalRoute: (task) =>
+          task.origin.platform === "delegated" ? policy.parent(task) : task,
+        toolPolicy: {
+          canExecute: canReach,
+          allowedOperations: peers.operations,
+        },
+        toolHandlers: peers.handlers,
+        delegation: { canExecute: policy.canExecute, canHandoff, wake },
+        run: hosts.get(agentId)!.run,
+        decide: hosts.get(agentId)!.decide,
+        access: {
+          canActivate: () => true,
+          canExecute: (botId, _ownerId, chatId) =>
+            canReach({
+              agentId,
+              id: "",
+              prompt: "",
+              origin: { platform: "telegram", botId, chatId },
+            } as RoutedTask),
+        },
+        discord: {
+          admit: canReach,
+          progress: async () => {},
+          acknowledge: async () => true,
+          deliver: async (_task, outcome) => {
+            sent.push({
+              agentId,
+              text: outcome.ok ? outcome.output : outcome.kind,
+              messageId: "0",
+            });
+          },
+          sendDelegation: async (_task, text, canSend) => {
+            if (!canSend())
+              return { status: "failed", sentParts: 0, reason: "unavailable" };
+            sent.push({ agentId, text, messageId: "0" });
+            return { status: "delivered", sentParts: 1 };
+          },
+          sendApproval: async (_task, text, buttons) => {
+            const messageId = String(sent.length + 10);
+            sent.push({
+              agentId,
+              text,
+              key: buttons[0]!.customId.split(":")[1],
+              messageId,
+            });
+            return messageId;
+          },
+        },
+      };
+    },
+    {
       store: tasks,
-      ownerId: () => 42,
-      approvals: { store: approvals, rules },
-      notificationStore: notifications,
-      approvalReach: canReach,
-      approvalRoute: (task) =>
-        task.origin.platform === "delegated" ? policy.parent(task) : task,
-      toolPolicy: { canExecute: canReach, allowedOperations: peers.operations },
-      toolHandlers: peers.handlers,
-      delegation: { canExecute: policy.canExecute, canHandoff, wake },
-      run: hosts.get(agentId)!.run,
-      decide: hosts.get(agentId)!.decide,
-      access: {
-        canActivate: () => true,
-        canExecute: (botId, _ownerId, chatId) =>
-          canReach({
-            agentId,
-            id: "",
-            prompt: "",
-            origin: { platform: "telegram", botId, chatId },
-          } as RoutedTask),
+      targetStatus: () => "ready",
+      cancelHostTask: async (agentId, serverTaskId) => {
+        const hostTaskId = tasks.getHostTaskId(agentId, serverTaskId);
+        if (!hostTaskId) return;
+        cancelledHosts.push({ agentId, serverTaskId, hostTaskId });
+        await hosts.get(agentId)!.cancel(hostTaskId);
       },
-      discord: {
-        admit: canReach,
-        progress: async () => {},
-        acknowledge: async () => true,
-        deliver: async (_task, outcome) => {
-          sent.push({
-            agentId,
-            text: outcome.ok ? outcome.output : outcome.kind,
-            messageId: "0",
-          });
-        },
-        sendDelegation: async (_task, text, canSend) => {
-          if (!canSend())
-            return { status: "failed", sentParts: 0, reason: "unavailable" };
-          sent.push({ agentId, text, messageId: "0" });
-          return { status: "delivered", sentParts: 1 };
-        },
-        sendApproval: async (_task, text, buttons) => {
-          const messageId = String(sent.length + 10);
-          sent.push({
-            agentId,
-            text,
-            key: buttons[0]!.customId.split(":")[1],
-            messageId,
-          });
-          return messageId;
-        },
-      },
-    };
-  });
+    },
+  );
   const waitForServices: (() => Promise<void>)[] = [];
   for (const id of ["a", "b"]) {
     const service = await services.get(id);
@@ -303,6 +326,7 @@ async function fixture(platform: "telegram" | "discord") {
     parentHold,
     targetHold,
     delegation: () => tasks.getDelegation("a", delegationId),
+    cancelledHosts,
   };
 }
 
@@ -426,7 +450,12 @@ it.each(["telegram", "discord"] as const)(
     expect(
       (await f.services.get("a")).cancelDelegation(f.delegation()!.id),
     ).toBe(false);
-    expect(target.cancelDelegation(f.delegation()!.id)).toBe(true);
+    expect(await f.services.cancelDelegation("b", f.delegation()!.id)).toBe(
+      false,
+    );
+    expect(await f.services.cancelDelegation("a", f.delegation()!.id)).toBe(
+      true,
+    );
     expect(await f.answer(permission)).toBe("expired");
     await target.idle();
     expect(f.delegation()).toMatchObject({
@@ -444,6 +473,39 @@ it.each(["telegram", "discord"] as const)(
     expect(f.histories.b).toEqual(["target-after"]);
   },
 );
+
+it("cancels the bound Host task when the target service was detached", async () => {
+  const f = await fixture("telegram");
+  await f.submit("a", "parent-private");
+  await vi.waitFor(() =>
+    expect(f.sent.filter((message) => message.key)).toHaveLength(1),
+  );
+  await f.answer(f.sent.find((message) => message.key)!);
+  await vi.waitFor(() => expect(f.delegation()?.state).toBe("pending"));
+  f.parentHold.release();
+  await vi.waitFor(() =>
+    expect(f.sent.filter((message) => message.key)).toHaveLength(2),
+  );
+  const target = await f.services.get("b");
+  f.services.stop("b");
+  expect(await f.services.cancelDelegation("a", f.delegation()!.id)).toBe(true);
+  await target.idle();
+  const child = f.started.find((row) => row.context.sessionMode === "fresh")!;
+  expect(f.cancelledHosts).toEqual([
+    {
+      agentId: "b",
+      serverTaskId: child.context.identity!.serverTaskId,
+      hostTaskId: child.context.hostTaskId,
+    },
+  ]);
+  expect(f.delegation()).toMatchObject({
+    childStatus: "cancelled",
+    result: { ok: false, kind: "cancelled" },
+  });
+  expect(
+    f.started.filter((row) => row.context.sessionMode === "fresh"),
+  ).toHaveLength(1);
+});
 
 it.each(["target", "grant"] as const)(
   "rechecks the %s before a queued child reaches its Host",

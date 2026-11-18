@@ -9,12 +9,17 @@ export function createAgentTaskServices(
     controls: { wake(targetAgentIds: readonly string[]): Promise<void> },
   ) => Promise<Parameters<typeof createBotTasks>[0]>,
   recovery?: {
-    store: Pick<TaskStore, "failQueuedDelegations">;
+    store: Pick<
+      TaskStore,
+      "failQueuedDelegations" | "getDelegation" | "cancelDelegation"
+    >;
     targetStatus(agentId: string): "ready" | "paused" | "deleted";
+    cancelHostTask?(agentId: string, serverTaskId: string): Promise<void>;
   },
 ) {
   type Service = ReturnType<typeof createBotTasks>;
   const services = new Map<string, Promise<Service>>();
+  const loaded = new Map<string, Service>();
   let closed = false;
   function get(id: string): Promise<Service> {
     if (closed)
@@ -28,7 +33,7 @@ export function createAgentTaskServices(
           throw new Error("Agent task service was stopped");
         if (config.agentId !== id)
           throw new Error("Agent task service identity mismatch");
-        return createBotTasks({
+        const service = createBotTasks({
           ...config,
           approvalRelay: config.approvalRelay ?? relayApproval,
           delegationResult: config.delegationResult ?? relayDelegationResult,
@@ -43,6 +48,8 @@ export function createAgentTaskServices(
               }
             : {}),
         });
+        loaded.set(id, service);
+        return service;
       });
     services.set(id, pending);
     void pending.catch(() => {
@@ -89,6 +96,7 @@ export function createAgentTaskServices(
   function stop(id: string) {
     const pending = services.get(id);
     services.delete(id);
+    loaded.delete(id);
     if (pending)
       void pending.then((service) => service.close()).catch(() => {});
   }
@@ -97,6 +105,38 @@ export function createAgentTaskServices(
     wake,
     relayApproval,
     relayDelegationResult,
+    async cancelDelegation(
+      sourceAgentId: string,
+      id: string,
+    ): Promise<boolean> {
+      if (closed || !recovery) return false;
+      const handoff = recovery.store.getDelegation(sourceAgentId, id);
+      if (!handoff) return false;
+      const accepted = recovery.store.cancelDelegation(
+        handoff.targetAgentId,
+        id,
+      );
+      if (!accepted) return false;
+      if (accepted.status === "queued") {
+        void relayDelegationResult(accepted.task).catch(() => {});
+      } else {
+        const aborted =
+          loaded
+            .get(handoff.targetAgentId)
+            ?.abortDelegation(accepted.task.id) ?? false;
+        if (!aborted) {
+          try {
+            await recovery.cancelHostTask?.(
+              handoff.targetAgentId,
+              accepted.task.id,
+            );
+          } catch {
+            /* Never undo accepted cancellation when the Host is unavailable. */
+          }
+        }
+      }
+      return true;
+    },
     async resumeDelegations(
       store: Pick<TaskStore, "pendingDelegationTargets">,
     ) {

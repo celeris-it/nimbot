@@ -48,6 +48,30 @@ export interface HostTaskExecution {
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
+/** Best-effort cancellation of one durably bound Host task; never submits work. */
+export function createHostCancellation(
+  config: AgentHostConfig,
+  request: typeof fetch = fetch,
+) {
+  return async (id: string): Promise<boolean> => {
+    if (!UUID.test(id)) return false;
+    try {
+      const result = await request(
+        `${config.url}/tasks/${encodeURIComponent(id)}/cancel`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${config.token}` },
+          signal: AbortSignal.timeout(5000),
+          redirect: "error",
+        },
+      );
+      return result.ok;
+    } catch {
+      return false;
+    }
+  };
+}
+
 function parseToolRequest(output: unknown) {
   try {
     const data = JSON.parse(String(output)) as Record<string, unknown>;

@@ -73,6 +73,18 @@ export interface Delegation {
   /** Untrusted output from the child; never permission or instructions for the requester. */
   result?: DelegationResult;
 }
+export interface DelegationHistoryEntry {
+  id: string;
+  targetAgentId: string;
+  sourceTaskId: string;
+  childTaskId: string | null;
+  briefPreview: string;
+  status: TaskStatus | "pending" | "discarded" | "unavailable";
+  reason: string | null;
+  createdAt: number;
+  cancellationRequested: boolean;
+  canCancel: boolean;
+}
 type DelegationPolicy = (parent: ChatTask, targetAgentId: string) => boolean;
 
 export type TaskOutcome =
@@ -225,6 +237,7 @@ export function openTaskStore(path: string) {
         OR (state = 'pending' AND child_task_id IS NULL AND reason IS NULL)
         OR (state = 'discarded' AND child_task_id IS NULL AND reason IS NOT NULL))
     ); CREATE INDEX IF NOT EXISTS delegations_parent ON delegations(source_task_id, state, seq);
+    CREATE INDEX IF NOT EXISTS delegations_source_history ON delegations(source_agent_id, seq);
     CREATE INDEX IF NOT EXISTS delegations_source_results ON delegations(source_agent_id, seq)
       WHERE state = 'admitted' AND result_json IS NOT NULL`);
     db.exec(
@@ -584,6 +597,50 @@ export function openTaskStore(path: string) {
         .get(sourceAgentId, id);
       return row ? readDelegation(row) : undefined;
     },
+    /** Administrator history excludes parent prompts and child result bodies. */
+    listDelegations(
+      sourceAgentId: string,
+      page = 1,
+    ): { delegations: DelegationHistoryEntry[]; hasMore: boolean } {
+      const safePage =
+        Number.isSafeInteger(page) && page >= 1 && page <= 1000 ? page : 1;
+      const rows = db
+        .prepare(
+          `SELECT d.id, d.source_task_id, d.target_agent_id, substr(d.brief, 1, 160) AS preview,
+          d.state, d.reason, d.created_at, d.cancel_requested_at, t.id AS child_id, t.status AS child_status
+        FROM delegations d LEFT JOIN tasks t ON d.state = 'admitted' AND t.id = d.child_task_id
+          AND t.platform = 'delegated' AND t.delegation_id = d.id AND t.parent_task_id = d.source_task_id
+          AND t.source_agent_id = d.source_agent_id AND t.agent_id = d.target_agent_id
+        WHERE d.source_agent_id = ? ORDER BY d.seq DESC LIMIT 21 OFFSET ?`,
+        )
+        .all(sourceAgentId, (safePage - 1) * 20);
+      return {
+        delegations: rows.slice(0, 20).map((row) => {
+          const status =
+            row.state === "admitted"
+              ? String(row.child_status ?? "unavailable")
+              : String(row.state);
+          const cancellationRequested = row.cancel_requested_at !== null;
+          return {
+            id: String(row.id),
+            targetAgentId: String(row.target_agent_id),
+            sourceTaskId: String(row.source_task_id),
+            childTaskId: typeof row.child_id === "string" ? row.child_id : null,
+            briefPreview: String(row.preview),
+            status: status as DelegationHistoryEntry["status"],
+            reason:
+              typeof row.reason === "string" ? row.reason.slice(0, 96) : null,
+            createdAt: Number(row.created_at),
+            cancellationRequested,
+            canCancel:
+              row.state === "admitted" &&
+              ["queued", "running"].includes(status) &&
+              !cancellationRequested,
+          };
+        }),
+        hasMore: rows.length > 20,
+      };
+    },
     /** Administrator cancellation, scoped to an exact destination and admitted child. Commit before aborting the runtime. */
     cancelDelegation(
       targetAgentId: string,
@@ -866,7 +923,8 @@ export function openTaskStore(path: string) {
         return (
           db
             .prepare(
-              "UPDATE tasks SET host_task_id = ?, updated_at = ? WHERE id = ? AND agent_id = ? AND status = 'running' AND (host_task_id IS NULL OR host_task_id = ?)",
+              `UPDATE tasks SET host_task_id = ?, updated_at = ? WHERE id = ? AND agent_id = ? AND status = 'running' AND (host_task_id IS NULL OR host_task_id = ?)
+              AND NOT EXISTS (SELECT 1 FROM delegations d WHERE d.id = tasks.delegation_id AND d.child_task_id = tasks.id AND d.cancel_requested_at IS NOT NULL)`,
             )
             .run(hostTaskId, Date.now(), taskId, agentId, hostTaskId)
             .changes === 1
