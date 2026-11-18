@@ -222,7 +222,9 @@ export function openTaskStore(path: string) {
       CHECK((state = 'admitted' AND child_task_id IS NOT NULL AND reason IS NULL)
         OR (state = 'pending' AND child_task_id IS NULL AND reason IS NULL)
         OR (state = 'discarded' AND child_task_id IS NULL AND reason IS NOT NULL))
-    ); CREATE INDEX IF NOT EXISTS delegations_parent ON delegations(source_task_id, state, seq)`);
+    ); CREATE INDEX IF NOT EXISTS delegations_parent ON delegations(source_task_id, state, seq);
+    CREATE INDEX IF NOT EXISTS delegations_source_results ON delegations(source_agent_id, seq)
+      WHERE state = 'admitted' AND result_json IS NOT NULL`);
     db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS tasks_host_identity ON tasks (agent_id, host_task_id) WHERE host_task_id IS NOT NULL",
     );
@@ -579,6 +581,36 @@ export function openTaskStore(path: string) {
         )
         .all()
         .map((row) => String(row.agent_id));
+    },
+    /** Result recovery discovers identities only; delivery rechecks the grant, origin and bounded result. */
+    delegationResultSources(): string[] {
+      return db
+        .prepare(
+          `SELECT DISTINCT d.source_agent_id FROM delegations d JOIN tasks t ON t.id = d.child_task_id
+        WHERE d.state = 'admitted' AND d.result_json IS NOT NULL AND t.status IN ('completed', 'failed', 'cancelled', 'interrupted')
+        AND t.platform = 'delegated' AND t.delegation_id = d.id AND t.parent_task_id = d.source_task_id
+        AND t.source_agent_id = d.source_agent_id AND t.agent_id = d.target_agent_id ORDER BY d.source_agent_id`,
+        )
+        .all()
+        .map((row) => String(row.source_agent_id));
+    },
+    /** Keyset pages avoid retaining child outputs or scanning an unbounded history into memory. */
+    delegationResultPage(
+      sourceAgentId: string,
+      after = 0,
+    ): { id: string; seq: number }[] {
+      if (!Number.isSafeInteger(after) || after < 0)
+        throw new Error("Invalid delegation cursor");
+      return db
+        .prepare(
+          `SELECT d.id, d.seq FROM delegations d JOIN tasks t ON t.id = d.child_task_id
+        WHERE d.source_agent_id = ? AND d.seq > ? AND d.state = 'admitted' AND d.result_json IS NOT NULL
+        AND t.status IN ('completed', 'failed', 'cancelled', 'interrupted') AND t.platform = 'delegated'
+        AND t.delegation_id = d.id AND t.parent_task_id = d.source_task_id
+        AND t.source_agent_id = d.source_agent_id AND t.agent_id = d.target_agent_id ORDER BY d.seq LIMIT 100`,
+        )
+        .all(sourceAgentId, after)
+        .map((row) => ({ id: String(row.id), seq: Number(row.seq) }));
     },
     /** Rechecks the grant and source origin in the same transaction as parent completion and child admission. */
     finishWithDelegations,

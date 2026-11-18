@@ -63,6 +63,50 @@ function setup() {
   };
 }
 
+it("pages terminal result identities by source without returning bodies or pending work", () => {
+  const f = setup();
+  expect(f.store.delegationResultSources()).toEqual([]);
+  f.store.finish(f.child.id, "completed", {
+    ok: true,
+    output: "Private result",
+  });
+  for (let index = 0; index < 202; index++) {
+    const source = index % 2 ? "a" : "c";
+    const parent = f.store.enqueue({
+      agentId: source,
+      botId: 1,
+      chatId: 42,
+      prompt: "Private parent",
+    });
+    f.store.claimNextTask(source);
+    f.store.stageDelegation(
+      {
+        parentTaskId: parent.id,
+        targetAgentId: "b",
+        invocationId: randomUUID(),
+        brief: "Private brief",
+      },
+      () => true,
+    );
+    f.store.finishWithDelegations(parent.id, "completed", () => true);
+    const child = f.store.claimNextTask("b")!;
+    f.store.finish(child.id, "failed");
+  }
+  expect(f.store.delegationResultSources()).toEqual(["a", "c"]);
+  const first = f.store.delegationResultPage("a");
+  expect(first).toHaveLength(100);
+  expect(
+    first.every((row) => Object.keys(row).sort().join(",") === "id,seq"),
+  ).toBe(true);
+  const second = f.store.delegationResultPage("a", first.at(-1)!.seq);
+  expect(second).toHaveLength(2);
+  expect(new Set([...first, ...second].map((row) => row.id)).size).toBe(102);
+  expect(f.store.delegationResultPage("a", second.at(-1)!.seq)).toEqual([]);
+  expect(f.store.delegationResultPage("foreign")).toEqual([]);
+  expect(() => f.store.delegationResultPage("a", -1)).toThrow();
+  expect(() => f.store.delegationResultPage("a", Number.NaN)).toThrow();
+});
+
 it("retains a source-scoped child result across restart without copying its parent's output", () => {
   const f = setup();
   expect(f.get().result).toBeUndefined();

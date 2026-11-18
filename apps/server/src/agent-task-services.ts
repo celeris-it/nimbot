@@ -76,6 +76,19 @@ export function createAgentTaskServices(
     ) {
       await wake(store.pendingDelegationTargets());
     },
+    async resumeDelegationResults(
+      store: Pick<TaskStore, "delegationResultSources">,
+    ) {
+      if (closed) return;
+      for (const id of store.delegationResultSources()) {
+        if (closed) return;
+        try {
+          await (await get(id)).resumeDelegationResults();
+        } catch {
+          /* Results remain durable when a source service cannot be loaded. */
+        }
+      }
+    },
     stop,
     close() {
       closed = true;

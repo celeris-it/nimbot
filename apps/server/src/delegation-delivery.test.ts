@@ -88,45 +88,49 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
     request,
   );
   const run = vi.fn(async () => "unused");
-  const services = createAgentTaskServices(async (agentId, { wake }) => ({
-    agentId,
-    store: tasks,
-    notificationStore: notifications,
-    ownerId: () => owners[agentId]!,
-    run,
-    access: {
-      canActivate: () => true,
-      canExecute: (botId, ownerId, chatId) =>
-        bound &&
-        agentId === "a" &&
-        botId === 101 &&
-        ownerId === 42 &&
-        chatId === 42,
-    },
-    delegation: {
-      canHandoff: (parent, target) =>
-        grants.allows(
-          parent.agentId,
-          target,
-          "delegate",
-          parent.origin.platform,
-        ),
-      wake,
-    },
-    discord: {
-      admit: (task) =>
-        bound &&
-        task.agentId === "a" &&
-        task.origin.botId === "101" &&
-        task.origin.ownerId === "42" &&
-        task.origin.channelId === "300",
-      progress: async () => {},
-      deliver: async () => {},
-      sendApproval: async () => "unused",
-      sendDelegation: (task, text, canSend) =>
-        discord.sendTask(task, text, canSend),
-    },
-  }));
+  let loadFailed = false;
+  const services = createAgentTaskServices(async (agentId, { wake }) => {
+    if (loadFailed) throw new Error("Source credentials are unavailable");
+    return {
+      agentId,
+      store: tasks,
+      notificationStore: notifications,
+      ownerId: () => owners[agentId]!,
+      run,
+      access: {
+        canActivate: () => true,
+        canExecute: (botId, ownerId, chatId) =>
+          bound &&
+          agentId === "a" &&
+          botId === 101 &&
+          ownerId === 42 &&
+          chatId === 42,
+      },
+      delegation: {
+        canHandoff: (parent, target) =>
+          grants.allows(
+            parent.agentId,
+            target,
+            "delegate",
+            parent.origin.platform,
+          ),
+        wake,
+      },
+      discord: {
+        admit: (task) =>
+          bound &&
+          task.agentId === "a" &&
+          task.origin.botId === "101" &&
+          task.origin.ownerId === "42" &&
+          task.origin.channelId === "300",
+        progress: async () => {},
+        deliver: async () => {},
+        sendApproval: async () => "unused",
+        sendDelegation: (task, text, canSend) =>
+          discord.sendTask(task, text, canSend),
+      },
+    };
+  });
   const attach = async () => {
     const source = await services.get("a");
     source.attach({
@@ -158,6 +162,9 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
     sent,
     services,
     run,
+    failLoad: (value: boolean) => {
+      loadFailed = value;
+    },
     request,
     source: () => source,
     notifications: () => notifications,
@@ -182,16 +189,133 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
     afterPart: (callback: () => void) => {
       afterPart = callback;
     },
-    restart: async () => {
+    attach: async () => {
+      source = await attach();
+    },
+    restart: async (attachBot = true) => {
       source.close();
       services.stop("a");
       await Promise.resolve();
       notifications.close();
       notifications = openNotificationStore(path);
-      source = await attach();
+      source = attachBot ? await attach() : await services.get("a");
     },
   };
 }
+
+it.each(["telegram", "discord"] as const)(
+  "recovers a committed %s result without rerunning the child",
+  async (platform) => {
+    const f = await setup(platform);
+    f.finish();
+    expect(f.sent).toEqual([]);
+    await f.restart(false);
+    await f.services.resumeDelegationResults(f.tasks);
+    if (platform === "telegram") {
+      expect(f.sent).toEqual([]);
+      expect(
+        f.notifications().get("a", `delegation_${f.delegation.id}`),
+      ).toBeUndefined();
+      await f.attach();
+    }
+    await vi.waitFor(() => expect(f.sent).toHaveLength(1));
+    expect(f.sent[0]).toMatchObject({
+      agentId: "a",
+      text: expect.stringContaining("Untrusted child result"),
+    });
+    await f.services.resumeDelegationResults(f.tasks);
+    expect(f.sent).toHaveLength(1);
+    expect(f.run).not.toHaveBeenCalled();
+  },
+);
+
+it("outcome reconciliation leaves unrelated queued work untouched", async () => {
+  const f = await setup("discord");
+  f.finish();
+  await f.restart(false);
+  const queued = f.tasks.enqueueDiscord({
+    agentId: "a",
+    prompt: "Unrelated queued task",
+    origin: {
+      platform: "discord",
+      botId: "101",
+      ownerId: "42",
+      channelId: "300",
+      messageId: "999",
+    },
+  });
+  await f.services.resumeDelegationResults(f.tasks);
+  expect(f.sent).toHaveLength(1);
+  expect(f.tasks.getTask(queued.id)?.status).toBe("queued");
+  expect(f.run).not.toHaveBeenCalled();
+});
+
+it("repeats an early Telegram scan after attachment races with startup recovery", async () => {
+  const f = await setup();
+  f.finish();
+  await f.restart(false);
+  const recovery = f.source().resumeDelegationResults();
+  await f.attach();
+  await recovery;
+  await vi.waitFor(() => expect(f.sent).toHaveLength(1));
+  expect(
+    f.notifications().get("a", `delegation_${f.delegation.id}`),
+  ).toMatchObject({ status: "delivered" });
+});
+
+it("recovers an interrupted child outcome without rerunning interrupted execution", async () => {
+  const f = await setup("discord");
+  f.tasks.markRunningInterrupted();
+  await f.restart(false);
+  await f.services.resumeDelegationResults(f.tasks);
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]!.text).toContain("(interrupted)");
+  expect(f.run).not.toHaveBeenCalled();
+});
+
+it("keeps a result pending when its source cannot load and recovers it on a later resume", async () => {
+  const f = await setup("discord");
+  f.finish();
+  f.services.stop("a");
+  f.failLoad(true);
+  await f.services.resumeDelegationResults(f.tasks);
+  expect(f.sent).toEqual([]);
+  expect(
+    f.notifications().get("a", `delegation_${f.delegation.id}`),
+  ).toBeUndefined();
+  f.failLoad(false);
+  await f.services.resumeDelegationResults(f.tasks);
+  expect(f.sent).toHaveLength(1);
+  expect(f.run).not.toHaveBeenCalled();
+});
+
+it.each(["grant", "binding"] as const)(
+  "rechecks the %s before recovering a missed result notification",
+  async (change) => {
+    const f = await setup("discord");
+    f.finish();
+    if (change === "grant") f.grants.revoke("a", "b", "delegate");
+    else f.unbind();
+    await f.restart(false);
+    await f.services.resumeDelegationResults(f.tasks);
+    expect(f.sent).toEqual([]);
+    expect(
+      f.notifications().get("a", `delegation_${f.delegation.id}`),
+    ).toBeUndefined();
+    expect(f.run).not.toHaveBeenCalled();
+  },
+);
+
+it("skips an existing delivery intent without reading its private child output again", async () => {
+  const f = await setup("discord");
+  f.finish();
+  await f.services.relayDelegationResult(f.child);
+  await f.restart(false);
+  const read = vi.spyOn(f.tasks, "getDelegation");
+  await f.services.resumeDelegationResults(f.tasks);
+  expect(read).not.toHaveBeenCalled();
+  expect(f.sent).toHaveLength(1);
+});
 
 it.each(["telegram", "discord"] as const)(
   "delivers one committed child outcome through the saved %s source conversation",

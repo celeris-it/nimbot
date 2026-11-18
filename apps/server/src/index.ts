@@ -598,6 +598,9 @@ async function main(): Promise<void> {
   void taskServices.resumeDelegations(taskStore).catch(() => {
     log.warn("server.delegation_resume_failed");
   });
+  void taskServices.resumeDelegationResults(taskStore).catch(() => {
+    log.warn("server.delegation_result_resume_failed");
+  });
   void scheduler.start();
 }
 

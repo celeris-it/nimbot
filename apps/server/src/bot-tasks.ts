@@ -97,6 +97,7 @@ export function createBotTasks(config: {
   };
 }) {
   let bot: Bot | undefined;
+  let closed = false;
   const admit = (task: RoutedTask) =>
     task.origin.platform === "delegated"
       ? (config.delegation?.canExecute?.(task) ?? false)
@@ -161,7 +162,11 @@ export function createBotTasks(config: {
         agentId: config.agentId,
         tasks: config.store,
         notifications: config.notificationStore,
-        canReach: admit,
+        canReach: (parent) =>
+          admit(parent) &&
+          (parent.origin.platform === "telegram"
+            ? !!bot
+            : !!config.discord?.sendDelegation),
         allowed: (parent, target) =>
           config.delegation?.canHandoff(parent, target) ?? false,
         async send(parent, text, canSend) {
@@ -236,6 +241,39 @@ export function createBotTasks(config: {
     decide: (hostTaskId, approvalId, allow) =>
       config.decide?.(hostTaskId, approvalId, allow) ?? Promise.resolve(false),
   });
+  let recoveringResults: Promise<void> | undefined;
+  function resumeDelegationResults(): Promise<void> {
+    if (closed || !config.notificationStore || !delegationDelivery)
+      return Promise.resolve();
+    if (recoveringResults) return recoveringResults;
+    const recover = async () => {
+      let after = 0;
+      while (!closed) {
+        const page = config.store.delegationResultPage(config.agentId, after);
+        if (!page.length) return;
+        for (const entry of page) {
+          if (closed) return;
+          after = entry.seq;
+          if (
+            config.notificationStore!.get(
+              config.agentId,
+              `delegation_${entry.id}`,
+            )
+          )
+            continue;
+          try {
+            await delegationDelivery!.deliver(entry.id);
+          } catch {
+            /* An existing intent is never retried. Missing transports or grants leave no intent. */
+          }
+        }
+      }
+    };
+    recoveringResults = recover().finally(() => {
+      recoveringResults = undefined;
+    });
+    return recoveringResults;
+  }
   const dispatcher = createToolDispatcher({
     store: config.store,
     authorize: capabilities.verify,
@@ -431,6 +469,7 @@ export function createBotTasks(config: {
         throw new Error("Delegated delivery is unavailable");
       return delegationDelivery.deliver(id);
     },
+    resumeDelegationResults,
     submit: queue.submitTelegram,
     submitDiscord: queue.submitDiscord,
     discordControl: {
@@ -478,6 +517,7 @@ export function createBotTasks(config: {
     resume: queue.resume,
     idle: queue.idle,
     close() {
+      closed = true;
       capabilities.close();
       relay.close();
       delegationDelivery?.close();
@@ -519,6 +559,12 @@ export function createBotTasks(config: {
     attach(target: Bot) {
       bot = target;
       queue.resume();
+      // A startup scan may already have passed this origin before its bot attached.
+      // Scan again after that pass, without racing another delivery intent.
+      void (recoveringResults ?? Promise.resolve())
+        .catch(() => {})
+        .then(() => resumeDelegationResults())
+        .catch(() => {});
     },
   };
 }
