@@ -201,6 +201,32 @@ async function fixture() {
   };
 }
 
+it("reads a pending delegation through MCP and denies access after its specific grant is revoked", async () => {
+  const f = await fixture();
+  f.grants.grant("a", "b", "delegate");
+  const parent = await f.start("a");
+  const delegation = f.store.stageDelegation(
+    {
+      parentTaskId: parent.id,
+      targetAgentId: "b",
+      invocationId: randomUUID(),
+      brief: "Explicit brief",
+    },
+    () => true,
+  );
+  const args = { delegationId: delegation.id };
+  expect(
+    (await f.call("a", "agent_delegation_status", args)).result
+      .structuredContent,
+  ).toMatchObject({ id: delegation.id, status: "pending" });
+  expect(f.store.claimNextTask("b")).toBeUndefined();
+  expect(f.questions).toEqual([]);
+  f.grants.revoke("a", "b", "delegate");
+  expect(
+    (await f.call("a", "agent_delegation_status", args)).result.isError,
+  ).toBe(true);
+});
+
 it("sends a note only after its originating owner approves and lets a later recipient task read untrusted content without automatic execution", async () => {
   const f = await fixture();
   await f.start("a");
