@@ -1,5 +1,6 @@
 /** Local times have minute precision; weekdays use Sunday = 0 through Saturday = 6. */
 export type ScheduleCadence =
+  | { kind: "webhook" }
   | { kind: "once"; date: string; time: string }
   | { kind: "daily"; time: string }
   | { kind: "weekly"; weekdays: number[]; time: string }
@@ -49,6 +50,7 @@ function parseCadence(input: unknown): ScheduleCadence {
     throw new Error("Cadence must be an object.");
   }
   const value = input as Record<string, unknown>;
+  if (value.kind === "webhook") return { kind: "webhook" };
   if (value.kind === "interval") {
     if (
       typeof value.minutes !== "number" ||
@@ -127,7 +129,11 @@ export function validateCadence(
   now: number,
 ): ScheduleCadence {
   const cadence = parseCadence(input);
-  if (nextRun(cadence, timeZone, now) === undefined) {
+  validateTimeZone(timeZone);
+  if (
+    cadence.kind !== "webhook" &&
+    nextRun(cadence, timeZone, now) === undefined
+  ) {
     throw new Error("Schedule must have an occurrence in the future.");
   }
   return cadence;
@@ -179,6 +185,7 @@ export function nextRun(
     throw new Error("After must be a valid UTC timestamp.");
   const cadence = parseCadence(input);
   const format = formatter(timeZone);
+  if (cadence.kind === "webhook") return undefined;
   if (cadence.kind === "interval") {
     const step = cadence.minutes * MINUTE;
     const occurrence =

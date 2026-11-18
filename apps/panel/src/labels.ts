@@ -25,7 +25,7 @@ export const scheduleText = {
   refresh: "Refresh schedules",
   name: "Schedule name",
   prompt: "Prompt",
-  kind: "Cadence",
+  kind: "Activation",
   date: "Date",
   time: "Time of day",
   minutes: "Interval in minutes",
@@ -61,7 +61,8 @@ export const scheduleText = {
     "A time skipped by daylight saving runs at the next valid instant; a repeated time runs only once.",
   editHelp:
     "Changes apply to future tasks. Already queued or running tasks keep their saved prompt and name.",
-  pausedHelp: "Pausing stops timed runs. You can still use Run now.",
+  pausedHelp:
+    "Pausing stops timed and webhook runs. You can still use Run now.",
   saved: "Schedule saved.",
   removed: "Schedule deleted. Already queued or running tasks are kept.",
   pauseDone: "Schedule paused.",
@@ -84,6 +85,7 @@ export const scheduleKinds = {
   daily: "Daily",
   weekly: "Weekly",
   interval: "Interval",
+  webhook: "Webhook",
 };
 export const scheduleWeekdays = [
   "Sunday",
@@ -96,6 +98,8 @@ export const scheduleWeekdays = [
 ];
 export function scheduleCadenceLabel(cadence: Schedule["cadence"]) {
   switch (cadence.kind) {
+    case "webhook":
+      return "On webhook request";
     case "once":
       return `Once on ${cadence.date} at ${cadence.time}`;
     case "daily":

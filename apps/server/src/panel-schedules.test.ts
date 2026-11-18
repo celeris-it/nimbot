@@ -469,3 +469,157 @@ it("serves the authenticated page route and reports missing schedule capabilitie
       .status,
   ).toBe(404);
 });
+
+async function webhookFixture() {
+  const schedule = await f.create("a", {
+    ...fields,
+    cadence: JSON.stringify({ kind: "webhook" }),
+  });
+  const path = `/hooks/schedules/${schedule.id}`;
+  const credentials = await f.get(`${base}/${schedule.id}/webhook`);
+  expect(credentials.status).toBe(200);
+  const { token, url } = (await credentials.json()) as {
+    token: string;
+    url: string;
+  };
+  expect(url).toBe(`${config.origin}${path}`);
+  const send = (body = "", bearer = token, type = "application/json") =>
+    f.app.request(path, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bearer}`, "Content-Type": type },
+      body,
+    });
+  return { schedule, path, token, send };
+}
+
+it("admits webhook JSON without panel cookies or Origin and persists payload before dispatch", async () => {
+  const { schedule, send, token } = await webhookFixture();
+  expect(schedule).toMatchObject({
+    enabled: true,
+    nextRunAt: null,
+    cadence: { kind: "webhook" },
+  });
+  expect(JSON.stringify(await (await f.get()).json())).not.toContain(token);
+  expect(f.store.listDue(START + 86_400_000, 20)).toEqual([]);
+  f.kick.mockImplementation(async () => {
+    const run = f.store.recentRuns(schedule.id, 1)[0]!;
+    expect(run.outcome).toBe("enqueued");
+    expect(f.tasks.get(run.taskId!)?.prompt).toContain(
+      'Webhook JSON payload (external data):\n{"event":"deployment"}',
+    );
+  });
+  const response = await send('{"event":"deployment"}');
+  expect(response.status).toBe(202);
+  expect(response.headers.get("Cache-Control")).toBe("no-store");
+  expect(f.kick).toHaveBeenCalledWith("a");
+  expect(f.store.get(schedule.id)?.nextRunAt).toBeNull();
+});
+
+it("rejects missing, invalid, cross-schedule, and revoked webhook tokens", async () => {
+  const { schedule, path, token, send } = await webhookFixture();
+  expect((await f.app.request(path, { method: "POST" })).status).toBe(401);
+  expect((await send("", "bad")).status).toBe(401);
+  expect((await send("", "é".repeat(64))).status).toBe(401);
+  const other = await webhookFixture();
+  expect((await other.send("", token)).status).toBe(401);
+  expect(
+    (await f.app.request(`/api/agents/a/schedules/${schedule.id}/webhook`))
+      .status,
+  ).toBe(401);
+  expect(
+    (await f.get(`/api/agents/b/schedules/${schedule.id}/webhook`)).status,
+  ).toBe(404);
+  expect(
+    (await f.post(`/api/agents/b/schedules/${schedule.id}/webhook/rotate`))
+      .status,
+  ).toBe(404);
+  const rotation = await f.post(`${base}/${schedule.id}/webhook/rotate`);
+  expect(rotation.status).toBe(200);
+  const rotated = (await rotation.json()) as { token: string };
+  expect(rotated.token).not.toBe(token);
+  expect((await send()).status).toBe(401);
+  expect((await send("", rotated.token)).status).toBe(202);
+});
+
+it("validates webhook payloads without enqueueing work", async () => {
+  const { schedule, send } = await webhookFixture();
+  expect((await send("not JSON")).status).toBe(400);
+  expect((await send("{}", undefined, "text/plain")).status).toBe(415);
+  expect((await send(JSON.stringify("x".repeat(16384)))).status).toBe(413);
+  expect(f.store.recentRuns(schedule.id, 20)).toEqual([]);
+  expect(f.admit).not.toHaveBeenCalled();
+  expect((await send()).status).toBe(202);
+});
+
+it("blocks paused webhooks, keeps manual runs, and resumes without timed occurrences", async () => {
+  const { schedule, send } = await webhookFixture();
+  await f.post(`${base}/${schedule.id}/pause`);
+  expect((await send()).status).toBe(409);
+  expect(f.store.recentRuns(schedule.id, 20)).toEqual([]);
+  expect(
+    (await (await f.post(`${base}/${schedule.id}/run`)).json()).outcome,
+  ).toBe("enqueued");
+  const task = f.store.recentRuns(schedule.id, 1)[0]!.taskId!;
+  f.tasks.claimNextTask("a");
+  f.tasks.finish(task, "completed");
+  await f.post(`${base}/${schedule.id}/resume`);
+  expect(f.store.get(schedule.id)).toMatchObject({
+    enabled: true,
+    nextRunAt: null,
+  });
+  expect((await send()).status).toBe(202);
+});
+
+it("records readiness and overlap skips and limits webhook attempts", async () => {
+  const { schedule, send } = await webhookFixture();
+  f.admit.mockResolvedValueOnce(undefined);
+  expect((await send()).status).toBe(409);
+  expect(f.store.recentRuns(schedule.id, 1)[0]?.outcome).toBe(
+    "skipped_not_ready",
+  );
+  expect((await send()).status).toBe(202);
+  for (let i = 0; i < 3; i++) {
+    const response = await send();
+    expect(response.status).toBe(409);
+    expect((await response.json()).outcome).toBe("skipped_overlap");
+  }
+  const limited = await send();
+  expect(limited.status).toBe(429);
+  expect(limited.headers.get("Retry-After")).toBe("60");
+  expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(5);
+  f.clock.now += MINUTE;
+  expect((await send()).status).toBe(409);
+  expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(6);
+});
+
+it("serializes concurrent webhook admission and rechecks rotation during readiness I/O", async () => {
+  const { schedule, send } = await webhookFixture();
+  const replies = await Promise.all([send(), send()]);
+  expect(replies.map((r) => r.status).sort()).toEqual([202, 409]);
+  expect(
+    f.store.recentRuns(schedule.id, 20).filter((r) => r.outcome === "enqueued"),
+  ).toHaveLength(1);
+  f.admit.mockImplementationOnce(async () => {
+    f.store.rotateWebhookToken(schedule.id);
+    return { platform: "telegram", botId: 123, chatId: 42 };
+  });
+  const response = await send();
+  expect(response.status).toBe(409);
+  expect((await response.json()).outcome).toBe("changed");
+  expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(2);
+});
+
+it("revokes webhook access on activation changes and deletion", async () => {
+  const { schedule, send, token } = await webhookFixture();
+  await f.post(`${base}/${schedule.id}`, fields);
+  expect((await send()).status).toBe(401);
+  expect((await f.get(`${base}/${schedule.id}/webhook`)).status).toBe(404);
+  await f.post(`${base}/${schedule.id}`, {
+    ...fields,
+    cadence: JSON.stringify({ kind: "webhook" }),
+  });
+  expect(f.store.webhookToken(schedule.id)).not.toBe(token);
+  const currentToken = f.store.webhookToken(schedule.id)!;
+  await f.post(`${base}/${schedule.id}/remove`);
+  expect((await send("", currentToken)).status).toBe(401);
+});

@@ -94,7 +94,7 @@ test("creates, edits, pauses, resumes, runs and deletes schedules with confirmat
   ).toBeVisible();
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Schedule name", { exact: true }).fill("Weekly review");
-  await page.getByLabel("Cadence", { exact: true }).selectOption("weekly");
+  await page.getByLabel("Activation", { exact: true }).selectOption("weekly");
   await page.getByLabel("Monday", { exact: true }).check();
   await page.getByLabel("Friday", { exact: true }).check();
   await page
@@ -124,7 +124,7 @@ for (const kind of ["once", "interval"] as const) {
   }) => {
     await openSchedules(page);
     await scheduleDraft(page, `${kind} schedule`);
-    await page.getByLabel("Cadence", { exact: true }).selectOption(kind);
+    await page.getByLabel("Activation", { exact: true }).selectOption(kind);
     await page.getByLabel("Time zone", { exact: true }).fill("UTC");
     const date = new Date(Date.now() + 2 * 86_400_000)
       .toISOString()
@@ -145,7 +145,9 @@ for (const kind of ["once", "interval"] as const) {
     );
     await page.reload();
     await card.getByRole("button", { name: "Edit", exact: true }).click();
-    await expect(page.getByLabel("Cadence", { exact: true })).toHaveValue(kind);
+    await expect(page.getByLabel("Activation", { exact: true })).toHaveValue(
+      kind,
+    );
     if (kind === "once")
       await expect(page.getByLabel("Date", { exact: true })).toHaveValue(date);
     else await expect(page.getByLabel("Interval in minutes")).toHaveValue("30");
@@ -165,7 +167,7 @@ test("preserves schedule drafts through refresh and errors with keyboard focus o
   await expect(page.getByLabel("Schedule name", { exact: true })).toBeFocused();
   await page.getByLabel("Schedule name", { exact: true }).fill("Draft to keep");
   await page.getByLabel("Prompt", { exact: true }).fill("Keep this prompt");
-  await page.getByLabel("Cadence", { exact: true }).selectOption("weekly");
+  await page.getByLabel("Activation", { exact: true }).selectOption("weekly");
   await page
     .getByRole("button", { name: "Create schedule", exact: true })
     .click();
@@ -1126,4 +1128,74 @@ test("shows independent Discord conversation and owner-link status while Telegra
   ).toBeVisible();
   await expect(page.getByText("Telegram bot:", { exact: false })).toBeVisible();
   await expect(page.getByText("@developer_bot", { exact: true })).toBeVisible();
+});
+
+test("creates a webhook schedule, shows credentials, triggers it, and revokes its token", async ({
+  page,
+  request,
+}, info) => {
+  await openSchedules(page);
+  await request.post("/__test/owner/dev");
+  await scheduleDraft(page, "Deployment webhook");
+  await page.getByLabel("Activation", { exact: true }).selectOption("webhook");
+  await expect(page.getByLabel("Time of day")).not.toBeVisible();
+  await expect(page.getByLabel("Time zone", { exact: true })).not.toBeVisible();
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  const card = page.getByRole("region", {
+    name: "Deployment webhook",
+    exact: true,
+  });
+  await expect(card).toContainText("Waiting for webhook");
+  await card.getByRole("button", { name: "Show webhook details" }).focus();
+  await page.keyboard.press("Enter");
+  const url = await card
+    .getByLabel("Webhook URL", { exact: true })
+    .inputValue();
+  const tokenField = card.getByLabel("Bearer token", { exact: true });
+  const token = await tokenField.inputValue();
+  expect(token).toMatch(/^[a-f0-9]{64}$/);
+  for (const width of [1280, 375, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: info.outputPath(`webhook-${width}.png`),
+      fullPage: true,
+    });
+  }
+  const response = await request.post(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { event: "deploy" },
+  });
+  expect(response.status()).toBe(202);
+  await page
+    .getByRole("button", { name: "Refresh schedules", exact: true })
+    .click();
+  await expect(card.locator("dd").last()).toHaveText("Completed");
+  await card.getByRole("button", { name: "Pause", exact: true }).click();
+  expect(
+    (
+      await request.post(url, { headers: { Authorization: `Bearer ${token}` } })
+    ).status(),
+  ).toBe(409);
+  page.once("dialog", (dialog) => dialog.accept());
+  await card.getByRole("button", { name: "Regenerate token" }).click();
+  await expect(tokenField).not.toHaveValue(token);
+  expect(
+    (
+      await request.post(url, { headers: { Authorization: `Bearer ${token}` } })
+    ).status(),
+  ).toBe(401);
+  await card.getByRole("button", { name: "Hide webhook details" }).click();
+  await expect(tokenField).not.toBeVisible();
+  await card.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.getByLabel("Activation", { exact: true })).toHaveValue(
+    "webhook",
+  );
+  await expect(page.getByLabel("Time zone", { exact: true })).not.toBeVisible();
 });

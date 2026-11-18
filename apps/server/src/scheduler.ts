@@ -14,6 +14,7 @@ import type {
   ScheduleRun,
   ScheduleRunOutcome,
   ScheduleStore,
+  WebhookInvocation,
 } from "./schedule-store.js";
 
 const TICK_MS = 30_000;
@@ -165,7 +166,10 @@ export function createScheduler(deps: SchedulerDeps) {
   }
   return {
     tick,
-    async runNow(schedule: Schedule): Promise<ScheduleRunNowResult> {
+    async runNow(
+      schedule: Schedule,
+      webhook?: WebhookInvocation,
+    ): Promise<ScheduleRunNowResult> {
       if (closed) return { outcome: "unavailable" };
       const origin = await deps.admit(schedule);
       if (closed) return { outcome: "unavailable" };
@@ -174,7 +178,7 @@ export function createScheduler(deps: SchedulerDeps) {
         : deps.isOverlapping(schedule.id)
           ? "skipped_overlap"
           : "enqueued";
-      const result = deps.store.runNow(schedule, outcome, origin);
+      const result = deps.store.runNow(schedule, outcome, origin, webhook);
       if (!result.recorded) return { outcome: "changed" };
       await dispatch(schedule, result);
       return {

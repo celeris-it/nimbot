@@ -33,7 +33,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Optionally connect a Discord bot and owner DM to the same agent, workspace, AI context, and durable task queue. Configure, replace, test, and remove the connection from the panel.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
-- Schedule saved prompts once, daily, weekly, or at fixed intervals from the panel, with results delivered to the owner's Telegram chat.
+- Run saved prompts once, daily, weekly, at fixed intervals, or on authenticated webhook requests configured from the panel, with results delivered to the owner's Telegram chat.
 - Cancel a running task without affecting other agents or blocking later queued tasks.
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
 - Replace revoked bot tokens securely and retain persistent volumes by default when deleting an agent.
@@ -133,6 +133,7 @@ is stopped. Creating and editing schedules stays in the panel.
 | Daily | The same local time each day |
 | Weekly | The same local time on one or more selected weekdays |
 | Interval | Every N minutes, anchored to creation time across pauses, edits, and restarts |
+| Webhook | On an authenticated POST request; no timed occurrence |
 
 Limits are 20 schedules per agent, an interval of at least 15 minutes, a name of
 up to 60 characters, and a prompt of up to 4000 characters. A local time skipped
@@ -170,9 +171,49 @@ history and stops future runs; already queued or running tasks are kept.
 Deleting an agent removes its schedules and run history while preserving volumes
 unless data deletion was explicitly requested.
 
+#### Webhook activation
+
+Choose **Webhook** in the schedule's **Activation** field and save. Open **Show
+webhook details** to get its URL and private Bearer token. The URL uses the
+configured `PANEL_URL`; external callers need to reach that origin. Use HTTPS
+when exposing it outside localhost. Tokens are stored in the server database,
+excluded from schedule listings, and visible only through the authenticated
+panel API. **Regenerate token** immediately revokes the previous token. Changing
+to a timed activation or deleting the schedule also revokes webhook access.
+
+```sh
+curl -X POST 'https://nimbot.example.com/hooks/schedules/SCHEDULE_ID' \
+  -H "Authorization: Bearer $WEBHOOK_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"event":"deployment","environment":"production"}'
+```
+
+An empty body runs the saved prompt. An optional JSON body of up to 16 KiB is
+appended as external data to the task prompt and persisted with the task. It
+cannot override the saved prompt or delivery target. Cookies and panel login
+are not used for this endpoint. Requests return `202` once the task is durably
+queued, `401` for invalid credentials, `400` for invalid JSON, `413` for an
+oversized body, or `415` for an unsupported content type. A paused, changed,
+overlapping, or not-ready schedule returns `409`; an unavailable scheduler
+returns `503`. Results and approvals use the owner's Telegram chat.
+
+Webhook admission is limited to five attempts per rolling minute. Recent
+skipped and manual runs count toward this limit; additional requests return `429` with
+`Retry-After: 60`. The limit survives server restarts. Pausing blocks webhooks;
+**Run now** still works while paused. Admission rechecks the enabled state,
+settings, token, and overlap before persisting work. Webhook invocations do not
+have automatic retries or event deduplication: a repeated request after a prior
+task finishes can create another task. External callers should avoid blindly
+retrying uncertain deliveries. No container starts automatically.
+
+The authenticated API exposes `GET /api/agents/:id/schedules/:scheduleId/webhook`
+and `POST /api/agents/:id/schedules/:scheduleId/webhook/rotate` to read or
+regenerate `{url, token}`. Create or edit with `cadence={"kind":"webhook"}` and
+`timeZone=UTC`, alongside the usual name and prompt form fields.
+
 ### Persistence and diagnostics
 
-Server state in `server.sqlite` includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, the durable task queue, and schedules with their saved prompts, cadences, time zones, and UTC next-run timestamps. It retains the latest 20 run records per schedule and reads execution status from the associated task row. Private `bot-secrets`, `discord-secrets`, and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
+Server state in `server.sqlite` includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, the durable task queue, and schedules with their saved prompts, cadences, time zones, UTC next-run timestamps, and private webhook tokens. It retains the latest 20 run records per schedule and reads execution status from the associated task row. Private `bot-secrets`, `discord-secrets`, and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
 
 Provider credentials are stored only in each agent's private engine-state volume. The panel forwards authentication operations over that agent's authenticated internal API; OAuth tokens never return to the server or browser. OpenAI supports an API key or ChatGPT device login; Anthropic, Google, and OpenRouter support API keys. The container must be running and idle to change authentication. Device login blocks new tasks for that agent as busy until it completes, is cancelled, or reaches its ten-minute local deadline; resend rejected tasks afterwards. Other agents remain independent. OpenCode renews OAuth tokens locally and still chooses the model automatically. Saving credentials does not verify balance or model access. Disconnecting removes the local credential without revoking it at the provider.
 
@@ -185,7 +226,7 @@ Nimbot is intended for trusted, single-server self-hosted deployments. Docker co
 - The server's Docker Engine access is equivalent to root on the host. A compromised server or panel can compromise the host; the fixed provisioning template does not constrain an attacker controlling the server. Rootless Docker reduces this exposure where practical.
 - Agent containers run as non-root with all capabilities dropped, `no-new-privileges`, CPU/memory/process limits, no additional swap, no published ports, and no Docker socket or server credentials. Each agent has its own network, volumes, and internal API token.
 - Outbound network access is unrestricted, including reachable private addresses. Agent volume disk usage is not limited. Apply restrictions on the host if needed.
-- Panel passwords use scrypt hashes. Sessions expire after eight hours and end on server restart. Cookies use HttpOnly and SameSite restrictions, with Secure cookies for HTTPS. State changes require same-origin checks; login is limited to five attempts per fifteen minutes. Remote access requires HTTPS.
+- Panel passwords use scrypt hashes. Sessions expire after eight hours and end on server restart. Cookies use HttpOnly and SameSite restrictions, with Secure cookies for HTTPS. Panel state changes require same-origin checks; webhook activation uses a per-schedule Bearer token. Login is limited to five attempts per fifteen minutes. Remote access requires HTTPS.
 - Telegram and Discord tokens stay on the server and never enter agent containers, model context, logs, or task events. Telegram messages and AI provider requests leave the server.
 
 See [security and recovery details](docs/OPERATIONS.md#security-limitations), including the limitations of restoring agents onto another Docker host.
@@ -269,7 +310,7 @@ The following ideas are deferred, not supported features or delivery commitments
 - **Messaging:** WhatsApp, Slack, shared agents, groups/topics, file and media attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
 - **Nimbot messaging app:** a dedicated messaging app with [Matrix](https://matrix.org/) connectivity.
 - **Agent capabilities:** agent-to-agent communication, delegation, shared tools, advanced memory retrieval, advanced approvals, and MCP integrations.
-- **Scheduled automation:** chat-created schedules, Discord delivery, cron expressions, event triggers, and chained automations.
+- **Scheduled automation:** chat-created schedules, Discord delivery, cron expressions, additional event triggers, and chained automations.
 - **User experience:** advanced dashboards and analytics, web chat, richer configuration, templates, browser terminals, workspace browsing, conversation search, and additional panel accounts.
 - **Operations:** multi-server and distributed execution, advanced monitoring, automated backups, image management, alternative runtimes, and stronger isolation.
 - **Managed hosting:** a separate paid offering; hosted accounts, billing, subscriptions, public registration, public multi-tenant hosting, organizations, marketplaces, and automatic external infrastructure provisioning remain outside the self-hosted product's current scope.

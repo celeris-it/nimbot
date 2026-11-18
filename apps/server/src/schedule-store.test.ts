@@ -647,3 +647,58 @@ it("keeps manual history and skip streaks in execution order when the server clo
     ["enqueued", "skipped_not_ready"],
   );
 });
+
+it("persists webhook credentials, disabled state, and admission quota across restart", () => {
+  const schedule = f.store.create({ ...input, cadence: { kind: "webhook" } });
+  const token = f.store.webhookToken(schedule.id)!;
+  expect(token).toMatch(/^[a-f0-9]{64}$/);
+  expect(f.store.authenticateWebhook(schedule.id, token)).toBe(true);
+  for (let i = 0; i < 5; i++) {
+    f.store.runNow(schedule, "skipped_not_ready", undefined, {
+      token,
+      payload: "",
+    });
+  }
+  f.restart();
+  expect(f.store.get(schedule.id)).toEqual(schedule);
+  expect(f.store.webhookToken(schedule.id)).toBe(token);
+  expect(() =>
+    f.store.runNow(schedule, "enqueued", origin, { token, payload: "" }),
+  ).toThrow("Too many webhook requests.");
+  f.store.setEnabled(schedule.id, false);
+  f.restart();
+  const paused = f.store.get(schedule.id)!;
+  expect(paused).toMatchObject({ enabled: false, nextRunAt: null });
+  expect(
+    f.store.runNow(paused, "enqueued", origin, { token, payload: "" }),
+  ).toEqual({ recorded: false });
+  expect(f.store.setEnabled(schedule.id, true)).toMatchObject({
+    enabled: true,
+    nextRunAt: null,
+  });
+  f.clock.now += MINUTE;
+  expect(
+    f.store.runNow(f.store.get(schedule.id)!, "enqueued", origin, {
+      token,
+      payload: "",
+    }),
+  ).toMatchObject({ recorded: true, run: { outcome: "enqueued" } });
+});
+
+it("retains webhook tokens on edits and rejects stale paused webhook admissions", () => {
+  const schedule = f.store.create({ ...input, cadence: { kind: "webhook" } });
+  const token = f.store.webhookToken(schedule.id)!;
+  const updated = f.store.update(schedule.id, {
+    ...schedule,
+    prompt: "Changed prompt",
+  })!;
+  expect(f.store.webhookToken(schedule.id)).toBe(token);
+  expect(
+    f.store.runNow(schedule, "enqueued", origin, { token, payload: "" }),
+  ).toEqual({ recorded: false });
+  f.store.setEnabled(schedule.id, false);
+  expect(
+    f.store.runNow(updated, "enqueued", origin, { token, payload: "" }),
+  ).toEqual({ recorded: false });
+  expect(f.store.recentRuns(schedule.id, 20)).toEqual([]);
+});

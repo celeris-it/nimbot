@@ -16,6 +16,8 @@ import type {
 } from "./panel-contracts.js";
 import {
   SCHEDULE_LIMITS,
+  WebhookRateLimitError,
+  type WebhookInvocation,
   ScheduleValidationError,
   type Schedule,
   type ScheduleInput,
@@ -43,6 +45,9 @@ export interface PanelDeps {
   schedules?: {
     store: Pick<
       ScheduleStore,
+      | "webhookToken"
+      | "authenticateWebhook"
+      | "rotateWebhookToken"
       | "get"
       | "create"
       | "update"
@@ -51,7 +56,10 @@ export interface PanelDeps {
       | "listByAgent"
       | "recentRuns"
     >;
-    runNow(schedule: Schedule): Promise<ScheduleRunNowResult>;
+    runNow(
+      schedule: Schedule,
+      webhook?: WebhookInvocation,
+    ): Promise<ScheduleRunNowResult>;
     ownerLinked(agentId: string): boolean;
   };
   providers?: ReturnType<
@@ -146,6 +154,64 @@ export function createPanel(
       strictTransportSecurity: secure,
       referrerPolicy: "same-origin",
     }),
+  );
+  // This exact POST route authenticates independently of panel cookies and Origin.
+  app.post(
+    "/hooks/schedules/:scheduleId",
+    async (c, next) => {
+      c.header("Cache-Control", "no-store");
+      const id = c.req.param("scheduleId");
+      const token =
+        c.req.header("Authorization")?.match(/^Bearer ([a-f0-9]{64})$/i)?.[1] ??
+        "";
+      if (!deps.schedules?.store.authenticateWebhook(id, token))
+        return c.json({ error: "Invalid webhook credentials." }, 401);
+      await next();
+    },
+    bodyLimit({
+      maxSize: 16384,
+      onError: (c) => c.json({ error: "Webhook payload exceeds 16 KiB." }, 413),
+    }),
+    async (c) => {
+      const schedules = deps.schedules!;
+      const id = c.req.param("scheduleId");
+      const schedule = schedules.store.get(id);
+      if (!schedule || !getAgentSetup?.(schedule.agentId))
+        return c.json({ error: "Schedule not found." }, 404);
+      if (!schedule.enabled)
+        return c.json({ error: "Schedule is paused." }, 409);
+      const body = await c.req.text();
+      let payload = "";
+      if (body) {
+        if (
+          c.req.header("Content-Type")?.split(";")[0]?.trim().toLowerCase() !==
+          "application/json"
+        )
+          return c.json(
+            { error: "Use application/json for webhook payloads." },
+            415,
+          );
+        try {
+          payload = JSON.stringify(JSON.parse(body));
+        } catch {
+          return c.json({ error: "Webhook payload must be valid JSON." }, 400);
+        }
+      }
+      try {
+        const token = c.req.header("Authorization")!.slice(7);
+        const result = await schedules.runNow(schedule, { token, payload });
+        if (result.outcome === "unavailable") return c.json(result, 503);
+        if (result.outcome === "changed") return c.json(result, 409);
+        return c.json(result, result.outcome === "enqueued" ? 202 : 409);
+      } catch (error) {
+        if (!(error instanceof WebhookRateLimitError)) throw error;
+        c.header("Retry-After", "60");
+        return c.json(
+          { error: "Too many webhook requests. Try again in one minute." },
+          429,
+        );
+      }
+    },
   );
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store");
@@ -326,13 +392,15 @@ export function createPanel(
     if (cadence && typeof cadence === "object" && "kind" in cadence) {
       const kind = cadence.kind;
       const keys =
-        kind === "interval"
-          ? ["kind", "minutes"]
-          : kind === "once"
-            ? ["kind", "date", "time"]
-            : kind === "weekly"
-              ? ["kind", "weekdays", "time"]
-              : ["kind", "time"];
+        kind === "webhook"
+          ? ["kind"]
+          : kind === "interval"
+            ? ["kind", "minutes"]
+            : kind === "once"
+              ? ["kind", "date", "time"]
+              : kind === "weekly"
+                ? ["kind", "weekdays", "time"]
+                : ["kind", "time"];
       if (Object.keys(cadence).some((key) => !keys.includes(key)))
         throw new ScheduleValidationError("Unknown cadence field.");
       if (kind === "interval") cadence = { ...cadence, anchor: now() };
@@ -381,6 +449,33 @@ export function createPanel(
       ? c.json({ schedule: updated })
       : c.json({ error: "Schedule not found." }, 404);
   });
+  app.get("/api/agents/:id/schedules/:scheduleId/webhook", (c) => {
+    const schedule = ownedSchedule(c);
+    if (!schedule || schedule.cadence.kind !== "webhook")
+      return c.json({ error: "Webhook schedule not found." }, 404);
+    return c.json({
+      url: `${config.origin}/hooks/schedules/${schedule.id}`,
+      token: deps.schedules!.store.webhookToken(schedule.id),
+    });
+  });
+  app.post(
+    "/api/agents/:id/schedules/:scheduleId/webhook/rotate",
+    async (c) => {
+      const schedule = ownedSchedule(c);
+      if (!schedule || schedule.cadence.kind !== "webhook")
+        return c.json({ error: "Webhook schedule not found." }, 404);
+      if (Object.keys(await scheduleFields(c)).length)
+        throw new ScheduleValidationError(
+          "This action does not accept form fields.",
+        );
+      const token = deps.schedules!.store.rotateWebhookToken(schedule.id);
+      if (!token) return c.json({ error: "Webhook schedule not found." }, 404);
+      return c.json({
+        url: `${config.origin}/hooks/schedules/${schedule.id}`,
+        token,
+      });
+    },
+  );
   for (const action of ["pause", "resume", "remove", "run"] as const) {
     app.post(`/api/agents/:id/schedules/:scheduleId/${action}`, async (c) => {
       let schedule = ownedSchedule(c);

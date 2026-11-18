@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { request, post } from "./api.js";
   import { tick } from "svelte";
   import { validateTimeZone } from "../../server/src/schedule-time.js";
   import type {
@@ -36,6 +37,35 @@
     refresh: () => void;
   } = $props();
   // Polling updates the list, never an open form's draft.
+  let webhook = $state<{ id: string; url: string; token: string }>();
+  let webhookBusy = $state(false);
+  let webhookError = $state("");
+  async function loadWebhook(id: string, rotate = false) {
+    if (webhookBusy || busy) return;
+    if (
+      rotate &&
+      !window.confirm(
+        "Regenerate this webhook token? The previous token will stop working immediately.",
+      )
+    )
+      return;
+    webhookBusy = true;
+    webhookError = "";
+    try {
+      const path = `/api/agents/${encodeURIComponent(agent.id)}/schedules/${encodeURIComponent(id)}/webhook`;
+      const result = rotate
+        ? await post<{ url: string; token: string }>(`${path}/rotate`, {})
+        : await request<{ url: string; token: string }>(path);
+      webhook = { id, ...result };
+    } catch (error) {
+      webhookError =
+        error instanceof Error
+          ? error.message
+          : "Could not load webhook details.";
+    } finally {
+      webhookBusy = false;
+    }
+  }
   let formVisible = $state(false);
   let editId = $state<string>();
   let name = $state("");
@@ -72,9 +102,7 @@
     kind = schedule?.cadence.kind ?? "daily";
     date = schedule?.cadence.kind === "once" ? schedule.cadence.date : "";
     time =
-      schedule && schedule.cadence.kind !== "interval"
-        ? schedule.cadence.time
-        : "09:00";
+      schedule && "time" in schedule.cadence ? schedule.cadence.time : "09:00";
     weekdays =
       schedule?.cadence.kind === "weekly" ? [...schedule.cadence.weekdays] : [];
     minutes =
@@ -111,7 +139,7 @@
     if (kind === "weekly" && weekdays.length === 0) {
       localError = text.weekdayError;
       invalid = "weekdays";
-    } else {
+    } else if (kind !== "webhook") {
       try {
         validateTimeZone(timeZone);
       } catch {
@@ -125,14 +153,26 @@
       return;
     }
     const cadence: ScheduleSettings["cadence"] =
-      kind === "once"
-        ? { kind, date, time }
-        : kind === "weekly"
-          ? { kind, weekdays: [...weekdays], time }
-          : kind === "interval"
-            ? { kind, minutes: minutes ?? 0 }
-            : { kind, time };
-    if (await save({ name, prompt, timeZone, cadence }, editId))
+      kind === "webhook"
+        ? { kind }
+        : kind === "once"
+          ? { kind, date, time }
+          : kind === "weekly"
+            ? { kind, weekdays: [...weekdays], time }
+            : kind === "interval"
+              ? { kind, minutes: minutes ?? 0 }
+              : { kind, time };
+    if (
+      await save(
+        {
+          name,
+          prompt,
+          timeZone: kind === "webhook" ? "UTC" : timeZone,
+          cadence,
+        },
+        editId,
+      )
+    )
       await closeForm();
   }
   async function remove(schedule: Schedule) {
@@ -149,6 +189,7 @@
 
 <h1 tabindex="-1">{text.title(agent.name)}</h1>
 <div data-ui="schedules">
+  <p role="alert">{webhookError}</p>
   <p id="schedule-costs">{text.costs}</p>
   {#if !data.ownerLinked}<p role="status" data-ui="schedule-warning">
       {text.unlinked}
@@ -221,7 +262,7 @@
             />
             <p id="schedule-date-help">{text.dateHelp}</p>
           {/if}
-          {#if kind !== "interval"}
+          {#if kind !== "interval" && kind !== "webhook"}
             <label for="schedule-time">{text.time}</label>
             <input
               class="input"
@@ -232,7 +273,7 @@
               bind:value={time}
             />
             <p id="schedule-time-help">{text.dstHelp}</p>
-          {:else}
+          {:else if kind === "interval"}
             <label for="schedule-minutes">{text.minutes}</label>
             <input
               class="input"
@@ -264,16 +305,22 @@
               </div>
             </fieldset>
           {/if}
-          <label for="schedule-zone">{text.zone}</label>
-          <input
-            class="input"
-            id="schedule-zone"
-            required
-            bind:value={timeZone}
-            aria-describedby="schedule-zone-help schedule-form-error"
-            aria-invalid={invalid === "zone"}
-          />
-          <p id="schedule-zone-help">{text.zoneHelp}</p>
+          {#if kind !== "webhook"}
+            <label for="schedule-zone">{text.zone}</label>
+            <input
+              class="input"
+              id="schedule-zone"
+              required
+              bind:value={timeZone}
+              aria-describedby="schedule-zone-help schedule-form-error"
+              aria-invalid={invalid === "zone"}
+            />
+            <p id="schedule-zone-help">{text.zoneHelp}</p>
+          {:else}<p>
+              Save this schedule to get its webhook URL and token. An optional
+              JSON payload is appended to the prompt. Pausing blocks webhook
+              requests.
+            </p>{/if}
           <div data-ui="schedule-actions">
             <button class="btn" type="submit"
               >{busy ? text.saving : editId ? text.save : text.create}</button
@@ -300,7 +347,8 @@
           {#if schedule.nextRunAt !== null}<time
               datetime={new Date(schedule.nextRunAt).toISOString()}
               >{scheduleTimeLabel(schedule.nextRunAt, schedule.timeZone)}</time
-            >{:else}{text.noNext} ({schedule.timeZone}){/if}
+            >{:else if schedule.cadence.kind === "webhook"}Waiting for webhook{:else}{text.noNext}
+            ({schedule.timeZone}){/if}
         </dd>
         <dt>{text.last}</dt>
         <dd>
@@ -327,6 +375,48 @@
           >{text.remove}</button
         >
       </div>
+      {#if schedule.cadence.kind === "webhook"}
+        <button
+          class="btn"
+          disabled={busy || webhookBusy}
+          onclick={() => loadWebhook(schedule.id)}>Show webhook details</button
+        >
+        {#if webhook?.id === schedule.id}
+          <label for={`webhook-url-${schedule.id}`}>Webhook URL</label>
+          <input
+            class="input"
+            id={`webhook-url-${schedule.id}`}
+            readonly
+            value={webhook.url}
+          />
+          <label for={`webhook-token-${schedule.id}`}>Bearer token</label>
+          <input
+            class="input"
+            id={`webhook-token-${schedule.id}`}
+            readonly
+            value={webhook.token}
+          />
+          <p>
+            Send a POST request with Authorization: Bearer TOKEN. Keep the token
+            private. Optional body: application/json, up to 16 KiB. Limit: five
+            requests per minute; overlapping runs are skipped.
+          </p>
+          <div data-ui="schedule-actions">
+            <button
+              class="btn"
+              disabled={busy || webhookBusy}
+              onclick={() => loadWebhook(schedule.id, true)}
+              >Regenerate token</button
+            >
+            <button
+              class="btn"
+              onclick={() => {
+                webhook = undefined;
+              }}>Hide webhook details</button
+            >
+          </div>
+        {/if}
+      {/if}
       {#if !schedule.enabled}<p>{text.pausedHelp}</p>{/if}
       {#if schedule.recentRuns.length > 0}
         <details>

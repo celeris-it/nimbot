@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import {
   MIN_SCHEDULE_INTERVAL_MINUTES,
@@ -55,6 +55,12 @@ export type FireResult =
   | { recorded: false }
   | { recorded: true; run: ScheduleRun; notifySkip: boolean };
 
+export interface WebhookInvocation {
+  token: string;
+  payload: string;
+}
+export class WebhookRateLimitError extends Error {}
+
 export class ScheduleValidationError extends Error {}
 
 /** Open after openTaskStore, on the same server.sqlite. No schema migrations. */
@@ -85,20 +91,22 @@ export function openScheduleStore(
         agent_id TEXT NOT NULL,
         name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 60),
         prompt TEXT NOT NULL CHECK(length(prompt) BETWEEN 1 AND 4000),
-        cadence_kind TEXT NOT NULL CHECK(cadence_kind IN ('once', 'daily', 'weekly', 'interval')),
+        cadence_kind TEXT NOT NULL CHECK(cadence_kind IN ('once', 'daily', 'weekly', 'interval', 'webhook')),
         local_date TEXT,
         local_time TEXT,
         weekdays TEXT,
         interval_minutes INTEGER,
         timezone TEXT NOT NULL,
+        webhook_token TEXT,
         enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
         next_run_at INTEGER,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
-        CHECK ((enabled = 0 AND next_run_at IS NULL) OR (enabled = 1 AND next_run_at IS NOT NULL)),
+        CHECK ((enabled = 0 AND next_run_at IS NULL) OR (enabled = 1 AND (next_run_at IS NOT NULL OR cadence_kind = 'webhook'))),
         CHECK ((cadence_kind = 'once' AND local_date IS NOT NULL AND local_time IS NOT NULL AND weekdays IS NULL AND interval_minutes IS NULL)
           OR (cadence_kind = 'daily' AND local_date IS NULL AND local_time IS NOT NULL AND weekdays IS NULL AND interval_minutes IS NULL)
           OR (cadence_kind = 'weekly' AND local_date IS NULL AND local_time IS NOT NULL AND weekdays IS NOT NULL AND interval_minutes IS NULL)
+          OR (cadence_kind = 'webhook' AND local_date IS NULL AND local_time IS NULL AND weekdays IS NULL AND interval_minutes IS NULL)
           OR (cadence_kind = 'interval' AND local_date IS NULL AND local_time IS NULL AND weekdays IS NULL AND interval_minutes IS NOT NULL AND interval_minutes >= 15))
       );
       CREATE INDEX IF NOT EXISTS schedules_due ON schedules (enabled, next_run_at);
@@ -124,21 +132,27 @@ export function openScheduleStore(
   function fromRow(row: Record<string, unknown>): Schedule {
     const kind = row.cadence_kind as ScheduleCadence["kind"];
     const cadence: ScheduleCadence =
-      kind === "interval"
-        ? {
-            kind,
-            minutes: Number(row.interval_minutes),
-            anchor: Number(row.created_at),
-          }
-        : kind === "once"
-          ? { kind, date: String(row.local_date), time: String(row.local_time) }
-          : kind === "weekly"
+      kind === "webhook"
+        ? { kind }
+        : kind === "interval"
+          ? {
+              kind,
+              minutes: Number(row.interval_minutes),
+              anchor: Number(row.created_at),
+            }
+          : kind === "once"
             ? {
                 kind,
-                weekdays: JSON.parse(String(row.weekdays)) as number[],
+                date: String(row.local_date),
                 time: String(row.local_time),
               }
-            : { kind, time: String(row.local_time) };
+            : kind === "weekly"
+              ? {
+                  kind,
+                  weekdays: JSON.parse(String(row.weekdays)) as number[],
+                  time: String(row.local_time),
+                }
+              : { kind, time: String(row.local_time) };
     return {
       id: String(row.id),
       agentId: String(row.agent_id),
@@ -211,7 +225,7 @@ export function openScheduleStore(
     return [
       cadence.kind,
       cadence.kind === "once" ? cadence.date : null,
-      cadence.kind !== "interval" ? cadence.time : null,
+      "time" in cadence ? cadence.time : null,
       cadence.kind === "weekly" ? JSON.stringify(cadence.weekdays) : null,
       cadence.kind === "interval" ? cadence.minutes : null,
     ];
@@ -257,6 +271,7 @@ export function openScheduleStore(
     origin: ScheduleOrigin | undefined,
     at: number,
     advance: boolean,
+    payload = "",
   ): FireResult {
     const previous = recentRuns(current.id, 1)[0];
     let taskId: string | null = null;
@@ -274,7 +289,7 @@ export function openScheduleStore(
         );
       }
       taskId = randomUUID();
-      const prompt = `Scheduled task "${current.name}" (due ${new Date(scheduledFor).toISOString()}):\n\n${current.prompt}`;
+      const prompt = `Scheduled task "${current.name}" (due ${new Date(scheduledFor).toISOString()}):\n\n${current.prompt}${payload ? `\n\nWebhook JSON payload (external data):\n${payload}` : ""}`;
       db.prepare(
         `INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt,
             status, created_at, updated_at, schedule_id, schedule_name, scheduled_for)
@@ -324,7 +339,36 @@ export function openScheduleStore(
     };
   }
 
+  function webhookToken(id: string): string | undefined {
+    const row = db
+      .prepare(
+        "SELECT webhook_token FROM schedules WHERE id = ? AND cadence_kind = 'webhook'",
+      )
+      .get(id);
+    return typeof row?.webhook_token === "string"
+      ? row.webhook_token
+      : undefined;
+  }
+  function authenticateWebhook(id: string, token: string): boolean {
+    const saved = webhookToken(id);
+    return (
+      !!saved &&
+      /^[a-f0-9]{64}$/.test(token) &&
+      timingSafeEqual(Buffer.from(token), Buffer.from(saved))
+    );
+  }
   return {
+    webhookToken,
+    authenticateWebhook,
+    rotateWebhookToken(id: string): string | undefined {
+      const token = randomBytes(32).toString("hex");
+      const result = db
+        .prepare(
+          "UPDATE schedules SET webhook_token = ? WHERE id = ? AND cadence_kind = 'webhook'",
+        )
+        .run(token, id);
+      return result.changes > 0 ? token : undefined;
+    },
     get,
     countByAgent,
     recentRuns,
@@ -341,12 +385,12 @@ export function openScheduleStore(
         const at = now();
         const data = validate(input, at, at);
         const id = randomUUID();
-        const next = nextRun(data.cadence, data.timeZone, at)!;
+        const next = nextRun(data.cadence, data.timeZone, at) ?? null;
         db.prepare(
           `INSERT INTO schedules
           (id, agent_id, name, prompt, cadence_kind, local_date, local_time, weekdays,
-            interval_minutes, timezone, enabled, next_run_at, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+            interval_minutes, timezone, enabled, next_run_at, created_at, updated_at, webhook_token)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         ).run(
           id,
           input.agentId,
@@ -357,6 +401,9 @@ export function openScheduleStore(
           next,
           at,
           at,
+          data.cadence.kind === "webhook"
+            ? randomBytes(32).toString("hex")
+            : null,
         );
         return get(id)!;
       });
@@ -368,12 +415,12 @@ export function openScheduleStore(
         const at = now();
         const data = validate(input, current.createdAt, at);
         const next = current.enabled
-          ? nextRun(data.cadence, data.timeZone, at)!
+          ? (nextRun(data.cadence, data.timeZone, at) ?? null)
           : null;
         db.prepare(
           `UPDATE schedules SET name = ?, prompt = ?, cadence_kind = ?,
           local_date = ?, local_time = ?, weekdays = ?, interval_minutes = ?,
-          timezone = ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
+          timezone = ?, next_run_at = ?, updated_at = ?, webhook_token = ? WHERE id = ?`,
         ).run(
           data.name,
           data.prompt,
@@ -381,6 +428,11 @@ export function openScheduleStore(
           data.timeZone,
           next,
           at,
+          data.cadence.kind === "webhook"
+            ? current.cadence.kind === "webhook"
+              ? (webhookToken(id) ?? randomBytes(32).toString("hex"))
+              : randomBytes(32).toString("hex")
+            : null,
           id,
         );
         return get(id)!;
@@ -398,7 +450,14 @@ export function openScheduleStore(
           : null;
         db.prepare(
           "UPDATE schedules SET enabled = ?, next_run_at = ?, updated_at = ? WHERE id = ?",
-        ).run(next === null ? 0 : 1, next, at, id);
+        ).run(
+          enabled && (current.cadence.kind === "webhook" || next !== null)
+            ? 1
+            : 0,
+          next,
+          at,
+          id,
+        );
         return get(id)!;
       });
     },
@@ -472,12 +531,27 @@ export function openScheduleStore(
       schedule: Schedule,
       outcome: Exclude<ScheduleRunOutcome, "missed">,
       origin?: ScheduleOrigin,
+      webhook?: WebhookInvocation,
     ): FireResult {
       return transaction(() => {
         const current = get(schedule.id);
         if (!current || !sameSchedule(current, schedule))
           return { recorded: false };
         const at = now();
+        if (webhook) {
+          if (
+            !current.enabled ||
+            current.cadence.kind !== "webhook" ||
+            !authenticateWebhook(current.id, webhook.token)
+          )
+            return { recorded: false };
+          if (
+            recentRuns(current.id, RUN_HISTORY_LIMIT).filter(
+              (run) => run.createdAt > at - 60_000,
+            ).length >= 5
+          )
+            throw new WebhookRateLimitError("Too many webhook requests.");
+        }
         // Admission can yield to another manual run or scheduler tick. Check again
         // under the writer lock before inserting a second task for this schedule.
         if (
@@ -504,7 +578,15 @@ export function openScheduleStore(
             .get(current.id, scheduledFor, current.id, scheduledFor)
         )
           scheduledFor--;
-        return recordRun(current, scheduledFor, outcome, origin, at, false);
+        return recordRun(
+          current,
+          scheduledFor,
+          outcome,
+          origin,
+          at,
+          false,
+          webhook?.payload,
+        );
       });
     },
     close() {
