@@ -274,6 +274,8 @@ docker build -f infrastructure/docker/agent-host.Dockerfile -t nimbot-agent-host
 NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.Id}}') pnpm test integration
 ```
 
+The Docker suite includes `tests/opencode-mcp.integration.test.ts`, a compatibility gate for the exact OpenCode version pinned in the Agent Host Dockerfile. It verifies HTTP MCP discovery, structured tool calls, registration on a new session and a session restored in a new ACP process, and cancellation during a pending tool call. The fixture runs as the image's non-root user with external networking disabled, using a local simulated model and MCP server. Run it separately with `NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.Id}}') pnpm test tests/opencode-mcp.integration.test.ts`. This gate does not enable application tools; direct chat tasks still pass no MCP servers.
+
 `NIMBOT_TEST_DOCKER_SOCKET` optionally selects a different Unix socket. Tests create uniquely named resources and clean them up. CI runs lint, type checking, build, tests, and panel browser tests.
 
 ## Discord and outbound notifications
