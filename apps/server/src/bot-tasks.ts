@@ -4,6 +4,7 @@ import {
   type ApprovalGate,
 } from "./approval-gate.js";
 import { createApprovalRelay, type ApprovalForward } from "./approval-relay.js";
+import { createDelegatedHostApprovals } from "./delegated-host-approvals.js";
 import type { ApprovalRules } from "./approval-rules.js";
 import type { ApprovalStore } from "./approval-store.js";
 import {
@@ -173,6 +174,20 @@ export function createBotTasks(config: {
     if (!gate) throw new Error("Approvals are unavailable");
     return gate.guard(...args);
   };
+  const delegatedHostApprovals = createDelegatedHostApprovals({
+    agentId: config.agentId,
+    store: config.store,
+    isActive: (task) =>
+      config.store.getTask(task.id)?.status === "running" &&
+      queue.isRunning(task.origin),
+    forward: (...args) => {
+      if (!config.approvalRelay)
+        return Promise.reject(new Error("Approval relay is unavailable"));
+      return config.approvalRelay(...args);
+    },
+    decide: (hostTaskId, approvalId, allow) =>
+      config.decide?.(hostTaskId, approvalId, allow) ?? Promise.resolve(false),
+  });
   const dispatcher = createToolDispatcher({
     store: config.store,
     authorize: capabilities.verify,
@@ -258,8 +273,7 @@ export function createBotTasks(config: {
       if (
         !saved ||
         saved.agentId !== config.agentId ||
-        saved.status !== "running" ||
-        saved.origin.platform === "delegated"
+        saved.status !== "running"
       )
         throw new HostTaskError("unavailable");
       const tools = capabilities.issue(
@@ -275,9 +289,11 @@ export function createBotTasks(config: {
           signal,
           (approval) => {
             const request =
-              saved.origin.platform === "telegram"
-                ? askOwner(saved.origin, approval)
-                : discordApprovals.ask(saved as DiscordQueuedTask, approval);
+              saved.origin.platform === "delegated"
+                ? delegatedHostApprovals.ask(saved, approval, signal)
+                : saved.origin.platform === "telegram"
+                  ? askOwner(saved.origin, approval)
+                  : discordApprovals.ask(saved as DiscordQueuedTask, approval);
             void request.catch(() => {});
           },
           {
@@ -300,6 +316,7 @@ export function createBotTasks(config: {
           },
         );
       } finally {
+        delegatedHostApprovals.endTask(saved.id);
         capabilities.revokeTask(saved.agentId, saved.id);
       }
     },
@@ -396,6 +413,7 @@ export function createBotTasks(config: {
     close() {
       capabilities.close();
       relay.close();
+      delegatedHostApprovals.close();
       gate?.close();
       discordApprovals.close();
       queue.close();

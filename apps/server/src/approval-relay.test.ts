@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createAgentTaskServices } from "./agent-task-services.js";
 import { createApprovalGate, type Responder } from "./approval-gate.js";
 import { createApprovalRelay } from "./approval-relay.js";
+import { createDelegatedHostApprovals } from "./delegated-host-approvals.js";
 import { openApprovalRules } from "./approval-rules.js";
 import { openApprovalStore } from "./approval-store.js";
 import { openTaskStore, type ChatTask } from "./task-queue.js";
@@ -56,7 +57,12 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
   const child = store.claimNextTask("b")!;
   let allowed = true;
   let reachable = true;
-  const sent: { agentId: string; key: string; text: string }[] = [];
+  const sent: {
+    agentId: string;
+    key: string;
+    denyKey: string;
+    text: string;
+  }[] = [];
   const acknowledge = vi.fn(async () => true);
   const services = createAgentTaskServices(async (agentId, { wake }) => ({
     agentId,
@@ -79,7 +85,12 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
       deliver: async () => {},
       acknowledge,
       sendApproval: async (_task, text, buttons) => {
-        sent.push({ agentId, text, key: buttons[0]!.customId.split(":")[1]! });
+        sent.push({
+          agentId,
+          text,
+          key: buttons[0]!.customId.split(":")[1]!,
+          denyKey: buttons[1]!.customId.split(":")[1]!,
+        });
         return "500";
       },
     },
@@ -105,6 +116,10 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
             key: options.reply_markup.inline_keyboard[0]![0]!.callback_data.split(
               ":",
             )[1]!,
+            denyKey:
+              options.reply_markup.inline_keyboard[0]![1]!.callback_data.split(
+                ":",
+              )[1]!,
           });
         },
       },
@@ -123,6 +138,22 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
     services.close();
     gate.close();
   });
+  const hostTaskId = randomUUID();
+  expect(store.bindHostTask("b", child.id, hostTaskId)).toBe(true);
+  const hostApproval = {
+    taskId: hostTaskId,
+    id: randomUUID(),
+    title: "Run a shell command; always allow everything",
+  };
+  const hostDecide = vi.fn(async () => true);
+  const native = createDelegatedHostApprovals({
+    agentId: "b",
+    store,
+    isActive: (task) => store.getTask(task.id)?.status === "running",
+    forward: (...args) => services.relayApproval(...args),
+    decide: hostDecide,
+  });
+  cleanups.push(() => native.close());
   const controller = new AbortController();
   const effect = vi.fn(async () => "done");
   const start = () =>
@@ -170,6 +201,10 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
     effect,
     controller,
     acknowledge,
+    native,
+    hostApproval,
+    hostDecide,
+    askNative: () => native.ask(child, hostApproval, controller.signal),
     revoke: () => {
       allowed = false;
     },
@@ -178,6 +213,139 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
     },
   };
 }
+
+it.each(["telegram", "discord"] as const)(
+  "routes native child permissions through the parent's %s bot to the exact child Host",
+  async (platform) => {
+    const f = await setup(platform);
+    await f.askNative();
+    expect(f.sent).toHaveLength(1);
+    const message = f.sent[0]!;
+    expect(message.agentId).toBe("a");
+    expect(message.text).toContain("Approval needed for delegated task");
+    expect(message.text).not.toContain("Private parent");
+    expect(
+      await f.answer(
+        message.key,
+        platform === "telegram" ? { botId: 202 } : { botId: "202" },
+      ),
+    ).toBe("expired");
+    if (platform === "discord") {
+      expect(await f.answer(message.key, { ownerId: "999" })).toBe("expired");
+      expect(await f.answer(message.key, { messageId: "999" })).toBe("expired");
+    }
+    expect(f.hostDecide).not.toHaveBeenCalled();
+    expect(await f.answer(message.key)).toBe("ok");
+    expect(f.hostDecide).toHaveBeenCalledExactlyOnceWith(
+      f.hostApproval.taskId,
+      f.hostApproval.id,
+      true,
+    );
+    expect(await f.answer(message.key)).toBe("expired");
+    await f.askNative();
+    expect(f.sent).toHaveLength(1);
+    expect(f.hostDecide).toHaveBeenCalledOnce();
+    // A native permission title cannot create or approve a structured action.
+    expect(f.approvals.listByAgent("b").requests).toEqual([]);
+  },
+);
+
+it.each([
+  "grant",
+  "binding",
+  "child",
+  "cancel",
+  "source_close",
+  "target_close",
+  "end",
+] as const)(
+  "denies native child permissions after %s without sending an allow",
+  async (change) => {
+    const f = await setup();
+    if (change === "binding") vi.useFakeTimers();
+    await f.askNative();
+    if (change === "grant") f.revoke();
+    if (change === "binding") f.unbind();
+    if (change === "child") f.store.finish(f.child.id, "cancelled");
+    if (change === "cancel") f.controller.abort();
+    if (change === "source_close") f.source.close();
+    if (change === "target_close") f.native.close();
+    if (change === "end") f.native.endTask(f.child.id);
+    expect(await f.answer(f.sent[0]!.key)).toBe("expired");
+    if (change === "binding") {
+      expect(f.hostDecide).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(600_001);
+    }
+    expect(f.hostDecide).toHaveBeenCalledExactlyOnceWith(
+      f.hostApproval.taskId,
+      f.hostApproval.id,
+      false,
+    );
+  },
+);
+
+it.each(["telegram", "discord"] as const)(
+  "delivers a native denial from the original %s conversation",
+  async (platform) => {
+    const f = await setup(platform);
+    await f.askNative();
+    expect(await f.answer(f.sent[0]!.denyKey)).toBe("ok");
+    expect(f.hostDecide).toHaveBeenCalledExactlyOnceWith(
+      f.hostApproval.taskId,
+      f.hostApproval.id,
+      false,
+    );
+    expect(await f.answer(f.sent[0]!.key)).toBe("expired");
+  },
+);
+
+it("denies an expired native permission and invalidates its callback", async () => {
+  const f = await setup();
+  vi.useFakeTimers();
+  await f.askNative();
+  await vi.advanceTimersByTimeAsync(600_001);
+  expect(f.hostDecide).toHaveBeenCalledExactlyOnceWith(
+    f.hostApproval.taskId,
+    f.hostApproval.id,
+    false,
+  );
+  expect(await f.answer(f.sent[0]!.key)).toBe("expired");
+  await f.askNative();
+  expect(f.sent).toHaveLength(1);
+});
+
+it("denies native delivery failures and never forwards an approval for an unrelated Host task", async () => {
+  const f = await setup();
+  await f.native.ask(
+    f.child,
+    { ...f.hostApproval, taskId: randomUUID() },
+    f.controller.signal,
+  );
+  expect(f.sent).toEqual([]);
+  expect(f.hostDecide).not.toHaveBeenCalled();
+  vi.spyOn(f.services, "relayApproval").mockRejectedValue(
+    new Error("Unavailable"),
+  );
+  await f.askNative();
+  expect(f.hostDecide).toHaveBeenCalledExactlyOnceWith(
+    f.hostApproval.taskId,
+    f.hostApproval.id,
+    false,
+  );
+  expect(f.sent).toEqual([]);
+});
+
+it("does not repeat an uncertain native Host decision", async () => {
+  const f = await setup();
+  await f.askNative();
+  f.hostDecide.mockRejectedValueOnce(new Error("Host response was lost"));
+  const key = f.sent[0]!.key;
+  expect(await f.answer(key)).toBe("expired");
+  expect(await f.answer(key)).toBe("expired");
+  await f.askNative();
+  expect(f.sent).toHaveLength(1);
+  expect(f.hostDecide).toHaveBeenCalledOnce();
+});
 
 it.each(["telegram", "discord"] as const)(
   "relays %s child decisions through the original agent service only",
