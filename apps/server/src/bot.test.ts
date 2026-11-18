@@ -341,8 +341,22 @@ describe("scheduled task listing", () => {
       enabled: true,
       nextRunAt: next,
       timeZone: "Europe/Madrid",
+      cadence: { kind: "daily" as const },
     },
-    { name: "Paused check", enabled: false, nextRunAt: null, timeZone: "UTC" },
+    {
+      name: "Paused check",
+      enabled: false,
+      nextRunAt: null,
+      timeZone: "UTC",
+      cadence: { kind: "once" as const },
+    },
+    {
+      name: "Deploy hook",
+      enabled: true,
+      nextRunAt: null,
+      timeZone: "UTC",
+      cadence: { kind: "webhook" as const },
+    },
   ];
   const listing = (
     read: NonNullable<BotConfig["schedules"]>,
@@ -356,7 +370,7 @@ describe("scheduled task listing", () => {
     const f = setup(execute, undefined, hostStatus, undefined, undefined, read);
     await f.bot.handleUpdate(message("/schedules"));
     expect(f.sent).toEqual([
-      "Schedules for Test agent:\n\nMorning summary — Enabled\nNext run: Jan 2, 2027, 9:00 AM (Europe/Madrid)\n\nPaused check — Disabled\nNext run: No upcoming run (UTC)\n\nCreate and manage schedules in this agent's panel.",
+      "Schedules for Test agent:\n\nMorning summary — Enabled\nNext run: Jan 2, 2027, 9:00 AM (Europe/Madrid)\n\nPaused check — Disabled\nNext run: No upcoming run (UTC)\n\nDeploy hook — Enabled\nRuns on webhook request\n\nCreate and manage schedules in this agent's panel.",
     ]);
     expect(f.destinations).toEqual([42]);
     expect(read).toHaveBeenCalledOnce();
@@ -419,6 +433,7 @@ describe("scheduled task listing", () => {
       enabled: true,
       nextRunAt: next,
       timeZone: "America/Argentina/Catamarca",
+      cadence: { kind: "daily" as const },
     }));
     const f = listing(() => schedules);
     await f.bot.handleUpdate(message("/schedules"));

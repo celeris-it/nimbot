@@ -194,17 +194,26 @@ cannot override the saved prompt or delivery target. Cookies and panel login
 are not used for this endpoint. Requests return `202` once the task is durably
 queued, `401` for invalid credentials, `400` for invalid JSON, `413` for an
 oversized body, or `415` for an unsupported content type. A paused, changed,
-overlapping, or not-ready schedule returns `409`; an unavailable scheduler
-returns `503`. Results and approvals use the owner's Telegram chat.
+or not-ready schedule returns `409`; an unavailable scheduler returns `503`.
+Responses contain only an `outcome` and, on failure, an `error` message.
+Results and approvals use the owner's Telegram chat.
+
+A request that arrives while an earlier run of the same schedule is still
+queued or running is not skipped: it becomes its own task, with its own
+payload, in the agent's durable FIFO queue, and runs in arrival order. One
+webhook schedule can hold up to 20 unfinished tasks; further requests return
+`429` until the backlog drains. Timed occurrences and **Run now** keep the
+overlap skip. A stopped or not-ready agent queues nothing and returns `409`.
 
 Webhook admission is limited to five attempts per rolling minute. Recent
 skipped and manual runs count toward this limit; additional requests return `429` with
-`Retry-After: 60`. The limit survives server restarts. Pausing blocks webhooks;
-**Run now** still works while paused. Admission rechecks the enabled state,
-settings, token, and overlap before persisting work. Webhook invocations do not
-have automatic retries or event deduplication: a repeated request after a prior
-task finishes can create another task. External callers should avoid blindly
-retrying uncertain deliveries. No container starts automatically.
+`Retry-After: 60` before the Host is contacted. The limit survives server
+restarts. Pausing blocks webhooks; **Run now** still works while paused.
+Admission rechecks the enabled state, settings, token, and backlog before
+persisting work. Webhook invocations do not have automatic retries or event
+deduplication: a repeated request creates another task. External callers
+should avoid blindly retrying uncertain deliveries. No container starts
+automatically.
 
 The authenticated API exposes `GET /api/agents/:id/schedules/:scheduleId/webhook`
 and `POST /api/agents/:id/schedules/:scheduleId/webhook/rotate` to read or

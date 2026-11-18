@@ -47,6 +47,7 @@ export interface PanelDeps {
       ScheduleStore,
       | "webhookToken"
       | "authenticateWebhook"
+      | "webhookLimited"
       | "rotateWebhookToken"
       | "get"
       | "create"
@@ -197,19 +198,39 @@ export function createPanel(
           return c.json({ error: "Webhook payload must be valid JSON." }, 400);
         }
       }
+      const limited = (error: string) => {
+        c.header("Retry-After", "60");
+        return c.json({ error }, 429);
+      };
+      // Reject before admission so limited requests never contact the Host.
+      if (schedules.store.webhookLimited(id))
+        return limited("Too many webhook requests. Try again in one minute.");
       try {
         const token = c.req.header("Authorization")!.slice(7);
-        const result = await schedules.runNow(schedule, { token, payload });
-        if (result.outcome === "unavailable") return c.json(result, 503);
-        if (result.outcome === "changed") return c.json(result, 409);
-        return c.json(result, result.outcome === "enqueued" ? 202 : 409);
+        const { outcome } = await schedules.runNow(schedule, {
+          token,
+          payload,
+        });
+        // Run and task identifiers stay inside the panel.
+        if (outcome === "enqueued") return c.json({ outcome }, 202);
+        if (outcome === "unavailable")
+          return c.json(
+            { outcome, error: "Scheduled execution is unavailable." },
+            503,
+          );
+        return c.json(
+          {
+            outcome,
+            error:
+              outcome === "changed"
+                ? "Schedule changed during the request. Try again."
+                : "Not run: the agent is unavailable or its owner chat is not linked.",
+          },
+          409,
+        );
       } catch (error) {
         if (!(error instanceof WebhookRateLimitError)) throw error;
-        c.header("Retry-After", "60");
-        return c.json(
-          { error: "Too many webhook requests. Try again in one minute." },
-          429,
-        );
+        return limited(error.message);
       }
     },
   );

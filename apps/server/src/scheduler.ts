@@ -173,9 +173,10 @@ export function createScheduler(deps: SchedulerDeps) {
       if (closed) return { outcome: "unavailable" };
       const origin = await deps.admit(schedule);
       if (closed) return { outcome: "unavailable" };
+      // Webhook requests queue behind unfinished work instead of being skipped.
       const outcome = !origin
         ? "skipped_not_ready"
-        : deps.isOverlapping(schedule.id)
+        : !webhook && deps.isOverlapping(schedule.id)
           ? "skipped_overlap"
           : "enqueued";
       const result = deps.store.runNow(schedule, outcome, origin, webhook);

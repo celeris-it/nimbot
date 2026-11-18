@@ -13,7 +13,7 @@ Use the same Docker context/socket used during installation. The installer print
 | Data | Where |
 |---|---|
 | Agents, owners, instructions, bot identities, chat bindings, provisioning state, task metadata | SQLite in the server state volume |
-| Schedules, saved prompts, cadences, time zones, next-run timestamps, and the latest 20 run records per schedule | `server.sqlite` in the same server state volume |
+| Schedules, saved prompts, cadences, time zones, next-run timestamps, private webhook tokens, and the latest 20 run records per schedule | `server.sqlite` in the same server state volume |
 | Telegram and Discord bot tokens, and Agent Host API tokens | Private files in the same server state volume (`bot-secrets`, `discord-secrets`, `host-secrets`) |
 | Agent files | Per-agent workspace volume |
 | OpenCode sessions, history, and provider credentials | Per-agent engine-state volume |
@@ -123,6 +123,22 @@ unfinished work. Let it finish, inspect queue and bot availability, or increase
 the interval. `/stop` cancels only the owner's running task; it does not remove
 queued work. A different schedule or chat task for the same agent shares that
 queue and may delay execution.
+
+**Webhook requests.** A webhook schedule runs on `POST /hooks/schedules/:id` with
+its Bearer token; `/schedules` shows it as "Runs on webhook request". Responses
+identify the cause:
+
+| Status | Cause and action |
+| --- | --- |
+| `401` | Missing, wrong, or regenerated token, an unknown schedule, or one no longer using webhook activation. Copy the current token from **Show webhook details**. |
+| `409` | The schedule is paused, changed during the request, or the agent is unavailable or its owner chat is unlinked. Nothing was queued; fix the cause and send the request again. |
+| `413` / `415` / `400` | The body exceeds 16 KiB, is not `application/json`, or is not valid JSON. |
+| `429` | More than five attempts in a minute, or 20 unfinished tasks already queued for this schedule. Wait for `Retry-After` or for the backlog to drain. |
+| `503` | The server is shutting down. |
+
+Requests received while an earlier run is unfinished are queued, not skipped, so
+a slow agent accumulates a backlog; check the schedule's recent runs for queued
+entries. The token is stored in `server.sqlite` and is part of every backup.
 
 **Missed: more than 10 minutes late.** Check server downtime and clock accuracy.
 Missed occurrences are not replayed. When the agent is ready, **Run now** can

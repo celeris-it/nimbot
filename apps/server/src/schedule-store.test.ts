@@ -702,3 +702,20 @@ it("retains webhook tokens on edits and rejects stale paused webhook admissions"
   ).toEqual({ recorded: false });
   expect(f.store.recentRuns(schedule.id, 20)).toEqual([]);
 });
+
+it("queues webhook runs behind unfinished work while manual runs still skip", () => {
+  const schedule = f.store.create({ ...input, cadence: { kind: "webhook" } });
+  const token = f.store.webhookToken(schedule.id)!;
+  const webhook = (payload: string) =>
+    f.store.runNow(schedule, "enqueued", origin, { token, payload });
+  const first = webhook('{"n":1}');
+  const second = webhook('{"n":2}');
+  expect([first, second]).toMatchObject([
+    { recorded: true, run: { outcome: "enqueued" } },
+    { recorded: true, run: { outcome: "enqueued" } },
+  ]);
+  expect(f.store.runNow(schedule, "enqueued", origin)).toMatchObject({
+    recorded: true,
+    run: { outcome: "skipped_overlap", taskId: null },
+  });
+});

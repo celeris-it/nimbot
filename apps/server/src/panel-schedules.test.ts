@@ -570,35 +570,69 @@ it("blocks paused webhooks, keeps manual runs, and resumes without timed occurre
   expect((await send()).status).toBe(202);
 });
 
-it("records readiness and overlap skips and limits webhook attempts", async () => {
+it("records readiness skips, queues overlapping webhook requests in order, and limits attempts before admission", async () => {
   const { schedule, send } = await webhookFixture();
   f.admit.mockResolvedValueOnce(undefined);
-  expect((await send()).status).toBe(409);
-  expect(f.store.recentRuns(schedule.id, 1)[0]?.outcome).toBe(
-    "skipped_not_ready",
-  );
-  expect((await send()).status).toBe(202);
-  for (let i = 0; i < 3; i++) {
-    const response = await send();
-    expect(response.status).toBe(409);
-    expect((await response.json()).outcome).toBe("skipped_overlap");
+  const skipped = await send();
+  expect(skipped.status).toBe(409);
+  expect(await skipped.json()).toEqual({
+    outcome: "skipped_not_ready",
+    error: expect.any(String),
+  });
+  for (let event = 1; event <= 4; event++) {
+    const response = await send(JSON.stringify({ event }));
+    expect(response.status).toBe(202);
+    // Run, task, and agent identifiers are not returned to external callers.
+    expect(await response.json()).toEqual({ outcome: "enqueued" });
   }
+  const prompts = f.store
+    .recentRuns(schedule.id, 20)
+    .filter((run) => run.outcome === "enqueued")
+    .reverse()
+    .map((run) => f.tasks.get(run.taskId!)!.prompt);
+  expect(prompts).toHaveLength(4);
+  prompts.forEach((prompt, index) =>
+    expect(prompt).toContain(`{"event":${index + 1}}`),
+  );
+  expect(f.admit).toHaveBeenCalledTimes(5);
   const limited = await send();
   expect(limited.status).toBe(429);
   expect(limited.headers.get("Retry-After")).toBe("60");
+  expect(f.admit).toHaveBeenCalledTimes(5);
   expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(5);
   f.clock.now += MINUTE;
-  expect((await send()).status).toBe(409);
+  expect((await send()).status).toBe(202);
   expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(6);
 });
 
-it("serializes concurrent webhook admission and rechecks rotation during readiness I/O", async () => {
+it("bounds the webhook backlog and keeps the overlap skip for manual runs", async () => {
+  const { schedule, send } = await webhookFixture();
+  for (let i = 0; i < 20; i++) {
+    if (i % 5 === 0) f.clock.now += MINUTE;
+    expect((await send()).status).toBe(202);
+  }
+  f.clock.now += MINUTE;
+  const full = await send();
+  expect(full.status).toBe(429);
+  expect(full.headers.get("Retry-After")).toBe("60");
+  expect(await full.json()).toEqual({
+    error: "Too many queued webhook runs. Try again later.",
+  });
+  expect(
+    (await (await f.post(`${base}/${schedule.id}/run`)).json()).outcome,
+  ).toBe("skipped_overlap");
+  const first = f.tasks.claimNextTask("a")!;
+  f.tasks.finish(first.id, "completed");
+  expect((await send()).status).toBe(202);
+});
+
+it("queues concurrent webhook requests and rechecks rotation during readiness I/O", async () => {
   const { schedule, send } = await webhookFixture();
   const replies = await Promise.all([send(), send()]);
-  expect(replies.map((r) => r.status).sort()).toEqual([202, 409]);
-  expect(
-    f.store.recentRuns(schedule.id, 20).filter((r) => r.outcome === "enqueued"),
-  ).toHaveLength(1);
+  expect(replies.map((r) => r.status)).toEqual([202, 202]);
+  const runs = f.store.recentRuns(schedule.id, 20);
+  expect(runs.map((run) => run.outcome)).toEqual(["enqueued", "enqueued"]);
+  expect(new Set(runs.map((run) => run.taskId)).size).toBe(2);
   f.admit.mockImplementationOnce(async () => {
     f.store.rotateWebhookToken(schedule.id);
     return { platform: "telegram", botId: 123, chatId: 42 };

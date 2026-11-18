@@ -15,6 +15,9 @@ export const SCHEDULE_LIMITS = {
   minIntervalMinutes: MIN_SCHEDULE_INTERVAL_MINUTES,
 } as const;
 const RUN_HISTORY_LIMIT = 20;
+const WEBHOOK_REQUESTS_PER_MINUTE = 5;
+/** Queued or running tasks one webhook schedule may hold at once. */
+export const WEBHOOK_BACKLOG_LIMIT = 20;
 
 export interface ScheduleInput {
   name: string;
@@ -357,9 +360,18 @@ export function openScheduleStore(
       timingSafeEqual(Buffer.from(token), Buffer.from(saved))
     );
   }
+  /** Counts every recorded run, so the quota survives restarts. */
+  function webhookLimited(id: string, at = now()): boolean {
+    return (
+      recentRuns(id, RUN_HISTORY_LIMIT).filter(
+        (run) => run.createdAt > at - 60_000,
+      ).length >= WEBHOOK_REQUESTS_PER_MINUTE
+    );
+  }
   return {
     webhookToken,
     authenticateWebhook,
+    webhookLimited,
     rotateWebhookToken(id: string): string | undefined {
       const token = randomBytes(32).toString("hex");
       const result = db
@@ -545,24 +557,29 @@ export function openScheduleStore(
             !authenticateWebhook(current.id, webhook.token)
           )
             return { recorded: false };
-          if (
-            recentRuns(current.id, RUN_HISTORY_LIMIT).filter(
-              (run) => run.createdAt > at - 60_000,
-            ).length >= 5
-          )
-            throw new WebhookRateLimitError("Too many webhook requests.");
+          if (webhookLimited(current.id, at))
+            throw new WebhookRateLimitError(
+              "Too many webhook requests. Try again in one minute.",
+            );
         }
-        // Admission can yield to another manual run or scheduler tick. Check again
-        // under the writer lock before inserting a second task for this schedule.
-        if (
-          outcome === "enqueued" &&
+        const pending = Number(
           db
             .prepare(
-              "SELECT 1 FROM tasks WHERE schedule_id = ? AND status IN ('queued', 'running') LIMIT 1",
+              "SELECT count(*) AS count FROM tasks WHERE schedule_id = ? AND status IN ('queued', 'running')",
             )
-            .get(current.id)
-        )
+            .get(current.id)!.count,
+        );
+        if (webhook) {
+          // Webhook requests queue behind unfinished work, each with its own payload.
+          if (outcome === "enqueued" && pending >= WEBHOOK_BACKLOG_LIMIT)
+            throw new WebhookRateLimitError(
+              "Too many queued webhook runs. Try again later.",
+            );
+        } else if (outcome === "enqueued" && pending > 0) {
+          // Admission can yield to another manual run or scheduler tick. Check again
+          // under the writer lock before inserting a second task for this schedule.
           outcome = "skipped_overlap";
+        }
         let scheduledFor = at;
         // Reserve a distinct millisecond if a manual click coincides with a timed
         // occurrence or another click. Tasks retain uniqueness after history pruning.

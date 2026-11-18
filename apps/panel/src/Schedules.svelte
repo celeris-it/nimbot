@@ -42,13 +42,7 @@
   let webhookError = $state("");
   async function loadWebhook(id: string, rotate = false) {
     if (webhookBusy || busy) return;
-    if (
-      rotate &&
-      !window.confirm(
-        "Regenerate this webhook token? The previous token will stop working immediately.",
-      )
-    )
-      return;
+    if (rotate && !window.confirm(text.webhookRotateConfirm)) return;
     webhookBusy = true;
     webhookError = "";
     try {
@@ -58,10 +52,7 @@
         : await request<{ url: string; token: string }>(path);
       webhook = { id, ...result };
     } catch (error) {
-      webhookError =
-        error instanceof Error
-          ? error.message
-          : "Could not load webhook details.";
+      webhookError = error instanceof Error ? error.message : text.webhookError;
     } finally {
       webhookBusy = false;
     }
@@ -189,7 +180,7 @@
 
 <h1 tabindex="-1">{text.title(agent.name)}</h1>
 <div data-ui="schedules">
-  <p role="alert">{webhookError}</p>
+  {#if webhookError}<p role="alert">{webhookError}</p>{/if}
   <p id="schedule-costs">{text.costs}</p>
   {#if !data.ownerLinked}<p role="status" data-ui="schedule-warning">
       {text.unlinked}
@@ -316,11 +307,7 @@
               aria-invalid={invalid === "zone"}
             />
             <p id="schedule-zone-help">{text.zoneHelp}</p>
-          {:else}<p>
-              Save this schedule to get its webhook URL and token. An optional
-              JSON payload is appended to the prompt. Pausing blocks webhook
-              requests.
-            </p>{/if}
+          {:else}<p>{text.webhookFormHelp}</p>{/if}
           <div data-ui="schedule-actions">
             <button class="btn" type="submit"
               >{busy ? text.saving : editId ? text.save : text.create}</button
@@ -347,7 +334,7 @@
           {#if schedule.nextRunAt !== null}<time
               datetime={new Date(schedule.nextRunAt).toISOString()}
               >{scheduleTimeLabel(schedule.nextRunAt, schedule.timeZone)}</time
-            >{:else if schedule.cadence.kind === "webhook"}Waiting for webhook{:else}{text.noNext}
+            >{:else if schedule.cadence.kind === "webhook"}{text.webhookWaiting}{:else}{text.noNext}
             ({schedule.timeZone}){/if}
         </dd>
         <dt>{text.last}</dt>
@@ -379,40 +366,37 @@
         <button
           class="btn"
           disabled={busy || webhookBusy}
-          onclick={() => loadWebhook(schedule.id)}>Show webhook details</button
+          onclick={() => loadWebhook(schedule.id)}>{text.webhookShow}</button
         >
         {#if webhook?.id === schedule.id}
-          <label for={`webhook-url-${schedule.id}`}>Webhook URL</label>
+          <label for={`webhook-url-${schedule.id}`}>{text.webhookUrl}</label>
           <input
             class="input"
             id={`webhook-url-${schedule.id}`}
             readonly
             value={webhook.url}
           />
-          <label for={`webhook-token-${schedule.id}`}>Bearer token</label>
+          <label for={`webhook-token-${schedule.id}`}>{text.webhookToken}</label
+          >
           <input
             class="input"
             id={`webhook-token-${schedule.id}`}
             readonly
             value={webhook.token}
           />
-          <p>
-            Send a POST request with Authorization: Bearer TOKEN. Keep the token
-            private. Optional body: application/json, up to 16 KiB. Limit: five
-            requests per minute; overlapping runs are skipped.
-          </p>
+          <p>{text.webhookHelp}</p>
           <div data-ui="schedule-actions">
             <button
               class="btn"
               disabled={busy || webhookBusy}
               onclick={() => loadWebhook(schedule.id, true)}
-              >Regenerate token</button
+              >{text.webhookRotate}</button
             >
             <button
               class="btn"
               onclick={() => {
                 webhook = undefined;
-              }}>Hide webhook details</button
+              }}>{text.webhookHide}</button
             >
           </div>
         {/if}

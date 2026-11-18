@@ -47,7 +47,7 @@ export const scheduleText = {
   unlinked:
     "Owner chat is not linked. The owner must send this agent's Telegram bot a private message. Runs are skipped until the chat is linked.",
   rules:
-    "Stopped or unavailable agents are skipped; containers never start automatically. Runs more than 10 minutes late are missed, and overlapping runs are skipped.",
+    "Stopped or unavailable agents are skipped; containers never start automatically. Runs more than 10 minutes late are missed, and overlapping timed or manual runs are skipped. Webhook requests queue instead.",
   promptHelp:
     "Describe what the agent should do. Scheduled runs share its existing conversation context.",
   zoneHelp:
@@ -63,6 +63,19 @@ export const scheduleText = {
     "Changes apply to future tasks. Already queued or running tasks keep their saved prompt and name.",
   pausedHelp:
     "Pausing stops timed and webhook runs. You can still use Run now.",
+  webhookWaiting: "Waiting for webhook",
+  webhookFormHelp:
+    "Save this schedule to get its webhook URL and token. An optional JSON payload is appended to the prompt. Pausing blocks webhook requests.",
+  webhookShow: "Show webhook details",
+  webhookHide: "Hide webhook details",
+  webhookUrl: "Webhook URL",
+  webhookToken: "Bearer token",
+  webhookRotate: "Regenerate token",
+  webhookRotateConfirm:
+    "Regenerate this webhook token? The previous token will stop working immediately.",
+  webhookHelp:
+    "Send a POST request with Authorization: Bearer TOKEN. Keep the token private. Optional body: application/json, up to 16 KiB. Limit: five requests per minute. Requests received while a run is in progress are queued, up to 20 unfinished runs.",
+  webhookError: "Could not load webhook details.",
   saved: "Schedule saved.",
   removed: "Schedule deleted. Already queued or running tasks are kept.",
   pauseDone: "Schedule paused.",

@@ -53,10 +53,10 @@ export interface BotConfig {
   telegramBotToken: string;
   agent: { id: string; name: string; ownerId: number };
   /** Server-owned, scoped to this agent. Prompts are never included in replies. */
-  schedules?: () => Pick<
+  schedules?: () => (Pick<
     Schedule,
     "name" | "enabled" | "nextRunAt" | "timeZone"
-  >[];
+  > & { cadence: Pick<Schedule["cadence"], "kind"> })[];
 }
 
 export function createBot(
@@ -199,7 +199,10 @@ export function createBot(
                         dateStyle: "medium",
                         timeStyle: "short",
                       }).format(schedule.nextRunAt);
-                return `${schedule.name} — ${schedule.enabled ? "Enabled" : "Disabled"}\nNext run: ${next} (${schedule.timeZone})`;
+                const state = `${schedule.name} — ${schedule.enabled ? "Enabled" : "Disabled"}`;
+                return schedule.cadence.kind === "webhook"
+                  ? `${state}\nRuns on webhook request`
+                  : `${state}\nNext run: ${next} (${schedule.timeZone})`;
               })
               .join("\n\n")}\n\n${manage}`;
     } catch {
