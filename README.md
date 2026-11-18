@@ -97,6 +97,8 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
 
 The stack uses strict TypeScript on Node.js, pnpm workspaces, Hono, grammY, Drizzle for task persistence, Node's built-in SQLite API for the registry, Docker, Playwright, Vitest, ESLint, and Prettier.
 
+The application-tool bridge is in development. Its selected transport follows the existing approval exchange: the Host will persist a tool-request event, the Server will read it through task-event polling and validate the operation against its own state, then post the outcome to an authenticated Host endpoint. All connections originate on the Server, so this also supports native Server runs without a container callback address or a new Server listener. Local memory operations will stay in the Host. `tests/host-polling.integration.test.ts` measures the existing exchange over local HTTP with the production one-second polling interval, deliberately emitting just after a poll. It guards a five-second transport allowance within a planned 60-second ordinary tool-call budget; this is a local baseline, not a deployment network latency guarantee. Application tools remain disabled until task identity and the bridge are implemented.
+
 ### Agent lifecycle
 
 The server verifies BotFather tokens with Telegram and rejects bots already linked to another agent. Tokens remain in private server-side files; SQLite holds credential references. Replacing a token must preserve the bot's identity and takes effect after a server restart. Switching an existing agent to a different bot is outside the current scope.
