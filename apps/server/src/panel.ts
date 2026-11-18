@@ -1218,6 +1218,7 @@ export function createPanel(
     "memory",
     "approvals",
     "peers",
+    "delegations",
     "schedules",
     "settings",
     "token",
@@ -1232,6 +1233,7 @@ export function createPanel(
         (suffix === "memory" && !deps.memories) ||
         (suffix === "approvals" && !deps.approvals) ||
         (suffix === "peers" && !deps.peers) ||
+        (suffix === "delegations" && !deps.delegations) ||
         (suffix === "settings" && !agentSettings?.get(id)) ||
         (suffix === "token" &&
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||

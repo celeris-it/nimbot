@@ -45,6 +45,7 @@
 <a class="btn" href={`${base}/memory`}>Review memory</a>
 <a class="btn" href={`${base}/approvals`}>Approvals</a>
 <a class="btn" href={`${base}/peers`}>Agent access</a>
+<a class="btn" href={`${base}/delegations`}>Delegations</a>
 <a class="btn" href={`${base}/schedules`}>{scheduleText.link}</a>
 {#if agent.capabilities.edit}<a class="btn" href={`${base}/settings`}
     >Edit agent</a

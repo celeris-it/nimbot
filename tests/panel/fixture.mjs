@@ -68,6 +68,13 @@ const panel = createPanel(
     port: 3199,
   },
   {
+    delegations: {
+      store: tasks,
+      cancel: async (source, id) => {
+        const handoff = tasks.getDelegation(source, id);
+        return !!handoff && !!tasks.cancelDelegation(handoff.targetAgentId, id);
+      },
+    },
     schedules: {
       store: schedules,
       runNow: scheduler.runNow,
@@ -231,6 +238,37 @@ app.post("/__test/agent/:id", (c) => {
     container: "running",
     authBusy: false,
   });
+  return c.json({ ok: true });
+});
+app.post("/__test/delegations/:source", (c) => {
+  const source = c.req.param("source");
+  const target = `target-${source}`;
+  for (let index = 0; index < 21; index++) {
+    const parent = tasks.enqueue({
+      agentId: source,
+      botId: 123,
+      chatId: 42,
+      prompt: "Private parent prompt",
+    });
+    tasks.claimNextTask(source);
+    tasks.stageDelegation(
+      {
+        parentTaskId: parent.id,
+        targetAgentId: target,
+        invocationId: randomUUID(),
+        brief: `Brief ${index + 1} <em>as text</em>`,
+      },
+      () => true,
+    );
+    tasks.finishWithDelegations(parent.id, "completed", () => true);
+    if (index === 0) {
+      const child = tasks.claimNextTask(target);
+      tasks.finish(child.id, "completed", {
+        ok: true,
+        output: "Private child output",
+      });
+    }
+  }
   return c.json({ ok: true });
 });
 app.post("/__test/owner/:id", (c) => {

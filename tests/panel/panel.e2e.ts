@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 
 async function login(page: Page) {
   await page.goto("/");
@@ -12,6 +13,44 @@ async function login(page: Page) {
 
 test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
+});
+
+test("pages through delegation history and cancels only the selected child", async ({
+  page,
+  request,
+}) => {
+  const source = randomUUID();
+  expect((await request.post(`/__test/agent/${source}`)).ok()).toBe(true);
+  expect((await request.post(`/__test/delegations/${source}`)).ok()).toBe(true);
+  await login(page);
+  await page.goto(`/agents/${source}/setup`);
+  await page.getByRole("link", { name: "Delegations" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Delegations from Researcher" }),
+  ).toBeFocused();
+  const history = page.getByRole("list", { name: "Delegation history" });
+  const row = (brief: number) =>
+    history.getByRole("listitem").filter({
+      has: page.getByText(`Brief ${brief} <em>as text</em>`, { exact: true }),
+    });
+  const selected = row(21);
+  await expect(selected.getByText("Queued", { exact: true })).toBeVisible();
+  await expect(selected.locator("em")).toHaveCount(0);
+  await selected.getByRole("button", { name: "Cancel child" }).click();
+  await expect(selected.getByText("Cancelled", { exact: true })).toBeVisible();
+  await expect(selected.getByRole("button")).toHaveCount(0);
+  await expect(row(20).getByText("Queued", { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "Next" }).click();
+  await expect(page).toHaveURL(/\?page=2$/);
+  await expect(row(1).getByText("Completed", { exact: true })).toBeVisible();
+  await expect(row(1).getByRole("button")).toHaveCount(0);
+  await expect(page.getByText("Private child output")).toHaveCount(0);
+  await expect(page.getByText("Private parent prompt")).toHaveCount(0);
+  await page.reload();
+  await expect(row(1)).toBeVisible();
+  await page.getByRole("link", { name: "Previous" }).click();
+  await expect(selected.getByText("Cancelled", { exact: true })).toBeVisible();
 });
 
 async function openProviders(page: Page) {

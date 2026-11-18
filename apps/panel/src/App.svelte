@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import type {
     AgentDetail,
+    DelegationHistory,
     PanelSession,
     PanelStatus,
     ScheduleList,
@@ -19,6 +20,7 @@
   import Memory from "./Memory.svelte";
   import Approvals from "./Approvals.svelte";
   import Peers from "./Peers.svelte";
+  import Delegations from "./Delegations.svelte";
   import type { PeerGrant } from "../../server/src/agent-grants.js";
   import type { ApprovalRequest } from "../../server/src/approval-store.js";
   import type { ApprovalRule } from "../../server/src/approval-rules.js";
@@ -34,6 +36,8 @@
   let schedules = $state<ScheduleList>();
   let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
   let memoryPage = $state(1);
+  let delegations = $state<DelegationHistory>();
+  let delegationPage = $state(delegationPageOf(location.search));
   let peers = $state<{
     grants: PeerGrant[];
     candidates: { id: string; name: string }[];
@@ -56,7 +60,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|approvals|peers|schedules|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|approvals|peers|delegations|schedules|token|delete|container\/stop)$/,
     ),
   );
   let title = $derived(
@@ -66,30 +70,36 @@
         ? "Agents"
         : route?.[2] === "schedules"
           ? scheduleText.pageTitle
-          : route?.[2] === "peers"
-            ? "Agent access"
-            : route?.[2] === "approvals"
-              ? "Approvals"
-              : route?.[2] === "memory"
-                ? "Memory"
-                : route?.[2] === "providers"
-                  ? "AI providers"
-                  : path === "/agents/new"
-                    ? "Create agent"
-                    : route?.[2] === "settings"
-                      ? "Edit agent"
-                      : route?.[2] === "token"
-                        ? "Bot token"
-                        : route?.[2] === "delete"
-                          ? "Delete agent"
-                          : route?.[2] === "container/stop"
-                            ? "Stop agent"
-                            : "Agent setup",
+          : route?.[2] === "delegations"
+            ? "Delegations"
+            : route?.[2] === "peers"
+              ? "Agent access"
+              : route?.[2] === "approvals"
+                ? "Approvals"
+                : route?.[2] === "memory"
+                  ? "Memory"
+                  : route?.[2] === "providers"
+                    ? "AI providers"
+                    : path === "/agents/new"
+                      ? "Create agent"
+                      : route?.[2] === "settings"
+                        ? "Edit agent"
+                        : route?.[2] === "token"
+                          ? "Bot token"
+                          : route?.[2] === "delete"
+                            ? "Delete agent"
+                            : route?.[2] === "container/stop"
+                              ? "Stop agent"
+                              : "Agent setup",
   );
 
   async function focusHeading() {
     await tick();
     document.querySelector<HTMLElement>("h1")?.focus();
+  }
+  function delegationPageOf(search: string) {
+    const page = Number(new URLSearchParams(search).get("page"));
+    return Number.isInteger(page) && page >= 1 && page <= 1000 ? page : 1;
   }
   function navigate(next: string, replace = false) {
     controller?.abort();
@@ -97,7 +107,10 @@
     inFlight = false;
     if (replace) history.replaceState(null, "", next);
     else history.pushState(null, "", next);
-    path = new URL(next, location.origin).pathname;
+    const url = new URL(next, location.origin);
+    path = url.pathname;
+    delegationPage = delegationPageOf(url.search);
+    delegations = undefined;
     agent = undefined;
     providerSettings = undefined;
     schedules = undefined;
@@ -166,6 +179,21 @@
             )
               throw cause;
             peers = undefined;
+          }
+        }
+        if (route[2] === "delegations") {
+          try {
+            delegations = await request<DelegationHistory>(
+              `/api/agents/${route[1]}/delegations?page=${delegationPage}`,
+              { signal: current.signal },
+            );
+          } catch (cause) {
+            if (
+              current.signal.aborted ||
+              (cause instanceof ApiError && cause.status === 401)
+            )
+              throw cause;
+            delegations = undefined;
           }
         }
         if (route[2] === "approvals") {
@@ -411,6 +439,22 @@
         void load();
       },
     );
+  }
+  async function cancelDelegation(id: string) {
+    if (!agent || busy) return;
+    const startedPath = path;
+    await mutate(
+      `/api/agents/${encodeURIComponent(agent.id)}/delegations/${encodeURIComponent(id)}/cancel`,
+      {},
+      () => {
+        notice = "Cancellation requested.";
+      },
+    );
+    if (path === startedPath && session) {
+      controller?.abort();
+      inFlight = false;
+      void load();
+    }
   }
   async function peerAction(
     kind: "grant" | "revoke",
@@ -684,6 +728,15 @@
           action={scheduleAction}
           refresh={() => load()}
         />{/key}
+    {:else if route[2] === "delegations"}
+      <Delegations
+        {agent}
+        data={delegations}
+        page={delegationPage}
+        {busy}
+        cancel={cancelDelegation}
+        refresh={() => load()}
+      />
     {:else if route[2] === "peers"}
       {#key agent.id}<Peers
           {agent}
