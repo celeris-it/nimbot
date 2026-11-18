@@ -61,7 +61,7 @@ it.skipIf(!image)(
         () => {},
       );
       await serverControl.action("start");
-      for (const recreate of [false, true]) {
+      for (const lifecycle of ["initial", "retained", "purged"]) {
         const refs = await resources.create(agentId, token, () => {});
         const reconcile = createResourceReconciliation(
           {
@@ -216,24 +216,55 @@ it.skipIf(!image)(
             `console.log((await fetch('http://localhost:3001/health')).status)`,
           ),
         ).toBe("401");
-        if (recreate) {
+        const memories = () =>
+          JSON.parse(
+            exec(
+              refs.containerRef,
+              `const r = await fetch('http://localhost:3001/memories', {headers: {authorization: 'Bearer ' + process.env.AGENT_HOST_TOKEN}}); if (!r.ok) throw new Error('Memory inspection failed'); console.log(await r.text());`,
+            ),
+          ).memories;
+        if (lifecycle === "retained") {
           expect(
             exec(
               refs.containerRef,
               `import {readFileSync} from 'node:fs'; console.log(readFileSync('/workspace/retained.txt', 'utf8'));`,
             ),
           ).toBe(agentId);
-        } else {
+          expect(memories()).toEqual([
+            expect.objectContaining({
+              title: "Volume fixture",
+              content: agentId,
+            }),
+          ]);
+        } else if (lifecycle === "initial") {
+          expect(memories()).toEqual([]);
           exec(
             refs.containerRef,
             `import {writeFileSync} from 'node:fs'; writeFileSync('/workspace/retained.txt', '${agentId}');`,
           );
+          exec(
+            refs.containerRef,
+            `import {openMemoryStore} from '/app/apps/agent-host/dist/memory-store.js'; const store = openMemoryStore('/home/node/.local/share/nimbot/memory.sqlite'); store.create({title: 'Volume fixture', content: '${agentId}'}, '${agentId}'); store.close();`,
+          );
+          expect(memories()).toHaveLength(1);
+        } else {
+          expect(memories()).toEqual([]);
+          expect(
+            exec(
+              refs.containerRef,
+              `import {existsSync} from 'node:fs'; console.log(existsSync('/workspace/retained.txt'));`,
+            ),
+          ).toBe("false");
         }
         await control.action("stop");
         expect(await control.status()).toBe("stopped");
-        await resources.remove(agentId);
+        const purge = lifecycle === "retained";
+        await resources.remove(agentId, purge);
         expect(await control.status()).toBe("missing");
-        expect((await call(`/volumes/${refs.volumeRef}`)).code).toBe(200);
+        for (const suffix of ["workspace", "engine", "tasks"])
+          expect(
+            (await call(`/volumes/nimbot-${agentId}-${suffix}`)).code,
+          ).toBe(purge ? 404 : 200);
       }
     } finally {
       if ((await control.status()) === "running") await control.action("stop");

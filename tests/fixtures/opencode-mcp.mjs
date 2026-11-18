@@ -17,9 +17,13 @@ const { createToolBridge } =
   await import("/app/apps/agent-host/dist/tool-bridge.js");
 const { createOpenCodeEngine } =
   await import("/app/apps/agent-host/dist/opencode-engine.js");
+const { openMemoryStore } =
+  await import("/app/apps/agent-host/dist/memory-store.js");
+const { createMemoryTools } =
+  await import("/app/apps/agent-host/dist/memory-tools.js");
 
 // Also bounds a hung child shutdown, so a timed-out Docker client cannot leave work running.
-const deadline = setTimeout(() => process.exit(1), 150000);
+const deadline = setTimeout(() => process.exit(1), 170000);
 assert.equal(
   execFileSync("opencode", ["--version"], { encoding: "utf8" }).trim(),
   process.argv[2],
@@ -30,6 +34,7 @@ const calls = [];
 let mode = "echo";
 let discovered = 0;
 let modelCalls = 0;
+const memoryResults = [];
 const bridges = [];
 const signals = [];
 async function adapter() {
@@ -100,7 +105,10 @@ const server = createServer(async (req, res) => {
     );
     return;
   }
-  const tool = message.tools?.find((t) => t.function.name.endsWith("echo"));
+  const memoryMode = mode.startsWith("memory_");
+  const tool = message.tools?.find((t) =>
+    t.function.name.endsWith(memoryMode ? mode : "echo"),
+  );
   if (mode === "plain")
     assert.equal(
       tool,
@@ -113,8 +121,25 @@ const server = createServer(async (req, res) => {
   }
   const last = message.messages.at(-1);
   const finished = mode === "plain" || last.role === "tool";
-  if (finished && mode !== "plain")
-    assert.match(JSON.stringify(last), /echoed/);
+  if (finished && mode !== "plain") {
+    assert.match(
+      JSON.stringify(last),
+      memoryMode ? /violet lighthouse/ : /echoed/,
+    );
+    if (mode === "memory_search") {
+      assert.match(JSON.stringify(last), /untrusted data/);
+      assert.match(JSON.stringify(last), /memories/);
+    }
+    if (memoryMode) memoryResults.push(mode);
+  }
+  if (mode === "memory_search" && !finished) {
+    // A new conversation must learn the note from the tool, not session history.
+    assert.doesNotMatch(JSON.stringify(message.messages), /violet lighthouse/);
+    assert.equal(
+      message.tools.some((t) => t.function.name.endsWith("memory_create")),
+      false,
+    );
+  }
   res.writeHead(200, { "content-type": "text/event-stream" });
   const delta = finished
     ? { content: "Fixture complete" }
@@ -126,7 +151,17 @@ const server = createServer(async (req, res) => {
             type: "function",
             function: {
               name: tool.function.name,
-              arguments: JSON.stringify({ value: mode }),
+              arguments: JSON.stringify(
+                mode === "memory_create"
+                  ? {
+                      title: "Recall fixture",
+                      content: "violet lighthouse",
+                      tags: ["fixture"],
+                    }
+                  : mode === "memory_search"
+                    ? { query: "Recall", tag: "fixture" }
+                    : { value: mode },
+              ),
             },
           },
         ],
@@ -298,6 +333,52 @@ try {
   } finally {
     await direct.stop();
   }
+  const memoryPath = join(root, "memory.sqlite");
+  const memorySessions = [];
+  for (const operation of ["memory.create", "memory.search"]) {
+    mode = operation.replace(".", "_");
+    // Reopen the durable store and start a new ACP process and session each time.
+    const memory = openMemoryStore(memoryPath);
+    const engine = createOpenCodeEngine(
+      root,
+      {
+        read: async () => undefined,
+        write: async (id) => {
+          memorySessions.push(id);
+        },
+      },
+      [],
+      createMemoryTools(memory),
+    );
+    try {
+      assert.equal(
+        await engine.run(
+          "Run the granted memory tool.",
+          () => {},
+          undefined,
+          async () => true,
+          {
+            hostTaskId: randomUUID(),
+            identity: { agentId: "fixture", serverTaskId: randomUUID() },
+            tools: {
+              token: "f".repeat(64),
+              operations: [operation],
+              expiresAt: Date.now() + 60000,
+            },
+          },
+        ),
+        "end_turn",
+      );
+      assert.equal(memory.search("Recall")[0].content, "violet lighthouse");
+    } finally {
+      await engine.stop();
+      memory.close();
+    }
+  }
+  assert.equal(memorySessions.length, 2);
+  assert.notEqual(memorySessions[0], memorySessions[1]);
+  assert.deepEqual(memoryResults, ["memory_create", "memory_search"]);
+  console.log("Verified private memory retrieval in a fresh OpenCode session.");
   console.log(
     "Verified pinned OpenCode MCP discovery, structured calls, restored registration, and cancellation as uid 1000.",
   );
