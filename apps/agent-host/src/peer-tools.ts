@@ -4,6 +4,25 @@ import { createServerTool } from "./server-tool.js";
 export function createPeerToolDefinitions() {
   return [
     createServerTool({
+      operation: "agent.delegate",
+      name: "agent_delegate",
+      description:
+        "Request owner approval to delegate a bounded explicit brief to a granted agent. Returns a delegation ID without waiting for the child. The handoff stays pending for this entire turn and is admitted only when you complete successfully. Check status in a later turn; never wait for the child here. Only the brief is passed, without your conversation or workspace. Do not send secrets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          targetAgentId: {
+            type: "string",
+            maxLength: 48,
+            pattern: "^[a-z0-9][a-z0-9-]*$",
+          },
+          brief: { type: "string", minLength: 1, maxLength: 2000 },
+        },
+        required: ["targetAgentId", "brief"],
+        additionalProperties: false,
+      },
+    }),
+    createServerTool({
       operation: "agent.delegation.status",
       name: "agent_delegation_status",
       description:

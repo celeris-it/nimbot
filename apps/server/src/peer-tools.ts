@@ -2,7 +2,12 @@ import type { AgentGrants } from "./agent-grants.js";
 import { NOTE_LIMITS, type AgentNote, type AgentNotes } from "./agent-notes.js";
 import type { ApprovalGate } from "./approval-gate.js";
 import { redactSummary } from "./approval-store.js";
-import type { Delegation, RoutedTask, TaskStore } from "./task-queue.js";
+import {
+  DELEGATION_LIMITS,
+  type Delegation,
+  type RoutedTask,
+  type TaskStore,
+} from "./task-queue.js";
 import type { ServerToolHandler, ToolOutcome } from "./tool-dispatch.js";
 
 export const PEER_NOTICE =
@@ -16,12 +21,12 @@ const object = (value: unknown): value is Record<string, unknown> =>
 const empty = (value: unknown) =>
   object(value) && Object.keys(value).length === 0 ? {} : undefined;
 
-/** Server-owned authority for peer discovery, notes and delegation retrieval. */
+/** Server-owned authority for peer discovery, notes and delegation. */
 export function createPeerTools(config: {
   agentId: string;
   grants: AgentGrants;
   notes: AgentNotes;
-  tasks: Pick<TaskStore, "getTask" | "getDelegation">;
+  tasks: Pick<TaskStore, "getTask" | "getDelegation" | "stageDelegation">;
   name(agentId: string): string | undefined;
   /** Rechecks current ownership and the saved channel binding, including historical source tasks. */
   canReach(task: RoutedTask): boolean;
@@ -49,6 +54,15 @@ export function createPeerTools(config: {
     task.origin.platform !== "delegated" &&
     active(task) &&
     config.grants.allows(task.agentId, target, "note", task.origin.platform);
+  const canDelegate = (task: RoutedTask, target: string) =>
+    task.origin.platform !== "delegated" &&
+    active(task) &&
+    config.grants.allows(
+      task.agentId,
+      target,
+      "delegate",
+      task.origin.platform,
+    );
   const canRead = (task: RoutedTask, note: AgentNote) => {
     const source = config.tasks.getTask(note.sourceTaskId);
     return (
@@ -138,12 +152,71 @@ export function createPeerTools(config: {
           "delegate",
           task.origin.platform,
         ).length
-          ? ["agent.delegation.status"]
+          ? ["agent.delegate", "agent.delegation.status"]
           : []),
       ];
     },
     handlers(guard: ApprovalGate["guard"]): ServerToolHandler[] {
       return [
+        {
+          operation: "agent.delegate",
+          write: true,
+          validate(value) {
+            if (
+              !object(value) ||
+              Object.keys(value).length !== 2 ||
+              typeof value.targetAgentId !== "string" ||
+              !AGENT.test(value.targetAgentId) ||
+              typeof value.brief !== "string" ||
+              !value.brief.trim() ||
+              value.brief.length > DELEGATION_LIMITS.brief
+            )
+              return undefined;
+            return {
+              targetAgentId: value.targetAgentId,
+              brief: value.brief.trim(),
+            };
+          },
+          authorize: (task, args) =>
+            canDelegate(task, String(args.targetAgentId)),
+          async execute(task, args, context) {
+            const targetAgentId = String(args.targetAgentId);
+            const brief = String(args.brief);
+            const outcome = await guard(
+              task,
+              {
+                actionType: "agent.delegate",
+                ttlMs: 30_000,
+                target: targetAgentId,
+                summary: `Delegate a task to ${targetAgentId}: ${redactSummary(brief).slice(0, 160)}`,
+                arguments: args,
+              },
+              async (signal) => {
+                signal.throwIfAborted();
+                if (!canDelegate(task, targetAgentId))
+                  throw new Error("Delegation is not authorized");
+                const delegation = config.tasks.stageDelegation(
+                  {
+                    parentTaskId: task.id,
+                    targetAgentId,
+                    invocationId: context.invocationId,
+                    brief,
+                  },
+                  canDelegate,
+                );
+                return {
+                  id: delegation.id,
+                  status: "pending",
+                  notice: DELEGATION_NOTICE,
+                };
+              },
+              context.signal,
+            );
+            if (outcome.status !== "executed")
+              throw new Error("Delegation was not accepted");
+            return outcome.result;
+          },
+        },
         {
           operation: "agent.delegation.status",
           write: false,

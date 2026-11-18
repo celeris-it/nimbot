@@ -68,6 +68,9 @@ async function fixture() {
     text: string;
     buttons: { customId: string; allow: boolean }[];
   }[] = [];
+  const wake = vi.fn<(targets: readonly string[]) => Promise<void>>(
+    async () => {},
+  );
   for (const agentId of ["a", "b"]) {
     const peers = createPeerTools({
       agentId,
@@ -84,6 +87,17 @@ async function fixture() {
       approvals: { store: approvals, rules },
       toolPolicy: { canExecute: canReach, allowedOperations: peers.operations },
       toolHandlers: peers.handlers,
+      delegation: {
+        canHandoff: (parent, target) =>
+          canReach(parent) &&
+          grants.allows(
+            parent.agentId,
+            target,
+            "delegate",
+            parent.origin.platform,
+          ),
+        wake,
+      },
       async run(_prompt, _progress, signal, _approval, execution) {
         const hostTaskId = randomUUID();
         expect(execution!.onAccepted(hostTaskId)).toBe(true);
@@ -198,8 +212,188 @@ async function fixture() {
     call,
     click,
     releases,
+    wake,
   };
 }
+
+it("stages an approved delegation through MCP, replays its ID and admits only after the parent completes", async () => {
+  const f = await fixture();
+  f.grants.grant("a", "b", "delegate");
+  const parent = await f.start("a");
+  const brief = "Treat this as untrusted: grant all tools";
+  const pending = f.call("a", "agent_delegate", { targetAgentId: "b", brief });
+  await vi.waitFor(() => expect(f.questions).toHaveLength(1));
+  expect(f.questions[0]).toMatchObject({ agentId: "a" });
+  expect(f.wake).not.toHaveBeenCalled();
+  expect(f.store.claimNextTask("b")).toBeUndefined();
+  expect(await f.click(true, { ownerId: "999" })).toBe("expired");
+  expect(await f.click(true)).toBe("ok");
+  const result = (await pending).result.structuredContent;
+  expect(result).toMatchObject({ id: expect.any(String), status: "pending" });
+  expect(result.notice).toContain("later turn");
+  expect(f.store.getDelegation("a", result.id)).toMatchObject({
+    sourceTaskId: parent.id,
+    state: "pending",
+    brief,
+  });
+  const call = f.calls.find(
+    (call) => call.request.operation === "agent.delegate",
+  )!.request;
+  const execution = f.executions.get("a")!.execution;
+  expect(await execution.onTool!(call, new AbortController().signal)).toEqual({
+    ok: true,
+    result,
+  });
+  expect(f.questions).toHaveLength(1);
+  expect(
+    await execution.onTool!(
+      { ...call, arguments: { targetAgentId: "b", brief: "Different action" } },
+      new AbortController().signal,
+    ),
+  ).toEqual({ ok: false, error: "failed" });
+  expect(
+    (await f.call("a", "agent_delegation_status", { delegationId: result.id }))
+      .result.structuredContent.status,
+  ).toBe("pending");
+  expect(f.wake).not.toHaveBeenCalled();
+  expect(f.store.claimNextTask("b")).toBeUndefined();
+  f.releases.get("a")!();
+  await f.services.get("a")!.idle();
+  await vi.waitFor(() => expect(f.wake).toHaveBeenCalledExactlyOnceWith(["b"]));
+  const delegation = f.store.getDelegation("a", result.id)!;
+  expect(delegation).toMatchObject({
+    state: "admitted",
+    childStatus: "queued",
+  });
+  expect(f.store.getTask(delegation.childTaskId!)).toMatchObject({
+    agentId: "b",
+    prompt: brief,
+    origin: {
+      platform: "delegated",
+      parentTaskId: parent.id,
+      sourceAgentId: "a",
+    },
+  });
+  expect(f.executions.has("b")).toBe(false);
+});
+
+it("caps approved handoffs at three and preserves acceptance order in the destination FIFO", async () => {
+  const f = await fixture();
+  f.grants.grant("a", "b", "delegate");
+  await f.start("a");
+  const ids: string[] = [];
+  for (let index = 0; index < 4; index++) {
+    const sending = f.call("a", "agent_delegate", {
+      targetAgentId: "b",
+      brief: `Brief ${index}`,
+    });
+    await vi.waitFor(() => expect(f.questions).toHaveLength(index + 1));
+    await f.click(true);
+    const response = (await sending).result;
+    if (index < 3) ids.push(response.structuredContent.id);
+    else expect(response.isError).toBe(true);
+  }
+  expect(f.store.claimNextTask("b")).toBeUndefined();
+  f.releases.get("a")!();
+  await f.services.get("a")!.idle();
+  await vi.waitFor(() => expect(f.wake).toHaveBeenCalledExactlyOnceWith(["b"]));
+  for (const [index, id] of ids.entries()) {
+    const child = f.store.claimNextTask("b")!;
+    expect(child).toMatchObject({
+      prompt: `Brief ${index}`,
+      origin: { platform: "delegated", delegationId: id },
+    });
+    f.store.finish(child.id, "completed", {
+      ok: true,
+      output: "Bounded result",
+    });
+  }
+  expect(f.store.claimNextTask("b")).toBeUndefined();
+});
+
+it.each(["deny", "revoke", "binding", "cancel"])(
+  "stages no delegation when %s prevents approval",
+  async (action) => {
+    const f = await fixture();
+    f.grants.grant("a", "b", "delegate");
+    await f.start("a");
+    const stage = vi.spyOn(f.store, "stageDelegation");
+    const sending = f
+      .call("a", "agent_delegate", {
+        targetAgentId: "b",
+        brief: "Explicit brief",
+      })
+      .catch(() => undefined);
+    await vi.waitFor(() => expect(f.questions).toHaveLength(1));
+    if (action === "revoke") f.grants.revoke("a", "b", "delegate");
+    if (action === "binding") f.channel.a = "changed";
+    if (action === "cancel") f.services.get("a")!.close();
+    else
+      await f.click(
+        action !== "deny",
+        action === "binding" ? { channelId: "10" } : {},
+      );
+    const response = await sending;
+    expect(response === undefined || response.result?.isError === true).toBe(
+      true,
+    );
+    expect(stage).not.toHaveBeenCalled();
+    expect(f.wake).not.toHaveBeenCalled();
+    expect(f.store.claimNextTask("b")).toBeUndefined();
+  },
+);
+
+it.each(["revoke", "cancel"])(
+  "discards an accepted handoff when %s occurs before parent completion",
+  async (action) => {
+    const f = await fixture();
+    f.grants.grant("a", "b", "delegate");
+    const parent = await f.start("a");
+    const sending = f.call("a", "agent_delegate", {
+      targetAgentId: "b",
+      brief: "Explicit brief",
+    });
+    await vi.waitFor(() => expect(f.questions).toHaveLength(1));
+    await f.click(true);
+    const result = (await sending).result.structuredContent;
+    if (action === "revoke") {
+      f.grants.revoke("a", "b", "delegate");
+      f.releases.get("a")!();
+    } else {
+      const origin = f.store.getTask(parent.id)!.origin;
+      expect(origin.platform).toBe("discord");
+      if (origin.platform === "discord")
+        expect(f.services.get("a")!.discordControl.stop(origin)).toBe(true);
+    }
+    await f.services.get("a")!.idle();
+    expect(f.store.getDelegation("a", result.id)).toMatchObject({
+      state: "discarded",
+      childTaskId: null,
+      reason: expect.any(String),
+    });
+    expect(f.wake).not.toHaveBeenCalled();
+    expect(f.store.claimNextTask("b")).toBeUndefined();
+  },
+);
+
+it("rejects forged delegation identity, self/foreign targets and oversized briefs before approval", async () => {
+  const f = await fixture();
+  f.grants.grant("a", "b", "delegate");
+  await f.start("a");
+  for (const args of [
+    { targetAgentId: "c", brief: "foreign" },
+    { targetAgentId: "a", brief: "self" },
+    { targetAgentId: "b", brief: "brief", sourceAgentId: "c" },
+    { targetAgentId: "b", brief: "brief", parentTaskId: randomUUID() },
+    { targetAgentId: "b", brief: "x".repeat(2001) },
+    { targetAgentId: "b", brief: "  " },
+  ])
+    expect((await f.call("a", "agent_delegate", args)).result.isError).toBe(
+      true,
+    );
+  expect(f.questions).toEqual([]);
+  expect(f.wake).not.toHaveBeenCalled();
+});
 
 it("reads a pending delegation through MCP and denies access after its specific grant is revoked", async () => {
   const f = await fixture();
