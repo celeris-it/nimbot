@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import {
   createRoutedTaskQueue,
   openTaskStore,
+  type Delegation,
   type RoutedTask,
   type TaskOutcome,
 } from "./task-queue.js";
@@ -122,6 +123,45 @@ function childFixture() {
   store.finishWithDelegations(parent.id, "completed", () => true);
   return { store, handoff };
 }
+
+it.each(["failed", "cancelled"] as const)(
+  "discards a pending handoff when the parent is %s before completion",
+  async (kind) => {
+    const store = openTaskStore(":memory:");
+    let handoff: Delegation | undefined;
+    const source = createRoutedTaskQueue({
+      agentId: "a",
+      store,
+      execute: async (task) => {
+        handoff = store.stageDelegation(
+          {
+            parentTaskId: task.id,
+            targetAgentId: "b",
+            invocationId: randomUUID(),
+            brief: "pending brief",
+          },
+          () => true,
+        );
+        throw new HostTaskError(kind);
+      },
+      deliver: async () => {},
+    });
+    try {
+      source.submitTelegram(1, 42, "parent");
+      await source.idle();
+      expect(handoff).toBeDefined();
+      expect(store.getDelegation("a", handoff!.id)).toMatchObject({
+        state: "discarded",
+        reason: `parent_${kind}`,
+        childTaskId: null,
+      });
+      expect(store.claimNextTask("b")).toBeUndefined();
+    } finally {
+      source.close();
+      store.close();
+    }
+  },
+);
 
 it("saves a child result before delivering its outcome", async () => {
   const f = childFixture();

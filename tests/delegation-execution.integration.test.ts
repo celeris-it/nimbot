@@ -44,16 +44,28 @@ const latch = () => {
 async function fixture(platform: "telegram" | "discord") {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-two-agents-"));
   const path = join(dir, "server.sqlite");
-  const tasks = openTaskStore(path);
-  const approvals = openApprovalStore(path);
-  const rules = openApprovalRules(path, () => false);
-  const notes = openAgentNotes(path);
-  const notifications = openNotificationStore(path);
-  const grants = openAgentGrants(path, {
-    exists: (id) => ["a", "b"].includes(id),
-    telegramOwner: () => 42,
-    discordOwner: () => "42",
+  const openServerStores = () => ({
+    tasks: openTaskStore(path),
+    approvals: openApprovalStore(path),
+    rules: openApprovalRules(path, () => false),
+    notes: openAgentNotes(path),
+    notifications: openNotificationStore(path),
+    grants: openAgentGrants(path, {
+      exists: (id) => ["a", "b"].includes(id),
+      telegramOwner: () => 42,
+      discordOwner: () => "42",
+    }),
   });
+  let { tasks, approvals, rules, notes, notifications, grants } =
+    openServerStores();
+  const closeServerStores = () => {
+    grants.close();
+    notifications.close();
+    notes.close();
+    rules.close();
+    approvals.close();
+    tasks.close();
+  };
   grants.grant("a", "b", "delegate");
   const origin = (id: string) => ({
     platform: "discord" as const,
@@ -75,6 +87,7 @@ async function fixture(platform: "telegram" | "discord") {
     canReach(parent) &&
     grants.allows(parent.agentId, target, "delegate", parent.origin.platform);
   const ready: Record<string, boolean> = { a: true, b: true };
+  const paused = new Set<string>();
   const parentHold = latch();
   const targetHold = latch();
   let delegationId = "";
@@ -161,93 +174,99 @@ async function fixture(platform: "telegram" | "discord") {
     serverTaskId: string;
     hostTaskId: string;
   }[] = [];
-  const services = createAgentTaskServices(
-    async (agentId, { wake }) => {
-      const policy = createDelegationExecution({
-        agentId,
-        tasks,
-        ready: () => !!ready[agentId],
-        canReach,
-        allowed: canHandoff,
-      });
-      const peers = createPeerTools({
-        agentId,
-        tasks,
-        notes,
-        grants,
-        canReach,
-        name: (id) => id,
-      });
-      return {
-        agentId,
-        store: tasks,
-        ownerId: () => 42,
-        approvals: { store: approvals, rules },
-        notificationStore: notifications,
-        approvalReach: canReach,
-        approvalRoute: (task) =>
-          task.origin.platform === "delegated" ? policy.parent(task) : task,
-        toolPolicy: {
-          canExecute: canReach,
-          allowedOperations: peers.operations,
-        },
-        toolHandlers: peers.handlers,
-        delegation: { canExecute: policy.canExecute, canHandoff, wake },
-        run: hosts.get(agentId)!.run,
-        decide: hosts.get(agentId)!.decide,
-        access: {
-          canActivate: () => true,
-          canExecute: (botId, _ownerId, chatId) =>
-            canReach({
-              agentId,
-              id: "",
-              prompt: "",
-              origin: { platform: "telegram", botId, chatId },
-            } as RoutedTask),
-        },
-        discord: {
-          admit: canReach,
-          progress: async () => {},
-          acknowledge: async () => true,
-          deliver: async (_task, outcome) => {
-            sent.push({
-              agentId,
-              text: outcome.ok ? outcome.output : outcome.kind,
-              messageId: "0",
-            });
+  const makeServices = () =>
+    createAgentTaskServices(
+      async (agentId, { wake }) => {
+        const policy = createDelegationExecution({
+          agentId,
+          tasks,
+          ready: () => !!ready[agentId],
+          canReach,
+          allowed: canHandoff,
+        });
+        const peers = createPeerTools({
+          agentId,
+          tasks,
+          notes,
+          grants,
+          canReach,
+          name: (id) => id,
+        });
+        return {
+          agentId,
+          store: tasks,
+          ownerId: () => 42,
+          approvals: { store: approvals, rules },
+          notificationStore: notifications,
+          approvalReach: canReach,
+          approvalRoute: (task) =>
+            task.origin.platform === "delegated" ? policy.parent(task) : task,
+          toolPolicy: {
+            canExecute: canReach,
+            allowedOperations: peers.operations,
           },
-          sendDelegation: async (_task, text, canSend) => {
-            if (!canSend())
-              return { status: "failed", sentParts: 0, reason: "unavailable" };
-            sent.push({ agentId, text, messageId: "0" });
-            return { status: "delivered", sentParts: 1 };
+          toolHandlers: peers.handlers,
+          delegation: { canExecute: policy.canExecute, canHandoff, wake },
+          run: hosts.get(agentId)!.run,
+          decide: hosts.get(agentId)!.decide,
+          access: {
+            canActivate: () => true,
+            canExecute: (botId, _ownerId, chatId) =>
+              canReach({
+                agentId,
+                id: "",
+                prompt: "",
+                origin: { platform: "telegram", botId, chatId },
+              } as RoutedTask),
           },
-          sendApproval: async (_task, text, buttons) => {
-            const messageId = String(sent.length + 10);
-            sent.push({
-              agentId,
-              text,
-              key: buttons[0]!.customId.split(":")[1],
-              messageId,
-            });
-            return messageId;
+          discord: {
+            admit: canReach,
+            progress: async () => {},
+            acknowledge: async () => true,
+            deliver: async (_task, outcome) => {
+              sent.push({
+                agentId,
+                text: outcome.ok ? outcome.output : outcome.kind,
+                messageId: "0",
+              });
+            },
+            sendDelegation: async (_task, text, canSend) => {
+              if (!canSend())
+                return {
+                  status: "failed",
+                  sentParts: 0,
+                  reason: "unavailable",
+                };
+              sent.push({ agentId, text, messageId: "0" });
+              return { status: "delivered", sentParts: 1 };
+            },
+            sendApproval: async (_task, text, buttons) => {
+              const messageId = String(sent.length + 10);
+              sent.push({
+                agentId,
+                text,
+                key: buttons[0]!.customId.split(":")[1],
+                messageId,
+              });
+              return messageId;
+            },
           },
-        },
-      };
-    },
-    {
-      store: tasks,
-      targetStatus: () => "ready",
-      cancelHostTask: async (agentId, serverTaskId) => {
-        const hostTaskId = tasks.getHostTaskId(agentId, serverTaskId);
-        if (!hostTaskId) return;
-        cancelledHosts.push({ agentId, serverTaskId, hostTaskId });
-        await hosts.get(agentId)!.cancel(hostTaskId);
+        };
       },
-    },
-  );
+      {
+        store: tasks,
+        targetStatus: (id) => (paused.has(id) ? "paused" : "ready"),
+        cancelHostTask: async (agentId, serverTaskId) => {
+          const hostTaskId = tasks.getHostTaskId(agentId, serverTaskId);
+          if (!hostTaskId) return;
+          cancelledHosts.push({ agentId, serverTaskId, hostTaskId });
+          await hosts.get(agentId)!.cancel(hostTaskId);
+        },
+      },
+    );
+  let services = makeServices();
   const waitForServices: (() => Promise<void>)[] = [];
-  for (const id of ["a", "b"]) {
+  const attach = async (id: string) => {
     const service = await services.get(id);
     waitForServices.push(service.idle);
     service.attach({
@@ -270,7 +289,9 @@ async function fixture(platform: "telegram" | "discord") {
         },
       },
     } as unknown as Bot);
-  }
+  };
+  await attach("a");
+  await attach("b");
   cleanups.push(async () => {
     parentHold.release();
     targetHold.release();
@@ -278,22 +299,17 @@ async function fixture(platform: "telegram" | "discord") {
     for (const runner of runners) await runner.close();
     await Promise.all(waitForServices.map((idle) => idle()));
     for (const store of hostStores) await store.close();
-    grants.close();
-    notifications.close();
-    notes.close();
-    rules.close();
-    approvals.close();
-    tasks.close();
+    closeServerStores();
     await rm(dir, { recursive: true, force: true });
   });
 
   let update = 0;
-  const submit = async (id: string, prompt: string) => {
+  const submit = async (id: string, prompt: string, eventId = ++update) => {
     const service = await services.get(id);
     return platform === "telegram"
-      ? service.submit(id === "a" ? 101 : 202, 42, prompt, ++update)
+      ? service.submit(id === "a" ? 101 : 202, 42, prompt, eventId)
       : service.submitDiscord(
-          { ...origin(id), messageId: String(++update) },
+          { ...origin(id), messageId: String(eventId) },
           prompt,
         );
   };
@@ -314,9 +330,15 @@ async function fixture(platform: "telegram" | "discord") {
         });
   };
   return {
-    services,
-    tasks,
-    grants,
+    get services() {
+      return services;
+    },
+    get tasks() {
+      return tasks;
+    },
+    get grants() {
+      return grants;
+    },
     ready,
     started,
     histories,
@@ -327,8 +349,78 @@ async function fixture(platform: "telegram" | "discord") {
     targetHold,
     delegation: () => tasks.getDelegation("a", delegationId),
     cancelledHosts,
+    paused,
+    async restart() {
+      await Promise.all(waitForServices.splice(0).map((idle) => idle()));
+      services.close();
+      closeServerStores();
+      ({ tasks, approvals, rules, notes, notifications, grants } =
+        openServerStores());
+      tasks.markRunningInterrupted();
+      services = makeServices();
+      await attach("a");
+      await attach("b");
+      await services.resumeDelegations(tasks);
+      await services.resumeDelegationResults(tasks);
+    },
   };
 }
+
+it("recovers an admitted child across a Server restart without replaying the parent or replacing target chat history", async () => {
+  const f = await fixture("discord");
+  f.targetHold.release();
+  await f.submit("b", "target-private");
+  await (await f.services.get("b")).idle();
+  f.paused.add("b");
+  const parent = await f.submit("a", "parent-private", 20);
+  await vi.waitFor(() =>
+    expect(f.sent.filter((message) => message.key)).toHaveLength(1),
+  );
+  const admission = f.sent.find((message) => message.key)!;
+  expect(await f.answer(admission)).toBe("ok");
+  await vi.waitFor(() => expect(f.delegation()?.state).toBe("pending"));
+  expect(await f.submit("a", "parent-private", 20)).toMatchObject({
+    duplicate: true,
+    id: parent.id,
+  });
+  f.parentHold.release();
+  await (await f.services.get("a")).idle();
+  expect(f.delegation()?.childStatus).toBe("queued");
+  const childId = f.delegation()?.childTaskId;
+  f.paused.delete("b");
+  await f.restart();
+  expect(await f.submit("a", "parent-private", 20)).toMatchObject({
+    duplicate: true,
+    id: parent.id,
+  });
+  await vi.waitFor(() =>
+    expect(f.sent.filter((message) => message.key)).toHaveLength(2),
+  );
+  const permission = f.sent.filter((message) => message.key)[1]!;
+  expect(permission.agentId).toBe("a");
+  expect(await f.answer(admission)).toBe("expired");
+  expect(await f.answer(permission, true)).toBe("expired");
+  expect(await f.answer(permission)).toBe("ok");
+  await (await f.services.get("b")).idle();
+  expect(f.delegation()).toMatchObject({
+    childTaskId: childId,
+    childStatus: "completed",
+    result: { ok: true, output: "Child result for the original owner" },
+  });
+  await f.restart();
+  await f.submit("b", "target-after");
+  await (await f.services.get("b")).idle();
+  expect(f.histories.b).toEqual(["target-private", "target-after"]);
+  expect(f.started.map((row) => row.prompt)).toEqual([
+    "target-private",
+    "parent-private",
+    "Only explicit child brief",
+    "target-after",
+  ]);
+  expect(
+    f.sent.filter((message) => message.text.includes("Child result")),
+  ).toEqual([expect.objectContaining({ agentId: "a" })]);
+});
 
 it.each(["telegram", "discord"] as const)(
   "executes a one-hop child in the target FIFO and routes %s permissions and results to its original source",
