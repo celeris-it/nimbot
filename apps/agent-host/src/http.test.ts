@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHostApi, readHostConfig } from "./http.js";
+import { openTaskStore } from "./task-store.js";
+import { createTaskRunner } from "./tasks.js";
+import { pathToFileURL } from "node:url";
 
 const token = "test-internal-token-with-at-least-32-chars";
 const workspaces: string[] = [];
@@ -15,6 +18,59 @@ afterEach(async () => {
 });
 
 describe("Agent Host API", () => {
+  it("rejects invalid execution metadata before persisting or running a task", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "nimbot-host-identity-"));
+    workspaces.push(workspace);
+    const store = await openTaskStore(
+      pathToFileURL(join(workspace, "tasks.sqlite")).href,
+    );
+    let executions = 0;
+    const runner = createTaskRunner(store, {
+      async run() {
+        executions++;
+        return "end_turn";
+      },
+      async stop() {},
+    });
+    const app = createHostApi({ token, workspace }, runner);
+    const valid = {
+      agentId: "agent",
+      serverTaskId: "a0000000-0000-4000-8000-000000000001",
+    };
+    try {
+      for (const execution of [
+        null,
+        [],
+        "identity",
+        {},
+        { agentId: "agent" },
+        { ...valid, agentId: "../foreign" },
+        { ...valid, agentId: "a".repeat(49) },
+        { ...valid, serverTaskId: "not-a-task" },
+        { ...valid, serverTaskId: 123 },
+        { ...valid, grants: ["all"] },
+        { ...valid, capability: "secret" },
+      ]) {
+        const response = await app.request("/tasks", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ prompt: "hi", execution }),
+        });
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: "Invalid execution identity",
+        });
+      }
+      expect(executions).toBe(0);
+      expect(await store.getCurrent()).toBeNull();
+    } finally {
+      await runner.close();
+      store.close();
+    }
+  });
   it("rejects missing and invalid credentials before checking the workspace", async () => {
     const app = createHostApi({ token, workspace: "/missing" });
     for (const authorization of [

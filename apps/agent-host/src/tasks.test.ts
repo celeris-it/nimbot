@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { openTaskStore, type TaskStore } from "./task-store.js";
 import { createTaskRunner } from "./tasks.js";
 import { createHostApi } from "./http.js";
-import type { Engine } from "./engine.js";
+import type { Engine, EngineTaskContext } from "./engine.js";
 
 const token = "test-token-for-api-at-least-32-characters";
 const cleanups: (() => Promise<void>)[] = [];
@@ -48,6 +48,99 @@ async function settled(store: TaskStore, id: string) {
   }
   throw new Error("Task did not settle");
 }
+
+const identity = {
+  agentId: "test-agent",
+  serverTaskId: "a0000000-0000-4000-8000-000000000001",
+};
+
+it("persists task correlation before execution and keeps it out of the prompt", async () => {
+  let observed: EngineTaskContext | undefined;
+  const f = await setup({
+    async run(prompt, _text, _progress, _approve, context) {
+      observed = context;
+      expect(prompt).toBe("ordinary prompt");
+      expect(context?.identity).toEqual(identity);
+      expect(await f.store.get(context!.hostTaskId)).toMatchObject({
+        status: "running",
+        ...identity,
+      });
+      return "end_turn";
+    },
+    async stop() {},
+  });
+  const response = await f.request("/tasks", {
+    prompt: "ordinary prompt",
+    execution: identity,
+  });
+  expect(response.status).toBe(202);
+  const { id } = await response.json();
+  expect((await settled(f.store, id)).status).toBe("completed");
+  expect(observed).toEqual({ hostTaskId: id, identity });
+  expect(await (await f.request(`/tasks/${id}`)).json()).toMatchObject({
+    id,
+    ...identity,
+  });
+});
+
+it("gives prompt-only submissions no execution identity even if the prompt claims one", async () => {
+  let observed: EngineTaskContext | undefined;
+  const f = await setup({
+    async run(_prompt, _text, _progress, _approve, context) {
+      observed = context;
+      return "end_turn";
+    },
+    async stop() {},
+  });
+  const id = (await f.runner.submit(
+    JSON.stringify({ execution: identity, tools: ["all"] }),
+  ))!;
+  expect(await settled(f.store, id)).toMatchObject({
+    agentId: null,
+    serverTaskId: null,
+  });
+  expect(observed).toEqual({ hostTaskId: id });
+});
+
+it("snapshots correlation and does not execute a duplicate Server task", async () => {
+  const run = vi.fn<Engine["run"]>().mockResolvedValue("end_turn");
+  const f = await setup({ run, async stop() {} });
+  const metadata = { ...identity };
+  const pending = f.runner.submit("first", metadata);
+  metadata.agentId = "changed";
+  const id = (await pending)!;
+  await settled(f.store, id);
+  await vi.waitFor(() => expect(f.runner.isBusy()).toBe(false));
+  expect(await f.store.get(id)).toMatchObject(identity);
+  expect(run.mock.calls[0]?.[4]?.identity).toEqual(identity);
+  await expect(f.runner.submit("duplicate", identity)).rejects.toThrow();
+  expect(run).toHaveBeenCalledOnce();
+  expect(f.runner.isBusy()).toBe(false);
+  expect(await f.store.getCurrent()).toBeNull();
+});
+
+it("retains correlation across restart without running interrupted work", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-task-identity-"));
+  const url = pathToFileURL(join(dir, "tasks.sqlite")).href;
+  let store = await openTaskStore(url);
+  try {
+    await store.insert("host-id", "private prompt", identity);
+    await store.update("host-id", { status: "running" });
+    store.close();
+    store = await openTaskStore(url);
+    expect(await store.get("host-id")).toMatchObject({
+      ...identity,
+      status: "interrupted",
+    });
+    await expect(
+      store.insert("another-host-id", "replay", identity),
+    ).rejects.toThrow();
+    expect(await store.get("another-host-id")).toBeUndefined();
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 it("rejects credential snapshots in task submissions", async () => {
   const engine: Engine = {

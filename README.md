@@ -119,6 +119,8 @@ Incoming messages and task state are committed before execution. Each agent has 
 
 The Agent Host saves its OpenCode session ID in its task-state volume and loads it for later turns. If a session cannot be loaded, it starts a new one. Running tasks become interrupted after a Host restart rather than being replayed. On server restart, saved agents reconnect with their existing owners and chat bindings, and unfinished operations are recorded as interrupted. Missing or stopped containers are detected rather than silently recreated.
 
+Task identity plumbing is in progress: authenticated Host submissions can include an `execution` object with `agentId` and `serverTaskId`, saved atomically with the Host task before execution and passed to the engine separately from the prompt. A repeated agent/Server-task pair cannot execute again. Prompt-only submissions remain supported and carry no execution identity. These fields only correlate records; they grant no application tools. Server-side submission and grant resolution remain pending.
+
 Terminal and filesystem tools run through OpenCode inside the container. Browser automation uses headless Chromium through terminal execution with the bundled Playwright tooling; no external browser service is required. Client-side ACP filesystem and terminal capabilities remain disabled.
 
 ### Scheduled tasks

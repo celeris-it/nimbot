@@ -1,3 +1,11 @@
+import type { TaskIdentity } from "./task-identity.js";
+
+/** Runtime correlation stays separate from the model's prompt and grants no tools. */
+export interface EngineTaskContext {
+  hostTaskId: string;
+  identity?: TaskIdentity;
+}
+
 /** Engine boundary: no Telegram or HTTP concerns. */
 export interface Engine {
   /**
@@ -10,6 +18,7 @@ export interface Engine {
     onText: (text: string) => void,
     onProgress?: (message: string) => void,
     requestApproval?: (title: string) => Promise<boolean>,
+    context?: EngineTaskContext,
   ): Promise<string>;
   stop(): Promise<void>;
 }

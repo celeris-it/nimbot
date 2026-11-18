@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Engine } from "./engine.js";
 import type { TaskStore } from "./task-store.js";
 import { log as defaultLog, type Logger } from "./logger.js";
+import { isTaskIdentity, type TaskIdentity } from "./task-identity.js";
 
 const MAX_PROGRESS_EVENTS = 100;
 
@@ -36,12 +37,20 @@ export function createTaskRunner(
   }
   return {
     reserve,
-    async submit(prompt: string): Promise<string | undefined> {
+    async submit(
+      prompt: string,
+      identity?: TaskIdentity,
+    ): Promise<string | undefined> {
+      if (identity !== undefined && !isTaskIdentity(identity))
+        throw new Error("Invalid task identity");
+      // Copy before the first await: caller mutation cannot change the running turn.
+      const executionIdentity =
+        identity === undefined ? undefined : { ...identity };
       const release = reserve();
       if (!release) return undefined;
       const id = randomUUID();
       try {
-        inserting = store.insert(id, prompt);
+        inserting = store.insert(id, prompt, executionIdentity);
         await inserting;
       } catch (error) {
         release();
@@ -129,6 +138,12 @@ export function createTaskRunner(
                   .catch(() => {});
               },
               requestApproval,
+              {
+                hostTaskId: id,
+                ...(executionIdentity
+                  ? { identity: { ...executionIdentity } }
+                  : {}),
+              },
             ),
             cancelled,
             new Promise<never>((_, reject) => {

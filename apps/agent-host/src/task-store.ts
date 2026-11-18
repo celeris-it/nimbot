@@ -2,10 +2,13 @@ import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { eq, gt, and, asc, inArray } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import type { TaskIdentity } from "./task-identity.js";
 
 const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   prompt: text("prompt").notNull(),
+  agentId: text("agent_id"),
+  serverTaskId: text("server_task_id"),
   status: text("status", {
     enum: [
       "accepted",
@@ -40,7 +43,7 @@ export async function openTaskStore(url: string) {
     await client.execute("PRAGMA foreign_keys = ON");
     await client.batch(
       [
-        "CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT)",
+        "CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, agent_id TEXT, server_task_id TEXT, status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT, CHECK ((agent_id IS NULL AND server_task_id IS NULL) OR (agent_id IS NOT NULL AND server_task_id IS NOT NULL)), UNIQUE (agent_id, server_task_id))",
         "CREATE TABLE IF NOT EXISTS task_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT)",
         "CREATE INDEX IF NOT EXISTS task_events_task_sequence ON task_events(task_id, sequence)",
         "INSERT INTO task_events (task_id, status, output, stop_reason) SELECT id, 'interrupted', output, stop_reason FROM tasks WHERE status IN ('accepted', 'running')",
@@ -53,9 +56,15 @@ export async function openTaskStore(url: string) {
     throw error;
   }
   return {
-    async insert(id: string, prompt: string) {
+    async insert(id: string, prompt: string, identity?: TaskIdentity) {
       await db.batch([
-        db.insert(tasks).values({ id, prompt, status: "accepted" }),
+        db.insert(tasks).values({
+          id,
+          prompt,
+          status: "accepted",
+          agentId: identity?.agentId,
+          serverTaskId: identity?.serverTaskId,
+        }),
         db.insert(events).values({ taskId: id, status: "accepted" }),
       ]);
     },
