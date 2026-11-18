@@ -61,7 +61,7 @@ export function redactSummary(text: string): string {
       "$1$2[redacted]",
     )
     .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[redacted]")
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\p{Cc}+/gu, " ")
     .trim()
     .slice(0, APPROVAL_LIMITS.summary);
 }
