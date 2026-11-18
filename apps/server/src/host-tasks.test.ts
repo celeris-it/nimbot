@@ -9,6 +9,73 @@ const config = { url: "http://agent-host:3001", token: "x".repeat(32) };
 const accepted = () =>
   Response.json({ id: "task-1", status: "accepted" }, { status: 202 });
 describe("internal task client", () => {
+  const hostTaskId = "a0000000-0000-4000-8000-000000000001";
+  const identity = {
+    agentId: "a",
+    serverTaskId: "b0000000-0000-4000-8000-000000000002",
+  };
+
+  it("submits correlation separately and binds it before observing events", async () => {
+    const order: string[] = [];
+    const request = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/tasks"))
+        return Response.json({ id: hostTaskId, status: "accepted" });
+      order.push("events");
+      return Response.json({
+        id: hostTaskId,
+        events: [{ sequence: 1, status: "completed", output: "done" }],
+      });
+    });
+    expect(
+      await createHostTasks(config, request)(
+        "prompt",
+        undefined,
+        undefined,
+        undefined,
+        {
+          identity,
+          onAccepted(id) {
+            expect(id).toBe(hostTaskId);
+            order.push("bound");
+            return true;
+          },
+        },
+      ),
+    ).toBe("done");
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({
+      prompt: "prompt",
+      execution: identity,
+    });
+    expect(order).toEqual(["bound", "events"]);
+  });
+
+  it.each(["rejected", "throws", "invalid-id"])(
+    "cancels accepted work when correlation %s and never polls or retries it",
+    async (failure) => {
+      const id = failure === "invalid-id" ? "not-a-host-id" : hostTaskId;
+      const request = vi.fn<typeof fetch>(async () =>
+        Response.json({ id, status: "accepted" }),
+      );
+      const onAccepted = vi.fn(() => {
+        if (failure === "throws") throw new Error("private storage failure");
+        return false;
+      });
+      await expect(
+        createHostTasks(config, request)(
+          "prompt",
+          undefined,
+          undefined,
+          undefined,
+          { identity, onAccepted },
+        ),
+      ).rejects.toEqual(new HostTaskError("unavailable"));
+      expect(request.mock.calls.map(([url]) => String(url))).toEqual([
+        `${config.url}/tasks`,
+        `${config.url}/tasks/${id}/cancel`,
+      ]);
+      if (failure === "invalid-id") expect(onAccepted).not.toHaveBeenCalled();
+    },
+  );
   it("submits once and polls persisted state until completion", async () => {
     const request = vi
       .fn<typeof fetch>()

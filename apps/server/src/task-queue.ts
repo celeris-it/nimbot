@@ -66,6 +66,7 @@ export function openTaskStore(path: string) {
       schedule_id TEXT,
       schedule_name TEXT,
       scheduled_for INTEGER,
+      host_task_id TEXT,
       CHECK ((schedule_id IS NULL AND scheduled_for IS NULL) OR
         (schedule_id IS NOT NULL AND scheduled_for IS NOT NULL AND platform = 'telegram')),
       CHECK ((platform = 'telegram' AND bot_id IS NOT NULL AND chat_id IS NOT NULL AND discord_bot_id IS NULL AND discord_owner_id IS NULL AND discord_channel_id IS NULL AND discord_message_id IS NULL)
@@ -73,6 +74,9 @@ export function openTaskStore(path: string) {
     )`);
     db.exec(
       "CREATE INDEX IF NOT EXISTS tasks_agent_queue ON tasks (agent_id, status, seq)",
+    );
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS tasks_host_identity ON tasks (agent_id, host_task_id) WHERE host_task_id IS NOT NULL",
     );
     // Update IDs are only unique per bot, so the pair identifies one message.
     db.exec(
@@ -314,6 +318,36 @@ export function openTaskStore(path: string) {
         db.exec("ROLLBACK");
         throw error;
       }
+    },
+    /** Binds an accepted Host ID once, only to this agent's running Server task. */
+    bindHostTask(agentId: string, taskId: string, hostTaskId: string): boolean {
+      if (
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(
+          hostTaskId,
+        )
+      )
+        return false;
+      try {
+        return (
+          db
+            .prepare(
+              "UPDATE tasks SET host_task_id = ?, updated_at = ? WHERE id = ? AND agent_id = ? AND status = 'running' AND (host_task_id IS NULL OR host_task_id = ?)",
+            )
+            .run(hostTaskId, Date.now(), taskId, agentId, hostTaskId)
+            .changes === 1
+        );
+      } catch {
+        // Includes a Host ID already associated with another task of this agent.
+        return false;
+      }
+    },
+    getHostTaskId(agentId: string, taskId: string): string | undefined {
+      const row = db
+        .prepare("SELECT host_task_id FROM tasks WHERE id = ? AND agent_id = ?")
+        .get(taskId, agentId);
+      return typeof row?.host_task_id === "string"
+        ? row.host_task_id
+        : undefined;
     },
     finish(
       id: string,

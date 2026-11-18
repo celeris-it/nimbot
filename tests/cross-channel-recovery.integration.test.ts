@@ -7,7 +7,10 @@ import { expect, it, vi } from "vitest";
 import { createHostApi } from "../apps/agent-host/src/http.js";
 import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-store.js";
 import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
-import type { Engine } from "../apps/agent-host/src/engine.js";
+import type {
+  Engine,
+  EngineTaskContext,
+} from "../apps/agent-host/src/engine.js";
 import {
   createHostTasks,
   createHostApprovals,
@@ -20,8 +23,11 @@ it("shares Host context across simultaneous channel tasks, approvals, duplicates
   const statePath = join(dir, "server.sqlite");
   const host = { url: "http://agent:3001", token: "a".repeat(64) };
   const history: string[] = [];
+  const execution: EngineTaskContext[] = [];
   const engine: Engine = {
-    async run(prompt, onText, _progress, approval) {
+    async run(prompt, onText, _progress, approval, context) {
+      expect(context?.identity?.agentId).toBe("a");
+      execution.push(context!);
       if (prompt === "approve")
         expect(await approval?.("Run an action")).toBe(true);
       history.push(prompt);
@@ -97,6 +103,18 @@ it("shares Host context across simultaneous channel tasks, approvals, duplicates
     expect(discord).toEqual(["telegram|discord"]);
     expect(store.getTask(first.id)?.status).toBe("completed");
     expect(store.getTask(second.id)?.status).toBe("completed");
+    expect(execution.map((context) => context.identity?.serverTaskId)).toEqual([
+      first.id,
+      second.id,
+    ]);
+    for (const context of execution) {
+      expect(store.getHostTaskId("a", context.identity!.serverTaskId)).toBe(
+        context.hostTaskId,
+      );
+      expect(await hostStore.get(context.hostTaskId)).toMatchObject(
+        context.identity!,
+      );
+    }
 
     tasks.submitDiscord({ ...origin, messageId: "2" }, "approve");
     await vi.waitFor(() => expect(sendApproval).toHaveBeenCalledOnce());
@@ -147,6 +165,8 @@ it("shares Host context across simultaneous channel tasks, approvals, duplicates
     });
     store.close();
     store = openTaskStore(statePath);
+    expect(store.getHostTaskId("a", first.id)).toBe(execution[0]!.hostTaskId);
+    expect(store.getHostTaskId("a", second.id)).toBe(execution[1]!.hostTaskId);
     store.markRunningInterrupted();
     tasks = makeService();
     tasks.resume();

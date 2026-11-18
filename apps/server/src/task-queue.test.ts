@@ -34,6 +34,50 @@ function setup(
 }
 
 describe("task queue", () => {
+  it("binds Host IDs only to their running agent task and keeps them after restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nimbot-host-binding-"));
+    const file = join(dir, "tasks.sqlite");
+    let store = openTaskStore(file);
+    const hostId = "a0000000-0000-4000-8000-000000000001";
+    const otherHostId = "b0000000-0000-4000-8000-000000000002";
+    try {
+      const task = store.enqueue({
+        agentId: "a",
+        botId: 1,
+        chatId: 10,
+        prompt: "one",
+      });
+      expect(store.bindHostTask("a", task.id, hostId)).toBe(false);
+      store.claimNextTask("a");
+      expect(store.bindHostTask("b", task.id, hostId)).toBe(false);
+      expect(store.bindHostTask("a", task.id, "bad-id")).toBe(false);
+      expect(store.bindHostTask("a", task.id, hostId)).toBe(true);
+      expect(store.bindHostTask("a", task.id, hostId)).toBe(true);
+      expect(store.bindHostTask("a", task.id, otherHostId)).toBe(false);
+      expect(store.getHostTaskId("b", task.id)).toBeUndefined();
+      store.finish(task.id, "completed");
+      expect(store.bindHostTask("a", task.id, hostId)).toBe(false);
+      const second = store.enqueue({
+        agentId: "a",
+        botId: 1,
+        chatId: 10,
+        prompt: "two",
+      });
+      store.claimNextTask("a");
+      expect(store.bindHostTask("a", second.id, hostId)).toBe(false);
+      expect(store.bindHostTask("a", second.id, otherHostId)).toBe(true);
+      store.close();
+      store = openTaskStore(file);
+      store.markRunningInterrupted();
+      expect(store.getHostTaskId("a", task.id)).toBe(hostId);
+      expect(store.getHostTaskId("a", second.id)).toBe(otherHostId);
+      expect(store.getTask(second.id)?.status).toBe("interrupted");
+      expect(store.bindHostTask("a", second.id, otherHostId)).toBe(false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
   it("saves a message before executing it and reports tasks ahead", async () => {
     const hold = gate();
     let seen: string | undefined;

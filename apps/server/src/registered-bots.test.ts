@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -116,6 +117,7 @@ async function fixture() {
     prompt?: string;
   }[] = [];
   const down = new Set<string>();
+  const hostTaskIds = new Map<string, string>();
   const request: typeof fetch = async (input, init) => {
     const url = String(input);
     const id = new URL(url).hostname.split("-")[1]!;
@@ -133,13 +135,13 @@ async function fixture() {
         workspace: "writable",
         engine: "not_started",
       });
-    if (url.endsWith("/tasks"))
-      return Response.json(
-        { id: `task-${id}`, status: "accepted" },
-        { status: 202 },
-      );
+    if (url.endsWith("/tasks")) {
+      const taskId = randomUUID();
+      hostTaskIds.set(id, taskId);
+      return Response.json({ id: taskId, status: "accepted" }, { status: 202 });
+    }
     return Response.json({
-      id: `task-${id}`,
+      id: hostTaskIds.get(id),
       events: [
         { sequence: 1, status: "completed", output: `Result for ${id}` },
       ],

@@ -20,5 +20,23 @@ it("snapshots instructions per task and leaves bare prompts unchanged", async ()
     undefined,
     undefined,
     undefined,
+    undefined,
   );
+});
+
+it("keeps execution identity outside instructions and forwards the acceptance hook", async () => {
+  const execute = vi.fn().mockResolvedValue("done");
+  const execution = {
+    identity: { agentId: "a", serverTaskId: "server-task" },
+    onAccepted: vi.fn(() => true),
+  };
+  await withAgentInstructions(execute, () => "Follow owner instructions")(
+    "task",
+    undefined,
+    undefined,
+    undefined,
+    execution,
+  );
+  expect(execute.mock.calls[0]?.[0]).not.toContain("server-task");
+  expect(execute.mock.calls[0]?.[4]).toBe(execution);
 });

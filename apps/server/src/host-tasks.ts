@@ -21,6 +21,13 @@ export interface HostApproval {
   title: string;
 }
 
+/** Correlation resolved from a running persisted task; it grants no tools. */
+export interface HostTaskExecution {
+  identity: { agentId: string; serverTaskId: string };
+  /** Must durably bind the accepted Host ID before any events are handled. */
+  onAccepted(hostTaskId: string): boolean;
+}
+
 function parseApproval(taskId: string, output: unknown): HostApproval | null {
   try {
     const data = JSON.parse(String(output)) as Record<string, unknown>;
@@ -83,6 +90,7 @@ export function createHostTasks(
     cancelSignal?: AbortSignal,
     /** The agent wants the owner's permission for one action; decide via createHostApprovals. */
     onApproval?: (approval: HostApproval) => void,
+    execution?: HostTaskExecution,
   ): Promise<string> => {
     if (cancelSignal?.aborted) throw new HostTaskError("cancelled");
     const deadline = AbortSignal.timeout(waitMs);
@@ -112,7 +120,13 @@ export function createHostTasks(
       }).catch(() => {});
     };
     try {
-      const accepted = await call("/tasks", JSON.stringify({ prompt }));
+      const accepted = await call(
+        "/tasks",
+        JSON.stringify({
+          prompt,
+          ...(execution ? { execution: execution.identity } : {}),
+        }),
+      );
       if (
         typeof accepted !== "object" ||
         accepted === null ||
@@ -131,6 +145,21 @@ export function createHostTasks(
         cancelSignal?.addEventListener("abort", requestCancel, { once: true });
       removeCancelListener = () =>
         cancelSignal?.removeEventListener("abort", requestCancel);
+      if (execution) {
+        try {
+          if (
+            !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(
+              accepted.id,
+            ) ||
+            !execution.onAccepted(accepted.id)
+          )
+            throw new Error("Host task correlation failed");
+        } catch {
+          // An accepted task with uncertain correlation must not keep running.
+          cancelOnHost(accepted.id);
+          throw new HostTaskError("unavailable");
+        }
+      }
       let sequence = 0;
       let failedPolls = 0;
       while (!deadline.aborted) {

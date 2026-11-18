@@ -7,7 +7,11 @@ import { InlineKeyboard, type Bot } from "grammy";
 import type { BotAccess } from "./agent-access.js";
 import { createApprovalBook } from "./approvals.js";
 import { sendTaskOutcome } from "./bot.js";
-import type { HostApproval } from "./host-tasks.js";
+import {
+  HostTaskError,
+  type HostApproval,
+  type HostTaskExecution,
+} from "./host-tasks.js";
 import {
   createRoutedTaskQueue,
   type DiscordQueuedTask,
@@ -25,6 +29,7 @@ export function createBotTasks(config: {
     onProgress?: (message: string) => void,
     cancelSignal?: AbortSignal,
     onApproval?: (approval: HostApproval) => void,
+    execution?: HostTaskExecution,
   ) => Promise<string>;
   /** Delivers the owner's decision to the Agent Host; false if it was not recorded. */
   decide?: (
@@ -92,14 +97,34 @@ export function createBotTasks(config: {
     agentId: config.agentId,
     store: config.store,
     ready: (task) => task.origin.platform !== "telegram" || !!bot,
-    execute: (task, report, signal) =>
-      config.run(task.prompt, report, signal, (approval) => {
-        const request =
-          task.origin.platform === "telegram"
-            ? askOwner(task.origin, approval)
-            : discordApprovals.ask(task as DiscordQueuedTask, approval);
-        void request.catch(() => {});
-      }),
+    execute: (task, report, signal) => {
+      // Resolve correlation and callback origin from Server state, never the prompt
+      // or a Host-provided identity. All application-tool grants are still empty.
+      const saved = config.store.getTask(task.id);
+      if (
+        !saved ||
+        saved.agentId !== config.agentId ||
+        saved.status !== "running"
+      )
+        throw new HostTaskError("unavailable");
+      return config.run(
+        saved.prompt,
+        report,
+        signal,
+        (approval) => {
+          const request =
+            saved.origin.platform === "telegram"
+              ? askOwner(saved.origin, approval)
+              : discordApprovals.ask(saved as DiscordQueuedTask, approval);
+          void request.catch(() => {});
+        },
+        {
+          identity: { agentId: saved.agentId, serverTaskId: saved.id },
+          onAccepted: (hostTaskId) =>
+            config.store.bindHostTask(saved.agentId, saved.id, hostTaskId),
+        },
+      );
+    },
     progress: async (task, message) => {
       if (task.scheduleId !== undefined) return;
       if (task.origin.platform === "discord") {
