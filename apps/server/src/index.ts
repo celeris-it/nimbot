@@ -197,105 +197,124 @@ async function main(): Promise<void> {
     if (result.status !== "delivered")
       throw new Error("Discord delivery could not be confirmed");
   }
-  const taskServices = createAgentTaskServices(async (id, { wake }) => {
-    if (!hostCredentials || !registry.get(id))
-      throw new Error("Agent is unavailable");
-    const host = await hostCredentials.read(id);
-    const canReach = (task: RoutedTask) =>
-      task.origin.platform === "delegated"
-        ? false
-        : task.origin.platform === "discord"
-          ? discordAdmit(task as DiscordQueuedTask)
-          : createAgentAccess(registry, task.agentId).canExecute(
-              task.origin.botId,
-              registry.get(task.agentId)?.ownerId ?? 0,
-              task.origin.chatId,
-            );
-    const peerTools = createPeerTools({
-      agentId: id,
-      grants: agentGrants,
-      notes: agentNotes,
-      tasks: taskStore,
-      name: (agentId) => registry.get(agentId)?.name,
-      canReach,
-    });
-    const canHandoff = (parent: ChatTask, target: string) =>
-      canReach(parent) &&
-      agentGrants.allows(
-        parent.agentId,
-        target,
-        "delegate",
-        parent.origin.platform,
-      );
-    const delegatedExecution = createDelegationExecution({
-      agentId: id,
-      tasks: taskStore,
-      ready: () => {
-        const agent = registry.get(id);
-        const chatId = registry.getOwnerChat(id);
-        return (
-          !!agent &&
-          agent.botId !== null &&
-          chatId !== undefined &&
-          createAgentAccess(registry, id).canExecute(
-            agent.botId,
-            agent.ownerId,
-            chatId,
-          )
-        );
-      },
-      canReach,
-      allowed: canHandoff,
-    });
-    return {
-      agentId: id,
-      store: taskStore,
-      ownerId: () => registry.get(id)?.ownerId ?? 0,
-      approvals: { store: approvalStore, rules: approvalRules },
-      notificationStore,
-      approvalReach: canReach,
-      approvalRoute: (task) =>
+  const taskServices = createAgentTaskServices(
+    async (id, { wake }) => {
+      if (!hostCredentials || !registry.get(id))
+        throw new Error("Agent is unavailable");
+      const host = await hostCredentials.read(id);
+      const canReach = (task: RoutedTask) =>
         task.origin.platform === "delegated"
-          ? delegatedExecution.parent(task)
-          : task,
-      toolPolicy: {
-        canExecute: (task) => task.agentId === id && canReach(task),
-        allowedOperations: (task) => [
-          ...(registry.getMemoryEnabled(id) ? MEMORY_OPERATIONS : []),
-          ...peerTools.operations(task),
-        ],
-      },
-      toolHandlers: peerTools.handlers,
-      delegation: {
-        canHandoff,
-        canExecute: delegatedExecution.canExecute,
-        wake,
-      },
-      run: withAgentInstructions(
-        createHostTasks(host, fetch, undefined, taskWaitMs(taskTimeoutSeconds)),
-        () => registry.get(id)?.instructions ?? "",
-      ),
-      decide: createHostApprovals(host),
-      access: createAgentAccess(registry, id),
-      discord: {
-        admit: discordAdmit,
-        progress: (task, message) =>
-          sendDiscordTask(task, `Working: ${message}`),
-        deliver: (task, outcome) =>
-          sendDiscordTask(
-            task,
-            outcome.ok
-              ? outcome.output || "The task finished without a text response."
-              : outcome.kind === "cancelled"
-                ? "The task was cancelled. You can send a new task."
-                : "The task could not be completed. Check the agent status before trying again.",
+          ? false
+          : task.origin.platform === "discord"
+            ? discordAdmit(task as DiscordQueuedTask)
+            : createAgentAccess(registry, task.agentId).canExecute(
+                task.origin.botId,
+                registry.get(task.agentId)?.ownerId ?? 0,
+                task.origin.chatId,
+              );
+      const peerTools = createPeerTools({
+        agentId: id,
+        grants: agentGrants,
+        notes: agentNotes,
+        tasks: taskStore,
+        name: (agentId) => registry.get(agentId)?.name,
+        canReach,
+      });
+      const canHandoff = (parent: ChatTask, target: string) =>
+        canReach(parent) &&
+        agentGrants.allows(
+          parent.agentId,
+          target,
+          "delegate",
+          parent.origin.platform,
+        );
+      const delegatedExecution = createDelegationExecution({
+        agentId: id,
+        tasks: taskStore,
+        ready: () => {
+          const agent = registry.get(id);
+          const chatId = registry.getOwnerChat(id);
+          return (
+            !!agent &&
+            agent.botId !== null &&
+            chatId !== undefined &&
+            createAgentAccess(registry, id).canExecute(
+              agent.botId,
+              agent.ownerId,
+              chatId,
+            )
+          );
+        },
+        canReach,
+        allowed: canHandoff,
+      });
+      return {
+        agentId: id,
+        store: taskStore,
+        ownerId: () => registry.get(id)?.ownerId ?? 0,
+        approvals: { store: approvalStore, rules: approvalRules },
+        notificationStore,
+        approvalReach: canReach,
+        approvalRoute: (task) =>
+          task.origin.platform === "delegated"
+            ? delegatedExecution.parent(task)
+            : task,
+        toolPolicy: {
+          canExecute: (task) => task.agentId === id && canReach(task),
+          allowedOperations: (task) => [
+            ...(registry.getMemoryEnabled(id) ? MEMORY_OPERATIONS : []),
+            ...peerTools.operations(task),
+          ],
+        },
+        toolHandlers: peerTools.handlers,
+        delegation: {
+          canHandoff,
+          canExecute: delegatedExecution.canExecute,
+          wake,
+        },
+        run: withAgentInstructions(
+          createHostTasks(
+            host,
+            fetch,
+            undefined,
+            taskWaitMs(taskTimeoutSeconds),
           ),
-        sendApproval: discordDelivery.sendApproval,
-        sendDelegation: (task, text, canSend) =>
-          discordDelivery.sendTask(task, text, canSend),
+          () => registry.get(id)?.instructions ?? "",
+        ),
+        decide: createHostApprovals(host),
+        access: createAgentAccess(registry, id),
+        discord: {
+          admit: discordAdmit,
+          progress: (task, message) =>
+            sendDiscordTask(task, `Working: ${message}`),
+          deliver: (task, outcome) =>
+            sendDiscordTask(
+              task,
+              outcome.ok
+                ? outcome.output || "The task finished without a text response."
+                : outcome.kind === "cancelled"
+                  ? "The task was cancelled. You can send a new task."
+                  : "The task could not be completed. Check the agent status before trying again.",
+            ),
+          sendApproval: discordDelivery.sendApproval,
+          sendDelegation: (task, text, canSend) =>
+            discordDelivery.sendTask(task, text, canSend),
+        },
+      };
+    },
+    {
+      store: taskStore,
+      targetStatus: (id) => {
+        if (!registry.get(id)) return "deleted";
+        const operation = registry.getContainerOperation(id);
+        return operation?.status === "pending" ||
+          (operation?.action === "stop" &&
+            ["completed", "interrupted"].includes(operation.status))
+          ? "paused"
+          : "ready";
       },
-    };
-  });
+    },
+  );
   const registeredBots = hostCredentials
     ? createRegisteredBots(
         registry,
@@ -487,6 +506,7 @@ async function main(): Promise<void> {
       ? async (id, action) => {
           requireAgent(id);
           await containerAction(id, action);
+          await taskServices.wake([id]);
         }
       : undefined,
     registerAgent: provision
@@ -562,6 +582,7 @@ async function main(): Promise<void> {
               "Remove the Discord connection before deleting the agent",
             );
           await deleteAgent(id, deleteData);
+          await taskServices.wake([id]);
         }
       : undefined,
   });

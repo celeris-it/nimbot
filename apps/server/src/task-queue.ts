@@ -636,6 +636,40 @@ export function openTaskStore(path: string) {
         throw error;
       }
     },
+    /** A deleted target cannot run queued children. Preserve prior results and never classify running work as unexecuted. */
+    failQueuedDelegations(targetAgentId: string): number {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const now = Date.now();
+        const result = encodeDelegationResult("failed", {
+          ok: false,
+          kind: "not_ready",
+        });
+        db.prepare(
+          `UPDATE delegations SET result_json = ?, updated_at = ?
+          WHERE target_agent_id = ? AND state = 'admitted' AND result_json IS NULL
+          AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = delegations.child_task_id AND t.status = 'queued'
+            AND t.platform = 'delegated' AND t.agent_id = delegations.target_agent_id
+            AND t.delegation_id = delegations.id AND t.parent_task_id = delegations.source_task_id
+            AND t.source_agent_id = delegations.source_agent_id)`,
+        ).run(result, now, targetAgentId);
+        const changed = db
+          .prepare(
+            `UPDATE tasks SET status = 'failed', updated_at = ?
+          WHERE agent_id = ? AND status = 'queued' AND platform = 'delegated'
+          AND EXISTS (SELECT 1 FROM delegations d WHERE d.child_task_id = tasks.id AND d.state = 'admitted'
+            AND d.target_agent_id = tasks.agent_id AND d.id = tasks.delegation_id
+            AND d.source_task_id = tasks.parent_task_id AND d.source_agent_id = tasks.source_agent_id
+            AND d.result_json = ?)`,
+          )
+          .run(now, targetAgentId, result);
+        db.exec("COMMIT");
+        return Number(changed.changes);
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
     /** Recovery after commit but before a target worker was kicked. Never resumes running work. */
     pendingDelegationTargets(): string[] {
       return db

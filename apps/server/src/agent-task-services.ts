@@ -8,6 +8,10 @@ export function createAgentTaskServices(
     agentId: string,
     controls: { wake(targetAgentIds: readonly string[]): Promise<void> },
   ) => Promise<Parameters<typeof createBotTasks>[0]>,
+  recovery?: {
+    store: Pick<TaskStore, "failQueuedDelegations">;
+    targetStatus(agentId: string): "ready" | "paused" | "deleted";
+  },
 ) {
   type Service = ReturnType<typeof createBotTasks>;
   const services = new Map<string, Promise<Service>>();
@@ -28,6 +32,16 @@ export function createAgentTaskServices(
           ...config,
           approvalRelay: config.approvalRelay ?? relayApproval,
           delegationResult: config.delegationResult ?? relayDelegationResult,
+          ...(config.delegation && recovery
+            ? {
+                delegation: {
+                  ...config.delegation,
+                  canClaim: () =>
+                    recovery.targetStatus(id) === "ready" &&
+                    (config.delegation!.canClaim?.() ?? true),
+                },
+              }
+            : {}),
         });
       });
     services.set(id, pending);
@@ -56,9 +70,21 @@ export function createAgentTaskServices(
     // Failed credential loads never undo an admitted child or resubmit its parent.
     await Promise.allSettled(
       [...new Set(targetAgentIds)].map(async (id) => {
-        (await get(id)).resume();
+        if (!canWake(id)) return;
+        try {
+          const service = await get(id);
+          if (!closed && canWake(id)) service.resume();
+        } catch {
+          if (!closed) canWake(id);
+        }
       }),
     );
+  }
+  function canWake(id: string): boolean {
+    if (!recovery) return true;
+    const status = recovery.targetStatus(id);
+    if (status === "deleted") recovery.store.failQueuedDelegations(id);
+    return status === "ready";
   }
   function stop(id: string) {
     const pending = services.get(id);

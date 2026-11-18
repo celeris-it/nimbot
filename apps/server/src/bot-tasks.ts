@@ -67,6 +67,8 @@ export function createBotTasks(config: {
     canHandoff: Parameters<TaskStore["finishWithDelegations"]>[2];
     /** Live Server-owned target readiness, grant and saved parent checks. Omit to leave children queued. */
     canExecute?(task: RoutedTask): boolean;
+    /** A known stopped target keeps its FIFO head queued until explicitly resumed. */
+    canClaim?(): boolean;
     wake(targetAgentIds: readonly string[]): Promise<void>;
   };
   run: (
@@ -352,6 +354,7 @@ export function createBotTasks(config: {
     ready: (task) =>
       task.origin.platform === "delegated"
         ? !!(
+            (config.delegation?.canClaim?.() ?? true) &&
             config.delegation?.canExecute &&
             config.delegationResult &&
             config.approvalRelay &&
