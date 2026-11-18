@@ -434,3 +434,58 @@ describe("approval gate", () => {
     expect(f.sent).toHaveLength(0);
   });
 });
+
+it("rejects a stopped executing task even when its original conversation remains reachable", async () => {
+  const f = setup({ canReach: () => true });
+  try {
+    const pending = f.gate.guard(
+      telegram(),
+      action,
+      f.run,
+      new AbortController().signal,
+    );
+    await tick();
+    f.setActive(false);
+    expect(f.gate.answer(f.sent[0]!.keys.approve, tg)).toBe("expired");
+    expect(await pending).toMatchObject({
+      status: "denied",
+      reason: "expired",
+    });
+    expect(f.run).not.toHaveBeenCalled();
+  } finally {
+    f.gate.close();
+    f.rules.close();
+    f.store.close();
+  }
+});
+
+it("denies and releases a delivered question when its source relay becomes unavailable", async () => {
+  let unavailable!: () => void;
+  let signal!: AbortSignal;
+  const f = setup({
+    deliver: async (_to, _text, _keys, context) => {
+      unavailable = context.unavailable;
+      signal = context.signal;
+      return undefined;
+    },
+  });
+  try {
+    const pending = f.gate.guard(
+      telegram(),
+      action,
+      f.run,
+      new AbortController().signal,
+    );
+    await tick();
+    unavailable();
+    const result = await pending;
+    expect(result).toMatchObject({ status: "denied", reason: "delivery" });
+    expect(f.store.get(result.requestId!)?.status).toBe("denied");
+    expect(signal.aborted).toBe(true);
+    expect(f.run).not.toHaveBeenCalled();
+  } finally {
+    f.gate.close();
+    f.rules.close();
+    f.store.close();
+  }
+});

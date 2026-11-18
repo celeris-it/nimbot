@@ -223,6 +223,7 @@ async function main(): Promise<void> {
       store: taskStore,
       ownerId: () => registry.get(id)?.ownerId ?? 0,
       approvals: { store: approvalStore, rules: approvalRules },
+      approvalReach: canReach,
       toolPolicy: {
         canExecute: (task) => task.agentId === id && canReach(task),
         allowedOperations: (task) => [

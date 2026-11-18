@@ -40,6 +40,12 @@ export type Responder =
       channelId: string;
       messageId: string;
     };
+export interface ApprovalDeliveryContext {
+  task: RoutedTask;
+  signal: AbortSignal;
+  expiresAt: number;
+  unavailable(): void;
+}
 
 const label = (origin: RoutedTask["origin"]) =>
   origin.platform === "delegated"
@@ -85,6 +91,7 @@ export function createApprovalGate(config: {
     destination: ChatTask,
     text: string,
     keys: { approve: string; deny: string },
+    context: ApprovalDeliveryContext,
   ): Promise<string | undefined>;
   ttlMs?: number;
   now?: () => number;
@@ -94,12 +101,13 @@ export function createApprovalGate(config: {
     (config.canReach ?? config.isActive)(destination);
   const ttlMs = config.ttlMs ?? 600_000;
   type Waiting = {
+    task: RoutedTask;
     requestId: string;
     destination: ChatTask;
     messageId: string | undefined;
     expires: number;
     keys: [string, string];
-    settle(approved: boolean | "expired"): void;
+    settle(approved: boolean | "expired" | "delivery"): void;
   };
   const waiting = new Map<string, Waiting>();
   const drop = (entry: Waiting) => {
@@ -205,11 +213,12 @@ export function createApprovalGate(config: {
       randomBytes(9).toString("base64url"),
       randomBytes(9).toString("base64url"),
     ];
-    let settle!: (value: boolean | "expired") => void;
-    const decided = new Promise<boolean | "expired">((resolve) => {
+    let settle!: (value: boolean | "expired" | "delivery") => void;
+    const decided = new Promise<boolean | "expired" | "delivery">((resolve) => {
       settle = resolve;
     });
     const entry: Waiting = {
+      task,
       requestId,
       destination,
       messageId: undefined,
@@ -223,6 +232,7 @@ export function createApprovalGate(config: {
     timer.unref();
     const onAbort = () => settle("expired");
     signal.addEventListener("abort", onAbort, { once: true });
+    const delivery = new AbortController();
     try {
       try {
         const seconds = Math.ceil(ttlMs / 1000);
@@ -230,6 +240,15 @@ export function createApprovalGate(config: {
           destination,
           `Approval needed: ${action.summary.slice(0, 300)}\nTarget: ${action.target.slice(0, 120)}\nReply within ${seconds} second${seconds === 1 ? "" : "s"}. No answer counts as deny.`,
           { approve: keys[0], deny: keys[1] },
+          {
+            task,
+            signal: AbortSignal.any([signal, delivery.signal]),
+            expiresAt: entry.expires,
+            unavailable() {
+              config.store.failDelivery(requestId);
+              settle("delivery");
+            },
+          },
         );
       } catch {
         config.store.failDelivery(requestId);
@@ -246,8 +265,10 @@ export function createApprovalGate(config: {
         config.store.decide(requestId, false, "system:expiry");
         return "expired";
       }
+      if (answer === "delivery") return "delivery";
       return answer ? "approved" : "owner";
     } finally {
+      delivery.abort();
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
       drop(entry);
@@ -279,7 +300,11 @@ export function createApprovalGate(config: {
       if (!from) return "expired";
       // Single use: both keys die on the first accepted or rejected answer.
       drop(entry);
-      if (entry.expires <= now() || !reach(task)) {
+      if (
+        entry.expires <= now() ||
+        !config.isActive(entry.task) ||
+        !reach(task)
+      ) {
         entry.settle("expired");
         return "expired";
       }

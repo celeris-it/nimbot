@@ -1,3 +1,4 @@
+import type { ApprovalForward } from "./approval-relay.js";
 import { createBotTasks } from "./bot-tasks.js";
 import type { TaskStore } from "./task-queue.js";
 
@@ -23,7 +24,10 @@ export function createAgentTaskServices(
           throw new Error("Agent task service was stopped");
         if (config.agentId !== id)
           throw new Error("Agent task service identity mismatch");
-        return createBotTasks(config);
+        return createBotTasks({
+          ...config,
+          approvalRelay: config.approvalRelay ?? relayApproval,
+        });
       });
     services.set(id, pending);
     void pending.catch(() => {
@@ -31,6 +35,11 @@ export function createAgentTaskServices(
     });
     return pending;
   }
+  const relayApproval: ApprovalForward = async (destination, ...args) =>
+    (await get(destination.agentId)).forwardStructuredApproval(
+      destination,
+      ...args,
+    );
   async function wake(targetAgentIds: readonly string[]): Promise<void> {
     if (closed) return;
     // Failed credential loads never undo an admitted child or resubmit its parent.
@@ -49,6 +58,7 @@ export function createAgentTaskServices(
   return {
     get,
     wake,
+    relayApproval,
     async resumeDelegations(
       store: Pick<TaskStore, "pendingDelegationTargets">,
     ) {

@@ -3,6 +3,7 @@ import {
   type GateAction,
   type ApprovalGate,
 } from "./approval-gate.js";
+import { createApprovalRelay, type ApprovalForward } from "./approval-relay.js";
 import type { ApprovalRules } from "./approval-rules.js";
 import type { ApprovalStore } from "./approval-store.js";
 import {
@@ -26,6 +27,7 @@ import {
 } from "./host-tasks.js";
 import {
   createRoutedTaskQueue,
+  type ChatTask,
   type DiscordQueuedTask,
   type RoutedTask,
   type TaskOutcome,
@@ -48,6 +50,10 @@ export function createBotTasks(config: {
   approvals?: { store: ApprovalStore; rules: ApprovalRules };
   /** Original conversation for a delegated child, from its saved parent link. */
   approvalRoute?: (task: RoutedTask) => RoutedTask | undefined;
+  /** Current owner/binding check for a resolved conversation in another service. */
+  approvalReach?: (destination: ChatTask) => boolean;
+  /** Internal Server relay to the original agent transport. */
+  approvalRelay?: ApprovalForward;
   /** Server-owned handoff policy. Worker activation happens only after durable finalization. */
   delegation?: {
     canHandoff: Parameters<TaskStore["finishWithDelegations"]>[2];
@@ -101,7 +107,41 @@ export function createBotTasks(config: {
       : {}),
   });
   const book = createApprovalBook();
-  const gate = config.approvals
+  const sendStructuredApproval = async (
+    destination: ChatTask,
+    text: string,
+    keys: { approve: string; deny: string },
+  ) => {
+    if (destination.agentId !== config.agentId || !admit(destination))
+      throw new Error("Approval conversation is unavailable");
+    if (destination.origin.platform === "discord") {
+      if (!config.discord) throw new Error("Discord is unavailable");
+      return config.discord.sendApproval(
+        destination as DiscordQueuedTask,
+        text,
+        [
+          { label: "Approve", customId: `ap:${keys.approve}:y`, allow: true },
+          { label: "Deny", customId: `ap:${keys.deny}:n`, allow: false },
+        ],
+      );
+    }
+    if (!bot) throw new Error("Bot is not attached");
+    await bot.api.sendMessage(destination.origin.chatId, text, {
+      reply_markup: new InlineKeyboard()
+        .text("Approve", `ap:${keys.approve}:y`)
+        .text("Deny", `ap:${keys.deny}:n`),
+    });
+    return undefined;
+  };
+  const relay = createApprovalRelay({
+    agentId: config.agentId,
+    store: config.store,
+    canReach: (parent) => parent.agentId === config.agentId && admit(parent),
+    allowed: (parent, target) =>
+      config.delegation?.canHandoff(parent, target) ?? false,
+    send: sendStructuredApproval,
+  });
+  const gate: ApprovalGate | undefined = config.approvals
     ? createApprovalGate({
         store: config.approvals.store,
         rules: config.approvals.rules,
@@ -110,30 +150,22 @@ export function createBotTasks(config: {
           admit(task) &&
           config.store.getTask(task.id)?.status === "running" &&
           queue.isRunning(task.origin),
-        canReach: (destination) => admit(destination),
-        deliver: async (destination, text, keys) => {
-          if (destination.origin.platform === "discord") {
-            if (!config.discord) throw new Error("Discord is unavailable");
-            return config.discord.sendApproval(
-              destination as DiscordQueuedTask,
-              text,
-              [
-                {
-                  label: "Approve",
-                  customId: `ap:${keys.approve}:y`,
-                  allow: true,
-                },
-                { label: "Deny", customId: `ap:${keys.deny}:n`, allow: false },
-              ],
-            );
-          }
-          if (!bot) throw new Error("Bot is not attached");
-          await bot.api.sendMessage(destination.origin.chatId, text, {
-            reply_markup: new InlineKeyboard()
-              .text("Approve", `ap:${keys.approve}:y`)
-              .text("Deny", `ap:${keys.deny}:n`),
-          });
-          return undefined;
+        canReach: (destination) =>
+          destination.agentId === config.agentId
+            ? admit(destination)
+            : (config.approvalReach?.(destination) ?? false),
+        deliver: (destination, text, keys, context) => {
+          if (destination.agentId === config.agentId)
+            return sendStructuredApproval(destination, text, keys);
+          if (!config.approvalRelay)
+            throw new Error("Approval relay is unavailable");
+          return config.approvalRelay(
+            destination,
+            text,
+            keys,
+            context,
+            (key, who) => gate!.answer(key, who),
+          );
         },
       })
     : undefined;
@@ -314,6 +346,7 @@ export function createBotTasks(config: {
       if (!gate) throw new Error("Approvals are unavailable");
       return gate.guard(task, action, run, signal);
     },
+    forwardStructuredApproval: relay.forward,
     submit: queue.submitTelegram,
     submitDiscord: queue.submitDiscord,
     discordControl: {
@@ -340,6 +373,16 @@ export function createBotTasks(config: {
         });
         if (result !== "unknown") return result;
       }
+      if (key) {
+        const result = await relay.answer(key[1]!, {
+          platform: "discord",
+          botId: interaction.botId,
+          ownerId: interaction.ownerId,
+          channelId: interaction.channelId,
+          messageId: interaction.messageId,
+        });
+        if (result !== "unknown") return result;
+      }
       return discordApprovals.answer(config.agentId, interaction);
     },
     control: {
@@ -352,6 +395,7 @@ export function createBotTasks(config: {
     idle: queue.idle,
     close() {
       capabilities.close();
+      relay.close();
       gate?.close();
       discordApprovals.close();
       queue.close();
@@ -374,6 +418,11 @@ export function createBotTasks(config: {
           chatId: who.chatId,
         });
         if (structured && structured !== "unknown") return structured;
+        const forwarded = await relay.answer(key, {
+          platform: "telegram",
+          ...who,
+        });
+        if (forwarded !== "unknown") return forwarded;
         const entry = book.take(key, who);
         if (!entry || !config.decide) return "expired";
         return (await config.decide(entry.hostTaskId, entry.approvalId, allow))
