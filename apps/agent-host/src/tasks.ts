@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { Engine } from "./engine.js";
 import type { TaskStore } from "./task-store.js";
 import { log as defaultLog, type Logger } from "./logger.js";
-import { isTaskIdentity, type TaskIdentity } from "./task-identity.js";
+import {
+  isTaskIdentity,
+  isTaskToolAccess,
+  type TaskIdentity,
+  type TaskToolAccess,
+} from "./task-identity.js";
 
 const MAX_PROGRESS_EVENTS = 100;
 
@@ -40,12 +45,19 @@ export function createTaskRunner(
     async submit(
       prompt: string,
       identity?: TaskIdentity,
+      tools?: TaskToolAccess,
     ): Promise<string | undefined> {
       if (identity !== undefined && !isTaskIdentity(identity))
         throw new Error("Invalid task identity");
+      if (tools !== undefined && (!identity || !isTaskToolAccess(tools)))
+        throw new Error("Invalid task tool access");
       // Copy before the first await: caller mutation cannot change the running turn.
       const executionIdentity =
         identity === undefined ? undefined : { ...identity };
+      const toolAccess =
+        tools === undefined
+          ? undefined
+          : { ...tools, operations: [...tools.operations] };
       const release = reserve();
       if (!release) return undefined;
       const id = randomUUID();
@@ -142,6 +154,14 @@ export function createTaskRunner(
                 hostTaskId: id,
                 ...(executionIdentity
                   ? { identity: { ...executionIdentity } }
+                  : {}),
+                ...(toolAccess
+                  ? {
+                      tools: {
+                        ...toolAccess,
+                        operations: [...toolAccess.operations],
+                      },
+                    }
                   : {}),
               },
             ),

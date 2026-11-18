@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { AgentHostConfig } from "./agent-host.js";
+import type { TaskCapability } from "./task-capabilities.js";
 
 export class HostTaskError extends Error {
   constructor(
@@ -21,9 +22,10 @@ export interface HostApproval {
   title: string;
 }
 
-/** Correlation resolved from a running persisted task; it grants no tools. */
+/** Server-resolved correlation and optional task-scoped tool access. */
 export interface HostTaskExecution {
   identity: { agentId: string; serverTaskId: string };
+  tools?: TaskCapability;
   /** Must durably bind the accepted Host ID before any events are handled. */
   onAccepted(hostTaskId: string): boolean;
 }
@@ -125,6 +127,7 @@ export function createHostTasks(
         JSON.stringify({
           prompt,
           ...(execution ? { execution: execution.identity } : {}),
+          ...(execution?.tools ? { tools: execution.tools } : {}),
         }),
       );
       if (

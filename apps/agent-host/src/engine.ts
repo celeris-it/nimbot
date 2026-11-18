@@ -1,9 +1,10 @@
-import type { TaskIdentity } from "./task-identity.js";
+import type { TaskIdentity, TaskToolAccess } from "./task-identity.js";
 
-/** Runtime correlation stays separate from the model's prompt and grants no tools. */
+/** Runtime identity and optional tool access stay separate from the model's prompt. */
 export interface EngineTaskContext {
   hostTaskId: string;
   identity?: TaskIdentity;
+  tools?: TaskToolAccess;
 }
 
 /** Engine boundary: no Telegram or HTTP concerns. */

@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 describe("Agent Host API", () => {
-  it("rejects invalid execution metadata before persisting or running a task", async () => {
+  it("rejects invalid execution identity or tool access before persisting or running a task", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "nimbot-host-identity-"));
     workspaces.push(workspace);
     const store = await openTaskStore(
@@ -62,6 +62,43 @@ describe("Agent Host API", () => {
         expect(response.status).toBe(400);
         expect(await response.json()).toEqual({
           error: "Invalid execution identity",
+        });
+      }
+      const access = {
+        token: "a".repeat(64),
+        operations: ["memory.search"],
+        expiresAt: Date.now() + 60_000,
+      };
+      for (const body of [
+        { tools: access },
+        ...[
+          null,
+          [],
+          {},
+          { ...access, token: "short" },
+          { ...access, operations: [] },
+          { ...access, operations: ["*"] },
+          { ...access, operations: ["memory.search", "memory.search"] },
+          {
+            ...access,
+            operations: Array.from({ length: 33 }, (_, i) => `op${i}`),
+          },
+          { ...access, expiresAt: 0 },
+          { ...access, expiresAt: Date.now() + 7_200_000 },
+          { ...access, credential: "must-not-leak" },
+        ].map((tools) => ({ execution: valid, tools })),
+      ]) {
+        const response = await app.request("/tasks", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ prompt: "hi", ...body }),
+        });
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: "Invalid task tool access",
         });
       }
       expect(executions).toBe(0);

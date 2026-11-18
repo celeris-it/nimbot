@@ -5,7 +5,7 @@ import { bearerAuth } from "hono/bearer-auth";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
 import type { TaskRunner } from "./tasks.js";
-import { isTaskIdentity } from "./task-identity.js";
+import { isTaskIdentity, isTaskToolAccess } from "./task-identity.js";
 import {
   EngineAuthError,
   isProviderId,
@@ -76,7 +76,10 @@ export function createHostApi(
     const execution = (body as Record<string, unknown>).execution;
     if (execution !== undefined && !isTaskIdentity(execution))
       return c.json({ error: "Invalid execution identity" }, 400);
-    const id = await runner.submit(prompt, execution);
+    const tools = (body as Record<string, unknown>).tools;
+    if (tools !== undefined && (!execution || !isTaskToolAccess(tools)))
+      return c.json({ error: "Invalid task tool access" }, 400);
+    const id = await runner.submit(prompt, execution, tools);
     return id
       ? c.json({ id, status: "accepted" }, 202)
       : c.json({ error: "Agent is busy" }, 409);

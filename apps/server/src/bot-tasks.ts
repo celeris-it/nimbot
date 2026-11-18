@@ -3,6 +3,7 @@ import {
   type DiscordApprovalInteraction,
 } from "./discord-approvals.js";
 import { acknowledgeDiscordApproval } from "./discord-interactions.js";
+import { createTaskCapabilities } from "./task-capabilities.js";
 import { InlineKeyboard, type Bot } from "grammy";
 import type { BotAccess } from "./agent-access.js";
 import { createApprovalBook } from "./approvals.js";
@@ -15,6 +16,7 @@ import {
 import {
   createRoutedTaskQueue,
   type DiscordQueuedTask,
+  type RoutedTask,
   type TaskOutcome,
   type TaskStore,
 } from "./task-queue.js";
@@ -24,6 +26,9 @@ export function createBotTasks(config: {
   store: TaskStore;
   agentId: string;
   ownerId: () => number;
+  /** Internal service policy: must resolve exact operations from Server-owned grants. */
+  toolPolicy?: Parameters<typeof createTaskCapabilities>[0]["policy"];
+  toolLifetimeMs?: number;
   run: (
     prompt: string,
     onProgress?: (message: string) => void,
@@ -47,6 +52,28 @@ export function createBotTasks(config: {
   };
 }) {
   let bot: Bot | undefined;
+  const admit = (task: RoutedTask) =>
+    task.origin.platform === "discord"
+      ? !!config.discord?.admit(task as DiscordQueuedTask)
+      : !config.access ||
+        config.access.canExecute(
+          task.origin.botId,
+          config.ownerId(),
+          task.origin.chatId,
+        );
+  const capabilities = createTaskCapabilities({
+    store: config.store,
+    ...(config.toolPolicy
+      ? {
+          policy: {
+            canExecute: (task) =>
+              admit(task) && config.toolPolicy!.canExecute(task),
+            allowedOperations: (task) =>
+              config.toolPolicy!.allowedOperations(task),
+          },
+        }
+      : {}),
+  });
   const book = createApprovalBook();
   /** Asks the owner, in the chat that sent the task; any failure means deny. */
   async function askOwner(
@@ -97,9 +124,9 @@ export function createBotTasks(config: {
     agentId: config.agentId,
     store: config.store,
     ready: (task) => task.origin.platform !== "telegram" || !!bot,
-    execute: (task, report, signal) => {
+    execute: async (task, report, signal) => {
       // Resolve correlation and callback origin from Server state, never the prompt
-      // or a Host-provided identity. All application-tool grants are still empty.
+      // or a Host-provided identity. A missing policy grants no application tools.
       const saved = config.store.getTask(task.id);
       if (
         !saved ||
@@ -107,23 +134,34 @@ export function createBotTasks(config: {
         saved.status !== "running"
       )
         throw new HostTaskError("unavailable");
-      return config.run(
-        saved.prompt,
-        report,
+      const tools = capabilities.issue(
+        saved.agentId,
+        saved.id,
         signal,
-        (approval) => {
-          const request =
-            saved.origin.platform === "telegram"
-              ? askOwner(saved.origin, approval)
-              : discordApprovals.ask(saved as DiscordQueuedTask, approval);
-          void request.catch(() => {});
-        },
-        {
-          identity: { agentId: saved.agentId, serverTaskId: saved.id },
-          onAccepted: (hostTaskId) =>
-            config.store.bindHostTask(saved.agentId, saved.id, hostTaskId),
-        },
+        config.toolLifetimeMs ?? 600_000,
       );
+      try {
+        return await config.run(
+          saved.prompt,
+          report,
+          signal,
+          (approval) => {
+            const request =
+              saved.origin.platform === "telegram"
+                ? askOwner(saved.origin, approval)
+                : discordApprovals.ask(saved as DiscordQueuedTask, approval);
+            void request.catch(() => {});
+          },
+          {
+            identity: { agentId: saved.agentId, serverTaskId: saved.id },
+            ...(tools ? { tools } : {}),
+            onAccepted: (hostTaskId) =>
+              config.store.bindHostTask(saved.agentId, saved.id, hostTaskId),
+          },
+        );
+      } finally {
+        capabilities.revokeTask(saved.agentId, saved.id);
+      }
     },
     progress: async (task, message) => {
       if (task.scheduleId !== undefined) return;
@@ -134,15 +172,7 @@ export function createBotTasks(config: {
       } else if (bot)
         await bot.api.sendMessage(task.origin.chatId, `Working: ${message}`);
     },
-    admit: (task) =>
-      task.origin.platform === "discord"
-        ? !!config.discord?.admit(task as DiscordQueuedTask)
-        : !config.access ||
-          config.access.canExecute(
-            task.origin.botId,
-            config.ownerId(),
-            task.origin.chatId,
-          ),
+    admit,
     deliver: async (task, outcome) => {
       if (task.origin.platform === "discord") {
         const discordTask = task as DiscordQueuedTask;
@@ -161,6 +191,8 @@ export function createBotTasks(config: {
     },
   });
   return {
+    /** Internal tool-dispatch guard; returns the persisted task only when authorized. */
+    authorizeToolCall: capabilities.verify,
     submit: queue.submitTelegram,
     submitDiscord: queue.submitDiscord,
     discordControl: {
@@ -187,6 +219,7 @@ export function createBotTasks(config: {
     resume: queue.resume,
     idle: queue.idle,
     close() {
+      capabilities.close();
       discordApprovals.close();
       queue.close();
     },

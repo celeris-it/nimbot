@@ -54,6 +54,26 @@ const identity = {
   serverTaskId: "a0000000-0000-4000-8000-000000000001",
 };
 
+it("snapshots validated tool access outside the prompt and never persists its token", async () => {
+  const run = vi.fn<Engine["run"]>().mockResolvedValue("end_turn");
+  const f = await setup({ run, async stop() {} });
+  const tools = {
+    token: "c".repeat(64),
+    operations: ["memory.search"],
+    expiresAt: Date.now() + 60_000,
+  };
+  const pending = f.runner.submit("ordinary prompt", identity, tools);
+  tools.operations.push("memory.delete");
+  const id = (await pending)!;
+  const saved = await settled(f.store, id);
+  expect(run.mock.calls[0]?.[0]).toBe("ordinary prompt");
+  expect(run.mock.calls[0]?.[4]?.tools?.operations).toEqual(["memory.search"]);
+  expect(JSON.stringify(saved)).not.toContain(tools.token);
+  expect(JSON.stringify(await f.store.getEvents(id))).not.toContain(
+    tools.token,
+  );
+});
+
 it("persists task correlation before execution and keeps it out of the prompt", async () => {
   let observed: EngineTaskContext | undefined;
   const f = await setup({
@@ -680,7 +700,12 @@ it("logs the task lifecycle with the task ID and without prompt or output", asyn
     createLogger((_level, line) => lines.push(JSON.parse(line))),
   );
   try {
-    const id = await runner.submit("private prompt");
+    const toolToken = "d".repeat(64);
+    const id = await runner.submit("private prompt", identity, {
+      token: toolToken,
+      operations: ["memory.search"],
+      expiresAt: Date.now() + 60_000,
+    });
     await vi.waitFor(() => expect(runner.isBusy()).toBe(false));
     expect(lines.map((l) => `${l.event}:${l.status ?? ""}`)).toEqual([
       "task.accepted:",
@@ -688,6 +713,7 @@ it("logs the task lifecycle with the task ID and without prompt or output", asyn
     ]);
     expect(lines.every((l) => l.taskId === id)).toBe(true);
     expect(JSON.stringify(lines)).not.toContain("private");
+    expect(JSON.stringify(lines)).not.toContain(toolToken);
   } finally {
     await runner.close();
     store.close();

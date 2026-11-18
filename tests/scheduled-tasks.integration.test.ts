@@ -33,7 +33,11 @@ const MINUTE = 60_000;
 const DAY = 86_400_000;
 
 /** Real Host routes and stores, with a scriptable engine and intercepted Telegram API. */
-async function fixture(mode = "echo", approvalTimeout = 5000) {
+async function fixture(
+  mode = "echo",
+  approvalTimeout = 5000,
+  toolsEnabled = false,
+) {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-scheduled-flow-"));
   const path = join(dir, "server.sqlite");
   const clock = { now: START };
@@ -87,9 +91,14 @@ async function fixture(mode = "echo", approvalTimeout = 5000) {
   const runner = createTaskRunner(hostStore, engine, 10_000, approvalTimeout);
   const api = createHostApi({ token: host.token, workspace: dir }, runner);
   const hostIds: string[] = [];
+  const submissions: Record<string, unknown>[] = [];
   let offline = false;
   const request: typeof fetch = async (url, init) => {
     if (offline) throw new Error("Host is stopped");
+    if (init?.method === "POST" && new URL(String(url)).pathname === "/tasks")
+      submissions.push(
+        JSON.parse(String(init.body)) as Record<string, unknown>,
+      );
     const response = await api.request(new Request(String(url), init));
     if (
       init?.method === "POST" &&
@@ -110,6 +119,14 @@ async function fixture(mode = "echo", approvalTimeout = 5000) {
       agentId: id,
       store,
       ownerId: () => 42,
+      ...(toolsEnabled
+        ? {
+            toolPolicy: {
+              canExecute: () => true,
+              allowedOperations: () => ["memory.search"],
+            },
+          }
+        : {}),
       run: createHostTasks(
         host,
         request,
@@ -213,6 +230,7 @@ async function fixture(mode = "echo", approvalTimeout = 5000) {
     decisions,
     hostStore,
     hostIds,
+    submissions,
     notifySkip,
     notificationStore,
     get tasks() {
@@ -272,8 +290,8 @@ async function fixture(mode = "echo", approvalTimeout = 5000) {
   };
 }
 
-it("fires through the Host API, sends only the named final result to the owner, and reads completed history", async () => {
-  const f = await fixture();
+it("fires through the Host API without tool access, sends only the named final result to the owner, and reads completed history", async () => {
+  const f = await fixture("echo", 5000, true);
   try {
     const schedule = f.create();
     f.clock.now = schedule.nextRunAt!;
@@ -293,13 +311,14 @@ it("fires through the Host API, sends only the named final result to the owner, 
       agentId: "dev",
       serverTaskId: taskId,
     });
+    expect(f.submissions[0]?.tools).toBeUndefined();
   } finally {
     await f.close();
   }
 });
 
 it("correlates webhook work without interpreting identity claims in its payload", async () => {
-  const f = await fixture();
+  const f = await fixture("echo", 5000, true);
   try {
     const schedule = f.schedules.create({
       agentId: "dev",
@@ -330,6 +349,7 @@ it("correlates webhook work without interpreting identity claims in its payload"
     expect(hostTask?.prompt).toContain("foreign");
     expect(f.store.getHostTaskId("dev", taskId)).toBe(f.hostIds[0]);
     expect(f.store.getHostTaskId("foreign", taskId)).toBeUndefined();
+    expect(f.submissions[0]?.tools).toBeUndefined();
   } finally {
     await f.close();
   }
