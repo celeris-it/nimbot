@@ -3,6 +3,9 @@
   import type {
     AgentDetail,
     DelegationHistory,
+    McpAgentDefinition,
+    McpDefinition,
+    McpDefinitionSummary,
     PanelSession,
     PanelStatus,
     ScheduleList,
@@ -21,6 +24,8 @@
   import Approvals from "./Approvals.svelte";
   import Peers from "./Peers.svelte";
   import Delegations from "./Delegations.svelte";
+  import McpAgentAccess from "./McpAgentAccess.svelte";
+  import McpDefinitionForm from "./McpDefinitionForm.svelte";
   import type { PeerGrant } from "../../server/src/agent-grants.js";
   import type { ApprovalRequest } from "../../server/src/approval-store.js";
   import type { ApprovalRule } from "../../server/src/approval-rules.js";
@@ -38,6 +43,9 @@
   let memoryPage = $state(1);
   let delegations = $state<DelegationHistory>();
   let delegationPage = $state(delegationPageOf(location.search));
+  let mcpDefinitions = $state<McpDefinitionSummary[]>([]);
+  let mcpDefinition = $state<McpDefinition>();
+  let mcpAgentDefinitions = $state<McpAgentDefinition[]>([]);
   let peers = $state<{
     grants: PeerGrant[];
     candidates: { id: string; name: string }[];
@@ -60,37 +68,42 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|approvals|peers|delegations|schedules|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|approvals|peers|delegations|mcp|schedules|token|delete|container\/stop)$/,
     ),
   );
+  let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
   let title = $derived(
     path === "/login"
       ? "Sign in"
       : path === "/"
         ? "Agents"
-        : route?.[2] === "schedules"
-          ? scheduleText.pageTitle
-          : route?.[2] === "delegations"
-            ? "Delegations"
-            : route?.[2] === "peers"
-              ? "Agent access"
-              : route?.[2] === "approvals"
-                ? "Approvals"
-                : route?.[2] === "memory"
-                  ? "Memory"
-                  : route?.[2] === "providers"
-                    ? "AI providers"
-                    : path === "/agents/new"
-                      ? "Create agent"
-                      : route?.[2] === "settings"
-                        ? "Edit agent"
-                        : route?.[2] === "token"
-                          ? "Bot token"
-                          : route?.[2] === "delete"
-                            ? "Delete agent"
-                            : route?.[2] === "container/stop"
-                              ? "Stop agent"
-                              : "Agent setup",
+        : mcpRoute
+          ? "MCP catalog"
+          : route?.[2] === "mcp"
+            ? "MCP access"
+            : route?.[2] === "schedules"
+              ? scheduleText.pageTitle
+              : route?.[2] === "delegations"
+                ? "Delegations"
+                : route?.[2] === "peers"
+                  ? "Agent access"
+                  : route?.[2] === "approvals"
+                    ? "Approvals"
+                    : route?.[2] === "memory"
+                      ? "Memory"
+                      : route?.[2] === "providers"
+                        ? "AI providers"
+                        : path === "/agents/new"
+                          ? "Create agent"
+                          : route?.[2] === "settings"
+                            ? "Edit agent"
+                            : route?.[2] === "token"
+                              ? "Bot token"
+                              : route?.[2] === "delete"
+                                ? "Delete agent"
+                                : route?.[2] === "container/stop"
+                                  ? "Stop agent"
+                                  : "Agent setup",
   );
 
   async function focusHeading() {
@@ -111,6 +124,9 @@
     path = url.pathname;
     delegationPage = delegationPageOf(url.search);
     delegations = undefined;
+    mcpDefinition = undefined;
+    mcpDefinitions = [];
+    mcpAgentDefinitions = [];
     agent = undefined;
     providerSettings = undefined;
     schedules = undefined;
@@ -147,7 +163,20 @@
         status = await request<PanelStatus>("/api/status", {
           signal: current.signal,
         });
-      else if (route) {
+      else if (mcpRoute) {
+        const id = mcpRoute[1];
+        if (!session.capabilities.mcp) missing = true;
+        else if (!id) {
+          const data = await request<{ definitions: McpDefinitionSummary[] }>(
+            "/api/mcp",
+            { signal: current.signal },
+          );
+          mcpDefinitions = data.definitions;
+        } else if (id !== "new")
+          mcpDefinition = await request<McpDefinition>(`/api/mcp/${id}`, {
+            signal: current.signal,
+          });
+      } else if (route) {
         agent = await request<AgentDetail>(`/api/agents/${route[1]}`, {
           signal: current.signal,
         });
@@ -234,6 +263,13 @@
           }
         }
         const view = route[2];
+        if (view === "mcp") {
+          const data = await request<{ definitions: McpAgentDefinition[] }>(
+            `/api/agents/${route[1]}/mcp`,
+            { signal: current.signal },
+          );
+          mcpAgentDefinitions = data.definitions;
+        }
         if (view === "schedules")
           schedules = await request<ScheduleList>(
             `/api/agents/${route[1]}/schedules`,
@@ -273,7 +309,7 @@
   }
   async function mutate<T>(
     url: string,
-    fields: Record<string, string>,
+    fields: Record<string, string> | string,
     done: (result: T) => void,
   ) {
     if (busy) return;
@@ -439,6 +475,53 @@
         void load();
       },
     );
+  }
+  async function saveMcp(
+    settings: Pick<McpDefinition, "label" | "endpoint" | "enabled" | "tools">,
+  ) {
+    if (mcpDefinition) {
+      await mutate<{ definition: McpDefinition; cleanupPending: boolean }>(
+        `/api/mcp/${encodeURIComponent(mcpDefinition.id)}`,
+        JSON.stringify({ ...settings, revision: mcpDefinition.revision }),
+        (result) => {
+          mcpDefinition = result.definition;
+          notice = result.cleanupPending
+            ? "Integration saved. Credential cleanup is pending."
+            : "Integration saved.";
+        },
+      );
+    } else {
+      await mutate<McpDefinition>(
+        "/api/mcp",
+        JSON.stringify(settings),
+        (result) => {
+          navigate(`/mcp/${encodeURIComponent(result.id)}`, true);
+          notice = "Integration saved.";
+        },
+      );
+    }
+  }
+  async function mcpAgentAction(
+    definition: McpAgentDefinition,
+    command: "grant" | "revoke" | "credential",
+    token?: string | null,
+  ) {
+    if (!agent) return;
+    const startedPath = path;
+    await mutate<{ cleanupPending?: boolean }>(
+      `/api/agents/${encodeURIComponent(agent.id)}/mcp/${encodeURIComponent(definition.id)}/${command}`,
+      JSON.stringify({ revision: definition.revision, token }),
+      (result) => {
+        notice = result.cleanupPending
+          ? "MCP access updated. Credential cleanup is pending."
+          : "MCP access updated.";
+      },
+    );
+    if (path === startedPath && session) {
+      controller?.abort();
+      inFlight = false;
+      void load();
+    }
   }
   async function cancelDelegation(id: string) {
     if (!agent || busy) return;
@@ -644,7 +727,11 @@
     <nav aria-label="Main navigation">
       <a href="/" aria-current={path === "/" ? "page" : undefined}
         ><Icon name="grid" size={15} /> Agents</a
-      >{#if session.capabilities.createAgent}<a
+      >{#if session.capabilities.mcp}<a
+          href="/mcp"
+          aria-current={mcpRoute ? "page" : undefined}>MCP catalog</a
+        >{/if}
+      {#if session.capabilities.createAgent}<a
           href="/agents/new"
           aria-current={path === "/agents/new" ? "page" : undefined}
           ><Icon name="plus" size={15} /> New agent</a
@@ -718,6 +805,33 @@
     />
   {:else if path === "/agents/new"}
     {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
+  {:else if path === "/mcp"}
+    <h1 tabindex="-1">MCP catalog</h1>
+    <a class="btn btn-primary" href="/mcp/new">Add integration</a>
+    {#if mcpDefinitions.length === 0}
+      <p>No integrations in the catalog.</p>
+    {:else}
+      <section class="card" aria-label="Integrations">
+        <ul>
+          {#each mcpDefinitions as definition (definition.id)}
+            <li>
+              <a href={`/mcp/${encodeURIComponent(definition.id)}`}
+                >{definition.label}</a
+              >
+              · {definition.enabled ? "Enabled" : "Disabled"}
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+  {:else if mcpRoute}
+    <h1 tabindex="-1">
+      {mcpDefinition ? `Edit ${mcpDefinition.label}` : "Add MCP integration"}
+    </h1>
+    <a class="btn" href="/mcp">Back to catalog</a>
+    {#key path + (mcpDefinition?.revision ?? "")}
+      <McpDefinitionForm definition={mcpDefinition} {busy} save={saveMcp} />
+    {/key}
   {:else if agent && route}
     {#if route[2] === "schedules" && schedules}
       {#key agent.id}<Schedules
@@ -728,6 +842,15 @@
           action={scheduleAction}
           refresh={() => load()}
         />{/key}
+    {:else if route[2] === "mcp"}
+      {#key agent.id}
+        <McpAgentAccess
+          {agent}
+          {busy}
+          definitions={mcpAgentDefinitions}
+          action={mcpAgentAction}
+        />
+      {/key}
     {:else if route[2] === "delegations"}
       <Delegations
         {agent}
@@ -782,6 +905,7 @@
     {:else if route[2] === "setup"}<AgentStatus
         {agent}
         {busy}
+        mcpAvailable={session?.capabilities.mcp ?? false}
         {action}
         {discordAction}
         refresh={() => load()}

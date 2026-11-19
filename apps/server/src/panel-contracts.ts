@@ -12,6 +12,15 @@ export type { DelegationHistoryEntry } from "./task-queue.js";
 export type DelegationHistory = ReturnType<
   import("./task-queue.js").TaskStore["listDelegations"]
 >;
+export type { McpDefinition } from "./mcp-catalog.js";
+export type McpDefinitionSummary = Pick<
+  import("./mcp-catalog.js").McpDefinition,
+  "id" | "label" | "enabled" | "revision"
+>;
+export interface McpAgentDefinition extends McpDefinitionSummary {
+  granted: boolean;
+  hasCredential: boolean;
+}
 
 export interface ScheduleSettings {
   name: string;
@@ -36,7 +45,7 @@ export type AgentSummary = NonNullable<
 > & { id: string };
 export interface PanelSession {
   authenticated: true;
-  capabilities: { createAgent: boolean };
+  capabilities: { createAgent: boolean; mcp?: boolean };
 }
 export interface DiscordConversationStatus {
   state: "connecting" | "ready" | "reconnecting" | "failed" | "stopped";

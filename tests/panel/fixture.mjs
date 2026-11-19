@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openTaskStore } from "../../apps/server/dist/task-queue.js";
 import { openScheduleStore } from "../../apps/server/dist/schedule-store.js";
+import { openMcpCatalog } from "../../apps/server/dist/mcp-catalog.js";
+import { openMcpCredentials } from "../../apps/server/dist/mcp-credentials.js";
 import { createScheduler } from "../../apps/server/dist/scheduler.js";
 import { HostProviderError } from "../../apps/server/dist/host-providers.js";
 import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/index.mjs";
@@ -20,6 +22,11 @@ const stateDir = mkdtempSync(join(tmpdir(), "nimbot-panel-fixture-"));
 const statePath = join(stateDir, "server.sqlite");
 const tasks = openTaskStore(statePath);
 const schedules = openScheduleStore(statePath);
+const mcpCatalog = openMcpCatalog(statePath, (id) => agents.has(id));
+const mcpCredentials = await openMcpCredentials(
+  mcpCatalog,
+  join(stateDir, "mcp-secrets"),
+);
 const scheduler = createScheduler({
   store: schedules,
   admit: async (schedule) => {
@@ -68,6 +75,11 @@ const panel = createPanel(
     port: 3199,
   },
   {
+    mcp: {
+      catalog: mcpCatalog,
+      credentials: mcpCredentials,
+      agentExists: (id) => agents.has(id),
+    },
     delegations: {
       store: tasks,
       cancel: async (source, id) => {
@@ -297,6 +309,7 @@ process.once("SIGTERM", () => {
   void scheduler.close();
   server.close(() => {
     schedules.close();
+    mcpCatalog.close();
     tasks.close();
     rmSync(stateDir, { recursive: true, force: true });
   });

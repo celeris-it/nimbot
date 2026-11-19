@@ -15,6 +15,67 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("edits the MCP catalog and manages an agent's grant and write-only credential", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "MCP catalog" }).click();
+  await page.getByRole("link", { name: "Add integration" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Add MCP integration" }),
+  ).toBeFocused();
+  await page.getByLabel("Integration name").fill("Workspace docs");
+  await page.getByLabel("HTTPS endpoint").fill("https://docs.example.test/mcp");
+  await page.getByLabel("Enable integration").check();
+  await page.getByRole("button", { name: "Add tool" }).click();
+  await page.getByLabel("Tool name").fill("search");
+  await page.getByLabel("Access", { exact: true }).selectOption("read");
+  await page
+    .getByLabel("Argument schema (JSON)")
+    .fill('{"type":"object","properties":{"query":{"type":"string"}}}');
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Edit Workspace docs" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Tool name")).toHaveValue("search");
+  await page.getByLabel("Integration name").fill("Team docs");
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Edit Team docs" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Integration name")).toHaveValue("Team docs");
+
+  await page.goto("/agents/dev/setup");
+  await page.getByRole("link", { name: "MCP access" }).click();
+  await expect(
+    page.getByRole("heading", { name: "MCP access for Developer" }),
+  ).toBeFocused();
+  const integration = page.getByRole("region", { name: "Team docs" });
+  await expect(integration.getByText(/Access withheld/)).toBeVisible();
+  await integration.getByRole("button", { name: "Grant access" }).click();
+  const credential = integration.getByLabel("Bearer credential");
+  await expect(credential).toHaveAttribute("type", "password");
+  await credential.fill("example-panel-credential");
+  await integration.getByRole("button", { name: "Save credential" }).click();
+  await expect(
+    integration.getByRole("button", { name: "Replace credential" }),
+  ).toBeVisible();
+  await expect(credential).toHaveValue("");
+  await page.reload();
+  await expect(credential).toHaveValue("");
+  await expect(
+    integration.getByRole("button", { name: "Remove credential" }),
+  ).toBeVisible();
+  await integration.getByRole("button", { name: "Remove credential" }).click();
+  await expect(
+    integration.getByRole("button", { name: "Save credential" }),
+  ).toBeVisible();
+  await integration.getByRole("button", { name: "Revoke access" }).click();
+  await expect(integration.getByText(/Access withheld/)).toBeVisible();
+  await expect(credential).toHaveCount(0);
+});
+
 test("pages through delegation history and cancels only the selected child", async ({
   page,
   request,

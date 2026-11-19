@@ -367,7 +367,10 @@ export function createPanel(
   app.get("/api/session", (c) =>
     c.json({
       authenticated: true,
-      capabilities: { createAgent: !!registerAgent },
+      capabilities: {
+        createAgent: !!registerAgent,
+        ...(deps.mcp ? { mcp: true } : {}),
+      },
     } satisfies PanelSession),
   );
   const signOut = (c: Context) => {
@@ -1214,6 +1217,10 @@ export function createPanel(
       return c.redirect(back(id), 303);
     });
   app.get("/", entry);
+  if (deps.mcp) {
+    app.get("/mcp", entry);
+    app.get("/mcp/:definitionId", entry);
+  }
   app.get("/agents/new", (c) => (registerAgent ? entry(c) : c.notFound()));
   for (const suffix of [
     "setup",
@@ -1222,6 +1229,7 @@ export function createPanel(
     "approvals",
     "peers",
     "delegations",
+    "mcp",
     "schedules",
     "settings",
     "token",
@@ -1237,6 +1245,7 @@ export function createPanel(
         (suffix === "approvals" && !deps.approvals) ||
         (suffix === "peers" && !deps.peers) ||
         (suffix === "delegations" && !deps.delegations) ||
+        (suffix === "mcp" && !deps.mcp) ||
         (suffix === "settings" && !agentSettings?.get(id)) ||
         (suffix === "token" &&
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||

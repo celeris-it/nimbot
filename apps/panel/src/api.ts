@@ -28,9 +28,11 @@ export async function request<T>(
   return response.json() as Promise<T>;
 }
 
-export function post<T>(path: string, fields: Record<string, string>) {
+export function post<T>(path: string, fields: Record<string, string> | string) {
   return request<T>(path, {
     method: "POST",
-    body: new URLSearchParams(fields),
+    ...(typeof fields === "string"
+      ? { body: fields, headers: { "Content-Type": "application/json" } }
+      : { body: new URLSearchParams(fields) }),
   });
 }

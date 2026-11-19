@@ -13,12 +13,14 @@
   let {
     agent,
     busy,
+    mcpAvailable,
     action,
     refresh,
     discordAction,
   }: {
     agent: AgentDetail;
     busy: boolean;
+    mcpAvailable: boolean;
     action: (kind: "start" | "cancel" | "retry") => Promise<void>;
     refresh: () => void;
     discordAction: (
@@ -46,6 +48,7 @@
 <a class="btn" href={`${base}/approvals`}>Approvals</a>
 <a class="btn" href={`${base}/peers`}>Agent access</a>
 <a class="btn" href={`${base}/delegations`}>Delegations</a>
+{#if mcpAvailable}<a class="btn" href={`${base}/mcp`}>MCP access</a>{/if}
 <a class="btn" href={`${base}/schedules`}>{scheduleText.link}</a>
 {#if agent.capabilities.edit}<a class="btn" href={`${base}/settings`}
     >Edit agent</a
