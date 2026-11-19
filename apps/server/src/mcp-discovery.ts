@@ -1,7 +1,4 @@
-import {
-  Client,
-  StreamableHTTPClientTransport,
-} from "@modelcontextprotocol/client";
+import { createMcpConnection } from "./mcp-connection.js";
 
 export interface McpDiscoveredTool {
   name: string;
@@ -12,9 +9,7 @@ export type McpDiscoveryResult =
   | { status: "connected"; tools: McpDiscoveredTool[] }
   | { status: "timeout" | "redirect" | "unauthorized" | "unavailable" };
 
-const MAX_RESPONSE_BYTES = 128 * 1024;
 const MAX_SCHEMA_BYTES = 16 * 1024;
-const MAX_REQUESTS = 12;
 const MAX_VISIBLE_TOOLS = 64;
 
 /** Short-lived administrator discovery. Only protocol negotiation and listing are performed. */
@@ -28,91 +23,27 @@ export function createMcpDiscovery(
     signal?: AbortSignal,
     allowed: () => boolean = () => true,
   ): Promise<McpDiscoveryResult> {
-    const url = URL.parse(endpoint);
-    if (url?.protocol !== "https:" || url.username || url.password || url.hash)
-      return { status: "unavailable" };
-
-    const deadline = AbortSignal.timeout(timeoutMs);
-    const budget = new AbortController();
-    const lifetime = AbortSignal.any(
-      signal ? [budget.signal, deadline, signal] : [budget.signal, deadline],
-    );
-    let requests = 0;
-    let remaining = MAX_RESPONSE_BYTES;
-    let failed: "redirect" | "unauthorized" | undefined;
-    const transport = new StreamableHTTPClientTransport(url, {
-      redirectPolicy: "follow",
-      requestInit: {
-        redirect: "manual",
-        headers: credential
-          ? { Authorization: `Bearer ${credential}` }
-          : undefined,
-      },
-      reconnectionOptions: {
-        initialReconnectionDelay: 0,
-        maxReconnectionDelay: 0,
-        reconnectionDelayGrowFactor: 1,
-        maxRetries: 0,
-      },
-      async fetch(resource, init) {
-        lifetime.throwIfAborted();
-        if (
-          !allowed() ||
-          String(resource) !== url.href ||
-          ++requests > MAX_REQUESTS
-        )
-          throw new Error("MCP connection limits exceeded.");
-        const response = await request(url, {
-          ...init,
-          redirect: "manual",
-          signal: init?.signal
-            ? AbortSignal.any([lifetime, init.signal])
-            : lifetime,
-        });
-        if (
-          response.redirected ||
-          (response.status >= 300 && response.status < 400)
-        ) {
-          failed = "redirect";
-          await response.body?.cancel().catch(() => {});
-          throw new Error("MCP redirect rejected.");
-        }
-        if (response.status === 401 || response.status === 403)
-          failed = "unauthorized";
-        if (!response.body) return response;
-        const body = response.body.pipeThrough(
-          new TransformStream<Uint8Array, Uint8Array>({
-            transform(chunk, controller) {
-              remaining -= chunk.byteLength;
-              if (remaining < 0) {
-                budget.abort();
-                throw new Error("MCP response exceeded its size limit.");
-              }
-              controller.enqueue(chunk);
-            },
-          }),
-        );
-        return new Response(body, {
-          status: response.status,
-          headers: response.headers,
-        });
-      },
-    });
-    const client = new Client(
-      { name: "Nimbot", version: "1" },
-      {
-        enforceStrictCapabilities: true,
-        listMaxPages: 4,
-      },
-    );
+    let connection: ReturnType<typeof createMcpConnection> | undefined;
     try {
-      await client.connect(transport, { signal: lifetime, timeout: timeoutMs });
+      connection = createMcpConnection({
+        endpoint,
+        credential,
+        signal,
+        allowed,
+        request,
+        timeoutMs,
+      });
+      const { client, signal: lifetime } = connection;
+      await client.connect(connection.transport, {
+        signal: lifetime,
+        timeout: timeoutMs,
+      });
       const { tools } = await client.listTools(undefined, {
         signal: lifetime,
         timeout: timeoutMs,
         cacheMode: "bypass",
       });
-      const rejectedText = [url.href, credential]
+      const rejectedText = [new URL(endpoint).href, credential]
         .filter((value): value is string => !!value)
         .map((value) => JSON.stringify(value).slice(1, -1));
       const names = new Set<string>();
@@ -141,11 +72,12 @@ export function createMcpDiscovery(
       return { status: "connected", tools: discovered };
     } catch {
       return {
-        status: deadline.aborted ? "timeout" : (failed ?? "unavailable"),
+        status: connection?.timedOut
+          ? "timeout"
+          : (connection?.failure ?? "unavailable"),
       };
     } finally {
-      if (!lifetime.aborted) await transport.terminateSession().catch(() => {});
-      await client.close().catch(() => {});
+      await connection?.close();
     }
   };
 }
