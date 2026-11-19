@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AgentDetail } from "../../server/src/panel-contracts.js";
+  import { providers } from "../../server/src/provider-contracts.js";
   import DiscordSettings from "./DiscordSettings.svelte";
   import {
     botLabel,
@@ -28,6 +29,15 @@
       fields: Record<string, string>,
     ) => Promise<void>;
   } = $props();
+  const providerLabels = {
+    available: "Available",
+    rejected: "Reconnect required",
+    restricted: "Access restricted",
+    rate_limited: "Rate limited",
+    unavailable: "Unavailable",
+    unverified: "Unverified",
+    not_configured: "Not configured",
+  };
   const operationLabels = {
     pending: "In progress",
     completed: "Completed",
@@ -106,6 +116,33 @@
         agent.hostState
       ]}
     </p>{/if}
+  {#if agent.providerChecks}
+    <section aria-labelledby="ai-provider-status">
+      <h2 id="ai-provider-status">AI provider status</h2>
+      {#if agent.providerChecks.length}
+        <dl>
+          {#each agent.providerChecks as check (check.id)}
+            <dt>
+              {providers.find((provider) => provider.id === check.id)?.name}
+            </dt>
+            <dd>
+              {providerLabels[check.state]}
+              ·
+              <time datetime={new Date(check.checkedAt).toISOString()}>
+                {new Date(check.checkedAt).toLocaleString()}
+              </time>
+            </dd>
+          {/each}
+        </dl>
+      {:else}
+        <p>
+          {agent.hostState === "unavailable"
+            ? "Agent Host is offline."
+            : "No provider check results yet."}
+        </p>
+      {/if}
+    </section>
+  {/if}
   {#if agent.containerOperation}
     <p>
       Last operation: {agent.containerOperation.action === "start"

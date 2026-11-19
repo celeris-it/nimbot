@@ -71,6 +71,7 @@ export interface AgentDetail extends AgentSummary {
   memoryEnabled?: boolean;
   recovery?: import("./agent-recovery-inspection.js").RecoveryInspection;
   containerState?: "running" | "stopped" | "missing" | "unavailable";
+  providerChecks?: import("./provider-contracts.js").ProviderCheck[];
   hostState?: "ready" | "busy" | "unavailable";
   stopObservation?: {
     availability: "available" | "unavailable";

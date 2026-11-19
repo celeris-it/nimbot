@@ -22,6 +22,7 @@ Use the same Docker context/socket used during installation. The installer print
 | Delegation handoffs and bounded child outcomes (`delegations`) | `server.sqlite` in the server state volume; included in Server backups |
 | Peer note inboxes (`agent_notes`) | `server.sqlite` in the server state volume; included in Server backups |
 | External MCP definitions, per-agent grants and tool blocks | `server.sqlite` in the server state volume |
+| Operational incidents and notification delivery records | `server.sqlite` in the server state volume |
 | External MCP bearer credentials | Private files under `mcp-secrets` in the server state volume |
 | Agent memory notes (`memory.sqlite`) | Per-agent task-state volume; included in backups of it, and removed only when the volume is explicitly purged |
 
@@ -34,6 +35,30 @@ Server backups contain bot tokens, Agent Host tokens, and MCP bearer credentials
 Use **MCP catalog** to edit the HTTPS endpoint and select the allowed tools, argument schemas, and read/write classifications. On the agent’s page, **MCP access** manages its grant and private bearer credential. Changing the endpoint retires grants and credentials for the old endpoint. Revoking access or deleting an agent also retires the corresponding credentials. Removing a credential takes effect immediately, and the Server retries failed file cleanup on startup or a later MCP settings change. **Test connection** contacts only the saved HTTPS endpoint, using either no credential or the selected agent’s stored bearer credential. The Server rejects redirects and bounds discovery to eight seconds, 128 KiB of response bodies, and four tool pages. Discovery lists tool names and object schemas. Select a tool to review its schema and access classification, then save the integration to approve it. Schemas use JSON Schema 2020-12 by default, or an explicit draft-07 declaration. Standard formats are validated. Unsupported keywords, unknown formats, unresolved references and asynchronous schemas are rejected without changing the saved definition; external references are never fetched. Schemas and tool arguments are bounded to 16 KiB and 32 nested levels. Argument validation does not convert types, insert defaults or remove extra fields.
 
 If execution detects a missing tool, changed input schema or malformed tool listing, the Server records a tool block in `server.sqlite` and invalidates the previous catalog revision. The block survives restarts, credential changes and unrelated settings edits. **MCP catalog** marks affected definitions as **Review needed**; agent MCP access pages link to the tools requiring review. Use **Test connection** and **Review schema**, check the tool’s **I reviewed the schema and access** box, then **Save integration** to approve it again. Editing its schema or access clears the checkbox. A draft opened before a block must be refreshed before it can be saved. Discovery alone never clears a block, and remote tools absent from the approved catalog are never exposed. Approved tools are exposed to verified chat tasks only after the agent receives a catalog grant. Scheduled, webhook and delegated tasks receive none. The Server connects to the administrator-selected HTTPS endpoint with that agent’s optional bearer credential; a missing configured credential fails without an anonymous fallback. Remote servers receive the tool name, validated arguments, MCP client negotiation/session data and the configured bearer credential. They are trusted endpoints chosen by the administrator.
+
+## Owner alerts and provider status
+
+The agent's page shows **AI provider status** and the time of the last check.
+When a saved API key is rejected or OpenCode reports that a ChatGPT or Console
+connection needs reauthentication, open **Configure AI providers** to replace
+the key or sign in again. Saving a key requires a successful provider check.
+If the provider is unavailable, denies access, or rate limits the check, the
+previous credential stays active. An OAuth connection without a conclusive
+sign-in signal appears as **Unverified**. The checks use no inference quota.
+
+Open **Manage schedules** to investigate three consecutive execution failures.
+A successful execution resets the streak. Timed, manual and webhook runs share
+the same streak. Skips, cancellations and interruptions leave it unchanged.
+
+Check the agent status and Docker logs after an unexpected stop, disappearance,
+or automatic restart. The Server inspects Docker every 30 seconds and suppresses
+alerts during panel stops and managed recovery. Two stable checks close a
+container incident.
+
+Alerts go through the agent's own bot to the linked private Telegram chat. With
+the bot unavailable, an alert waits while the incident remains open. Nimbot
+persists delivery intent across Server restarts. Uncertain deliveries are never
+replayed. Telegram delivery requires the Nimbot Server to be running.
 
 ## Backup
 
