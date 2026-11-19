@@ -269,7 +269,7 @@ Nimbot is intended for trusted, single-server self-hosted deployments. Docker co
 - Panel passwords use scrypt hashes. Sessions expire after eight hours and end on server restart. Cookies use HttpOnly and SameSite restrictions, with Secure cookies for HTTPS. Panel state changes require same-origin checks; webhook activation uses a per-schedule Bearer token. Login is limited to five attempts per fifteen minutes. Remote access requires HTTPS.
 - Telegram and Discord tokens stay on the server and never enter agent containers, model context, logs, or task events. Telegram messages and AI provider requests leave the server.
 
-See [security and recovery details](docs/OPERATIONS.md#security-limitations), including the limitations of restoring agents onto another Docker host.
+See the [replacement server recovery procedure](docs/OPERATIONS.md#prepare-a-replacement-docker-host) to restore agent data and recreate stopped containers from the panel.
 
 ## Development
 

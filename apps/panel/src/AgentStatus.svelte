@@ -21,7 +21,7 @@
     agent: AgentDetail;
     busy: boolean;
     mcpAvailable: boolean;
-    action: (kind: "start" | "cancel" | "retry") => Promise<void>;
+    action: (kind: "start" | "cancel" | "retry" | "recover") => Promise<void>;
     refresh: () => void;
     discordAction: (
       kind: "save" | "remove" | "test",
@@ -135,6 +135,14 @@
         ).toISOString()}.
       </p>
     </section>
+  {/if}
+  {#if agent.recovery?.status === "available"}
+    <p>Recovery uses the restored volumes and leaves the container stopped.</p>
+    <button class="btn" disabled={busy} onclick={() => action("recover")}>
+      Recover on this server
+    </button>
+  {:else if agent.recovery?.status === "blocked"}
+    <p>{agent.recovery.message}</p>
   {/if}
   {#if agent.capabilities.container}
     <button class="btn" disabled={busy} onclick={() => action("start")}

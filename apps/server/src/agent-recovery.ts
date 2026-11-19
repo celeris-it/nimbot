@@ -60,7 +60,7 @@ export function createAgentRecovery(
           : [],
       );
     },
-    async recover(agentId: string) {
+    async recover(agentId: string, suspendWork?: () => Promise<void>) {
       const saved = registry.getRecovery(agentId);
       const intents = registry.listRecoveryIntents(agentId);
       const installation = config.installationId;
@@ -122,6 +122,7 @@ export function createAgentRecovery(
         const intent = (kind: RecoveryIntent["kind"]) =>
           pending.find((entry) => entry.kind === kind);
 
+        await suspendWork?.();
         const network = await resource(
           "network",
           names.network,

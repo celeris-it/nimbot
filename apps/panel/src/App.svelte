@@ -424,7 +424,7 @@
     );
   }
   async function action(
-    kind: "start" | "cancel" | "retry" | "stop" | "delete",
+    kind: "start" | "cancel" | "retry" | "stop" | "delete" | "recover",
   ) {
     if (!agent) return;
     const id = encodeURIComponent(agent.id);
@@ -435,10 +435,14 @@
           ? "provision"
           : kind === "delete"
             ? "delete"
-            : "container";
+            : kind === "recover"
+              ? "recover"
+              : "container";
     await mutate(
       `/api/agents/${id}/${target}`,
-      { action: kind, confirm: agent.id, deleteData: String(deleteData) },
+      kind === "recover"
+        ? {}
+        : { action: kind, confirm: agent.id, deleteData: String(deleteData) },
       () => {
         if (kind === "delete") navigate("/");
         else if (kind === "stop") navigate(`/agents/${id}/setup`);
@@ -448,7 +452,9 @@
               ? "Cancellation requested."
               : kind === "retry"
                 ? "Setup restarted."
-                : "Operation sent to Docker. The Agent Host may take a few seconds to become available.";
+                : kind === "recover"
+                  ? "Recovery complete. Select Start container to resume work."
+                  : "Operation sent to Docker. The Agent Host may take a few seconds to become available.";
           controller?.abort();
           controller = undefined;
           inFlight = false;

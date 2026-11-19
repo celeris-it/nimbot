@@ -893,3 +893,87 @@ it("offers a setup retry only for an unfinished setup when provisioning is enabl
     expect(await retry(state), state).toBe(false);
   expect(await retry("failed", false)).toBe(false);
 });
+
+it("shows recovery only for eligible agents and authenticates the same-origin action", async () => {
+  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
+  const { RecoveryError } = await import("./agent-recovery.js");
+  let container: "missing" | "stopped" = "missing";
+  let calls = 0;
+  let failure: Error | undefined;
+  const app = createPanel(config, {
+    getAgentSetup: (id) =>
+      id === "dev"
+        ? { name: "Dev", botUsername: "dev_bot", provisioning: "ready" }
+        : undefined,
+    containerAction: async () => {},
+    agentSettings: {
+      get: () => ({ name: "Dev", instructions: "" }),
+      save: () => {},
+      containerStatus: async () => container,
+    },
+    recovery: {
+      inspect: async () => ({ status: "available" }),
+      recover: async (id) => {
+        expect(id).toBe("dev");
+        calls++;
+        if (failure) throw failure;
+        container = "stopped";
+      },
+    },
+  });
+  const login = await app.request("/login", {
+    method: "POST",
+    headers: {
+      Origin: config.origin,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ password }),
+  });
+  const cookie = login.headers.get("Set-Cookie")!.split(";")[0]!;
+  const recover = (id: string, session = cookie, origin = config.origin) =>
+    app.request(`/api/agents/${id}/recover`, {
+      method: "POST",
+      headers: {
+        Cookie: session,
+        Origin: origin,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ id: "other", containerRef: "foreign" }),
+    });
+  expect((await recover("dev", "")).status).toBe(401);
+  expect((await recover("dev", cookie, "https://foreign.test")).status).toBe(
+    403,
+  );
+  expect((await recover("other")).status).toBe(404);
+  expect(calls).toBe(0);
+
+  const detail = async () =>
+    (
+      await app.request("/api/agents/dev", { headers: { Cookie: cookie } })
+    ).json();
+  expect(await detail()).toMatchObject({
+    recovery: { status: "available" },
+    capabilities: { container: false },
+  });
+  failure = new RecoveryError("Restore the workspace volume.");
+  let response = await recover("dev");
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    error: "Restore the workspace volume.",
+  });
+  failure = new Error("private Docker response");
+  response = await recover("dev");
+  expect(response.status).toBe(409);
+  expect(await response.text()).not.toContain(failure.message);
+  failure = undefined;
+  expect(await (await recover("dev")).json()).toEqual({
+    agentId: "dev",
+    recovery: "restored",
+  });
+  const restored = await detail();
+  expect(restored).not.toHaveProperty("recovery");
+  expect(restored).toMatchObject({
+    containerState: "stopped",
+    capabilities: { container: true },
+  });
+});

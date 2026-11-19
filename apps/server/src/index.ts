@@ -1,3 +1,4 @@
+import { createAgentRecovery } from "./agent-recovery.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { createRecoveryWorkGate } from "./recovery-work-gate.js";
 import { createTelegramAttachments } from "./telegram-attachments.js";
@@ -415,6 +416,16 @@ async function main(): Promise<void> {
       )
     : undefined;
   const provisioningShutdown = new AbortController();
+  const recovery =
+    provisioningConfig && hostCredentials
+      ? createAgentRecovery(
+          registry,
+          hostCredentials,
+          provisioningConfig,
+          undefined,
+          provisioningShutdown.signal,
+        )
+      : undefined;
   const provisionTask =
     provisioningConfig && hostCredentials
       ? createAgentProvisioning(
@@ -596,6 +607,17 @@ async function main(): Promise<void> {
         ),
     },
     resources: reconcile,
+    recovery: recovery
+      ? {
+          inspect: recovery.inspect,
+          recover: (id) =>
+            recovery.recover(id, async () => {
+              registeredDiscord.stop(id);
+              await registeredBots?.stop(id);
+              taskServices.stop(id);
+            }),
+        }
+      : undefined,
     provisionAgent: provision
       ? async (id) => {
           requireAgent(id);
@@ -611,13 +633,16 @@ async function main(): Promise<void> {
     containerAction: containerAction
       ? async (id, action) => {
           requireAgent(id);
+          const workWasHeld = !workGate.allowsWork(id);
           await containerAction(id, action);
           if (action === "start") {
             for (let attempt = 0; attempt < 10; attempt++) {
               await workGate.check(id);
               if (workGate.allowsWork(id)) {
-                registeredBots?.start(id);
-                void registeredDiscord.start(id);
+                if (workWasHeld) {
+                  registeredBots?.start(id);
+                  void registeredDiscord.start(id);
+                }
                 break;
               }
               if (attempt < 9)

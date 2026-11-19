@@ -122,11 +122,19 @@ change configuration, or start containers. Only use trusted Nimbot backup archiv
 
 The Server database preserves agent IDs, owners, chat bindings, schedules and task
 history, but its container and network IDs refer to the source Docker host. Those
-resources are not restored by extracting volume archives. **Replacement-host
-activation is not supported yet:** the panel cannot currently recreate missing
-containers and networks. Keep the destination stopped after restoring data until
-the recovery workflow is available. Do not delete and register agents again or
-purge their retained volumes to work around missing Docker resources.
+resources must be recreated on the replacement host. After completing the
+restore and stopping the source deployment, start the destination Server with
+`docker compose up -d`. Open each agent in the panel and select **Recover on
+this server**. Fix any reported credential, volume, label, or Docker conflict
+before retrying. The panel checks that the saved container is missing and uses
+the restored data and saved Agent Host credential to recreate the container
+and private network. It leaves the container stopped.
+
+Select **Start container** to resume polling and queued work once the
+authenticated Agent Host responds. If Docker loses a response during recovery,
+retry from the panel to inspect the saved attempt. The Server reconciles
+resources that it can attribute to the attempt and retains conflicting
+resources and restored volumes for inspection.
 
 ### Restore on the original Docker host
 
@@ -161,8 +169,7 @@ older occurrences become missed. It advances past the current time instead of
 replaying a backlog. Queued work remains in the ordinary task queue; interrupted
 running tasks are not replayed automatically.
 
-For a replacement host, follow the preparation section above instead of starting
-the Server with stale Docker references.
+For a replacement host, use the preparation and panel recovery steps above.
 
 ## Troubleshooting
 

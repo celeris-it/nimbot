@@ -60,6 +60,7 @@ export interface AgentDetail extends AgentSummary {
   settings?: { name: string; instructions: string };
   /** Present when the memory tools can be switched for this agent. */
   memoryEnabled?: boolean;
+  recovery?: import("./agent-recovery-inspection.js").RecoveryInspection;
   containerState?: "running" | "stopped" | "missing" | "unavailable";
   hostState?: "ready" | "busy" | "unavailable";
   stopObservation?: {

@@ -1473,3 +1473,40 @@ test("creates a webhook schedule, shows credentials, triggers it, and revokes it
   );
   await expect(page.getByLabel("Time zone", { exact: true })).not.toBeVisible();
 });
+
+test("recovers a missing container and displays Start only after recovery", async ({
+  page,
+}) => {
+  await login(page);
+  let recovered = false;
+  await page.route("**/api/agents/dev", async (route) => {
+    const response = await route.fetch();
+    const agent = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...agent,
+        containerState: recovered ? "stopped" : "missing",
+        recovery: recovered ? undefined : { status: "available" },
+        capabilities: { ...agent.capabilities, container: recovered },
+      },
+    });
+  });
+  await page.route("**/api/agents/dev/recover", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().postData() ?? "").toBe("");
+    recovered = true;
+    await route.fulfill({ json: { agentId: "dev", recovery: "restored" } });
+  });
+  await page.goto("/agents/dev/setup");
+  const start = page.getByRole("button", { name: "Start container" });
+  await expect(start).toHaveCount(0);
+  await page.getByRole("button", { name: "Recover on this server" }).click();
+  await expect(
+    page.getByText("Recovery complete. Select Start container to resume work."),
+  ).toBeVisible();
+  await expect(start).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Recover on this server" }),
+  ).toHaveCount(0);
+});

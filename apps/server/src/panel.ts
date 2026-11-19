@@ -1,3 +1,4 @@
+import { RecoveryError, type createAgentRecovery } from "./agent-recovery.js";
 import { HostProviderError } from "./host-providers.js";
 import { HostMemoryError } from "./host-memories.js";
 import { randomBytes } from "node:crypto";
@@ -136,6 +137,10 @@ export interface PanelDeps {
   resources?: () =>
     | import("./resource-reconciliation.js").ResourceInventory
     | Promise<import("./resource-reconciliation.js").ResourceInventory>;
+  recovery?: Pick<
+    ReturnType<typeof createAgentRecovery>,
+    "inspect" | "recover"
+  >;
   provisionAgent?: (agentId: string) => Promise<void>;
   removeResources?: (agentId: string, deleteData: boolean) => Promise<void>;
   containerAction?: (
@@ -820,6 +825,11 @@ export function createPanel(
       agentSettings?.hostStatus?.(id),
       agentSettings?.stopObservation?.(id),
     ]);
+    const recovery =
+      setup.provisioning === "ready" &&
+      (containerState === "missing" || containerState === "unavailable")
+        ? await deps.recovery?.inspect(id)
+        : undefined;
     const settings = agentSettings?.get(id);
     const discordConnection = deps.discord?.get(id);
     return c.json({
@@ -842,6 +852,7 @@ export function createPanel(
           }
         : undefined,
       containerState,
+      recovery,
       hostState,
       stopObservation: observation
         ? {
@@ -855,7 +866,10 @@ export function createPanel(
       capabilities: {
         edit: !!settings,
         replaceToken: !!settings && !!agentSettings?.saveToken,
-        container: setup.provisioning === "ready" && !!containerAction,
+        container:
+          setup.provisioning === "ready" &&
+          containerState !== "missing" &&
+          !!containerAction,
         cancel:
           !!setup.canCancelProvisioning &&
           !setup.cancellationRequested &&
@@ -1027,6 +1041,25 @@ export function createPanel(
       return c.json({ agentId: id, cancellation: "requested" }, 202);
     } catch {
       return c.json({ error: "No cancellable provisioning attempt" }, 409);
+    }
+  });
+  app.post("/api/agents/:id/recover", async (c) => {
+    if (!deps.recovery) return c.notFound();
+    const id = c.req.param("id");
+    if (!getAgentSetup?.(id)) return c.json({ error: "Agent not found." }, 404);
+    try {
+      await deps.recovery.recover(id);
+      return c.json({ agentId: id, recovery: "restored" });
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof RecoveryError
+              ? error.message
+              : "Recovery failed. Refresh the agent status before retrying.",
+        },
+        409,
+      );
     }
   });
   app.post("/api/agents/:id/provision", async (c) => {
