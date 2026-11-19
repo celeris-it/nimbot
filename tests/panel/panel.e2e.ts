@@ -15,6 +15,41 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("selects an agent model and shows its published quota in the panel", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto("/agents/dev/setup");
+  await page.getByRole("link", { name: "Model and usage" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Model and usage for Developer" }),
+  ).toBeFocused();
+  const model = page.getByLabel("Model for new turns");
+  await expect(model).toHaveValue("automatic");
+  await model.selectOption({ label: "Fixture model (opencode/fixture/model)" });
+  await page.getByRole("button", { name: "Save model" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Model saved for new turns." }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(model).toHaveValue(
+    JSON.stringify(["opencode", "fixture/model"]),
+  );
+  await expect(page.getByText("Queue paused for quota")).toBeVisible({
+    timeout: 12_000,
+  });
+  await expect(
+    page.getByText("Console monthly", { exact: true }),
+  ).toBeVisible();
+  await model.selectOption("automatic");
+  await page.getByRole("button", { name: "Save model" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Model saved for new turns." }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(model).toHaveValue("automatic");
+});
+
 test("edits the MCP catalog and manages an agent's grant and write-only credential", async ({
   page,
 }) => {

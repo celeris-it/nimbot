@@ -44,6 +44,7 @@
 
 <h1 tabindex="-1">{agent.name}</h1>
 <a class="btn" href={`${base}/providers`}>Configure AI providers</a>
+<a class="btn" href={`${base}/usage`}>Model and usage</a>
 <a class="btn" href={`${base}/memory`}>Review memory</a>
 <a class="btn" href={`${base}/approvals`}>Approvals</a>
 <a class="btn" href={`${base}/peers`}>Agent access</a>

@@ -4,6 +4,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { URL } from "node:url";
+import {
+  createAgentUsage,
+  createHostUsage,
+  openAgentUsage,
+} from "../../apps/server/dist/agent-usage.js";
 import { openTaskStore } from "../../apps/server/dist/task-queue.js";
 import { openScheduleStore } from "../../apps/server/dist/schedule-store.js";
 import { openMcpCatalog } from "../../apps/server/dist/mcp-catalog.js";
@@ -28,6 +33,34 @@ const logins = new Map();
 const stateDir = mkdtempSync(join(tmpdir(), "nimbot-panel-fixture-"));
 const statePath = join(stateDir, "server.sqlite");
 const tasks = openTaskStore(statePath);
+const usageStore = openAgentUsage(statePath);
+const fixtureModel = { providerId: "opencode", modelId: "fixture/model" };
+const usage = createAgentUsage(
+  usageStore,
+  createHostUsage(
+    async (id) => ({ url: `http://${id}.test`, token: "fixture" }),
+    async (url) =>
+      new URL(url).pathname === "/models"
+        ? globalThis.Response.json({
+            models: [{ ...fixtureModel, name: "Fixture model" }],
+          })
+        : globalThis.Response.json({
+            model: fixtureModel,
+            state: "exhausted",
+            checkedAt: Date.now(),
+            windows: [
+              {
+                name: "Console monthly",
+                usedPercent: 100,
+                exhausted: true,
+                resetsAt: Date.now() + 24 * 60 * 60_000,
+                limitUsd: 20,
+                spentUsd: 20,
+              },
+            ],
+          }),
+  ),
+);
 const schedules = openScheduleStore(statePath);
 const grants = openAgentGrants(statePath, {
   exists: (id) => agents.has(id),
@@ -87,6 +120,7 @@ function reset() {
   for (const memory of memoryStores.values()) memory.close();
   memoryStores.clear();
   memoryApis.clear();
+  usageStore.setModel("dev", null);
   agents.set("dev", {
     name: "Developer",
     instructions: "Be brief",
@@ -154,6 +188,7 @@ const panel = createPanel(
       runNow: scheduler.runNow,
       ownerLinked: (id) => !!agents.get(id)?.ownerLinked,
     },
+    usage: { ...usage, wake: async () => {} },
     providers: {
       status: async (id) => {
         requireHost(id);
@@ -434,6 +469,7 @@ process.once("SIGTERM", () => {
     rules.close();
     history.close();
     for (const memory of memoryStores.values()) memory.close();
+    usageStore.close();
     tasks.close();
     rmSync(stateDir, { recursive: true, force: true });
   });

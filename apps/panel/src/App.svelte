@@ -21,6 +21,12 @@
   import AgentForm from "./AgentForm.svelte";
   import AgentStatus from "./AgentStatus.svelte";
   import ProviderSettings from "./ProviderSettings.svelte";
+  import AgentUsageView from "./AgentUsage.svelte";
+  import type {
+    AgentModels,
+    AgentUsage,
+    ModelReference,
+  } from "../../server/src/usage-contracts.js";
   import Memory from "./Memory.svelte";
   import Approvals from "./Approvals.svelte";
   import Peers from "./Peers.svelte";
@@ -39,6 +45,9 @@
   let status = $state<PanelStatus>({ agents: [] });
   let agent = $state<AgentDetail>();
   let providerSettings = $state<ProviderSettingsState>();
+  let agentModels = $state<AgentModels>();
+  let usage = $state<AgentUsage>();
+  let usageBefore = $state(usageCursor(location.search));
   let schedules = $state<ScheduleList>();
   let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
   let memoryPage = $state(1);
@@ -70,7 +79,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|memory|approvals|peers|delegations|mcp|schedules|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|usage|memory|approvals|peers|delegations|mcp|schedules|token|delete|container\/stop)$/,
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
@@ -83,34 +92,40 @@
           ? "MCP catalog"
           : route?.[2] === "mcp"
             ? "MCP access"
-            : route?.[2] === "schedules"
-              ? scheduleText.pageTitle
-              : route?.[2] === "delegations"
-                ? "Delegations"
-                : route?.[2] === "peers"
-                  ? "Agent access"
-                  : route?.[2] === "approvals"
-                    ? "Approvals"
-                    : route?.[2] === "memory"
-                      ? "Memory"
-                      : route?.[2] === "providers"
-                        ? "AI providers"
-                        : path === "/agents/new"
-                          ? "Create agent"
-                          : route?.[2] === "settings"
-                            ? "Edit agent"
-                            : route?.[2] === "token"
-                              ? "Bot token"
-                              : route?.[2] === "delete"
-                                ? "Delete agent"
-                                : route?.[2] === "container/stop"
-                                  ? "Stop agent"
-                                  : "Agent setup",
+            : route?.[2] === "usage"
+              ? "Model and usage"
+              : route?.[2] === "schedules"
+                ? scheduleText.pageTitle
+                : route?.[2] === "delegations"
+                  ? "Delegations"
+                  : route?.[2] === "peers"
+                    ? "Agent access"
+                    : route?.[2] === "approvals"
+                      ? "Approvals"
+                      : route?.[2] === "memory"
+                        ? "Memory"
+                        : route?.[2] === "providers"
+                          ? "AI providers"
+                          : path === "/agents/new"
+                            ? "Create agent"
+                            : route?.[2] === "settings"
+                              ? "Edit agent"
+                              : route?.[2] === "token"
+                                ? "Bot token"
+                                : route?.[2] === "delete"
+                                  ? "Delete agent"
+                                  : route?.[2] === "container/stop"
+                                    ? "Stop agent"
+                                    : "Agent setup",
   );
 
   async function focusHeading() {
     await tick();
     document.querySelector<HTMLElement>("h1")?.focus();
+  }
+  function usageCursor(search: string) {
+    const value = Number(new URLSearchParams(search).get("before"));
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
   }
   function delegationPageOf(search: string) {
     const page = Number(new URLSearchParams(search).get("page"));
@@ -125,6 +140,9 @@
     const url = new URL(next, location.origin);
     path = url.pathname;
     delegationPage = delegationPageOf(url.search);
+    usageBefore = usageCursor(url.search);
+    agentModels = undefined;
+    usage = undefined;
     delegations = undefined;
     mcpDefinition = undefined;
     mcpDiscoveryAgents = [];
@@ -191,6 +209,16 @@
         agent = await request<AgentDetail>(`/api/agents/${route[1]}`, {
           signal: current.signal,
         });
+        if (route[2] === "usage") {
+          const url = `/api/agents/${route[1]}`;
+          [agentModels, usage] = await Promise.all([
+            request<AgentModels>(`${url}/models`, { signal: current.signal }),
+            request<AgentUsage>(
+              `${url}/usage${usageBefore ? `?before=${usageBefore}` : ""}`,
+              { signal: current.signal },
+            ),
+          ]);
+        }
         if (route[2] === "providers") {
           try {
             providerSettings = await request<ProviderSettingsState>(
@@ -463,6 +491,19 @@
       },
     );
   }
+  async function saveModel(model: ModelReference | null) {
+    if (!agent) return;
+    await mutate<{ selected: ModelReference | null }>(
+      `/api/agents/${encodeURIComponent(agent.id)}/model`,
+      JSON.stringify({ model }),
+      ({ selected }) => {
+        if (agentModels) agentModels = { ...agentModels, selected };
+        if (usage) usage = { ...usage, quota: null };
+        notice = "Model saved for new turns.";
+        void load();
+      },
+    );
+  }
   async function providerAction(
     id: string,
     kind: "save" | "remove" | "login" | "cancel",
@@ -488,7 +529,7 @@
               ? "Provider disconnected from this agent."
               : kind === "cancel"
                 ? "Login status updated."
-                : "Device login started. Complete authorization with OpenAI.";
+                : "Device login started. Complete authorization using the link below.";
         void load();
       },
     );
@@ -726,7 +767,10 @@
       if (
         !document.hidden &&
         !busy &&
-        (path === "/" || route?.[2] === "setup" || route?.[2] === "schedules")
+        (path === "/" ||
+          route?.[2] === "setup" ||
+          route?.[2] === "schedules" ||
+          route?.[2] === "usage")
       )
         void load();
     }, 5000);
@@ -945,6 +989,16 @@
           {busy}
           action={providerAction}
           refresh={() => load()}
+        />{/key}
+    {:else if route[2] === "usage"}
+      {#key agent.id}<AgentUsageView
+          {agent}
+          catalog={agentModels}
+          data={usage}
+          before={usageBefore}
+          {busy}
+          save={saveModel}
+          refresh={load}
         />{/key}
     {:else if route[2] === "setup"}<AgentStatus
         {agent}

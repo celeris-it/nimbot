@@ -78,8 +78,11 @@
 <p id="provider-help">
   The container must be running and idle to change authentication. Saving a key
   does not verify its validity, balance, or model access. OpenCode chooses the
-  model automatically.
+  model automatically until you choose one for this agent.
 </p>
+<a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/usage`}
+  >Model and usage</a
+>
 {#if !settings}
   <p role="status">
     Provider settings unavailable. Start the agent and refresh to try again.
@@ -100,48 +103,62 @@
       <h2>{provider.name}</h2>
       <p>
         {provider.method === "device"
-          ? "Configured — ChatGPT device login"
+          ? provider.id === "opencode"
+            ? "Configured — OpenCode Console device login"
+            : "Configured — ChatGPT device login"
           : provider.method === "api_key"
             ? "Configured — API key"
             : "Not configured"}
       </p>
-      <form
-        onsubmit={(event) => save(event, provider.id)}
-        aria-busy={busy}
-        aria-describedby="provider-help form-error"
-      >
-        <label for={`key-${provider.id}`}>{provider.name} API key</label>
-        <input
-          class="input"
-          id={`key-${provider.id}`}
-          name="key"
-          type="password"
-          autocomplete="new-password"
-          required
-          maxlength="4096"
-          bind:value={keys[provider.id]}
-          disabled={blocked}
-        />
-        <button class="btn" type="submit" disabled={blocked}
-          >{provider.method ? "Replace with API key" : "Save API key"}</button
+      {#if provider.id !== "opencode"}
+        <form
+          onsubmit={(event) => save(event, provider.id)}
+          aria-busy={busy}
+          aria-describedby="provider-help form-error"
         >
-      </form>
-      {#if provider.id === "openai"}
-        <p>
-          Or sign in with your ChatGPT account using a device code. A successful
-          login replaces this agent's OpenAI credential. Failed or cancelled
-          attempts keep it.
-        </p>
+          <label for={`key-${provider.id}`}>{provider.name} API key</label>
+          <input
+            class="input"
+            id={`key-${provider.id}`}
+            name="key"
+            type="password"
+            autocomplete="new-password"
+            required
+            maxlength="4096"
+            bind:value={keys[provider.id]}
+            disabled={blocked}
+          />
+          <button class="btn" type="submit" disabled={blocked}
+            >{provider.method ? "Replace with API key" : "Save API key"}</button
+          >
+        </form>
+      {/if}
+      {#if provider.id === "openai" || provider.id === "opencode"}
+        {#if provider.id === "openai"}
+          <p>
+            Or sign in with your ChatGPT account using a device code. A
+            successful login replaces this agent's OpenAI credential. Failed or
+            cancelled attempts keep it.
+          </p>
+        {:else}
+          <p>
+            Connect an OpenCode Console workspace to use its models, Console
+            budgets and Go allowance.
+          </p>
+        {/if}
         <button
           class="btn"
           disabled={blocked}
           onclick={() => {
             interrupted = false;
             copied = "";
-            void action("openai", "login");
-          }}>Sign in with ChatGPT</button
+            void action(provider.id, "login");
+          }}
+          >{provider.id === "openai"
+            ? "Sign in with ChatGPT"
+            : "Sign in to OpenCode Console"}</button
         >
-        {#if settings.login}
+        {#if settings.login && (settings.login.provider ?? "openai") === provider.id}
           <div aria-live="polite">
             {#if settings.login.state === "starting"}<p>
                 Starting device login…
@@ -151,18 +168,23 @@
                 Open <a
                   href={settings.login.url}
                   target="_blank"
-                  rel="noopener noreferrer">OpenAI device authorization</a
+                  rel="noopener noreferrer"
+                  >{provider.id === "openai"
+                    ? "OpenAI device authorization"
+                    : "OpenCode Console device authorization"}</a
                 > and enter this code:
               </p>
               <p><code>{settings.login.code}</code></p>
               <button class="btn" onclick={copy}>Copy code</button>
               <p>{copied}</p>
               <p>
-                Waiting for authorization. New tasks are rejected as busy until
-                login finishes. Resend them afterwards.
+                Waiting for authorization. Queued tasks wait until login
+                finishes.
               </p>
             {:else if settings.login.state === "completed"}<p>
-                ChatGPT login completed for this agent.
+                {provider.id === "openai"
+                  ? "ChatGPT login completed for this agent."
+                  : "OpenCode Console login completed for this agent."}
               </p>
             {:else if settings.login.state === "cancelled"}<p>
                 Device login cancelled. The previous credential was kept.
@@ -172,14 +194,15 @@
                 login.
               </p>
             {:else}<p>
-                Device login failed. Check that device code login is enabled in
-                your ChatGPT account or workspace, then try again.
+                {provider.id === "openai"
+                  ? "Device login failed. Check that device code login is enabled in your ChatGPT account or workspace, then try again."
+                  : "Device login failed. Check your OpenCode Console workspace and try again."}
               </p>{/if}
           </div>
           {#if waiting}<button
               class="btn"
               disabled={busy}
-              onclick={() => action("openai", "cancel", settings?.login?.id)}
+              onclick={() => action(provider.id, "cancel", settings?.login?.id)}
               >Cancel device login</button
             >{/if}
         {/if}
