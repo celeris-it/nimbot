@@ -3,7 +3,7 @@
 ## Restore the backup
 
 - [x] Update `docs/OPERATIONS.md` to document restoring onto a new Docker host. Use the same Nimbot version that created the backup, stop the source deployment before activating the destination, and restore the Server state and all three volumes for each agent.
-- [ ] Create the workspace, engine, and task volumes under their canonical names before extracting the archives. Apply the `io.nimbot.agent-id` and `io.nimbot.installation` labels using the agent ID and restored installation identity. Inspect existing volumes before extraction and abort on conflicts. Keep the current archive format and preserve file ownership.
+- [x] Create the workspace, engine, and task volumes under their canonical names before extracting the archives. Apply the `io.nimbot.agent-id` and `io.nimbot.installation` labels using the agent ID and restored installation identity. Inspect existing volumes before extraction and abort on conflicts. Keep the current archive format and preserve file ownership.
 
 ## Rebuild agents from the panel
 

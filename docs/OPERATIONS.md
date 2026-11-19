@@ -101,6 +101,25 @@ do not migrate saved state. Keep the original backup until recovery is verified.
    ownership when extracting the existing `.tar.gz` archives (Agent Hosts run as
    UID 1000). Docker volume labels are not part of those archives.
 
+From the matching release's source directory, use the restore helper once for
+each saved agent ID (Node.js 22.13 or newer is required). Pass the original
+installation identity from the restored configuration, not a new ID:
+
+```sh
+node scripts/restore-agent-volumes.mjs /absolute/path/to/backup AGENT_ID INSTALLATION_ID
+```
+
+The helper checks that all three archives are readable, checks Docker for name
+conflicts, and creates all three labelled volumes before extracting any archive.
+It uses the existing archive names and preserves numeric owners and permissions.
+It refuses **any existing destination volume**, including a volume left by a
+previous failed restore. It also checks each created volume's labels to detect
+concurrent creation. Stop other resource-management operations during restoration.
+On failure, all created volumes and extracted data remain available for inspection;
+there is no automatic removal or retry. Inspect retained volumes and resolve the
+conflict explicitly before trying again. The helper does not restore Server state,
+change configuration, or start containers. Only use trusted Nimbot backup archives.
+
 The Server database preserves agent IDs, owners, chat bindings, schedules and task
 history, but its container and network IDs refer to the source Docker host. Those
 resources are not restored by extracting volume archives. **Replacement-host
