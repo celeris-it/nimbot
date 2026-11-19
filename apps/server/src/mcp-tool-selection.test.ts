@@ -26,6 +26,26 @@ const settings = {
   ],
 };
 
+it("maps long, mixed-case and dotted remote names to distinct Host-compatible names", () => {
+  const f = fixture();
+  const names = ["Search.Docs", "search.docs", "Search.Docs" + "x".repeat(117)];
+  f.catalog.update(f.definition.id, 1, {
+    ...settings,
+    tools: names.map((name) => ({ ...settings.tools[0], name })),
+  });
+  f.grant();
+  const descriptors = f.selection.descriptors("a");
+  expect(descriptors).toHaveLength(3);
+  expect(new Set(descriptors.map(({ name }) => name)).size).toBe(3);
+  for (const descriptor of descriptors)
+    expect(descriptor.name).toMatch(/^mcp_[a-z0-9_-]{1,60}$/);
+  expect(
+    descriptors.map(
+      (descriptor) => f.selection.resolve("a", descriptor.operation)!.tool.name,
+    ),
+  ).toEqual(names);
+});
+
 function fixture() {
   const agents = new Set(["a", "b"]);
   const catalog = openMcpCatalog(":memory:", (id) => agents.has(id));

@@ -43,7 +43,6 @@ function redact(value: unknown, secrets: string[], depth = 0): unknown {
 /**
  * Server-only remote execution. Callers must authorize the task and, for writes,
  * record an invocation intent and obtain approval before entering this service.
- * This service is not registered as a production task handler yet.
  */
 export function createMcpExecution(config: {
   catalog: McpCatalog;

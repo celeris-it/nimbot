@@ -50,6 +50,8 @@ import { openDiscordSecrets } from "./discord-secret.js";
 import { openMcpCatalog } from "./mcp-catalog.js";
 import { openMcpCredentials } from "./mcp-credentials.js";
 import { createMcpDiscovery } from "./mcp-discovery.js";
+import { createMcpExecution } from "./mcp-execution.js";
+import { createMcpTools } from "./mcp-tools.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
 import { openAgentRegistry } from "./agent-registry.js";
@@ -215,6 +217,10 @@ async function main(): Promise<void> {
     if (result.status !== "delivered")
       throw new Error("Discord delivery could not be confirmed");
   }
+  const executeMcp = createMcpExecution({
+    catalog: mcpCatalog,
+    credentials: mcpCredentials,
+  });
   const taskServices = createAgentTaskServices(
     async (id, { wake }) => {
       if (!hostCredentials || !registry.get(id))
@@ -237,6 +243,14 @@ async function main(): Promise<void> {
         tasks: taskStore,
         name: (agentId) => registry.get(agentId)?.name,
         canReach,
+      });
+      const mcpTools = createMcpTools({
+        agentId: id,
+        catalog: mcpCatalog,
+        tasks: taskStore,
+        rules: approvalRules,
+        canReach,
+        execute: executeMcp,
       });
       const canHandoff = (parent: ChatTask, target: string) =>
         canReach(parent) &&
@@ -283,8 +297,10 @@ async function main(): Promise<void> {
             ...(registry.getMemoryEnabled(id) ? MEMORY_OPERATIONS : []),
             ...peerTools.operations(task),
           ],
+          remoteTools: mcpTools.descriptors,
         },
         toolHandlers: peerTools.handlers,
+        resolveToolHandler: mcpTools.resolve,
         delegation: {
           canHandoff,
           canExecute: delegatedExecution.canExecute,

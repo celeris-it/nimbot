@@ -43,7 +43,11 @@ export function createMcpToolSelection(catalog: McpCatalog) {
             credential: binding.reference,
             tool: tool.name,
           })}`,
-          name: `mcp_${hash([definitionId, tool.name]).slice(0, 24)}_${tool.name.slice(0, 64)}`,
+          // Reserve space for the engine's MCP server prefix in provider tool names.
+          name: `mcp_${hash([definitionId, tool.name]).slice(0, 24)}_${tool.name
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, "_")
+            .slice(0, 27)}`,
           inputSchema: tool.inputSchema,
         };
         if (

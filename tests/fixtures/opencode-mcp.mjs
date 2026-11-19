@@ -37,10 +37,11 @@ let modelCalls = 0;
 const memoryResults = [];
 const isolationCalls = [];
 const bridges = [];
+const remoteName = `mcp_${"a".repeat(24)}_${"long_echo_name_".repeat(2).slice(0, 27)}`;
 const signals = [];
 async function adapter() {
   const operation = `mcp.${"a".repeat(64)}`;
-  const name = "mcp_fixture_echo";
+  const name = remoteName;
   const bridge = await createToolBridge(
     {
       hostTaskId: randomUUID(),
@@ -112,7 +113,7 @@ const server = createServer(async (req, res) => {
   const memoryMode = mode.startsWith("memory_");
   const plainMode = mode === "plain" || mode.startsWith("isolation_");
   const tool = message.tools?.find((t) =>
-    t.function.name.endsWith(memoryMode ? mode : "mcp_fixture_echo"),
+    t.function.name.endsWith(memoryMode ? mode : remoteName),
   );
   if (plainMode)
     assert.equal(
@@ -122,6 +123,10 @@ const server = createServer(async (req, res) => {
     );
   else {
     assert.ok(tool, "MCP tool must be discovered by the actual model request");
+    assert.ok(
+      tool.function.name.length <= 64,
+      "Qualified provider tool names must fit 64 characters",
+    );
     discovered++;
   }
   const last = message.messages.at(-1);
@@ -305,7 +310,7 @@ try {
     });
   assert.equal((await prompt(first)).stopReason, "end_turn");
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].name, "mcp_fixture_echo");
+  assert.equal(calls[0].name, remoteName);
   assert.deepEqual(calls[0].arguments, { value: "echo" });
   assert.ok(
     first.updates.some(
