@@ -67,7 +67,7 @@ export class WebhookRateLimitError extends Error {}
 
 export class ScheduleValidationError extends Error {}
 
-/** Open after openTaskStore, on the same server.sqlite. No schema migrations. */
+/** Open after openTaskStore on the same server.sqlite. */
 export function openScheduleStore(
   path: string,
   options: { now?: () => number } = {},

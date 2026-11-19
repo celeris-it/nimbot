@@ -1,3 +1,4 @@
+import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
 import { createAttachments } from "./attachments.js";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
@@ -23,10 +24,12 @@ try {
   const stateDir =
     process.env.AGENT_STATE_DIR || "/home/node/.local/share/nimbot";
   await mkdir(stateDir, { recursive: true });
-  const store = await openTaskStore(
-    pathToFileURL(resolve(stateDir, "tasks.sqlite")).href,
-  );
-  const memory = openMemoryStore(resolve(stateDir, "memory.sqlite"));
+  const tasksPath = resolve(stateDir, "tasks.sqlite");
+  const memoryPath = resolve(stateDir, "memory.sqlite");
+  prepareStateSchema(tasksPath, "tasks");
+  prepareStateSchema(memoryPath, "memory");
+  const store = await openTaskStore(pathToFileURL(tasksPath).href);
+  const memory = openMemoryStore(memoryPath);
   const attachments = createAttachments(config.workspace);
   const openCode = createOpenCodeApi(config.workspace);
   const usage = createOpenCodeUsage(openCode.request);
@@ -94,9 +97,12 @@ try {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   log.info("host.listening", { port: 3001 });
-} catch {
+} catch (error) {
   log.error("host.init_failed", {
-    hint: "Check AGENT_HOST_TOKEN, TASK_TIMEOUT_SECONDS and writable state storage.",
+    hint:
+      error instanceof Error && /^(tasks|memory)\.sqlite:/.test(error.message)
+        ? error.message
+        : "Check AGENT_HOST_TOKEN, TASK_TIMEOUT_SECONDS and writable state storage.",
   });
   process.exitCode = 1;
 }

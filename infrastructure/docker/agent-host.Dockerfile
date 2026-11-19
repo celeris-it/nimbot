@@ -17,6 +17,8 @@ RUN pnpm install --frozen-lockfile \
  && chmod -R a+rX /opt/playwright \
  && rm -rf /var/lib/apt/lists/*
 
+COPY scripts/state-schema.mjs scripts/state-schema.d.mts scripts/
+COPY scripts/state-schema/ scripts/state-schema/
 COPY apps/agent-host/src apps/agent-host/src
 COPY apps/agent-host/tsconfig.json apps/agent-host/tsconfig.json
 RUN pnpm --filter @nimbot/agent-host build

@@ -1,6 +1,8 @@
 FROM node:22-bookworm-slim
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
+COPY scripts/state-schema.mjs scripts/state-schema.d.mts scripts/
+COPY scripts/state-schema/ scripts/state-schema/
 COPY apps/server apps/server
 COPY apps/panel apps/panel
 RUN npm install -g pnpm@10 \

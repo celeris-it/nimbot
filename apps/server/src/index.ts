@@ -1,3 +1,4 @@
+import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
 import { createAgentRecovery } from "./agent-recovery.js";
 import { createRecoveryWorkGate } from "./recovery-work-gate.js";
 import { createTelegramAttachments } from "./telegram-attachments.js";
@@ -119,6 +120,7 @@ async function main(): Promise<void> {
       return;
     }
   }
+  const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
   let statePath;
   let taskStore;
   let usageStore;
@@ -138,9 +140,9 @@ async function main(): Promise<void> {
   let hostCredentials:
     Awaited<ReturnType<typeof openHostCredentials>> | undefined;
   try {
-    const stateDir = resolve(process.env.SERVER_STATE_DIR || ".nimbot");
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     statePath = resolve(stateDir, "server.sqlite");
+    prepareStateSchema(statePath, "server");
     registry = openAgentRegistry(statePath);
     mcpCatalog = openMcpCatalog(statePath, (id) => !!registry.get(id));
     mcpCredentials = await openMcpCredentials(
@@ -177,7 +179,7 @@ async function main(): Promise<void> {
     taskStore.markRunningInterrupted();
     // Grants that no longer qualify (changed owner, removed agent) do not survive a restart.
     agentGrants.prune();
-  } catch {
+  } catch (error) {
     mcpCatalog?.close();
     agentNotes?.close();
     agentGrants?.close();
@@ -191,7 +193,10 @@ async function main(): Promise<void> {
     notificationStore?.close();
     registry?.close();
     log.error("server.state_init_failed", {
-      hint: "Check SERVER_STATE_DIR and writable storage.",
+      hint:
+        error instanceof Error && error.message.startsWith("server.sqlite:")
+          ? error.message
+          : "Check SERVER_STATE_DIR and writable storage.",
     });
     process.exitCode = 1;
     return;
