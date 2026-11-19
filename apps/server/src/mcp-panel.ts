@@ -5,11 +5,14 @@ import {
   type McpDefinition,
 } from "./mcp-catalog.js";
 import { isMcpBearer, type McpCredentials } from "./mcp-credentials.js";
+import type { createMcpDiscovery } from "./mcp-discovery.js";
 
 export interface McpPanelDeps {
   catalog: McpCatalog;
   credentials: McpCredentials;
   agentExists(id: string): boolean;
+  listAgents(): { id: string; name: string }[];
+  discover: ReturnType<typeof createMcpDiscovery>;
 }
 
 const summarize = ({ id, label, enabled, revision }: McpDefinition) => ({
@@ -47,6 +50,8 @@ export function createMcpPanel({
   catalog,
   credentials,
   agentExists,
+  listAgents,
+  discover,
 }: McpPanelDeps) {
   const app = new Hono();
   const changed = (c: Context) =>
@@ -78,6 +83,54 @@ export function createMcpPanel({
     );
     if (!updated) return changed(c);
     return c.json({ definition: updated, ...(await credentials.cleanup()) });
+  });
+  app.get("/mcp/:definitionId/discovery-agents", (c) => {
+    const id = c.req.param("definitionId");
+    if (!catalog.get(id))
+      return c.json({ error: "MCP definition not found." }, 404);
+    return c.json({
+      agents: listAgents().filter((agent) => credentials.has(agent.id, id)),
+    });
+  });
+  app.post("/mcp/:definitionId/discover", async (c) => {
+    const id = c.req.param("definitionId");
+    const fields = await jsonFields(c);
+    const revision = revisionOf(fields);
+    const definition = catalog.get(id);
+    if (!definition || definition.revision !== revision) return changed(c);
+    const agentId = fields.agentId;
+    if (agentId !== undefined && typeof agentId !== "string")
+      throw new McpCatalogValidationError(
+        "Invalid discovery credential selection.",
+      );
+    const binding =
+      agentId === undefined
+        ? undefined
+        : catalog.credentialBinding(agentId, id);
+    if (agentId !== undefined && !binding?.reference) return changed(c);
+    const allowed = () => {
+      if (catalog.get(id)?.revision !== revision) return false;
+      if (agentId === undefined) return true;
+      const current = catalog.credentialBinding(agentId, id);
+      return (
+        !!current &&
+        current.scope === binding?.scope &&
+        current.reference === binding?.reference
+      );
+    };
+    const credential =
+      agentId === undefined
+        ? undefined
+        : await credentials.read(agentId, id, revision);
+    if ((agentId !== undefined && credential === undefined) || !allowed())
+      return changed(c);
+    const result = await discover(
+      definition.endpoint,
+      credential,
+      c.req.raw.signal,
+      allowed,
+    );
+    return allowed() ? c.json(result) : changed(c);
   });
 
   for (const route of ["/agents/:agentId/mcp", "/agents/:agentId/mcp/*"])

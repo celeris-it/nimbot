@@ -45,6 +45,19 @@ test("edits the MCP catalog and manages an agent's grant and write-only credenti
   ).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("Integration name")).toHaveValue("Team docs");
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Connected." }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Tool name")).toHaveCount(1);
+  await page.getByRole("button", { name: "Review tool" }).click();
+  await expect(page.getByLabel("Tool name").last()).toHaveValue("lookup");
+  await expect(page.getByLabel("Access", { exact: true }).last()).toHaveValue(
+    "write",
+  );
+  await expect(page.getByLabel("Argument schema (JSON)").last()).toBeFocused();
+  await page.reload();
+  await expect(page.getByLabel("Tool name")).toHaveCount(1);
 
   await page.goto("/agents/dev/setup");
   await page.getByRole("link", { name: "MCP access" }).click();

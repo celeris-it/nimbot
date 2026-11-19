@@ -79,6 +79,17 @@ const panel = createPanel(
       catalog: mcpCatalog,
       credentials: mcpCredentials,
       agentExists: (id) => agents.has(id),
+      listAgents: () =>
+        [...agents].map(([id, agent]) => ({ id, name: agent.name })),
+      discover: async () => ({
+        status: "connected",
+        tools: [
+          {
+            name: "lookup",
+            inputSchema: { type: "object", required: ["query"] },
+          },
+        ],
+      }),
     },
     delegations: {
       store: tasks,

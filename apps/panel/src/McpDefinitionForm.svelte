@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
+  import type { McpDiscoveryResult } from "../../server/src/panel-contracts.js";
+  import type { McpDiscoveredTool } from "../../server/src/mcp-discovery.js";
   import type {
     McpDefinition,
     McpCatalogTool,
@@ -13,10 +15,14 @@
     definition,
     busy,
     save,
+    discoveryAgents,
+    discover,
   }: {
     definition?: McpDefinition;
     busy: boolean;
     save: (settings: Settings) => Promise<void>;
+    discoveryAgents: { id: string; name: string }[];
+    discover: (agentId?: string) => Promise<McpDiscoveryResult | undefined>;
   } = $props();
   let label = $state(untrack(() => definition?.label ?? ""));
   let endpoint = $state(untrack(() => definition?.endpoint ?? ""));
@@ -33,6 +39,39 @@
   );
   let nextId = untrack(() => tools.length);
   let parseError = $state("");
+  let discovery = $state<McpDiscoveryResult>();
+  let credentialAgent = $state("");
+  let endpointChanged = $derived(endpoint.trim() !== definition?.endpoint);
+  const discoveryStatus = {
+    timeout: "Connection timed out.",
+    redirect: "The endpoint attempted to redirect the connection.",
+    unauthorized:
+      "The endpoint rejected the connection. Check the selected credential.",
+    unavailable: "The MCP endpoint is unavailable.",
+  };
+
+  async function testConnection() {
+    if (busy || endpointChanged) return;
+    discovery = undefined;
+    discovery = await discover(credentialAgent || undefined);
+  }
+
+  async function reviewTool(tool: McpDiscoveredTool) {
+    if (busy || endpointChanged) return;
+    const existing = tools.find((entry) => entry.name === tool.name);
+    const schema = JSON.stringify(tool.inputSchema, null, 2);
+    let id: number;
+    if (existing) {
+      existing.schema = schema;
+      id = existing.id;
+    } else {
+      if (tools.length >= 32) return;
+      id = nextId++;
+      tools.push({ id, name: tool.name, access: "write", schema });
+    }
+    await tick();
+    document.getElementById(`mcp-tool-schema-${id}`)?.focus();
+  }
 
   function addTool() {
     tools.push({
@@ -93,6 +132,58 @@
   <label
     ><input class="checkbox" type="checkbox" bind:checked={enabled} /> Enable integration</label
   >
+
+  {#if definition}
+    <h2>Connection test</h2>
+    <label for="mcp-discovery-credential">Connection credential</label>
+    <select id="mcp-discovery-credential" bind:value={credentialAgent}>
+      <option value="">No credential</option>
+      {#each discoveryAgents as agent (agent.id)}
+        <option value={agent.id}>{agent.name} ({agent.id})</option>
+      {/each}
+    </select>
+    {#if endpointChanged}<p>
+        Save the endpoint before testing the connection.
+      </p>{/if}
+    <button
+      class="btn"
+      type="button"
+      disabled={busy || endpointChanged}
+      onclick={testConnection}>Test connection</button
+    >
+    {#if discovery && !endpointChanged}
+      {#if discovery.status === "connected"}
+        <p role="status">
+          Connected. {discovery.tools.length
+            ? "Review the tools you want to approve."
+            : "No supported tools were found."}
+        </p>
+        {#if discovery.tools.length}
+          <ul class="discovered">
+            {#each discovery.tools as tool (tool.name)}
+              <li>
+                <code>{tool.name}</code>
+                <button
+                  class="btn"
+                  type="button"
+                  disabled={busy ||
+                    (tools.length >= 32 &&
+                      !tools.some(({ name }) => name === tool.name))}
+                  onclick={() => reviewTool(tool)}
+                >
+                  {tools.some(({ name }) => name === tool.name)
+                    ? "Review schema"
+                    : "Review tool"}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {:else}
+        <p role="status">{discoveryStatus[discovery.status]}</p>
+      {/if}
+    {/if}
+  {/if}
 
   <h2>Approved tools</h2>
   {#if tools.length === 0}<p>No tools selected.</p>{/if}
@@ -156,5 +247,16 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
+  }
+  .discovered {
+    padding: 0;
+    list-style: none;
+  }
+  .discovered li {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    overflow-wrap: anywhere;
   }
 </style>

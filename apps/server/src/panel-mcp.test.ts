@@ -1,12 +1,13 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { openMcpCatalog, type McpDefinition } from "./mcp-catalog.js";
 import { openMcpCredentials } from "./mcp-credentials.js";
 import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";
 import { createPanel } from "./panel.js";
+import type { createMcpDiscovery } from "./mcp-discovery.js";
 
 const draft = {
   label: "Workspace docs",
@@ -24,8 +25,21 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     const config = readPanelConfig({
       PANEL_PASSWORD_HASH: await hashPassword("test-password"),
     });
+    const discover = vi.fn<ReturnType<typeof createMcpDiscovery>>(async () => ({
+      status: "connected",
+      tools: [],
+    }));
     const panel = createPanel(config, {
-      mcp: { catalog, credentials, agentExists },
+      mcp: {
+        catalog,
+        credentials,
+        agentExists,
+        listAgents: () => [
+          { id: "a", name: "Alice" },
+          { id: "b", name: "Bob" },
+        ],
+        discover,
+      },
     });
     const login = await panel.request("/api/login", {
       method: "POST",
@@ -59,6 +73,7 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     expect(created.status).toBe(201);
     const { id, revision } = (await created.json()) as McpDefinition;
     const path = `/api/mcp/${id}`;
+    const discoveryPath = `${path}/discover`;
     const agentPath = `/api/agents/a/mcp/${id}`;
     expect(await (await get(path)).json()).toEqual({ ...draft, id, revision });
     const token = "example-mcp-credential";
@@ -72,6 +87,27 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
       cleanupPending: false,
     });
     expect(await credentials.read("a", id, revision)).toBe(token);
+    expect(await (await get(`${path}/discovery-agents`)).json()).toEqual({
+      agents: [{ id: "a", name: "Alice" }],
+    });
+    expect((await post(discoveryPath, { agentId: "b", revision })).status).toBe(
+      409,
+    );
+    expect(
+      (await post(discoveryPath, { agentId: "a", revision: revision + 1 }))
+        .status,
+    ).toBe(409);
+    expect(discover).not.toHaveBeenCalled();
+    expect(
+      await (await post(discoveryPath, { agentId: "a", revision })).json(),
+    ).toEqual({ status: "connected", tools: [] });
+    expect(discover).toHaveBeenCalledExactlyOnceWith(
+      draft.endpoint,
+      token,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(await (await get(path)).json()).toEqual({ ...draft, id, revision });
     for (const url of [
       "/api/mcp",
       path,

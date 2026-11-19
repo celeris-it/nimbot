@@ -13,6 +13,7 @@ export type DelegationHistory = ReturnType<
   import("./task-queue.js").TaskStore["listDelegations"]
 >;
 export type { McpDefinition } from "./mcp-catalog.js";
+export type { McpDiscoveryResult } from "./mcp-discovery.js";
 export type McpDefinitionSummary = Pick<
   import("./mcp-catalog.js").McpDefinition,
   "id" | "label" | "enabled" | "revision"

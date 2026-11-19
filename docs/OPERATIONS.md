@@ -28,7 +28,7 @@ Compose stores server state in `<project>_server-state`. Every panel-created age
 
 Server backups contain bot tokens, Agent Host tokens, and MCP bearer credentials. Agent backups can contain AI provider credentials. Keep the backups private, and back up the panel password hash and other `.env` settings separately.
 
-Use **MCP catalog** to edit the HTTPS endpoint and select the allowed tools, argument schemas, and read/write classifications. On the agent’s page, **MCP access** manages its grant and private bearer credential. Changing the endpoint retires grants and credentials for the old endpoint. Revoking access or deleting an agent also retires the corresponding credentials. Removing a credential takes effect immediately, and the Server retries failed file cleanup on startup or a later MCP settings change.
+Use **MCP catalog** to edit the HTTPS endpoint and select the allowed tools, argument schemas, and read/write classifications. On the agent’s page, **MCP access** manages its grant and private bearer credential. Changing the endpoint retires grants and credentials for the old endpoint. Revoking access or deleting an agent also retires the corresponding credentials. Removing a credential takes effect immediately, and the Server retries failed file cleanup on startup or a later MCP settings change. **Test connection** contacts only the saved HTTPS endpoint, using either no credential or the selected agent’s stored bearer credential. The Server rejects redirects and bounds discovery to eight seconds, 128 KiB of response bodies, and four tool pages. Discovery lists tool names and object schemas. Select a tool to review its schema and access classification, then save the integration to approve it.
 
 ## Backup
 

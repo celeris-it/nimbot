@@ -49,6 +49,7 @@ import { openBotSecrets } from "./bot-secret.js";
 import { openDiscordSecrets } from "./discord-secret.js";
 import { openMcpCatalog } from "./mcp-catalog.js";
 import { openMcpCredentials } from "./mcp-credentials.js";
+import { createMcpDiscovery } from "./mcp-discovery.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
 import { openAgentRegistry } from "./agent-registry.js";
@@ -464,6 +465,12 @@ async function main(): Promise<void> {
       catalog: mcpCatalog,
       credentials: mcpCredentials,
       agentExists: (id) => !!registry.get(id),
+      listAgents: () =>
+        registry.listIds().flatMap((id) => {
+          const agent = registry.get(id);
+          return agent ? [{ id, name: agent.name }] : [];
+        }),
+      discover: createMcpDiscovery(),
     },
     schedules: {
       store: scheduleStore,

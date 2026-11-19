@@ -6,6 +6,7 @@
     McpAgentDefinition,
     McpDefinition,
     McpDefinitionSummary,
+    McpDiscoveryResult,
     PanelSession,
     PanelStatus,
     ScheduleList,
@@ -45,6 +46,7 @@
   let delegationPage = $state(delegationPageOf(location.search));
   let mcpDefinitions = $state<McpDefinitionSummary[]>([]);
   let mcpDefinition = $state<McpDefinition>();
+  let mcpDiscoveryAgents = $state<{ id: string; name: string }[]>([]);
   let mcpAgentDefinitions = $state<McpAgentDefinition[]>([]);
   let peers = $state<{
     grants: PeerGrant[];
@@ -125,6 +127,7 @@
     delegationPage = delegationPageOf(url.search);
     delegations = undefined;
     mcpDefinition = undefined;
+    mcpDiscoveryAgents = [];
     mcpDefinitions = [];
     mcpAgentDefinitions = [];
     agent = undefined;
@@ -172,10 +175,18 @@
             { signal: current.signal },
           );
           mcpDefinitions = data.definitions;
-        } else if (id !== "new")
-          mcpDefinition = await request<McpDefinition>(`/api/mcp/${id}`, {
-            signal: current.signal,
-          });
+        } else if (id !== "new") {
+          const url = `/api/mcp/${id}`;
+          const [definition, discovery] = await Promise.all([
+            request<McpDefinition>(url, { signal: current.signal }),
+            request<{ agents: { id: string; name: string }[] }>(
+              `${url}/discovery-agents`,
+              { signal: current.signal },
+            ),
+          ]);
+          mcpDefinition = definition;
+          mcpDiscoveryAgents = discovery.agents;
+        }
       } else if (route) {
         agent = await request<AgentDetail>(`/api/agents/${route[1]}`, {
           signal: current.signal,
@@ -485,6 +496,9 @@
         JSON.stringify({ ...settings, revision: mcpDefinition.revision }),
         (result) => {
           mcpDefinition = result.definition;
+          controller?.abort();
+          inFlight = false;
+          void load();
           notice = result.cleanupPending
             ? "Integration saved. Credential cleanup is pending."
             : "Integration saved.";
@@ -500,6 +514,18 @@
         },
       );
     }
+  }
+  async function discoverMcp(agentId?: string) {
+    if (!mcpDefinition || busy) return undefined;
+    let result: McpDiscoveryResult | undefined;
+    await mutate<McpDiscoveryResult>(
+      `/api/mcp/${encodeURIComponent(mcpDefinition.id)}/discover`,
+      JSON.stringify({ revision: mcpDefinition.revision, agentId }),
+      (value) => {
+        result = value;
+      },
+    );
+    return result;
   }
   async function mcpAgentAction(
     definition: McpAgentDefinition,
@@ -830,7 +856,13 @@
     </h1>
     <a class="btn" href="/mcp">Back to catalog</a>
     {#key path + (mcpDefinition?.revision ?? "")}
-      <McpDefinitionForm definition={mcpDefinition} {busy} save={saveMcp} />
+      <McpDefinitionForm
+        definition={mcpDefinition}
+        {busy}
+        save={saveMcp}
+        discoveryAgents={mcpDiscoveryAgents}
+        discover={discoverMcp}
+      />
     {/key}
   {:else if agent && route}
     {#if route[2] === "schedules" && schedules}
