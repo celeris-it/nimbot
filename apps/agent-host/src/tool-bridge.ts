@@ -1,3 +1,4 @@
+import { ATTACHMENT_OPERATION } from "./attachments.js";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   createServer,
@@ -75,7 +76,8 @@ export async function createToolBridge(
   for (const definition of [...definitions, ...remote]) {
     if (!snapshot.tools.operations.includes(definition.operation)) continue;
     if (
-      tools.size >= 32 ||
+      tools.size >=
+        32 + Number(snapshot.tools.operations.includes(ATTACHMENT_OPERATION)) ||
       tools.has(definition.name) ||
       !/^[a-zA-Z0-9_-]{1,64}$/.test(definition.name) ||
       definition.description.length > 512 ||

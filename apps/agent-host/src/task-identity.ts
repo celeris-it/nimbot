@@ -1,3 +1,4 @@
+import { ATTACHMENT_OPERATION } from "./attachments.js";
 /** Correlation supplied by the Server, never permission to perform an operation. */
 export interface TaskIdentity {
   agentId: string;
@@ -61,7 +62,8 @@ export function isTaskToolAccess(
     /^[a-f0-9]{64}$/.test(data.token) &&
     Array.isArray(data.operations) &&
     data.operations.length > 0 &&
-    data.operations.length <= 32 &&
+    data.operations.length <=
+      32 + Number(data.operations.includes(ATTACHMENT_OPERATION)) &&
     data.operations.every(
       (id) => typeof id === "string" && /^[a-z][a-z0-9_.:-]{0,127}$/.test(id),
     ) &&

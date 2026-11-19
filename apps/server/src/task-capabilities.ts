@@ -1,3 +1,4 @@
+import { ATTACHMENT_OPERATION } from "./telegram-attachments.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { RoutedTask, TaskStore } from "./task-queue.js";
 
@@ -31,7 +32,8 @@ const digest = (token: string) => createHash("sha256").update(token).digest();
 function operations(value: unknown): string[] | undefined {
   if (
     !Array.isArray(value) ||
-    value.length > MAX_OPERATIONS ||
+    value.length >
+      MAX_OPERATIONS + Number(value.includes(ATTACHMENT_OPERATION)) ||
     !value.every((id) => typeof id === "string" && OPERATION.test(id)) ||
     new Set(value).size !== value.length
   )

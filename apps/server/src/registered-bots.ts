@@ -1,3 +1,4 @@
+import { createTelegramAttachments } from "./telegram-attachments.js";
 import { log } from "./logger.js";
 import { GrammyError } from "grammy";
 import type { openAgentRegistry } from "./agent-registry.js";
@@ -91,6 +92,7 @@ export function createRegisteredBots(
               createHostTasks(host, request, undefined, config.taskWaitMs),
               () => registry.get(id)?.instructions ?? "",
             ),
+            attachments: createTelegramAttachments(host, request),
             decide: createHostApprovals(host, request),
             access,
           });

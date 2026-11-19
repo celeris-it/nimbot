@@ -1,3 +1,4 @@
+import { createTelegramAttachments } from "./telegram-attachments.js";
 import { createAgentTaskServices } from "./agent-task-services.js";
 import {
   createHostTasks,
@@ -315,6 +316,7 @@ async function main(): Promise<void> {
           ),
           () => registry.get(id)?.instructions ?? "",
         ),
+        attachments: createTelegramAttachments(host),
         decide: createHostApprovals(host),
         access: createAgentAccess(registry, id),
         discord: {

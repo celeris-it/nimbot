@@ -1,3 +1,8 @@
+import {
+  ATTACHMENT_LIMIT,
+  attachmentTaskId,
+  type createAttachments,
+} from "./attachments.js";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { Hono } from "hono";
@@ -115,6 +120,7 @@ export function createHostApi(
   runner?: TaskRunner,
   auth?: EngineAuth,
   memory?: Pick<MemoryStore, "list" | "delete">,
+  attachments?: ReturnType<typeof createAttachments>,
 ) {
   const app = new Hono();
   app.use("*", async (c, next) => {
@@ -143,6 +149,48 @@ export function createHostApi(
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );
+  app.put("/attachments/:id/:name", async (c) => {
+    if (!attachments) return c.notFound();
+    const { id, name } = c.req.param();
+    const size = c.req.header("X-Attachment-Size");
+    if (
+      !attachmentTaskId.test(id) ||
+      !size ||
+      !/^\d{1,8}$/.test(size) ||
+      Number(size) > ATTACHMENT_LIMIT
+    )
+      return c.json({ error: "Invalid attachment metadata" }, 400);
+    try {
+      await attachments.importFile(
+        id,
+        name,
+        c.req.raw.body ??
+          new ReadableStream({ start: (controller) => controller.close() }),
+        Number(size),
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(60_000)]),
+      );
+      return c.body(null, 204);
+    } catch {
+      return c.json({ error: "Attachment could not be saved" }, 400);
+    }
+  });
+  app.post("/tasks/:id/attachment", async (c) => {
+    const id = c.req.param("id");
+    if (
+      !attachments ||
+      !attachmentTaskId.test(id) ||
+      (await runner?.get(id))?.status !== "completed"
+    )
+      return c.notFound();
+    const file = attachments.consume(id);
+    return file
+      ? c.body(new Uint8Array(file.bytes), 200, {
+          "Content-Type": "application/octet-stream",
+          "X-Attachment-Name": file.name,
+          "Content-Length": String(file.bytes.length),
+        })
+      : c.notFound();
+  });
   const needsRunner = available(() => runner, "Task execution unavailable");
   app.get(
     "/tasks/:id/tool-requests/:invocationId",
@@ -251,7 +299,15 @@ export function createHostApi(
       const id = c.req.param("id");
       if (!runner || !(await runner.get(id)))
         return c.json({ error: "Task not found" }, 404);
-      return c.json({ id, events: await runner.getEvents(id, Number(after)) });
+      const events = await runner.getEvents(id, Number(after));
+      return c.json({
+        id,
+        events,
+        ...(events.some((event) => event.status === "completed") &&
+        attachments?.has(id)
+          ? { attachment: true }
+          : {}),
+      });
     },
   );
   app.get("/tasks/:id", async (c) => {

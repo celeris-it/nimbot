@@ -34,6 +34,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
 - Run saved prompts once, daily, weekly, at fixed intervals, or on authenticated webhook requests configured from the panel, with results delivered to the owner's Telegram chat.
+- Send documents up to 10 MiB to a Telegram agent and ask it to return generated files in the same chat.
 - Cancel a running task without affecting other agents or blocking later queued tasks.
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
 - Replace revoked bot tokens securely and retain persistent volumes by default when deleting an agent.
@@ -50,6 +51,14 @@ The panel uses one locally configured administrator account. Each agent has one 
 | `/schedules` | List this agent's scheduled tasks, next run times, and enabled state |
 | `/stop` | Cancel only this agent's running task |
 | Text message | Queue a task for this bot's agent |
+| Document with a caption | Queue a task using that document |
+| Document without a caption | Save the document and confirm its workspace path |
+
+Send one document at a time. Documents of any file type are stored as received,
+up to 10 MiB. Reply to the original document with instructions or use the
+workspace path in a later message. Ask the agent in the chat to return a file
+and it can attach one document of up to 10 MiB after the task succeeds.
+See [attachment handling and recovery](docs/OPERATIONS.md#telegram-documents).
 
 Agent creation, configuration, token replacement, container start/stop, and deletion are panel actions. Stopping a container safely interrupts active work; `/stop` cancels the task while leaving the container available.
 
@@ -339,7 +348,7 @@ replayed events, cross-channel deduplication and context, and restored FIFO work
 
 The following ideas are deferred, not supported features or delivery commitments:
 
-- **Messaging:** WhatsApp, Slack, shared agents, groups/topics, file and media attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
+- **Messaging:** WhatsApp, Slack, shared agents, groups/topics, photo and media messages, Discord attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
 - **Nimbot messaging app:** a dedicated messaging app with [Matrix](https://matrix.org/) connectivity.
 - **Agent capabilities:** multi-hop orchestration, shared memory and workspaces, richer memory retrieval, external MCP OAuth, arbitrary MCP stdio commands, and a tool marketplace.
 - **Scheduled automation:** chat-created schedules, Discord delivery, cron expressions, additional event triggers, and chained automations.

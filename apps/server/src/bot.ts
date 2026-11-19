@@ -1,3 +1,8 @@
+import {
+  ATTACHMENT_LIMIT,
+  attachmentName,
+  type TelegramDocument,
+} from "./telegram-attachments.js";
 import { log } from "./logger.js";
 import type { HostStatus } from "./agent-host.js";
 import type { ChatBinding } from "./chat-binding.js";
@@ -8,6 +13,8 @@ import type { BotAccess } from "./agent-access.js";
 import type { Schedule } from "./schedule-store.js";
 
 const failureMessages = {
+  attachment_unavailable:
+    "I could not open the document. Send it again to try a new task.",
   busy: "The agent is busy. Try again when the current task finishes.",
   failed:
     "The task failed or exceeded the time limit. You can send another task.",
@@ -46,6 +53,7 @@ export type SubmitTask = (
   chatId: number,
   prompt: string,
   updateId: number,
+  attachment?: { document?: TelegramDocument; replyDocumentId?: number },
 ) => { ahead: number; duplicate?: boolean };
 
 /** What one agent bot needs: its own token and the one owner it serves. */
@@ -172,7 +180,7 @@ export function createBot(
   });
   bot.command("help", async (ctx) => {
     await ctx.reply(
-      `${config.agent.name}: your user is authorized. Use /status to check the status, /schedules to list scheduled tasks, and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
+      `${config.agent.name}: your user is authorized. Use /status to check the status, /schedules to list scheduled tasks, and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Send one document up to 10 MiB with instructions, or send it alone to save it. Reply to a saved document to use it. Ask me to return a file in this chat. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
     );
   });
   bot.command("schedules", async (ctx) => {
@@ -239,14 +247,20 @@ export function createBot(
               }[await hostStatus()];
     await ctx.reply(`${config.agent.name}\nChat: linked\n${host}`);
   });
-  bot.on("message:text", async (ctx) => {
+  bot.on(["message:text", "message:document"], async (ctx) => {
+    const message = ctx.message;
+    const document = message.document;
+    const prompt = (document ? message.caption : message.text) ?? "";
+    const replyDocument = message.reply_to_message?.document
+      ? message.reply_to_message.message_id
+      : undefined;
     if (!execute) {
       await ctx.reply(
         "I cannot run tasks yet: the Agent Host is not connected. Your message was not sent to any agent.",
       );
       return;
     }
-    if (ctx.message.text.startsWith("/")) {
+    if (!document && prompt.startsWith("/")) {
       await ctx.reply("Command not available. Use /help to see the options.");
       return;
     }
@@ -256,6 +270,17 @@ export function createBot(
       "The agent's setup is not complete. Your message was not sent; check the panel before trying again.";
     if (!configured()) {
       await ctx.reply(incomplete);
+      return;
+    }
+    if (document && message.media_group_id) {
+      await ctx.reply("Send one document at a time.");
+      return;
+    }
+    if (
+      document?.file_size !== undefined &&
+      document.file_size > ATTACHMENT_LIMIT
+    ) {
+      await ctx.reply("Documents must be 10 MiB or smaller.");
       return;
     }
     // Checked before submission, so this reply is unambiguous: nothing was sent.
@@ -276,8 +301,23 @@ export function createBot(
       ({ ahead, duplicate } = execute(
         ctx.me.id,
         ctx.chat.id,
-        ctx.message.text,
+        prompt,
         ctx.update.update_id,
+        ...(document
+          ? [
+              {
+                document: {
+                  messageId: message.message_id,
+                  fileId: document.file_id,
+                  name: attachmentName(document.file_name),
+                  size: document.file_size,
+                  saveOnly: !prompt.trim(),
+                },
+              },
+            ]
+          : replyDocument === undefined
+            ? []
+            : [{ replyDocumentId: replyDocument }]),
       ));
     } catch {
       await ctx.reply(

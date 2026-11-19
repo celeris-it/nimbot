@@ -6,6 +6,7 @@ import type { ToolOutcome } from "./tool-dispatch.js";
 export class HostTaskError extends Error {
   constructor(
     readonly kind:
+      | "attachment_unavailable"
       | "busy"
       | "unavailable"
       | "failed"
@@ -44,6 +45,8 @@ export interface HostTaskExecution {
   ): Promise<ToolOutcome>;
   /** Must durably bind the accepted Host ID before any events are handled. */
   onAccepted(hostTaskId: string): boolean;
+  /** A completed Host task has a selected file waiting for delivery. */
+  onAttachment?(): void;
 }
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -312,6 +315,8 @@ export function createHostTasks(
           if (event.status === "completed") {
             if (typeof event.output !== "string")
               throw new HostTaskError("unavailable");
+            if ("attachment" in result && result.attachment === true)
+              execution?.onAttachment?.();
             return event.output;
           }
           if (event.status === "approval") {

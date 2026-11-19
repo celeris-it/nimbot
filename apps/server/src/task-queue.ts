@@ -1,3 +1,4 @@
+import type { TelegramDocument } from "./telegram-attachments.js";
 import { isDiscordId } from "./discord-identity.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -13,6 +14,8 @@ export interface QueuedTask {
   botId: number;
   chatId: number;
   prompt: string;
+  telegramDocument?: TelegramDocument;
+  replyDocumentId?: number;
   scheduleId?: string;
   scheduleName?: string;
   scheduledFor?: number;
@@ -102,6 +105,7 @@ const failureKinds = new Set([
   "timeout",
   "cancelled",
   "not_ready",
+  "attachment_unavailable",
 ]);
 function encodeDelegationResult(
   status: TaskStatus,
@@ -202,6 +206,10 @@ export function openTaskStore(path: string) {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       update_id INTEGER,
+      telegram_document TEXT,
+      telegram_document_id INTEGER,
+      reply_document_id INTEGER,
+      attachment_saved INTEGER NOT NULL DEFAULT 0,
       schedule_id TEXT,
       schedule_name TEXT,
       scheduled_for INTEGER,
@@ -219,6 +227,9 @@ export function openTaskStore(path: string) {
     )`);
     db.exec(
       "CREATE INDEX IF NOT EXISTS tasks_agent_queue ON tasks (agent_id, status, seq)",
+    );
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS tasks_telegram_document ON tasks (agent_id, bot_id, chat_id, telegram_document_id) WHERE telegram_document_id IS NOT NULL",
     );
     db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS tasks_delegation ON tasks (delegation_id) WHERE delegation_id IS NOT NULL",
@@ -274,7 +285,7 @@ export function openTaskStore(path: string) {
     throw error;
   }
   const columns =
-    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, schedule_name AS scheduleName, scheduled_for AS scheduledFor, delegation_id, parent_task_id, source_agent_id";
+    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, schedule_name AS scheduleName, scheduled_for AS scheduledFor, delegation_id, parent_task_id, source_agent_id, telegram_document, reply_document_id";
   function scheduleMetadata(row: Record<string, unknown>) {
     return row.scheduleId == null
       ? {}
@@ -318,6 +329,16 @@ export function openTaskStore(path: string) {
       ...base,
       botId: Number(row.botId),
       chatId: Number(row.chatId),
+      ...(typeof row.telegram_document === "string"
+        ? {
+            telegramDocument: JSON.parse(
+              row.telegram_document,
+            ) as TelegramDocument,
+          }
+        : {}),
+      ...(typeof row.reply_document_id === "number"
+        ? { replyDocumentId: row.reply_document_id }
+        : {}),
       origin: {
         platform: "telegram",
         botId: Number(row.botId),
@@ -809,7 +830,7 @@ export function openTaskStore(path: string) {
             .get(task.agentId)!.n,
         );
         db.prepare(
-          "INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at, update_id) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
+          "INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at, update_id, telegram_document, telegram_document_id, reply_document_id) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
         ).run(
           id,
           task.agentId,
@@ -819,6 +840,9 @@ export function openTaskStore(path: string) {
           now,
           now,
           task.updateId ?? null,
+          task.telegramDocument ? JSON.stringify(task.telegramDocument) : null,
+          task.telegramDocument?.messageId ?? null,
+          task.replyDocumentId ?? null,
         );
         db.exec("COMMIT");
         return { id, ahead, duplicate: false };
@@ -826,6 +850,30 @@ export function openTaskStore(path: string) {
         db.exec("ROLLBACK");
         throw error;
       }
+    },
+    markAttachmentSaved(taskId: string) {
+      return (
+        db
+          .prepare(
+            "UPDATE tasks SET attachment_saved = 1 WHERE id = ? AND status = 'running' AND telegram_document IS NOT NULL",
+          )
+          .run(taskId).changes === 1
+      );
+    },
+    savedTelegramDocument(
+      agentId: string,
+      botId: number,
+      chatId: number,
+      messageId: number,
+    ) {
+      const row = db
+        .prepare(
+          "SELECT id, telegram_document FROM tasks WHERE agent_id = ? AND bot_id = ? AND chat_id = ? AND telegram_document_id = ? AND attachment_saved = 1 ORDER BY seq LIMIT 1",
+        )
+        .get(agentId, botId, chatId, messageId);
+      if (!row || typeof row.telegram_document !== "string") return undefined;
+      const document = JSON.parse(row.telegram_document) as TelegramDocument;
+      return `attachments/${String(row.id)}/${document.name}`;
     },
     /** Telegram executor admission stops at a Discord task until routed execution is attached. */
     claimNext(agentId: string): QueuedTask | undefined {
@@ -1315,12 +1363,15 @@ export function createRoutedTaskQueue(
       chatId: number,
       prompt: string,
       updateId?: number,
+      attachment?: { document?: TelegramDocument; replyDocumentId?: number },
     ) {
       const saved = config.store.enqueue({
         agentId: config.agentId,
         botId,
         chatId,
         prompt,
+        telegramDocument: attachment?.document,
+        replyDocumentId: attachment?.replyDocumentId,
         ...(updateId === undefined ? {} : { updateId }),
       });
       queue.kick();

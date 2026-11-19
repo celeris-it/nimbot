@@ -1,3 +1,4 @@
+import { createAttachments } from "./attachments.js";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
@@ -23,15 +24,23 @@ try {
     pathToFileURL(resolve(stateDir, "tasks.sqlite")).href,
   );
   const memory = openMemoryStore(resolve(stateDir, "memory.sqlite"));
+  const attachments = createAttachments(config.workspace);
   const runner = createTaskRunner(
     store,
     createOpenCodeEngine(
       config.workspace,
       createSessionFile(resolve(stateDir, "engine-session.json")),
       undefined,
-      [...createMemoryTools(memory), ...createPeerToolDefinitions()],
+      [
+        ...createMemoryTools(memory),
+        ...createPeerToolDefinitions(),
+        attachments.tool,
+      ],
     ),
     readTaskTimeoutMs(process.env),
+    undefined,
+    undefined,
+    attachments.discard,
   );
   const auth = await createOpenCodeAuth(
     resolve(
@@ -41,7 +50,7 @@ try {
     runner.reserve,
     runner.isBusy,
   );
-  const app = createHostApi(config, runner, auth, memory);
+  const app = createHostApi(config, runner, auth, memory, attachments);
   const server = serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 3001 });
   server.on("error", () => {
     log.error("host.http_start_failed");

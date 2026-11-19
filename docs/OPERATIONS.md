@@ -126,6 +126,27 @@ For delegation, `agent_delegate` asks the initiating owner for approval with a 3
 
 **Unexpected state.** Resources the server did not create, or that disagree with its registry, appear as *untracked* or *missing* in the status inventory. Nimbot never adopts or deletes them automatically; inspect them with `docker ps -a --filter label=io.nimbot.agent-id`.
 
+### Telegram documents
+
+The owner's private bot chat accepts one Telegram document per message, up to
+10 MiB. A caption runs a task. A document without a caption is saved without
+using the AI provider. Both use the agent's FIFO queue. Reply to the original
+message to use a saved document, or pass its workspace path in a new task.
+Nimbot accepts all document types. The agent's tools determine which formats
+it can read. Send a photo as a document if you want to save the original file.
+
+The Server stores the Telegram file reference before downloading. The Agent
+Host stores the file in `attachments/<task-id>/` within its workspace.
+A queued import can resume after a restart. An interrupted import or task
+is not replayed. After a failed import, resend the original document.
+
+To receive a file, ask in the chat. The agent can select one file of up to
+10 MiB from that turn's `exports/<task-id>/` directory. Nimbot sends it back
+to the originating chat after successful completion. The selected copy is
+held in memory for up to ten minutes. If delivery is uncertain, check the chat
+before asking again. Imported and exported workspace files are retained with
+the workspace volume and included in its backups.
+
 ### Scheduled tasks
 
 Open **Manage schedules** on the agent page for the last run outcome, execution

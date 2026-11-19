@@ -19,6 +19,7 @@ export function createTaskRunner(
   /** An unanswered approval request is denied after this long. */
   approvalTimeoutMs = 300_000,
   log: Logger = defaultLog,
+  discardAttachment?: (hostTaskId: string) => void,
 ) {
   const approvals = new Map<
     string,
@@ -189,9 +190,11 @@ export function createTaskRunner(
           await requests?.close();
           await progressWrites;
           const status = closing ? "interrupted" : "completed";
+          if (status !== "completed") discardAttachment?.(id);
           log.info("task.finished", { taskId: id, status, stopReason: reason });
           await store.update(id, { status, output, stopReason: reason });
         } catch {
+          discardAttachment?.(id);
           denyPending("task ended");
           await requests?.close();
           await progressWrites;

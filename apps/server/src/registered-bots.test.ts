@@ -347,8 +347,9 @@ it("runs real grammY polling loops with isolated identities, owner activation, H
       {
         url: "http://nimbot-a:3001/tasks",
         authorization: `Bearer ${"a".repeat(64)}`,
-        prompt:
-          "Agent instructions:\nUpdated instructions\n\nUser task:\nTask A",
+        prompt: expect.stringMatching(
+          /^Agent instructions:\nUpdated instructions\n\nUser task:\nTask A\n\nIf the owner explicitly asks for a file, place the file in exports\/[a-f0-9-]+\//,
+        ),
       },
       {
         url: "http://nimbot-b:3001/tasks",
