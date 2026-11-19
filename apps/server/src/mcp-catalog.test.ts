@@ -116,3 +116,36 @@ it("rejects disallowed endpoints, ambiguous tools, and oversized schemas", () =>
     catalog.close();
   }
 });
+
+it("rejects unsupported schemas atomically without replacing the approved definition", () => {
+  const catalog = openMcpCatalog(":memory:", () => true);
+  try {
+    const saved = catalog.create(settings);
+    for (const inputSchema of [
+      { type: "object", required: "text" },
+      {
+        type: "object",
+        properties: {
+          text: { $ref: "https://unapproved.example.test/schema" },
+        },
+      },
+      { type: "object", unknownConstraint: true },
+      { type: "object", $async: true },
+    ]) {
+      const changed = {
+        ...settings,
+        tools: [{ ...settings.tools[0], inputSchema }],
+      };
+      expect(() => catalog.create(changed)).toThrow(
+        "Invalid or unsupported MCP tool schema.",
+      );
+      expect(() => catalog.update(saved.id, 1, changed)).toThrow(
+        "Invalid or unsupported MCP tool schema.",
+      );
+      expect(catalog.get(saved.id)).toEqual(saved);
+      expect(catalog.list()).toEqual([saved]);
+    }
+  } finally {
+    catalog.close();
+  }
+});

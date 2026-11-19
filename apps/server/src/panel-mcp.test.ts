@@ -76,6 +76,25 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     const discoveryPath = `${path}/discover`;
     const agentPath = `/api/agents/a/mcp/${id}`;
     expect(await (await get(path)).json()).toEqual({ ...draft, id, revision });
+    const invalidSchema = await post(path, {
+      ...draft,
+      revision,
+      tools: [
+        {
+          name: "search",
+          access: "read",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: { $ref: "https://unapproved.example.test/private-schema" },
+            },
+          },
+        },
+      ],
+    });
+    expect(invalidSchema.status).toBe(400);
+    expect(await invalidSchema.text()).not.toContain("private-schema");
+    expect(await (await get(path)).json()).toEqual({ ...draft, id, revision });
     const token = "example-mcp-credential";
     expect(
       (await post(`${agentPath}/credential`, { token, revision })).status,

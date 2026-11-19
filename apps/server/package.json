@@ -10,6 +10,8 @@
   "dependencies": {
     "@hono/node-server": "^2.1.8",
     "@modelcontextprotocol/client": "2.4.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "grammy": "^1.46.0",
     "hono": "^4.13.18"
   }

@@ -156,6 +156,45 @@ it("bounds tool count and total metadata, preserving room for local operations",
   expect(f.selection.descriptors("a")[0]!.inputSchema.type).toBe("object");
 });
 
+it("validates arguments only against currently granted pinned schemas", () => {
+  const f = fixture();
+  f.grant();
+  const operation = f.selection.descriptors("a")[0]!.operation;
+  const args = { query: "hello" };
+  expect(f.selection.validate("a", operation, args)).toBe(args);
+  expect(f.selection.validate("a", operation, { query: 1 })).toBeUndefined();
+  expect(f.selection.validate("a", operation, {})).toBeUndefined();
+  expect(
+    f.selection.validate("a", operation, {
+      ...args,
+      endpoint: settings.endpoint,
+    }),
+  ).toBeUndefined();
+  expect(f.selection.validate("b", operation, args)).toBeUndefined();
+  f.catalog.update(f.definition.id, 1, {
+    ...settings,
+    tools: [
+      {
+        ...settings.tools[0],
+        inputSchema: {
+          type: "object",
+          properties: { count: { type: "integer" } },
+          required: ["count"],
+          additionalProperties: false,
+        },
+      },
+    ],
+  });
+  expect(f.selection.validate("a", operation, args)).toBeUndefined();
+  const changed = f.selection.descriptors("a")[0]!.operation;
+  expect(f.selection.validate("a", changed, args)).toBeUndefined();
+  expect(f.selection.validate("a", changed, { count: 1 })).toEqual({
+    count: 1,
+  });
+  f.catalog.revoke("a", f.definition.id);
+  expect(f.selection.validate("a", changed, { count: 1 })).toBeUndefined();
+});
+
 it("revokes a live task capability when its pinned catalog revision changes", () => {
   const f = fixture();
   f.grant();

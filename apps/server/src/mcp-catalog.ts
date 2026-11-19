@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { compileMcpArguments } from "./mcp-arguments.js";
 
 export interface McpCatalogTool {
   name: string;
@@ -74,6 +75,10 @@ function settings(input: unknown) {
       throw new McpCatalogValidationError("Invalid MCP tool definition.");
     if (Buffer.byteLength(JSON.stringify(tool.inputSchema)) > MAX_SCHEMA_BYTES)
       throw new McpCatalogValidationError("MCP tool schema is too large.");
+    if (!compileMcpArguments(tool.inputSchema))
+      throw new McpCatalogValidationError(
+        "Invalid or unsupported MCP tool schema.",
+      );
     names.add(tool.name);
     return {
       name: tool.name,

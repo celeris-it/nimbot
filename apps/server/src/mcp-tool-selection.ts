@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { McpCatalog, McpCatalogTool } from "./mcp-catalog.js";
 import type { RemoteToolDefinition } from "./task-capabilities.js";
+import { compileMcpArguments } from "./mcp-arguments.js";
 
 interface SelectedTool {
   descriptor: RemoteToolDefinition;
@@ -32,6 +33,7 @@ export function createMcpToolSelection(catalog: McpCatalog) {
       const binding = catalog.credentialBinding(agentId, definitionId);
       if (!definition?.enabled || !binding) continue;
       for (const tool of definition.tools) {
+        if (!compileMcpArguments(tool.inputSchema)) continue;
         const descriptor: RemoteToolDefinition = {
           operation: `mcp.${hash({
             agentId,
@@ -70,6 +72,19 @@ export function createMcpToolSelection(catalog: McpCatalog) {
     resolve(agentId: string, operation: string): SelectedTool | undefined {
       return select(agentId).find(
         ({ descriptor }) => descriptor.operation === operation,
+      );
+    },
+    /** Validate against the current pinned schema without coercion or defaults. */
+    validate(
+      agentId: string,
+      operation: string,
+      input: unknown,
+    ): Record<string, unknown> | undefined {
+      const selected = select(agentId).find(
+        ({ descriptor }) => descriptor.operation === operation,
+      );
+      return (
+        selected && compileMcpArguments(selected.tool.inputSchema)?.(input)
       );
     },
   };
