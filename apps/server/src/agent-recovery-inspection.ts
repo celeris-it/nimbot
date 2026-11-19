@@ -2,6 +2,7 @@ import type { openAgentRegistry } from "./agent-registry.js";
 import { agentResourceNames } from "./container-resources.js";
 import { createDockerApi, type DockerApi } from "./docker-api.js";
 import type { openHostCredentials } from "./host-credentials.js";
+import type { RecoveryIntent } from "./recovery-registry.js";
 
 export type RecoveryBlocker =
   | "agent_state"
@@ -12,6 +13,7 @@ export type RecoveryBlocker =
   | "volume_conflict"
   | "labels_mismatch"
   | "name_conflict"
+  | "resource_uncertain"
   | "inspection_failed";
 
 export type RecoveryInspection =
@@ -37,7 +39,10 @@ export function createAgentRecoveryInspection(
   config: { socketPath: string; installationId?: string },
   call: DockerApi = createDockerApi(config.socketPath),
 ) {
-  return async (agentId: string): Promise<RecoveryInspection> => {
+  return async (
+    agentId: string,
+    intents: RecoveryIntent[] = [],
+  ): Promise<RecoveryInspection> => {
     const agent = registry.get(agentId);
     const setup = registry.getProvisioning(agentId);
     if (
@@ -95,19 +100,40 @@ export function createAgentRecoveryInspection(
       if (recorded.code !== 404) throw new Error("Inspection failed");
       // A matching name or even matching ownership labels cannot prove this is
       // the saved container. Only a durable recovery attempt may adopt resources.
-      for (const [kind, name, suffix] of [
-        ["containers", names.container, "/json"],
-        ["networks", names.network, ""],
+      for (const [kind, name, suffix, resourceKind] of [
+        ["containers", names.container, "/json", "container"],
+        ["networks", names.network, "", "network"],
       ] as const) {
+        const intent = intents.find((entry) => entry.kind === resourceKind);
         const response = await call(
           `/${kind}/${encodeURIComponent(name)}${suffix}`,
         );
-        if (response.code === 200)
+        if (response.code === 200) {
+          if (intent) {
+            const data = JSON.parse(response.body);
+            const labels =
+              resourceKind === "container"
+                ? data?.Config?.Labels
+                : data?.Labels;
+            if (
+              owned(labels) &&
+              labels?.["io.nimbot.recovery-operation"] === intent.operationId &&
+              /^[a-f0-9]{64}$/.test(data?.Id) &&
+              (!intent.resourceRef || intent.resourceRef === data.Id)
+            )
+              continue;
+          }
           return blocked(
             "name_conflict",
             `Docker resource ${name} already exists. Inspect and resolve the name conflict without deleting restored volumes.`,
           );
+        }
         if (response.code !== 404) throw new Error("Inspection failed");
+        if (intent)
+          return blocked(
+            "resource_uncertain",
+            `Docker has not confirmed ${name} from the saved recovery attempt. Check Docker and retry inspection. Nimbot cannot safely repeat an unconfirmed create.`,
+          );
       }
       try {
         const host = await credentials.read(agent.id);
@@ -149,7 +175,7 @@ export function createAgentRecoveryInspection(
       // error, malformed response or permission failure is never proof of absence.
       return blocked(
         "inspection_failed",
-        "Docker inspection failed. Check Docker availability and the Server's socket permissions, then retry. No resources were changed.",
+        "Docker inspection failed. Check Docker availability and the Server's socket permissions, then retry.",
       );
     }
 

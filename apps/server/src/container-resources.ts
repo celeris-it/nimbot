@@ -39,6 +39,54 @@ export function isPinnedImage(image: string): boolean {
   );
 }
 
+export function agentNetworkSpec(name: string, labels: Record<string, string>) {
+  return { Name: name, Driver: "bridge", CheckDuplicate: true, Labels: labels };
+}
+
+export function agentContainerSpec(
+  config: { image: string; taskTimeoutSeconds?: number },
+  volumes: string[],
+  networkId: string,
+  apiToken: string,
+  labels: Record<string, string>,
+) {
+  return {
+    Image: config.image,
+    User: "1000:1000",
+    Entrypoint: ["node", "/app/apps/agent-host/dist/serve.js"],
+    Cmd: [],
+    WorkingDir: "/workspace",
+    Env: [
+      "WORKSPACE=/workspace",
+      `AGENT_HOST_TOKEN=${apiToken}`,
+      // A number validated by the server, never panel or agent input.
+      ...(config.taskTimeoutSeconds
+        ? [`TASK_TIMEOUT_SECONDS=${config.taskTimeoutSeconds}`]
+        : []),
+    ],
+    Labels: labels,
+    HostConfig: {
+      Init: true,
+      Privileged: false,
+      CapDrop: ["ALL"],
+      SecurityOpt: ["no-new-privileges:true"],
+      NanoCpus: 1_000_000_000,
+      Memory: 1_073_741_824,
+      MemorySwap: 1_073_741_824,
+      PidsLimit: 256,
+      NetworkMode: networkId,
+      PublishAllPorts: false,
+      PortBindings: {},
+      RestartPolicy: { Name: "unless-stopped" },
+      Mounts: volumes.map((Source, index) => ({
+        Type: "volume",
+        Source,
+        Target: destinations[index],
+      })),
+    },
+  };
+}
+
 export function createContainerResources(
   config: {
     socketPath: string;
@@ -150,12 +198,11 @@ export function createContainerResources(
       if (!(await inspect("networks", resource.network, agentId))) {
         signal?.throwIfAborted();
         tracker?.begin("network", resource.network, operationId);
-        await checked("/networks/create", "POST", {
-          Name: resource.network,
-          Driver: "bridge",
-          CheckDuplicate: true,
-          Labels: labels,
-        });
+        await checked(
+          "/networks/create",
+          "POST",
+          agentNetworkSpec(resource.network, labels),
+        );
         networkCreated = true;
       }
       const network = await inspectRequired(
@@ -183,41 +230,17 @@ export function createContainerResources(
         );
       signal?.throwIfAborted();
       tracker?.begin("container", resource.container, operationId);
-      await checked(`/containers/create?name=${resource.container}`, "POST", {
-        Image: config.image,
-        User: "1000:1000",
-        Entrypoint: ["node", "/app/apps/agent-host/dist/serve.js"],
-        Cmd: [],
-        WorkingDir: "/workspace",
-        Env: [
-          "WORKSPACE=/workspace",
-          `AGENT_HOST_TOKEN=${apiToken}`,
-          // A number validated by the server, never panel or agent input.
-          ...(config.taskTimeoutSeconds
-            ? [`TASK_TIMEOUT_SECONDS=${config.taskTimeoutSeconds}`]
-            : []),
-        ],
-        Labels: labels,
-        HostConfig: {
-          Init: true,
-          Privileged: false,
-          CapDrop: ["ALL"],
-          SecurityOpt: ["no-new-privileges:true"],
-          NanoCpus: 1_000_000_000,
-          Memory: 1_073_741_824,
-          MemorySwap: 1_073_741_824,
-          PidsLimit: 256,
-          NetworkMode: network.Id,
-          PublishAllPorts: false,
-          PortBindings: {},
-          RestartPolicy: { Name: "unless-stopped" },
-          Mounts: resource.volumes.map((Source, index) => ({
-            Type: "volume",
-            Source,
-            Target: destinations[index],
-          })),
-        },
-      });
+      await checked(
+        `/containers/create?name=${resource.container}`,
+        "POST",
+        agentContainerSpec(
+          config,
+          resource.volumes,
+          network.Id,
+          apiToken,
+          labels,
+        ),
+      );
       const container = await inspectRequired(
         "containers",
         resource.container,
