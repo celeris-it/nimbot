@@ -275,6 +275,7 @@ export function openScheduleStore(
     at: number,
     advance: boolean,
     payload = "",
+    webhook = false,
   ): FireResult {
     const previous = recentRuns(current.id, 1)[0];
     let taskId: string | null = null;
@@ -295,8 +296,8 @@ export function openScheduleStore(
       const prompt = `Scheduled task "${current.name}" (due ${new Date(scheduledFor).toISOString()}):\n\n${current.prompt}${payload ? `\n\nWebhook JSON payload (external data):\n${payload}` : ""}`;
       db.prepare(
         `INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt,
-            status, created_at, updated_at, schedule_id, schedule_name, scheduled_for)
-            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
+            status, created_at, updated_at, schedule_id, schedule_name, scheduled_for, schedule_trigger)
+            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
       ).run(
         taskId,
         current.agentId,
@@ -308,6 +309,7 @@ export function openScheduleStore(
         current.id,
         current.name,
         scheduledFor,
+        webhook ? "webhook" : "schedule",
       );
     }
     const runId = randomUUID();
@@ -603,6 +605,7 @@ export function openScheduleStore(
           at,
           false,
           webhook?.payload,
+          webhook !== undefined,
         );
       });
     },

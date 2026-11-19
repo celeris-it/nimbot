@@ -2,7 +2,7 @@ import type { TelegramDocument } from "./telegram-attachments.js";
 import { isDiscordId } from "./discord-identity.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { HostTaskError } from "./host-tasks.js";
+import { HostModelAdmissionExpired, HostTaskError } from "./host-tasks.js";
 import { log as defaultLog, type Logger } from "./logger.js";
 
 export type TaskStatus =
@@ -205,6 +205,7 @@ export function openTaskStore(path: string) {
       status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted', 'cancelled')),
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
+      started_at INTEGER,
       update_id INTEGER,
       telegram_document TEXT,
       telegram_document_id INTEGER,
@@ -213,6 +214,7 @@ export function openTaskStore(path: string) {
       schedule_id TEXT,
       schedule_name TEXT,
       scheduled_for INTEGER,
+      schedule_trigger TEXT CHECK(schedule_trigger IN ('schedule', 'webhook')),
       host_task_id TEXT,
       delegation_id TEXT,
       parent_task_id TEXT,
@@ -346,6 +348,17 @@ export function openTaskStore(path: string) {
       },
     };
   }
+  function nextTask(agentId: string): RoutedTask | undefined {
+    const row = db
+      .prepare(
+        `SELECT ${columns}, platform, discord_bot_id, discord_owner_id, discord_channel_id, discord_message_id FROM tasks
+        WHERE agent_id = ? AND status = 'queued'
+          AND NOT EXISTS (SELECT 1 FROM tasks busy WHERE busy.agent_id = ? AND busy.status = 'running')
+        ORDER BY seq LIMIT 1`,
+      )
+      .get(agentId, agentId);
+    return row ? routed(row) : undefined;
+  }
   function claim(
     agentId: string,
     telegramOnly: boolean,
@@ -353,21 +366,10 @@ export function openTaskStore(path: string) {
   ): RoutedTask | undefined {
     db.exec("BEGIN IMMEDIATE");
     try {
-      const busy = db
-        .prepare(
-          "SELECT 1 FROM tasks WHERE agent_id = ? AND status = 'running'",
-        )
-        .get(agentId);
-      const row = busy
-        ? undefined
-        : db
-            .prepare(
-              `SELECT ${columns}, platform, discord_bot_id, discord_owner_id, discord_channel_id, discord_message_id FROM tasks WHERE agent_id = ? AND status = 'queued' ORDER BY seq LIMIT 1`,
-            )
-            .get(agentId);
+      const head = nextTask(agentId);
       const task =
-        row && (!telegramOnly || row.platform === "telegram")
-          ? routed(row)
+        head && (!telegramOnly || head.origin.platform === "telegram")
+          ? head
           : undefined;
       if (task && ready && !ready(task)) {
         db.exec("COMMIT");
@@ -375,8 +377,8 @@ export function openTaskStore(path: string) {
       }
       if (task)
         db.prepare(
-          "UPDATE tasks SET status = 'running', updated_at = ? WHERE id = ?",
-        ).run(Date.now(), task.id);
+          "UPDATE tasks SET status = 'running', updated_at = ?, started_at = ? WHERE id = ?",
+        ).run(Date.now(), Date.now(), task.id);
       db.exec("COMMIT");
       return task;
     } catch (error) {
@@ -900,6 +902,18 @@ export function openTaskStore(path: string) {
     ): RoutedTask | undefined {
       return claim(agentId, false, ready);
     },
+    peekNextTask: nextTask,
+    requeueUnaccepted(id: string): boolean {
+      return (
+        db
+          .prepare(
+            `UPDATE tasks SET status = 'queued', started_at = NULL, updated_at = ?
+        WHERE id = ? AND status = 'running' AND host_task_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM delegations d WHERE d.child_task_id = tasks.id AND d.cancel_requested_at IS NOT NULL)`,
+          )
+          .run(Date.now(), id).changes === 1
+      );
+    },
     enqueueDiscord(task: Omit<DiscordQueuedTask, "id">) {
       const origin = task.origin;
       if (
@@ -1128,6 +1142,8 @@ export type TaskStore = ReturnType<typeof openTaskStore>;
 interface QueueConfig<T extends { id: string; prompt: string }> {
   agentId: string;
   claim(): T | undefined;
+  prepare?: () => Promise<boolean>;
+  requeue?: (task: T) => boolean;
   finish: TaskStore["finish"];
   /** Synchronous durable finalization, with the accepted cancellation signal still available. */
   finalize?: (
@@ -1167,6 +1183,7 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
       while (!closed) {
         let task: T | undefined;
         try {
+          if (config.prepare && (!(await config.prepare()) || closed)) return;
           task = config.claim();
         } catch {
           return;
@@ -1204,6 +1221,13 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
             };
           }
         } catch (error) {
+          if (
+            error instanceof HostModelAdmissionExpired &&
+            !controller.signal.aborted
+          ) {
+            active.delete(conversationKey);
+            if (config.requeue?.(task)) return;
+          }
           outcome = {
             ok: false,
             kind: error instanceof HostTaskError ? error.kind : "unavailable",
@@ -1284,7 +1308,7 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
 
 type DeliveryConfig<T extends { id: string; prompt: string }> = Omit<
   QueueConfig<T>,
-  "claim" | "finish" | "conversation"
+  "claim" | "finish" | "conversation" | "prepare"
 >;
 
 /** Telegram entry point, retained until bot lifecycle uses routed execution. */
@@ -1329,16 +1353,28 @@ export function taskOriginKey(origin: RoutedTask["origin"]) {
 /** Both platforms use one executor and context; callbacks route using each saved origin. */
 export function createRoutedTaskQueue(
   config: DeliveryConfig<RoutedTask> & {
+    prepare?: (task: RoutedTask) => Promise<boolean>;
     /** Keep the FIFO head queued until its reply transport has been attached. */
     ready?: (task: RoutedTask) => boolean;
     store: Pick<
       TaskStore,
       "enqueue" | "enqueueDiscord" | "claimNextTask" | "finish"
-    >;
+    > &
+      Partial<Pick<TaskStore, "peekNextTask" | "requeueUnaccepted">>;
   },
 ) {
+  let preparedId: string | undefined;
   const queue = createAgentQueue({
     ...config,
+    prepare:
+      config.prepare &&
+      (async () => {
+        const task = config.store.peekNextTask?.(config.agentId);
+        if (!task || config.ready?.(task) === false) return false;
+        preparedId = task.id;
+        return config.prepare!(task);
+      }),
+    requeue: (task) => config.store.requeueUnaccepted?.(task.id) ?? false,
     execute: async (task, report, signal) => {
       const output = await config.execute(task, report, signal);
       if (task.origin.platform === "delegated" && signal.aborted)
@@ -1352,7 +1388,13 @@ export function createRoutedTaskQueue(
           config.store.finish(task.id, status, outcome);
         else config.store.finish(task.id, status);
       }),
-    claim: () => config.store.claimNextTask(config.agentId, config.ready),
+    claim: () =>
+      config.store.claimNextTask(
+        config.agentId,
+        (task) =>
+          (!config.prepare || task.id === preparedId) &&
+          (config.ready?.(task) ?? true),
+      ),
     finish: config.store.finish,
     conversation: (task: RoutedTask) => taskOriginKey(task.origin),
   });

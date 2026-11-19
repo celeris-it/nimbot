@@ -9,6 +9,11 @@ import {
 } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
 import { createHostProviders } from "./host-providers.js";
+import {
+  createAgentUsage,
+  createHostUsage,
+  openAgentUsage,
+} from "./agent-usage.js";
 import { createHostMemories } from "./host-memories.js";
 import { openApprovalStore } from "./approval-store.js";
 import { openAgentGrants } from "./agent-grants.js";
@@ -114,6 +119,7 @@ async function main(): Promise<void> {
   }
   let statePath;
   let taskStore;
+  let usageStore;
   let scheduleStore;
   let approvalStore;
   let approvalRules;
@@ -152,6 +158,7 @@ async function main(): Promise<void> {
     discordInbox = openDiscordInbox(statePath);
     notificationStore = openNotificationStore(statePath);
     taskStore = openTaskStore(statePath);
+    usageStore = openAgentUsage(statePath);
     scheduleStore = openScheduleStore(statePath);
     approvalStore = openApprovalStore(statePath);
     // No operation is verified read-only yet, so persistent allow rules are unavailable.
@@ -174,6 +181,7 @@ async function main(): Promise<void> {
     approvalStore?.close();
     scheduleStore?.close();
     taskStore?.close();
+    usageStore?.close();
     discordInbox?.close();
     notificationStore?.close();
     registry?.close();
@@ -193,6 +201,7 @@ async function main(): Promise<void> {
     discordInbox.close();
     notificationStore.close();
     taskStore.close();
+    usageStore.close();
     registry.close();
   });
   async function inspectContainer(id: string) {
@@ -252,6 +261,13 @@ async function main(): Promise<void> {
     catalog: mcpCatalog,
     credentials: mcpCredentials,
   });
+  const usage = createAgentUsage(
+    usageStore,
+    createHostUsage(async (id) => {
+      if (!hostCredentials) throw new Error("Agent Host unavailable");
+      return hostCredentials.read(id);
+    }),
+  );
   const taskServices = createAgentTaskServices(
     async (id, { wake }) => {
       if (!hostCredentials || !registry.get(id))
@@ -314,6 +330,9 @@ async function main(): Promise<void> {
       return {
         agentId: id,
         canClaim: () => workGate.allowsWork(id),
+        prepareModel: () => usage.prepare(id),
+        recordUsage: (taskId, hostId, reading) =>
+          usage.record(id, taskId, hostId, reading),
         store: taskStore,
         ownerId: () => registry.get(id)?.ownerId ?? 0,
         approvals: { store: approvalStore, rules: approvalRules },
@@ -568,6 +587,7 @@ async function main(): Promise<void> {
     providers: hostCredentials
       ? createHostProviders((id) => hostCredentials!.read(id))
       : undefined,
+    usage: { ...usage, wake: (id) => taskServices.wake([id]) },
     approvals: { rules: approvalRules, history: approvalStore },
     delegations: {
       store: taskStore,
@@ -749,7 +769,22 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   });
   log.info("server.panel_listening", { origin: panelConfig.origin });
+  let recoveringUsage = false;
+  const refreshQueues = () => {
+    void taskServices.wake(usageStore.queuedAgents()).catch(() => {});
+    if (recoveringUsage) return;
+    recoveringUsage = true;
+    void usage
+      .recover()
+      .catch(() => {})
+      .finally(() => {
+        recoveringUsage = false;
+      });
+  };
+  const usageTimer = setInterval(refreshQueues, 30_000);
+  usageTimer.unref();
   const stop = () => {
+    clearInterval(usageTimer);
     void scheduler.close();
     registeredDiscord.close();
     taskServices.close();
@@ -778,6 +813,7 @@ async function main(): Promise<void> {
     log.warn("server.delegation_result_resume_failed");
   });
   void scheduler.start();
+  refreshQueues();
 }
 
 await main();

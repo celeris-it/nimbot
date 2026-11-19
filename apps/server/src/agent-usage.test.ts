@@ -1,0 +1,179 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { expect, it, vi } from "vitest";
+import {
+  createAgentUsage,
+  createHostUsage,
+  openAgentUsage,
+} from "./agent-usage.js";
+import { createRoutedTaskQueue, openTaskStore } from "./task-queue.js";
+import { HostModelAdmissionExpired } from "./host-tasks.js";
+import { openScheduleStore } from "./schedule-store.js";
+
+const model = { providerId: "opencode", modelId: "fixture" };
+const origin = { platform: "telegram", botId: 123, chatId: 42 } as const;
+const tokens = {
+  input: 20,
+  output: 4,
+  reasoning: 3,
+  cacheRead: 2,
+  cacheWrite: 1,
+};
+
+it("leaves chats, schedules and webhooks in one FIFO until the provider check succeeds", async () => {
+  const root = await mkdtemp(join(tmpdir(), "nimbot-usage-"));
+  const file = join(root, "server.sqlite");
+  let quota: "exhausted" | "checking" | "available" = "exhausted";
+  const store = openTaskStore(file);
+  const usageStore = openAgentUsage(file);
+  const schedules = openScheduleStore(file);
+  const usage = createAgentUsage(
+    usageStore,
+    createHostUsage(
+      async (id) => ({ url: `http://${id}.test`, token: "token" }),
+      vi.fn<typeof fetch>(async (url) => {
+        const state = String(url).includes("b.test") ? "unavailable" : quota;
+        return Response.json({
+          model,
+          state,
+          checkedAt: Date.now(),
+          windows: [],
+          ...(state === "available" || state === "unavailable"
+            ? { admission: { model, revision: randomUUID() } }
+            : {}),
+        });
+      }),
+    ),
+  );
+  const seen: string[] = [];
+  const queue = (agentId: string) =>
+    createRoutedTaskQueue({
+      agentId,
+      store,
+      prepare: async () => !!(await usage.prepare(agentId)),
+      execute: async (task) => {
+        seen.push(task.scheduleName ?? task.prompt);
+        const hostId = randomUUID();
+        expect(store.bindHostTask(agentId, task.id, hostId)).toBe(true);
+        usage.record("wrong-agent", task.id, hostId, {
+          model,
+          state: "reported",
+          tokens,
+          costUsd: 999,
+        });
+        usage.record(agentId, task.id, hostId, {
+          model,
+          state: "reported",
+          tokens,
+          costUsd: 0.125,
+        });
+        usage.record(agentId, task.id, hostId, {
+          model,
+          state: "reported",
+          tokens,
+          costUsd: 999,
+        });
+        return "done";
+      },
+      deliver: async () => {},
+    });
+  let a = queue("a");
+  const b = queue("b");
+  try {
+    expect(await usage.setModel("a", null)).toBe(true);
+    const first = a.submitTelegram(123, 42, "chat");
+    const timed = schedules.create({
+      agentId: "a",
+      name: "timed",
+      timeZone: "UTC",
+      cadence: { kind: "daily", time: "10:00" },
+      prompt: "scheduled prompt",
+    });
+    expect(schedules.runNow(timed, "enqueued", origin).recorded).toBe(true);
+    const hook = schedules.create({
+      agentId: "a",
+      name: "hook",
+      timeZone: "UTC",
+      cadence: { kind: "webhook" },
+      prompt: "hook prompt",
+    });
+    const token = schedules.rotateWebhookToken(hook.id)!;
+    expect(
+      schedules.runNow(hook, "enqueued", origin, { token, payload: "" })
+        .recorded,
+    ).toBe(true);
+    b.submitTelegram(456, 42, "other");
+    await Promise.all([a.idle(), b.idle()]);
+    expect(seen).toEqual(["other"]);
+    expect(usage.report("a")).toMatchObject({
+      queued: 3,
+      quota: { state: "exhausted" },
+    });
+    expect(store.getTask(first.id)?.status).toBe("queued");
+
+    a.close();
+    a = queue("a");
+    quota = "checking";
+    a.resume();
+    await a.idle();
+    expect(usage.report("a")).toMatchObject({
+      queued: 3,
+      quota: { state: "checking" },
+    });
+    quota = "available";
+    a.resume();
+    await a.idle();
+    expect(seen).toEqual(["other", "chat", "timed", "hook"]);
+    expect(usage.report("a")).toMatchObject({
+      queued: 0,
+      today: { tasks: 3, tokens: 90, costUsd: 0.375, incomplete: 0 },
+      month: { tasks: 3, tokens: 90, costUsd: 0.375 },
+      tasks: [
+        { origin: "webhook" },
+        { origin: "schedule" },
+        { origin: "telegram" },
+      ],
+    });
+    expect(usage.report("b").today.tasks).toBe(1);
+  } finally {
+    a.close();
+    b.close();
+    schedules.close();
+    usageStore.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("requeues a task only when the Host explicitly rejects it before acceptance", async () => {
+  const store = openTaskStore(":memory:");
+  const seen: string[] = [];
+  let stale = true;
+  const queue = createRoutedTaskQueue({
+    agentId: "a",
+    store,
+    prepare: async () => true,
+    execute: async (task) => {
+      if (stale) throw new HostModelAdmissionExpired();
+      seen.push(task.prompt);
+      return "done";
+    },
+    deliver: async () => {},
+  });
+  try {
+    const first = queue.submitTelegram(123, 42, "first");
+    queue.submitTelegram(123, 42, "second");
+    await queue.idle();
+    expect(store.getTask(first.id)?.status).toBe("queued");
+    expect(seen).toEqual([]);
+    stale = false;
+    queue.resume();
+    await queue.idle();
+    expect(seen).toEqual(["first", "second"]);
+  } finally {
+    queue.close();
+    store.close();
+  }
+});

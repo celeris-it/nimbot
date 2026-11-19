@@ -38,6 +38,50 @@ describe("internal task client", () => {
     agentId: "a",
     serverTaskId: "b0000000-0000-4000-8000-000000000002",
   };
+  it("binds the task before forwarding validated usage and passes admission outside the prompt", async () => {
+    const model = { providerId: "openrouter", modelId: "vendor/model" };
+    const admission = {
+      model,
+      revision: "a0000000-0000-4000-8000-000000000003",
+    };
+    const reading = { model, tokens: null, costUsd: 0, state: "partial" };
+    const onAccepted = vi.fn(() => true);
+    const onUsage = vi.fn(() => expect(onAccepted).toHaveBeenCalledOnce());
+    const request = vi.fn<typeof fetch>(async (input) =>
+      String(input).endsWith("/tasks")
+        ? Response.json({ id: hostTaskId, status: "accepted" })
+        : Response.json({
+            id: hostTaskId,
+            events: [
+              {
+                sequence: 1,
+                status: "usage",
+                output: JSON.stringify({
+                  ...reading,
+                  model: { ...model, modelId: "foreign" },
+                }),
+              },
+              { sequence: 2, status: "usage", output: JSON.stringify(reading) },
+              { sequence: 3, status: "completed", output: "done" },
+            ],
+          }),
+    );
+    const run = createHostTasks(config, request);
+    await expect(
+      run("prompt", undefined, undefined, undefined, {
+        identity,
+        admission,
+        onAccepted,
+        onUsage,
+      }),
+    ).resolves.toBe("done");
+    expect(JSON.parse(String(request.mock.calls[0]![1]!.body))).toEqual({
+      prompt: "prompt",
+      execution: identity,
+      admission,
+    });
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith(hostTaskId, reading);
+  });
   it("sends a Server-selected fresh session outside the prompt and never parses mode claims from prompt text", async () => {
     const request = vi.fn<typeof fetch>(async (input) =>
       String(input).endsWith("/tasks")

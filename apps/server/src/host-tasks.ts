@@ -2,6 +2,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { AgentHostConfig } from "./agent-host.js";
 import type { TaskCapability } from "./task-capabilities.js";
 import type { ToolOutcome } from "./tool-dispatch.js";
+import {
+  taskUsage,
+  type ModelAdmission,
+  type TaskUsage,
+} from "./usage-contracts.js";
+
+export class HostModelAdmissionExpired extends Error {}
 
 export class HostTaskError extends Error {
   constructor(
@@ -30,6 +37,8 @@ export interface HostTaskExecution {
   tools?: TaskCapability;
   /** Server-selected isolation for a delegated turn; never inferred from prompt text. */
   sessionMode?: "fresh";
+  admission?: ModelAdmission;
+  onUsage?(hostTaskId: string, usage: TaskUsage): void;
   /**
    * Answers one Host-relayed tool request. The signal aborts on `tool_cancel` and
    * when the task ends. Without it, requests are answered "denied".
@@ -171,6 +180,8 @@ export function createHostTasks(
         redirect: "error",
       });
       if (response.status === 409) throw new HostTaskError("busy");
+      if (path === "/tasks" && execution?.admission && response.status === 412)
+        throw new HostModelAdmissionExpired();
       if (!response.ok) throw new HostTaskError("unavailable");
       return (await response.json()) as unknown;
     }
@@ -192,6 +203,7 @@ export function createHostTasks(
           prompt,
           ...(execution ? { execution: execution.identity } : {}),
           ...(execution?.tools ? { tools: execution.tools } : {}),
+          ...(execution?.admission ? { admission: execution.admission } : {}),
           ...(execution?.sessionMode
             ? { sessionMode: execution.sessionMode }
             : {}),
@@ -312,6 +324,26 @@ export function createHostTasks(
           )
             throw new HostTaskError("unavailable");
           sequence = event.sequence;
+          if (event.status === "usage") {
+            try {
+              if (
+                typeof event.output === "string" &&
+                event.output.length <= 4096
+              ) {
+                const usage = taskUsage.parse(JSON.parse(event.output));
+                const expected = execution?.admission?.model;
+                if (
+                  !expected ||
+                  (usage.model.providerId === expected.providerId &&
+                    usage.model.modelId === expected.modelId)
+                )
+                  execution?.onUsage?.(hostId, usage);
+              }
+            } catch {
+              /* Usage is ancillary to the task result and can be reconciled later. */
+            }
+            continue;
+          }
           if (event.status === "completed") {
             if (typeof event.output !== "string")
               throw new HostTaskError("unavailable");
@@ -368,6 +400,7 @@ export function createHostTasks(
       }
       throw new HostTaskError("timeout");
     } catch (error) {
+      if (error instanceof HostModelAdmissionExpired) throw error;
       if (error instanceof HostTaskError) {
         if (error.kind === "timeout" && acceptedId) cancelOnHost(acceptedId);
         throw error;

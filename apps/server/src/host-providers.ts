@@ -4,6 +4,7 @@ import {
   type ProviderId,
   type ProviderSettings,
   type DeviceLogin,
+  type DeviceProvider,
 } from "./provider-contracts.js";
 
 export class HostProviderError extends Error {
@@ -11,7 +12,7 @@ export class HostProviderError extends Error {
     super("Provider request failed");
   }
 }
-function login(value: unknown): DeviceLogin {
+function login(value: unknown, expected?: DeviceProvider): DeviceLogin {
   if (!value || typeof value !== "object") throw new HostProviderError(503);
   const data = value as Record<string, unknown>;
   if (
@@ -31,14 +32,33 @@ function login(value: unknown): DeviceLogin {
     id: data.id,
     state: data.state as DeviceLogin["state"],
   };
+  const provider = data.provider ?? "openai";
+  if (
+    (provider !== "openai" && provider !== "opencode") ||
+    (expected && expected !== provider)
+  )
+    throw new HostProviderError(503);
+  if (data.provider !== undefined) result.provider = provider;
   if (result.state === "awaiting_authorization") {
+    const url =
+      typeof data.url === "string" &&
+      data.url.length <= 2048 &&
+      URL.canParse(data.url)
+        ? new URL(data.url)
+        : undefined;
     if (
-      data.url !== "https://auth.openai.com/codex/device" ||
+      !url ||
+      url.username ||
+      url.password ||
+      (provider === "openai"
+        ? url.href !== "https://auth.openai.com/codex/device"
+        : url.origin !== "https://opencode.ai" ||
+          !url.pathname.startsWith("/console/")) ||
       typeof data.code !== "string" ||
       !/^[A-Za-z0-9-]{4,32}$/.test(data.code)
     )
       throw new HostProviderError(503);
-    result.url = data.url;
+    result.url = url.href;
     result.code = data.code;
   }
   return result;
@@ -63,7 +83,7 @@ export function createHostProviders(
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(15_000),
         redirect: "error",
       });
       if (!response.ok)
@@ -95,7 +115,9 @@ export function createHostProviders(
             ![null, "api_key", "device"].includes(
               entry.method as null | string,
             ) ||
-            (entry.method === "device" && provider.id !== "openai")
+            (entry.method === "device" &&
+              provider.id !== "openai" &&
+              provider.id !== "opencode")
           )
             throw new HostProviderError(503);
           return {
@@ -113,16 +135,21 @@ export function createHostProviders(
     async remove(id: string, provider: ProviderId) {
       await call(id, `/${provider}/remove`, {});
     },
-    async startLogin(id: string) {
-      return login(await call(id, "/openai/device-login", {}));
+    async startLogin(id: string, provider: DeviceProvider = "openai") {
+      return login(await call(id, `/${provider}/device-login`, {}), provider);
     },
-    async cancelLogin(id: string, attempt: string) {
+    async cancelLogin(
+      id: string,
+      attempt: string,
+      provider: DeviceProvider = "openai",
+    ) {
       return login(
         await call(
           id,
-          `/openai/device-login/${encodeURIComponent(attempt)}/cancel`,
+          `/${provider}/device-login/${encodeURIComponent(attempt)}/cancel`,
           {},
         ),
+        provider,
       );
     },
   };

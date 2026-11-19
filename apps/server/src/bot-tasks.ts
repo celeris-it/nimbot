@@ -43,6 +43,7 @@ import {
   type TaskOutcome,
   type TaskStore,
 } from "./task-queue.js";
+import type { ModelAdmission, TaskUsage } from "./usage-contracts.js";
 
 /** One persistent queue and Host runner per agent; callbacks return to the saved origin. */
 export function createBotTasks(config: {
@@ -99,6 +100,8 @@ export function createBotTasks(config: {
   ) => Promise<boolean>;
   access?: BotAccess;
   canClaim?(): boolean;
+  prepareModel?(): Promise<ModelAdmission | undefined>;
+  recordUsage?(id: string, hostTaskId: string, usage: TaskUsage): void;
   discord?: {
     admit(task: DiscordQueuedTask): boolean;
     progress(task: DiscordQueuedTask, message: string): Promise<void>;
@@ -353,9 +356,22 @@ export function createBotTasks(config: {
       config.decide?.(approval.taskId, approval.id, allow) ??
       Promise.resolve(false),
   });
+  let admission: ModelAdmission | undefined;
   const queue = createRoutedTaskQueue({
     agentId: config.agentId,
     store: config.store,
+    ...(config.prepareModel
+      ? {
+          async prepare(task) {
+            admission = undefined;
+            // Attachment-only messages save a file without running a model.
+            if ("telegramDocument" in task && task.telegramDocument?.saveOnly)
+              return true;
+            admission = await config.prepareModel!();
+            return !!admission;
+          },
+        }
+      : {}),
     ...(config.delegation
       ? {
           finalize(task, status, signal, outcome) {
@@ -471,6 +487,13 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
           },
           {
             identity: { agentId: saved.agentId, serverTaskId: saved.id },
+            ...(admission ? { admission } : {}),
+            ...(config.recordUsage
+              ? {
+                  onUsage: (hostTaskId: string, usage: TaskUsage) =>
+                    config.recordUsage!(saved.id, hostTaskId, usage),
+                }
+              : {}),
             ...(saved.origin.platform === "delegated"
               ? { sessionMode: "fresh" as const }
               : {}),

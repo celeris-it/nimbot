@@ -1,5 +1,8 @@
 import { RecoveryError, type createAgentRecovery } from "./agent-recovery.js";
 import { HostProviderError } from "./host-providers.js";
+import type { createAgentUsage } from "./agent-usage.js";
+import { modelReference } from "./usage-contracts.js";
+import { z } from "zod";
 import { HostMemoryError } from "./host-memories.js";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -88,6 +91,9 @@ export interface PanelDeps {
   providers?: ReturnType<
     typeof import("./host-providers.js").createHostProviders
   >;
+  usage?: ReturnType<typeof createAgentUsage> & {
+    wake(id: string): Promise<void>;
+  };
   peers?: {
     grants: Pick<
       import("./agent-grants.js").AgentGrants,
@@ -600,22 +606,45 @@ export function createPanel(
       return c.json({ error: "Provider settings unavailable." }, 503);
     await next();
   });
-  app.get("/api/agents/:id/providers", async (c) =>
-    c.json(await deps.providers!.status(c.req.param("id"))),
-  );
-  app.post("/api/agents/:id/providers/openai/device-login", async (c) =>
-    c.json(await deps.providers!.startLogin(c.req.param("id")), 202),
-  );
+  const deviceLogins = new Map<string, string>();
+  function providersChanged(id: string) {
+    deps.usage?.invalidate(id);
+    void deps.usage?.wake(id).catch(() => {});
+  }
+  app.get("/api/agents/:id/providers", async (c) => {
+    const id = c.req.param("id");
+    const settings = await deps.providers!.status(id);
+    if (
+      settings.login?.state === "completed" &&
+      deviceLogins.get(id) !== settings.login.id
+    ) {
+      deviceLogins.set(id, settings.login.id);
+      providersChanged(id);
+    }
+    return c.json(settings);
+  });
+  app.post("/api/agents/:id/providers/:provider/device-login", async (c) => {
+    const { id, provider } = c.req.param();
+    if (provider !== "openai" && provider !== "opencode") return c.notFound();
+    return c.json(
+      await (provider === "openai"
+        ? deps.providers!.startLogin(id)
+        : deps.providers!.startLogin(id, provider)),
+      202,
+    );
+  });
   app.post(
-    "/api/agents/:id/providers/openai/device-login/:attempt/cancel",
+    "/api/agents/:id/providers/:provider/device-login/:attempt/cancel",
     validated("param", loginAttemptParams.loose(), "Invalid login attempt."),
-    async (c) =>
-      c.json(
-        await deps.providers!.cancelLogin(
-          c.req.param("id"),
-          c.req.param("attempt"),
-        ),
-      ),
+    async (c) => {
+      const { id, provider, attempt } = c.req.param();
+      if (provider !== "openai" && provider !== "opencode") return c.notFound();
+      const result = await (provider === "openai"
+        ? deps.providers!.cancelLogin(id, attempt)
+        : deps.providers!.cancelLogin(id, attempt, provider));
+      providersChanged(id);
+      return c.json(result);
+    },
   );
   app.post("/api/agents/:id/providers/:provider", async (c) => {
     const provider = c.req.param("provider");
@@ -628,6 +657,7 @@ export function createPanel(
     );
     if (form.response) return form.response;
     await deps.providers!.save(c.req.param("id"), provider, form.data.key);
+    providersChanged(c.req.param("id"));
     return c.json({ saved: true });
   });
   app.post("/api/agents/:id/providers/:provider/remove", async (c) => {
@@ -635,8 +665,64 @@ export function createPanel(
     if (!isProviderId(provider))
       return c.json({ error: "Unknown provider." }, 400);
     await deps.providers!.remove(c.req.param("id"), provider);
+    providersChanged(c.req.param("id"));
     return c.json({ removed: true });
   });
+  for (const suffix of ["models", "model", "usage"])
+    app.use(`/api/agents/:id/${suffix}`, async (c, next) => {
+      if (!getAgentSetup?.(c.req.param("id")!))
+        return c.json({ error: "Agent not found." }, 404);
+      if (!deps.usage)
+        return c.json({ error: "Model settings unavailable." }, 503);
+      await next();
+    });
+  app.get("/api/agents/:id/models", async (c) =>
+    c.json(await deps.usage!.models(c.req.param("id"))),
+  );
+  app.post("/api/agents/:id/model", async (c) => {
+    const id = c.req.param("id");
+    const parsed = z
+      .strictObject({ model: modelReference.nullable() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: "Invalid model selection." }, 400);
+    let saved;
+    try {
+      saved = await deps.usage!.setModel(id, parsed.data.model);
+    } catch {
+      return c.json(
+        { error: "Model catalog unavailable. Start the agent and try again." },
+        503,
+      );
+    }
+    if (!saved)
+      return c.json(
+        { error: "That model is unavailable for this agent." },
+        409,
+      );
+    void deps.usage!.wake(id).catch(() => {});
+    return c.json({ selected: parsed.data.model });
+  });
+  app.get(
+    "/api/agents/:id/usage",
+    validated(
+      "query",
+      z.object({
+        before: z
+          .string()
+          .regex(/^\d+$/)
+          .transform(Number)
+          .pipe(z.int().positive())
+          .optional(),
+      }),
+      "Invalid usage page.",
+    ),
+    (c) => {
+      const id = c.req.param("id");
+      deps.usage!.refresh(id);
+      return c.json(deps.usage!.report(id, c.req.valid("query").before));
+    },
+  );
   for (const path of ["/api/agents/:id/peers", "/api/agents/:id/peers/*"])
     app.use(path, async (c, next) => {
       if (!getAgentSetup?.(c.req.param("id")!))
@@ -1214,6 +1300,7 @@ export function createPanel(
   for (const suffix of [
     "setup",
     "providers",
+    "usage",
     "memory",
     "approvals",
     "peers",
@@ -1231,6 +1318,7 @@ export function createPanel(
         !getAgentSetup?.(id) ||
         (suffix === "schedules" && !deps.schedules) ||
         (suffix === "memory" && !deps.memories) ||
+        (suffix === "usage" && !deps.usage) ||
         (suffix === "approvals" && !deps.approvals) ||
         (suffix === "peers" && !deps.peers) ||
         (suffix === "delegations" && !deps.delegations) ||
