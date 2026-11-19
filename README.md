@@ -16,9 +16,21 @@ With Docker and its Compose plugin installed and running, open a terminal and ru
 curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash
 ```
 
-The installer supports Linux and macOS, downloads the code, builds the images, generates configuration, and starts the panel. It asks for a password and offers localhost access or an existing HTTPS origin. No Node.js, pnpm, or Git is required on the host. Only one installation per Docker Engine is supported.
+The installer supports Linux and macOS, downloads the code, builds the images, generates configuration, and starts the panel. It asks for a password and offers localhost access or an existing HTTPS origin. No Node.js, pnpm, or Git is required on the host. Only one installation per Docker Engine is supported. Use the [versioned installer option](docs/INSTALL.md#install) to install a published tag on the supported upgrade path.
 
-To uninstall while retaining data, run `bash "$HOME/.local/share/nimbot/uninstall.sh"`. Add `--purge-data` to explicitly delete agent and server data after confirmation. Images and source files are kept.
+## Upgrade
+
+For an installer-managed deployment, choose a supported release tag and run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/upgrade.sh | bash -s -- --version vX.Y.Z
+```
+
+Replace `vX.Y.Z` with the target tag. The upgrade backs up the installation, updates the Server and existing Agent Hosts, and keeps agent data and configuration. The panel and bots are unavailable during the maintenance window, and active tasks can be interrupted. See [supported upgrade paths and recovery](docs/INSTALL.md#upgrade).
+
+## Uninstall
+
+To uninstall while retaining data, run `bash "$HOME/.local/share/nimbot/uninstall.sh"`. Add `--purge-data` to explicitly delete agent and server data after confirmation. Upgrade backups, images, and source files are kept.
 
 See [docs/INSTALL.md](docs/INSTALL.md) for a custom directory, HTTPS, BotFather linking, and AI provider authentication. [docs/OPERATIONS.md](docs/OPERATIONS.md) covers backup and restore, troubleshooting, and security limitations.
 

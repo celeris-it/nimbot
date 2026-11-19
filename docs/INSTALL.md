@@ -18,6 +18,8 @@ To choose another installation directory:
 curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash -s -- --directory "$HOME/nimbot"
 ```
 
+Add `--version vX.Y.Z` after `bash -s --` to install a specific release tag. Use a tag that supports versioned installation for a deployment you plan to upgrade. The default download tracks development on `main`.
+
 You can download and inspect the script before running it. Only one Nimbot installation per Docker Engine is supported. Running the installer again reuses the saved source and configuration; it does not update Nimbot or reset the password. Failed installation resources are kept so you can fix the reported error and retry with the same directory.
 
 The default panel URL is <http://localhost:3000>. On a remote server, open a tunnel from your computer:
@@ -55,6 +57,26 @@ During device login, tasks stay in that agent’s queue and are eligible to star
 
 To replace a revoked token, open the agent's token form, enter a replacement for the same bot, and restart the server with `docker restart nimbot-server`.
 
+## Upgrade
+
+Use this command on an installer-managed deployment:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/upgrade.sh | bash -s -- --version vX.Y.Z
+```
+
+Replace `vX.Y.Z` with a published Nimbot tag. Add `--directory "$HOME/nimbot"` if you used a custom installation directory. You can download and inspect the script before running it. The command uses the saved Docker socket and Compose project and requires the existing Server container, which can be stopped. Installations configured manually with Compose are outside the automated upgrade path.
+
+Each tag's `release.json` lists its supported predecessor. Upgrade through those tags in order. The first upgrade-capable release accepts an unversioned installer-managed deployment whose SQLite schemas match [the supported `main` commit](https://github.com/celeris-it/nimbot/commit/4e10035fab5be78edf5a16690115b87dbd3abd63). Older schemas and installations recorded as development are outside that path. A repeated upgrade to the installed tag exits successfully.
+
+The command builds the images before starting maintenance, then saves a verified backup, migrates state, and updates the Server and existing Agent Hosts. Previously running agents resume and stopped agents stay stopped. If recovery is pending, run the following from the installation directory or specify its path with `--directory`:
+
+```sh
+bash upgrade.sh --rollback
+```
+
+The recovery command restores the previous deployment if activation had yet to commit. If activation had committed, the command finishes activation and cleanup. See [upgrade and recovery operations](OPERATIONS.md#upgrade-and-recovery) for downtime, backups, and post-upgrade restoration.
+
 ## Uninstall
 
 By default, uninstall removes Nimbot's containers and networks while keeping all volumes, credentials, `.env`, images, and source files:
@@ -69,9 +91,9 @@ To permanently delete all agent files, conversations, provider credentials, serv
 bash "$HOME/.local/share/nimbot/uninstall.sh" --purge-data
 ```
 
-The script asks for confirmation; purging also requires typing `DELETE NIMBOT DATA`. Images and source files remain. If you chose another directory, run its `uninstall.sh` or pass `--directory PATH`.
+The script asks for confirmation; purging also requires typing `DELETE NIMBOT DATA`. Upgrade backups, images, and source files remain. If you chose another directory, run its `uninstall.sh` or pass `--directory PATH`.
 
-Retaining volumes is useful for backups and recovery, but does not automatically recreate removed agent containers. Review [backup and restore](OPERATIONS.md) before uninstalling if you need to recover the installation later. The installer marker is kept so you can run `--purge-data` later or retry partial cleanup. Until a stable release, installations start fresh; there are no upgrade migrations.
+Retaining volumes is useful for backups and recovery, but does not automatically recreate removed agent containers. Review [backup and restore](OPERATIONS.md) before uninstalling if you need to recover the installation later. The installer marker is kept so you can run `--purge-data` later or retry partial cleanup.
 
 ## Configuration and operations
 
@@ -84,7 +106,7 @@ docker logs -f nimbot-server
 docker restart nimbot-server
 ```
 
-With a non-default Docker context, use the context selected during installation. The installer prints a logs command with the explicit socket. After rebuilding the Agent Host image, recreate the server before provisioning new agents so it resolves the new immutable image ID. From the installation directory, preserve its Compose project name:
+With a non-default Docker context, use the context selected during installation. The installer prints a logs command with the explicit socket. For development deployments, recreating the server after rebuilding the Agent Host image lets it resolve the new immutable image ID for future agents. Use the upgrade command for released installations. In development, preserve the installation’s Compose project name:
 
 ```sh
 docker compose --project-name "nimbot-$(head -n 1 .nimbot-installation)" up -d --force-recreate server

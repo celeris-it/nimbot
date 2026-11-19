@@ -60,6 +60,16 @@ the bot unavailable, an alert waits while the incident remains open. Nimbot
 persists delivery intent across Server restarts. Uncertain deliveries are never
 replayed. Telegram delivery requires the Nimbot Server to be running.
 
+## Upgrade and recovery
+
+Follow the [install guide](INSTALL.md#upgrade) to select a supported target tag. Schedule a maintenance window. Nimbot stops incoming work, and any active tasks may be recorded as interrupted by normal restart recovery. The upgrade preserves queued work and previously saved results. Finish pending provisioning or recovery operations first and reconcile untracked containers. Avoid concurrent Docker changes to Nimbot while the command is running.
+
+The upgrade keeps the original `.env` and installation identity. It takes a consistent snapshot with the Server and Hosts stopped. Backups in `.nimbot-backups/` hold volume archives, private configuration, and a deployment manifest. The preceding source and images are retained locally. The deployment manifest identifies the previous Server and Agent Host images. Protect the backup directory, keep enough free disk space for the backup, and copy the backup off the host if you plan to use it for disaster recovery. Regular Docker image pruning can remove images required to restore a backup.
+
+A failure before activation triggers automatic rollback. If Docker was unavailable or the command was interrupted, start Docker and run `bash /path/to/installation/upgrade.sh --rollback --directory /path/to/installation`. Recovery may also finish activation if the commit was already recorded. When the original process was killed, the recovery command can reclaim its stale lock. If the PID has been reused, confirm that the maintenance process and its `nimbot-upgrade-<installation-id>` container have exited before clearing the stale `.nimbot-maintenance` symlink.
+
+After a completed upgrade, restoring an earlier version requires the protected backup, the matching images and source, and the restore procedure below. Restoring the snapshot discards writes accepted after it was taken.
+
 ## Backup
 
 Stop everything first so SQLite and the agents' files are consistent.
@@ -78,6 +88,7 @@ for v in $(docker volume ls -q | grep -E 'server-state|agent-workspace|agent-eng
 done
 cp .env backup/env.backup && chmod 600 backup/env.backup
 if [ -f .nimbot-installation ]; then cp .nimbot-installation backup/installation.backup; fi
+if [ -f .nimbot-release ]; then cp .nimbot-release backup/release.backup; fi
 chmod -R go-rwx backup
 docker compose start
 ```
@@ -87,8 +98,9 @@ Restart panel-created agent containers from the panel, or with `docker start nim
 ## Restore
 
 Restore with the **same Nimbot version that created the backup**, including its
-Server and Agent Host images. A restore is not an upgrade: pre-stable releases
-do not migrate saved state. Keep the original backup until recovery is verified.
+Server and Agent Host images. Use the upgrade command when you want to migrate to a supported release. Keep the original backup until recovery is verified.
+
+For an upgrade snapshot, use `deployment.json` to identify the images. Build or load the matching images on the destination, set `NIMBOT_SERVER_IMAGE` and `AGENT_HOST_IMAGE` for Compose, and use the matching source directory. If the source Compose file uses a fixed Server image name, tag the matching image as `nimbot-server`. Copy `release.backup` to `.nimbot-release` for a tagged installation. For a snapshot marked `legacy-main`, keep the installation unversioned.
 
 ### Prepare a replacement Docker host
 
@@ -231,7 +243,7 @@ For a replacement host, use the preparation and panel recovery steps above.
 
 Start with `docker compose ps`, then `docker compose logs --tail 100 server`. Logs are JSON lines with `event`, `agentId`, and `taskId`; secrets are redacted and prompts and results are never logged.
 
-**The server exits at startup.** The log shows `server.config_invalid`, `server.state_init_failed`, or `server.docker_unavailable`. For `server.docker_unavailable`, follow its message: `permission denied` means `DOCKER_SOCKET_GID` does not match the socket's group, `socket not found` means `DOCKER_SOCKET_PATH` or the socket mount is wrong, and `not responding` means Docker is down. If `AGENT_HOST_IMAGE` is reported as not found locally, build the Agent Host image first. Check `PANEL_PASSWORD_HASH`, `AGENT_HOST_IMAGE`, Docker deployment settings, and writable server state. Telegram settings are managed through the panel and are not required for startup. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value. Pre-stable releases initialize the current schema directly and do not migrate older databases or persisted state. If an update cannot open an older state volume, keep a protected backup and prepare a fresh installation. Restoring an older schema does not upgrade it; do not delete the existing volume without explicitly choosing to discard that state.
+**The server exits at startup.** The log shows `server.config_invalid`, `server.state_init_failed`, or `server.docker_unavailable`. For `server.docker_unavailable`, follow its message: `permission denied` means `DOCKER_SOCKET_GID` does not match the socket's group, `socket not found` means `DOCKER_SOCKET_PATH` or the socket mount is wrong, and `not responding` means Docker is down. If `AGENT_HOST_IMAGE` is reported as not found locally, build the Agent Host image first. Check `PANEL_PASSWORD_HASH`, `AGENT_HOST_IMAGE`, Docker deployment settings, and writable server state. Telegram settings are managed through the panel and are not required for startup. A hash that was cut or reformatted is rejected; paste the whole `scrypt:...` value. A startup diagnostic naming a SQLite store and schema version indicates that the volume requires a supported upgrade path or the matching release. Keep a protected copy of the original volume before attempting recovery.
 
 **The panel rejects my login or forms.** Five failed logins within fifteen minutes block further attempts until the window passes. Sessions last eight hours and end when the server restarts. If sign-in works but actions fail, `PANEL_URL` does not match the address in your browser (scheme, host, and port must match); fix it and recreate the server (`docker compose up -d`).
 

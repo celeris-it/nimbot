@@ -14,7 +14,7 @@ The MVP is complete. The Agent Host lives in `apps/agent-host/`, the Nimbot Serv
 - Keep work within the current features documented in README.md. Future work is out of scope unless the user asks for it.
 - Prefer the simplest thing that satisfies the requested change. Do not add services, packages, or abstractions it does not need.
 - No PostgreSQL, Redis, Kubernetes, or message brokers. Storage is SQLite and Docker volumes.
-- Until a stable version is reached, every installation starts from scratch. Do not develop database or persisted-state migrations or backward compatibility for previous installations; update schema initialization directly.
+- Preserve persisted state when upgrading from a supported release or the documented unversioned baseline. Version SQLite schema changes, provide ordered transactional migrations, and update the current schema for fresh installations. Set the supported predecessor in `release.json` when preparing a release.
 
 ## Stack
 
