@@ -81,9 +81,17 @@ const panel = createPanel(
       agentExists: (id) => agents.has(id),
       listAgents: () =>
         [...agents].map(([id, agent]) => ({ id, name: agent.name })),
-      discover: async () => ({
+      discover: async (endpoint) => ({
         status: "connected",
         tools: [
+          ...(
+            mcpCatalog
+              .list()
+              .find((definition) => definition.endpoint === endpoint)?.tools ??
+            []
+          )
+            .filter((tool) => tool.name !== "lookup")
+            .map(({ name, inputSchema }) => ({ name, inputSchema })),
           {
             name: "lookup",
             inputSchema: { type: "object", required: ["query"] },
@@ -249,6 +257,18 @@ const app = new Hono();
 app.post("/__test/reset", (c) => {
   reset();
   return c.json({ ok: true });
+});
+app.post("/__test/mcp/:id/block/:tool", (c) => {
+  const definition = mcpCatalog.get(c.req.param("id"));
+  return c.json({
+    blocked:
+      !!definition &&
+      mcpCatalog.blockTool(
+        definition.id,
+        definition.revision,
+        c.req.param("tool"),
+      ),
+  });
 });
 app.post("/__test/fail/:id", (c) => {
   agents.get(c.req.param("id")).provisioning = "failed";

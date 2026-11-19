@@ -1,4 +1,5 @@
 import type { McpCatalog } from "./mcp-catalog.js";
+import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
 import type { McpCredentials } from "./mcp-credentials.js";
 import { createMcpConnection } from "./mcp-connection.js";
 import { createMcpToolSelection } from "./mcp-tool-selection.js";
@@ -110,21 +111,49 @@ export function createMcpExecution(config: {
         signal,
         timeout: timeoutMs,
       });
-      const listed = await client.listTools(undefined, {
-        signal,
-        timeout: timeoutMs,
-        cacheMode: "bypass",
-      });
+      let listed: Awaited<ReturnType<typeof client.listTools>>;
+      try {
+        listed = await client.listTools(undefined, {
+          signal,
+          timeout: timeoutMs,
+          cacheMode: "bypass",
+        });
+      } catch (error) {
+        if (
+          error instanceof SdkError &&
+          error.code === SdkErrorCode.InvalidResult &&
+          allowed()
+        ) {
+          config.catalog.blockTool(
+            selected.definitionId,
+            selected.revision,
+            selected.tool.name,
+          );
+          return { ok: false, error: "denied" };
+        }
+        throw error;
+      }
       const matches = listed.tools.filter(
         (tool) => tool.name === selected.tool.name,
       );
-      if (
-        matches.length !== 1 ||
-        JSON.stringify(canonical(matches[0]!.inputSchema)) !==
-          JSON.stringify(canonical(selected.tool.inputSchema)) ||
-        !allowed()
-      )
+      if (!allowed()) return { ok: false, error: "denied" };
+      let sameSchema = false;
+      try {
+        sameSchema =
+          matches.length === 1 &&
+          JSON.stringify(canonical(matches[0]!.inputSchema)) ===
+            JSON.stringify(canonical(selected.tool.inputSchema));
+      } catch {
+        // An unusable live schema also needs administrator review.
+      }
+      if (!sameSchema) {
+        config.catalog.blockTool(
+          selected.definitionId,
+          selected.revision,
+          selected.tool.name,
+        );
         return { ok: false, error: "denied" };
+      }
       signal.throwIfAborted();
       // Explicit pinned metadata avoids SDK cache-driven schema/header changes and
       // its corrective tool-call retry. Never attach remote output schemas or hints.

@@ -18,6 +18,8 @@ interface McpDefinitionSettings {
 export interface McpDefinition extends McpDefinitionSettings {
   id: string;
   revision: number;
+  /** Approved tools disabled after a remote change, pending explicit administrator review. */
+  blockedTools?: string[];
 }
 
 interface CredentialBinding {
@@ -91,11 +93,20 @@ function settings(input: unknown) {
     throw new McpCatalogValidationError(
       "MCP definition has too much tool data.",
     );
+  const reviewedTools: unknown = input.reviewedTools ?? [];
+  if (
+    !Array.isArray(reviewedTools) ||
+    reviewedTools.length > MAX_TOOLS ||
+    new Set(reviewedTools).size !== reviewedTools.length ||
+    !reviewedTools.every((name) => typeof name === "string" && names.has(name))
+  )
+    throw new McpCatalogValidationError("Invalid MCP tool review selection.");
   return {
     label: input.label.trim(),
     endpoint: url.href,
     enabled: Number(input.enabled),
     toolsJson,
+    reviewedToolsJson: JSON.stringify(reviewedTools),
   };
 }
 
@@ -135,6 +146,11 @@ export function openMcpCatalog(
         PRIMARY KEY (agent_id, definition_id)
       );
       CREATE TABLE IF NOT EXISTS mcp_retired_secrets (ref TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS mcp_tool_blocks (
+        definition_id TEXT NOT NULL REFERENCES mcp_definitions(id) ON DELETE CASCADE,
+        tool_name TEXT NOT NULL,
+        PRIMARY KEY (definition_id, tool_name)
+      );
       CREATE INDEX IF NOT EXISTS mcp_grants_definition ON mcp_grants(definition_id);
       CREATE TRIGGER IF NOT EXISTS mcp_grant_revoked
       AFTER DELETE ON mcp_grants WHEN OLD.secret_ref IS NOT NULL
@@ -158,6 +174,17 @@ export function openMcpCatalog(
     throw error;
   }
 
+  function readDefinition(row: Record<string, unknown>): McpDefinition {
+    const saved = definition(row);
+    const blockedTools = db
+      .prepare(
+        "SELECT tool_name FROM mcp_tool_blocks WHERE definition_id = ? ORDER BY tool_name",
+      )
+      .all(saved.id)
+      .map((entry) => String(entry.tool_name));
+    return { ...saved, ...(blockedTools.length ? { blockedTools } : {}) };
+  }
+
   return {
     create(input: unknown): McpDefinition {
       const { label, endpoint, enabled, toolsJson } = settings(input);
@@ -176,34 +203,73 @@ export function openMcpCatalog(
           MAX_DEFINITIONS,
         );
       if (!row) throw new McpCatalogValidationError("MCP catalog is full.");
-      return definition(row);
+      return readDefinition(row);
     },
     update(
       id: string,
       revision: number,
       input: unknown,
     ): McpDefinition | undefined {
-      const { label, endpoint, enabled, toolsJson } = settings(input);
-      const row = db
-        .prepare(
-          `UPDATE mcp_definitions
+      const { label, endpoint, enabled, toolsJson, reviewedToolsJson } =
+        settings(input);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const row = db
+          .prepare(
+            `UPDATE mcp_definitions
          SET label = ?, endpoint = ?, enabled = ?, tools_json = ?, revision = revision + 1
          WHERE id = ? AND revision = ? RETURNING *`,
-        )
-        .get(label, endpoint, enabled, toolsJson, id, revision);
-      return row && definition(row);
+          )
+          .get(label, endpoint, enabled, toolsJson, id, revision);
+        if (row)
+          db.prepare(
+            `DELETE FROM mcp_tool_blocks WHERE definition_id = ? AND (
+          tool_name IN (SELECT value FROM json_each(?)) OR
+          tool_name NOT IN (SELECT json_extract(value, '$.name') FROM json_each(?))
+        )`,
+          ).run(id, reviewedToolsJson, toolsJson);
+        db.exec("COMMIT");
+        return row && readDefinition(row);
+      } catch (error) {
+        if (db.isTransaction) db.exec("ROLLBACK");
+        throw error;
+      }
     },
     get(id: string): McpDefinition | undefined {
       const row = db
         .prepare("SELECT * FROM mcp_definitions WHERE id = ?")
         .get(id);
-      return row && definition(row);
+      return row && readDefinition(row);
     },
     list(): McpDefinition[] {
       return db
         .prepare("SELECT * FROM mcp_definitions ORDER BY label, id")
         .all()
-        .map(definition);
+        .map(readDefinition);
+    },
+    /** A stale observer must never disable a newly reviewed revision. */
+    blockTool(id: string, revision: number, name: string): boolean {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const blocked =
+          db
+            .prepare(
+              `INSERT INTO mcp_tool_blocks (definition_id, tool_name)
+          SELECT id, ? FROM mcp_definitions WHERE id = ? AND revision = ?
+          AND EXISTS (SELECT 1 FROM json_each(tools_json) WHERE json_extract(value, '$.name') = ?)
+          ON CONFLICT DO NOTHING`,
+            )
+            .run(name, id, revision, name).changes === 1;
+        if (blocked)
+          db.prepare(
+            "UPDATE mcp_definitions SET revision = revision + 1 WHERE id = ?",
+          ).run(id);
+        db.exec("COMMIT");
+        return blocked;
+      } catch (error) {
+        if (db.isTransaction) db.exec("ROLLBACK");
+        throw error;
+      }
     },
     grant(agentId: string, id: string, revision: number): boolean {
       if (!agentExists(agentId)) return false;

@@ -10,7 +10,7 @@
   type Settings = Pick<
     McpDefinition,
     "label" | "endpoint" | "enabled" | "tools"
-  >;
+  > & { reviewedTools: string[] };
   let {
     definition,
     busy,
@@ -34,6 +34,7 @@
         name: tool.name,
         access: tool.access,
         schema: JSON.stringify(tool.inputSchema, null, 2),
+        reviewed: false,
       })),
     ),
   );
@@ -63,11 +64,18 @@
     let id: number;
     if (existing) {
       existing.schema = schema;
+      existing.reviewed = false;
       id = existing.id;
     } else {
       if (tools.length >= 32) return;
       id = nextId++;
-      tools.push({ id, name: tool.name, access: "write", schema });
+      tools.push({
+        id,
+        name: tool.name,
+        access: "write",
+        schema,
+        reviewed: false,
+      });
     }
     await tick();
     document.getElementById(`mcp-tool-schema-${id}`)?.focus();
@@ -79,6 +87,7 @@
       name: "",
       access: "write",
       schema: '{\n  "type": "object"\n}',
+      reviewed: false,
     });
   }
 
@@ -102,11 +111,28 @@
         return;
       }
     }
-    await save({ label, endpoint, enabled, tools: parsed });
+    await save({
+      label,
+      endpoint,
+      enabled,
+      tools: parsed,
+      reviewedTools: tools
+        .filter(
+          (tool) =>
+            tool.reviewed && definition?.blockedTools?.includes(tool.name),
+        )
+        .map((tool) => tool.name),
+    });
   }
 </script>
 
 <form aria-busy={busy} onsubmit={submit}>
+  {#if definition?.blockedTools?.length}
+    <p class="alert" role="alert">
+      Some tools are disabled after a remote change. Review their schemas and
+      access before approving them again.
+    </p>
+  {/if}
   <label for="integration-label">Integration name</label>
   <input
     class="input"
@@ -195,11 +221,16 @@
         class="input"
         id={`mcp-tool-name-${tool.id}`}
         bind:value={tool.name}
+        oninput={() => (tool.reviewed = false)}
         maxlength="128"
         required
       />
       <label for={`mcp-tool-access-${tool.id}`}>Access</label>
-      <select id={`mcp-tool-access-${tool.id}`} bind:value={tool.access}>
+      <select
+        id={`mcp-tool-access-${tool.id}`}
+        bind:value={tool.access}
+        onchange={() => (tool.reviewed = false)}
+      >
         <option value="write">Write or unknown</option>
         <option value="read">Read only</option>
       </select>
@@ -208,9 +239,26 @@
         class="textarea"
         id={`mcp-tool-schema-${tool.id}`}
         bind:value={tool.schema}
+        oninput={() => (tool.reviewed = false)}
         rows="6"
         maxlength="16384"
         required></textarea>
+      {#if definition?.blockedTools?.includes(tool.name)}
+        <p id={`mcp-tool-review-help-${tool.id}`}>
+          Disabled pending review. Test the connection to retrieve the current
+          schema, then review the schema and access above.
+        </p>
+        <label
+          ><input
+            class="checkbox"
+            type="checkbox"
+            bind:checked={tool.reviewed}
+            disabled={busy}
+            aria-describedby={`mcp-tool-review-help-${tool.id}`}
+          />
+          I reviewed the schema and access for {tool.name}</label
+        >
+      {/if}
       <button
         class="btn"
         type="button"

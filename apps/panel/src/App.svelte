@@ -488,7 +488,10 @@
     );
   }
   async function saveMcp(
-    settings: Pick<McpDefinition, "label" | "endpoint" | "enabled" | "tools">,
+    settings: Pick<
+      McpDefinition,
+      "label" | "endpoint" | "enabled" | "tools"
+    > & { reviewedTools: string[] },
   ) {
     if (mcpDefinition) {
       await mutate<{ definition: McpDefinition; cleanupPending: boolean }>(
@@ -845,6 +848,9 @@
                 >{definition.label}</a
               >
               · {definition.enabled ? "Enabled" : "Disabled"}
+              {#if definition.blockedTools?.length}<span class="badge"
+                  >Review needed</span
+                >{/if}
             </li>
           {/each}
         </ul>

@@ -233,24 +233,58 @@ it("allows an explicitly credential-free grant and never borrows another agent's
   expect(f.calls()[0]!.authorization).toBeNull();
 });
 
-it("denies missing, duplicate and changed remote schemas without calling tools", async () => {
-  const f = await fixture();
-  for (const tools of [
-    [],
-    [f.remote.tools[0]!, f.remote.tools[0]!],
-    [
-      {
-        name: "search",
-        inputSchema: { ...schema, additionalProperties: true },
-      },
-    ],
-  ]) {
-    f.remote.tools = tools;
+it.each(["missing", "duplicate", "changed", "malformed"])(
+  "blocks a %s remote schema without calling tools",
+  async (kind) => {
+    const f = await fixture();
+    f.remote.tools =
+      kind === "missing"
+        ? []
+        : kind === "duplicate"
+          ? [f.remote.tools[0]!, f.remote.tools[0]!]
+          : kind === "malformed"
+            ? [
+                {
+                  name: "search",
+                  inputSchema: null as unknown as typeof schema,
+                },
+              ]
+            : [
+                {
+                  name: "search",
+                  inputSchema: { ...schema, additionalProperties: true },
+                },
+              ];
+    const operation = f.operation();
+    expect(
+      await f.execute("a", operation, { query: "hello" }, f.context),
+    ).toEqual({ ok: false, error: "denied" });
+    expect(f.calls()).toHaveLength(0);
+    expect(f.catalog.get(f.definition.id)).toMatchObject({
+      revision: 2,
+      blockedTools: ["search"],
+    });
+    f.request.mockClear();
+    f.remote.tools = settings.tools.map(({ name, inputSchema }) => ({
+      name,
+      inputSchema,
+    }));
+    expect(
+      await f.execute("a", operation, { query: "hello" }, f.context),
+    ).toEqual({ ok: false, error: "denied" });
+    expect(f.request).not.toHaveBeenCalled();
+    f.catalog.update(f.definition.id, 2, {
+      ...settings,
+      reviewedTools: ["search"],
+    });
     expect(
       await f.execute("a", f.operation(), { query: "hello" }, f.context),
-    ).toEqual({ ok: false, error: "denied" });
-  }
-  expect(f.calls()).toHaveLength(0);
+    ).toMatchObject({ ok: true });
+  },
+);
+
+it("ignores JSON key order when comparing remote schemas", async () => {
+  const f = await fixture();
   // JSON key order is not a schema change.
   f.remote.tools = [
     {

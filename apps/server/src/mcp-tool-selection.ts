@@ -33,6 +33,7 @@ export function createMcpToolSelection(catalog: McpCatalog) {
       const binding = catalog.credentialBinding(agentId, definitionId);
       if (!definition?.enabled || !binding) continue;
       for (const tool of definition.tools) {
+        if (definition.blockedTools?.includes(tool.name)) continue;
         if (!compileMcpArguments(tool.inputSchema)) continue;
         const descriptor: RemoteToolDefinition = {
           operation: `mcp.${hash({

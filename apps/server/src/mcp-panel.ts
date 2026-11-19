@@ -15,11 +15,18 @@ export interface McpPanelDeps {
   discover: ReturnType<typeof createMcpDiscovery>;
 }
 
-const summarize = ({ id, label, enabled, revision }: McpDefinition) => ({
+const summarize = ({
   id,
   label,
   enabled,
   revision,
+  blockedTools,
+}: McpDefinition) => ({
+  id,
+  label,
+  enabled,
+  revision,
+  ...(blockedTools?.length ? { blockedTools } : {}),
 });
 
 async function jsonFields(c: Context): Promise<Record<string, unknown>> {

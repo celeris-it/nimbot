@@ -42,6 +42,15 @@
           ? "Enabled in catalog"
           : "Disabled in catalog"}
       </p>
+      {#if definition.blockedTools?.length}
+        <p>
+          {definition.blockedTools.length} tool{definition.blockedTools
+            .length === 1
+            ? ""
+            : "s"} disabled pending review.
+          <a href={`/mcp/${encodeURIComponent(definition.id)}`}>Review tools</a>
+        </p>
+      {/if}
       {#if definition.granted}
         <form aria-busy={busy} onsubmit={(event) => save(event, definition)}>
           <label for={`credential-${definition.id}`}>Bearer credential</label>

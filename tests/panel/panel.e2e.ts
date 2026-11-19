@@ -89,6 +89,112 @@ test("edits the MCP catalog and manages an agent's grant and write-only credenti
   await expect(credential).toHaveCount(0);
 });
 
+test("keeps changed MCP tools disabled until an explicit schema review is saved", async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  await page.goto("/mcp/new");
+  await page.getByLabel("Integration name").fill("Changed docs");
+  await page
+    .getByLabel("HTTPS endpoint")
+    .fill("https://changed.example.test/mcp");
+  await page.getByLabel("Enable integration").check();
+  await page.getByRole("button", { name: "Add tool" }).click();
+  await page.getByLabel("Tool name").fill("search");
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Edit Changed docs" }),
+  ).toBeVisible();
+  const id = page.url().split("/").at(-1)!;
+  expect((await request.post(`/__test/mcp/${id}/block/search`)).ok()).toBe(
+    true,
+  );
+  await page.getByLabel("Integration name").fill("Stale draft");
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(page.getByRole("alert")).toContainText("MCP settings changed");
+  await expect(page.getByLabel("Integration name")).toHaveValue("Stale draft");
+  await page.reload();
+  const review = page.getByLabel("I reviewed the schema and access for search");
+  await expect(review).not.toBeChecked();
+  await expect(page.getByRole("alert")).toContainText(
+    "Some tools are disabled",
+  );
+  await page.getByLabel("Integration name").fill("Renamed changed docs");
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Edit Renamed changed docs" }),
+  ).toBeVisible();
+  await expect(review).not.toBeChecked();
+  await page.goto("/mcp");
+  await expect(page.getByText("Review needed", { exact: true })).toBeVisible();
+  await page.goto("/agents/dev/mcp");
+  const integration = page.getByRole("region", {
+    name: "Renamed changed docs",
+  });
+  await expect(
+    integration.getByText("1 tool disabled pending review.", { exact: false }),
+  ).toBeVisible();
+  await integration.getByRole("link", { name: "Review tools" }).click();
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Connected." }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Review schema" }).click();
+  await expect(page.getByLabel("Argument schema (JSON)")).toBeFocused();
+  await expect(review).not.toBeChecked();
+  await review.focus();
+  await page.keyboard.press("Space");
+  await expect(review).toBeChecked();
+  await page.getByLabel("Access", { exact: true }).selectOption("read");
+  await expect(review).not.toBeChecked();
+  await review.focus();
+  await page.keyboard.press("Space");
+  for (const width of [1280, 375, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/mcp-review-${width}.png`,
+      fullPage: true,
+    });
+  }
+  const colors = await page.locator(".alert").evaluate((element) => {
+    const style = getComputedStyle(element);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    const hex = (color: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return (
+        "#" +
+        Array.from(context.getImageData(0, 0, 1, 1).data)
+          .slice(0, 3)
+          .map((value) => value.toString(16).padStart(2, "0"))
+          .join("")
+      );
+    };
+    return { text: hex(style.color), background: hex(style.backgroundColor) };
+  });
+  await test.info().attach("mcp-review-colors", {
+    body: JSON.stringify(colors),
+    contentType: "application/json",
+  });
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(review).toHaveCount(0);
+  await page.reload();
+  await expect(
+    page.getByText("Disabled pending review.", { exact: false }),
+  ).toHaveCount(0);
+  await page.goto("/mcp");
+  await expect(page.getByText("Review needed", { exact: true })).toHaveCount(0);
+});
+
 test("pages through delegation history and cancels only the selected child", async ({
   page,
   request,

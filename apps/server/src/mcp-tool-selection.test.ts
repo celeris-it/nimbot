@@ -282,8 +282,13 @@ it("revokes a live task capability when its pinned catalog revision changes", ()
     operation: lease.operations[0]!,
   };
   expect(capabilities.verify(call)).toBeDefined();
-  f.catalog.update(f.definition.id, 1, { ...settings, tools: [] });
+  expect(f.catalog.blockTool(f.definition.id, 1, "search")).toBe(true);
+  expect(f.selection.descriptors("a")).toEqual([]);
   expect(capabilities.verify(call)).toBeUndefined();
-  f.catalog.update(f.definition.id, 2, settings);
+  f.catalog.update(f.definition.id, 2, {
+    ...settings,
+    reviewedTools: ["search"],
+  });
+  expect(f.selection.descriptors("a")).toHaveLength(1);
   expect(capabilities.verify(call)).toBeUndefined();
 });

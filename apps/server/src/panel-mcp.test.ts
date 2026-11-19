@@ -180,6 +180,34 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     ).toBe(200);
     expect(catalog.grants("a")).toEqual([]);
     expect(await credentials.read("a", id, revision + 1)).toBeUndefined();
+    const current = catalog.get(id)!;
+    expect(catalog.blockTool(id, current.revision, "search")).toBe(true);
+    const blocked = catalog.get(id)!;
+    expect(await (await get(path)).json()).toEqual(blocked);
+    for (const url of ["/api/mcp", "/api/agents/b/mcp"]) {
+      const listing = (await (await get(url)).json()) as {
+        definitions: McpDefinition[];
+      };
+      expect(listing.definitions[0]!.blockedTools).toEqual(["search"]);
+    }
+    expect(
+      (await post(path, { ...current, reviewedTools: ["search"] })).status,
+    ).toBe(409);
+    expect(
+      (
+        await post(path, {
+          ...blocked,
+          label: "Renamed again",
+          blockedTools: [],
+        })
+      ).status,
+    ).toBe(200);
+    expect(catalog.get(id)!.blockedTools).toEqual(["search"]);
+    expect(
+      (await post(path, { ...catalog.get(id), reviewedTools: ["search"] }))
+        .status,
+    ).toBe(200);
+    expect(catalog.get(id)!.blockedTools).toBeUndefined();
   } finally {
     catalog.close();
     await rm(dir, { recursive: true, force: true });

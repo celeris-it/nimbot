@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
 import { openMcpCatalog } from "./mcp-catalog.js";
 
@@ -28,6 +29,98 @@ const settings = {
     },
   ],
 };
+
+it("persists blocked tools, invalidates stale edits and requires an explicit review to clear them", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nimbot-mcp-review-"));
+  const path = join(directory, "server.sqlite");
+  let catalog = openMcpCatalog(path, () => true);
+  try {
+    const saved = catalog.create(settings);
+    catalog.grant("a", saved.id, 1);
+    expect(catalog.blockTool(saved.id, 1, "unselected")).toBe(false);
+    expect(catalog.blockTool(saved.id, 1, "search")).toBe(true);
+    expect(catalog.get(saved.id)).toMatchObject({
+      revision: 2,
+      blockedTools: ["search"],
+    });
+    expect(catalog.blockTool(saved.id, 2, "search")).toBe(false);
+    expect(
+      catalog.update(saved.id, 1, { ...settings, reviewedTools: ["search"] }),
+    ).toBeUndefined();
+    catalog.close();
+    catalog = openMcpCatalog(path, () => true);
+    expect(catalog.list()[0]!.blockedTools).toEqual(["search"]);
+    for (const enabled of [false, true]) {
+      const current = catalog.get(saved.id)!;
+      expect(
+        catalog.update(saved.id, current.revision, {
+          ...settings,
+          label: "Renamed",
+          enabled,
+          blockedTools: [],
+        })!.blockedTools,
+      ).toEqual(["search"]);
+    }
+    const current = catalog.get(saved.id)!;
+    expect(
+      catalog.update(saved.id, current.revision, {
+        ...settings,
+        reviewedTools: ["search"],
+      })!.blockedTools,
+    ).toBeUndefined();
+    expect(catalog.blockTool(saved.id, 2, "search")).toBe(false);
+    expect(catalog.grants("a")).toEqual([saved.id]);
+    expect(
+      catalog.blockTool(saved.id, catalog.get(saved.id)!.revision, "add"),
+    ).toBe(true);
+    const withBlock = catalog.get(saved.id)!;
+    expect(() =>
+      catalog.update(saved.id, withBlock.revision, {
+        ...settings,
+        reviewedTools: ["unknown"],
+      }),
+    ).toThrow("review selection");
+    expect(catalog.get(saved.id)).toEqual(withBlock);
+    expect(
+      catalog.update(saved.id, withBlock.revision, {
+        ...settings,
+        tools: [settings.tools[0]],
+      })!.blockedTools,
+    ).toBeUndefined();
+  } finally {
+    catalog.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("rolls back settings, grants and review state together if clearing a block fails", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nimbot-mcp-review-rollback-"));
+  const path = join(directory, "server.sqlite");
+  const catalog = openMcpCatalog(path, () => true);
+  const connection = new DatabaseSync(path);
+  try {
+    const saved = catalog.create(settings);
+    catalog.grant("a", saved.id, 1);
+    catalog.blockTool(saved.id, 1, "search");
+    const blocked = catalog.get(saved.id)!;
+    connection.exec(
+      "CREATE TRIGGER refuse_review BEFORE DELETE ON mcp_tool_blocks BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END;",
+    );
+    expect(() =>
+      catalog.update(saved.id, blocked.revision, {
+        ...settings,
+        endpoint: "https://replacement.example.test/mcp",
+        reviewedTools: ["search"],
+      }),
+    ).toThrow();
+    expect(catalog.get(saved.id)).toEqual(blocked);
+    expect(catalog.grants("a")).toEqual([saved.id]);
+  } finally {
+    connection.close();
+    catalog.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 it("persists stable definitions and independent, default-denied agent grants", () => {
   const dir = mkdtempSync(join(tmpdir(), "nimbot-mcp-catalog-"));
