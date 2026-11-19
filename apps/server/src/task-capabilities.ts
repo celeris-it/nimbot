@@ -26,6 +26,12 @@ export interface CapabilityCallIdentity {
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const OPERATION = /^[a-z][a-z0-9_.:-]{0,127}$/;
 const MAX_OPERATIONS = 32;
+// Built-in Telegram operations have reserved slots, so adding them preserves MCP capacity.
+const TELEGRAM_OPERATIONS = [
+  ATTACHMENT_OPERATION,
+  "schedule.context",
+  "schedule.propose",
+];
 const MAX_LIFETIME_MS = 3_600_000;
 const digest = (token: string) => createHash("sha256").update(token).digest();
 
@@ -33,7 +39,9 @@ function operations(value: unknown): string[] | undefined {
   if (
     !Array.isArray(value) ||
     value.length >
-      MAX_OPERATIONS + Number(value.includes(ATTACHMENT_OPERATION)) ||
+      MAX_OPERATIONS +
+        TELEGRAM_OPERATIONS.filter((operation) => value.includes(operation))
+          .length ||
     !value.every((id) => typeof id === "string" && OPERATION.test(id)) ||
     new Set(value).size !== value.length
   )

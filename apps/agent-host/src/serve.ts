@@ -16,6 +16,7 @@ import { createOpenCodeUsage } from "./opencode-usage.js";
 import { openMemoryStore } from "./memory-store.js";
 import { createMemoryTools } from "./memory-tools.js";
 import { createPeerToolDefinitions } from "./peer-tools.js";
+import { createScheduleToolDefinitions } from "./schedule-tools.js";
 
 try {
   const config = readHostConfig(process.env);
@@ -42,6 +43,7 @@ try {
       [
         ...createMemoryTools(memory),
         ...createPeerToolDefinitions(),
+        ...createScheduleToolDefinitions(),
         attachments.tool,
       ],
       { usage, hasCost: models.hasCost },

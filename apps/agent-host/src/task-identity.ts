@@ -56,19 +56,23 @@ export function isTaskToolAccess(
 ): value is TaskToolAccess {
   if (!object(value)) return false;
   const data = value;
+  const operations = data.operations;
   return (
     Object.keys(data).length === (data.remoteTools === undefined ? 3 : 4) &&
     typeof data.token === "string" &&
     /^[a-f0-9]{64}$/.test(data.token) &&
-    Array.isArray(data.operations) &&
-    data.operations.length > 0 &&
-    data.operations.length <=
-      32 + Number(data.operations.includes(ATTACHMENT_OPERATION)) &&
-    data.operations.every(
+    Array.isArray(operations) &&
+    operations.length > 0 &&
+    operations.length <=
+      32 +
+        [ATTACHMENT_OPERATION, "schedule.context", "schedule.propose"].filter(
+          (operation) => operations.includes(operation),
+        ).length &&
+    operations.every(
       (id) => typeof id === "string" && /^[a-z][a-z0-9_.:-]{0,127}$/.test(id),
     ) &&
-    new Set(data.operations).size === data.operations.length &&
-    validRemoteTools(data.remoteTools, data.operations) &&
+    new Set(operations).size === operations.length &&
+    validRemoteTools(data.remoteTools, operations) &&
     typeof data.expiresAt === "number" &&
     Number.isSafeInteger(data.expiresAt) &&
     data.expiresAt > now &&
