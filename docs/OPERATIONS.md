@@ -18,6 +18,7 @@ Use the same Docker context/socket used during installation. The installer print
 | Agent files | Per-agent workspace volume |
 | OpenCode sessions, history, and provider credentials | Per-agent engine-state volume |
 | Task records and results, tool request outbox, and saved tool outcomes | Per-agent task-state volume |
+| Approval rules, decision history, and Server tool invocation records | `server.sqlite` in the server state volume |
 | Delegation handoffs and bounded child outcomes (`delegations`) | `server.sqlite` in the server state volume; included in Server backups |
 | Peer note inboxes (`agent_notes`) | `server.sqlite` in the server state volume; included in Server backups |
 | External MCP definitions, per-agent grants and tool blocks | `server.sqlite` in the server state volume |
@@ -25,6 +26,8 @@ Use the same Docker context/socket used during installation. The installer print
 | Agent memory notes (`memory.sqlite`) | Per-agent task-state volume; included in backups of it, and removed only when the volume is explicitly purged |
 
 Compose stores server state in `<project>_server-state`. Every panel-created agent uses `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks` volumes.
+
+Agent deletion retains these three agent volumes by default. Selecting data deletion removes all three, including the Host task database, its tool outbox, and private memory. That volume purge leaves historical Server records, including approval decisions, invocation outcomes, peer notes, and delegation results, in `server.sqlite`. Agent deletion revokes MCP access and retires the agent's MCP credentials regardless of the volume choice. Existing backups can still contain previous records and credentials.
 
 Server backups contain bot tokens, Agent Host tokens, and MCP bearer credentials. Agent backups can contain AI provider credentials. Keep the backups private, and back up the panel password hash and other `.env` settings separately.
 
