@@ -15,11 +15,16 @@ export function createAgentResourceRemoval(
   call: DockerApi = createDockerApi(config.socketPath),
 ) {
   const resources = createContainerResources(config, call);
-  return async (agentId: string, deleteData = false) => {
+  return async (
+    agentId: string,
+    deleteData = false,
+    beforeRemoval?: () => Promise<void>,
+  ) => {
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(agentId))
       throw new Error("Invalid agent ID");
     registry.beginResourceRemoval(agentId);
     try {
+      await beforeRemoval?.();
       const control = createContainerControl(
         { socketPath: config.socketPath, target: `nimbot-${agentId}`, agentId },
         (id) => registry.setContainerRef(agentId, id),

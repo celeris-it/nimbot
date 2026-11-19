@@ -25,7 +25,11 @@ function fixture(path = ":memory:") {
 function deletion(
   registry: ReturnType<typeof fixture>,
   overrides: {
-    removeResources?: (id: string, data: boolean) => Promise<void>;
+    removeResources?: (
+      id: string,
+      data: boolean,
+      stop: () => Promise<void>,
+    ) => Promise<void>;
     removeSchedules?: (id: string) => void;
   } = {},
 ) {
@@ -42,9 +46,10 @@ function deletion(
     stopBot: async (id) => void events.push(`stop:${id}`),
     removeResources:
       overrides.removeResources ??
-      (async (id, data) => {
-        events.push(`resources:${id}:${data}`);
+      (async (id, data, stop) => {
         registry.beginResourceRemoval(id);
+        await stop();
+        events.push(`resources:${id}:${data}`);
         registry.finishResourceRemoval(id, data);
       }),
     removeBotSecret: async (ref) => void events.push(`bot-secret:${ref}`),
@@ -89,7 +94,12 @@ describe("agent deletion", () => {
 
   it("keeps secrets and the agent when resource removal fails, and can be retried", async () => {
     const registry = fixture();
-    const fail = vi.fn().mockRejectedValue(new Error("docker"));
+    const fail = vi.fn(
+      async (...[, , stop]: [string, boolean, () => Promise<void>]) => {
+        await stop();
+        throw new Error("docker");
+      },
+    );
     const failing = deletion(registry, { removeResources: fail });
     await expect(failing.run("dev")).rejects.toThrow();
     expect(failing.events).toEqual(["stop:dev"]);
@@ -103,6 +113,19 @@ describe("agent deletion", () => {
     const { run, events } = deletion(registry);
     await expect(run("../x")).rejects.toThrow("Invalid agent ID");
     expect(events).toEqual([]);
+  });
+
+  it("leaves polling and retained resources untouched when recovery owns the lifecycle lock", async () => {
+    const registry = fixture();
+    try {
+      registry.beginRecovery("dev", `sha256:${"a".repeat(64)}`, "manual");
+      const { run, events } = deletion(registry);
+      await expect(run("dev", true)).rejects.toThrow("cannot be removed");
+      expect(events).toEqual([]);
+      expect(registry.getRecovery("dev")?.status).toBe("recovering");
+    } finally {
+      registry.close();
+    }
   });
 
   it("keeps the agent and secrets when schedule cleanup fails, then permits retry", async () => {
