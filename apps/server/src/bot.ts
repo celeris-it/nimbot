@@ -10,7 +10,7 @@ import { splitTelegramText } from "./telegram-text.js";
 import type { TaskOutcome } from "./task-queue.js";
 import { Bot, type Api } from "grammy";
 import type { BotAccess } from "./agent-access.js";
-import type { Schedule } from "./schedule-store.js";
+import type { Schedule, ScheduleOrigin } from "./schedule-store.js";
 
 const failureMessages = {
   attachment_unavailable:
@@ -65,6 +65,11 @@ export interface BotConfig {
     Schedule,
     "name" | "enabled" | "nextRunAt" | "timeZone"
   > & { cadence: Pick<Schedule["cadence"], "kind"> })[];
+  answerSchedule?(
+    key: string,
+    confirm: boolean,
+    origin: ScheduleOrigin,
+  ): string;
 }
 
 export function createBot(
@@ -169,6 +174,19 @@ export function createBot(
       )
       .catch(() => {});
   });
+  bot.callbackQuery(/^sc:([A-Za-z0-9_-]{16}):([yn])$/, async (ctx) => {
+    const [, key, choice] = ctx.match;
+    const result =
+      config.answerSchedule?.(key!, choice === "y", {
+        platform: "telegram",
+        botId: ctx.me.id,
+        chatId: ctx.chat!.id,
+      }) ?? "This schedule proposal has expired.";
+    await ctx
+      .answerCallbackQuery({ text: result, show_alert: true })
+      .catch(() => {});
+    await ctx.editMessageReplyMarkup().catch(() => {});
+  });
   bot.on("callback_query:data", (ctx) =>
     ctx.answerCallbackQuery({ text: "Unknown action." }).catch(() => {}),
   );
@@ -179,8 +197,11 @@ export function createBot(
     );
   });
   bot.command("help", async (ctx) => {
+    const createSchedule = config.answerSchedule
+      ? ' Ask in this chat to create a schedule, for example "Remind me every Monday at 9 AM to review invoices."'
+      : "";
     await ctx.reply(
-      `${config.agent.name}: your user is authorized. Use /status to check the status, /schedules to list scheduled tasks, and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Send one document up to 10 MiB with instructions, or send it alone to save it. Reply to a saved document to use it. Ask me to return a file in this chat. Tasks are processed one at a time." : "I cannot run tasks yet."}`,
+      `${config.agent.name}: your user is authorized. Use /status to check the status, /schedules to list scheduled tasks, and /stop to cancel the running task. ${execute && (!access || access.canExecute(ctx.me.id, ctx.from!.id, ctx.chat.id)) ? "Send text to run a task. Send one document up to 10 MiB with instructions, or send it alone to save it. Reply to a saved document to use it. Ask me to return a file in this chat. Tasks are processed one at a time." : "I cannot run tasks yet."}${createSchedule}`,
     );
   });
   bot.command("schedules", async (ctx) => {
@@ -193,7 +214,9 @@ export function createBot(
     let text: string;
     try {
       const schedules = config.schedules();
-      const manage = "Create and manage schedules in this agent's panel.";
+      const manage = config.answerSchedule
+        ? "Ask in this chat to create a schedule. Manage schedules in this agent's panel."
+        : "Create and manage schedules in this agent's panel.";
       text =
         schedules.length === 0
           ? `No schedules for ${config.agent.name}. ${manage}`

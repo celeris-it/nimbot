@@ -44,6 +44,8 @@ import {
   type TaskStore,
 } from "./task-queue.js";
 import type { ModelAdmission, TaskUsage } from "./usage-contracts.js";
+import { createChatSchedules } from "./chat-schedules.js";
+import { splitTelegramText } from "./telegram-text.js";
 
 /** One persistent queue and Host runner per agent; callbacks return to the saved origin. */
 export function createBotTasks(config: {
@@ -51,6 +53,7 @@ export function createBotTasks(config: {
   agentId: string;
   ownerId: () => number;
   attachments?: ReturnType<typeof createTelegramAttachments>;
+  schedules?: Pick<Parameters<typeof createChatSchedules>[0], "store" | "now">;
 
   /** Internal service policy: must resolve exact operations from Server-owned grants. */
   toolPolicy?: Parameters<typeof createTaskCapabilities>[0]["policy"];
@@ -129,15 +132,63 @@ export function createBotTasks(config: {
             config.ownerId(),
             task.origin.chatId,
           );
+  const schedules =
+    config.schedules &&
+    createChatSchedules({
+      agentId: config.agentId,
+      ...config.schedules,
+      canReach: ({ botId, chatId }) =>
+        !closed &&
+        bot?.botInfo.id === botId &&
+        config.access?.canExecute(botId, config.ownerId(), chatId) === true,
+      async send(origin, text, key, signal) {
+        const target = bot;
+        const parts = splitTelegramText(text);
+        const sendSignal = AbortSignal.any([
+          signal,
+          AbortSignal.timeout(10_000),
+        ]);
+        for (const [index, part] of parts.entries()) {
+          sendSignal.throwIfAborted();
+          if (
+            !target ||
+            bot !== target ||
+            target.botInfo.id !== origin.botId ||
+            closed ||
+            !config.access?.canExecute(
+              origin.botId,
+              config.ownerId(),
+              origin.chatId,
+            )
+          )
+            throw new Error("Schedule conversation is unavailable");
+          await target.api.sendMessage(
+            origin.chatId,
+            part,
+            index === parts.length - 1
+              ? {
+                  reply_markup: new InlineKeyboard()
+                    .text("Confirm", `sc:${key}:y`)
+                    .text("Cancel", `sc:${key}:n`),
+                }
+              : {},
+            sendSignal as unknown as Parameters<
+              typeof target.api.sendMessage
+            >[3],
+          );
+        }
+      },
+    });
   const capabilities = createTaskCapabilities({
     store: config.store,
-    ...(config.toolPolicy || config.attachments
+    ...(config.toolPolicy || config.attachments || schedules
       ? {
           policy: {
             canExecute: (task) =>
               admit(task) && (config.toolPolicy?.canExecute(task) ?? true),
             allowedOperations: (task) => [
               ...(config.toolPolicy?.allowedOperations(task) ?? []),
+              ...(schedules?.operations(task) ?? []),
               ...(config.attachments &&
               task.origin.platform === "telegram" &&
               task.scheduleId === undefined
@@ -304,10 +355,12 @@ export function createBotTasks(config: {
   const dispatcher = createToolDispatcher({
     store: config.store,
     authorize: capabilities.verify,
-    handlers:
-      typeof config.toolHandlers === "function"
+    handlers: [
+      ...(typeof config.toolHandlers === "function"
         ? config.toolHandlers(guardAction)
-        : (config.toolHandlers ?? []),
+        : (config.toolHandlers ?? [])),
+      ...(schedules?.handlers ?? []),
+    ],
     resolveHandler: (task, operation) =>
       config.resolveToolHandler?.(task, operation, guardAction),
   });
@@ -708,6 +761,7 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
     idle: queue.idle,
     close() {
       closed = true;
+      schedules?.clear();
       capabilities.close();
       relay.close();
       delegationDelivery?.close();
@@ -746,7 +800,9 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
           : "expired";
       },
     },
+    answerSchedule: schedules?.answer,
     attach(target: Bot) {
+      if (bot !== target) schedules?.clear();
       bot = target;
       queue.resume();
       // A startup scan may already have passed this origin before its bot attached.

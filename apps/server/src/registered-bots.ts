@@ -103,6 +103,7 @@ export function createRegisteredBots(
           schedules: config.schedules
             ? () => config.schedules!.listByAgent(id)
             : undefined,
+          answerSchedule: tasks.answerSchedule,
           agent: {
             id,
             ownerId: agent.ownerId,

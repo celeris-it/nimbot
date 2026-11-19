@@ -143,7 +143,7 @@ The Agent Host saves its ordinary OpenCode conversation session ID in its task-s
 
 The Server resolves the agent and task from its running SQLite record and sends an `execution` object with `agentId` and `serverTaskId`, saved atomically with the Host task before execution and passed to the engine separately from the prompt. The Server saves the accepted Host ID before processing events; if it cannot save that association, it requests cancellation and does not retry submission. Both stores retain the association after restart. A repeated agent/Server-task pair cannot execute again. Prompt-only Host submissions remain supported and carry no execution identity. These fields only correlate records and grant no application tools.
 
-The task service now supports optional Server policies that resolve exact tool operations from Server-owned state. Without a policy it issues no tool access; production services do not configure one yet. When a policy grants access, a short-lived capability travels separately in `tools`, and the Host passes a snapshot to the engine without persisting its token. The Server's internal dispatch guard binds each token to its agent, task, saved Host ID, original conversation, operations, and expiry, and rechecks current authorization. Cancellation, execution ending, service shutdown, and expiry revoke access; restarting cannot restore tokens. Scheduled tasks and webhooks never receive capabilities, even when a policy is configured.
+The task service resolves tool operations from Server-owned policy. When a policy grants access, a short-lived capability travels separately in `tools`, and the Host passes a snapshot to the engine without persisting its token. The Server's internal dispatch guard binds each token to its agent, task, saved Host ID, original conversation, operations, and expiry, and rechecks current authorization. Cancellation, execution ending, service shutdown, and expiry revoke access; restarting cannot restore tokens. Scheduled tasks and webhooks never receive capabilities, even when a policy is configured.
 
 For tool-enabled turns, the engine starts a bundled HTTP MCP adapter on container loopback and registers it on new or restored ACP sessions. Only granted, Host-registered handlers are discoverable. Missing handlers, stale identity, or unsupported HTTP MCP fail before prompting. The adapter uses a separate per-turn credential, keeps task identity and capabilities out of model-visible tool arguments, bounds requests and responses to 64 KiB, and permits at most four concurrent calls and 100 calls per turn. Each call has a 60-second timeout capped by capability expiry. Ending the prompt or stopping the engine closes the endpoint and aborts pending calls; stopping also waits for adapter startup to settle before another turn can begin.
 
@@ -177,10 +177,20 @@ snapshot of a possibly shared account.
 ### Scheduled tasks
 
 Open **Manage schedules** on an agent's page to create, edit, pause, resume, run,
-or delete saved prompts. Each schedule has an IANA time zone, prefilled from the
-browser. The panel shows its next local run time, enabled state, and recent run
-outcomes; `/schedules` lists it in the owner's Telegram chat even if the container
-is stopped. Creating and editing schedules stays in the panel.
+or delete saved prompts. The panel shows each schedule's next local run time,
+enabled state, and recent run outcomes. `/schedules` lists schedules in the owner's
+Telegram chat even if the container is stopped.
+
+To create a timed schedule in Telegram, message your agent as usual, for example
+“Remind me every Monday at 9 AM to review invoices.” The agent asks for any
+missing details. Review the task, cadence, time zone, and first run, then choose
+**Confirm** to save it or **Cancel** to discard it. A newer preview replaces the
+previous one, and previews expire after ten minutes or on server restart.
+
+Set the installation's **Schedule time zone** in the panel under **Settings**.
+It starts at `UTC`, applies to new schedules created from Telegram, and prefills
+the editable time zone for new schedules in the panel. Saved schedules retain
+their own time zone.
 
 | Cadence | Timing |
 |---|---|
@@ -200,6 +210,8 @@ The same operations are available under the authenticated
 `/api/agents/:id/schedules` API. Mutations use POST. Schedule settings are form
 fields `name`, `prompt`, `timeZone`, and `cadence` (a JSON object with its kind and
 matching fields); interval anchors are assigned by the server.
+Read or change the global zone with `GET` or `POST /api/settings/schedules`.
+The POST accepts the `timeZone` form field.
 
 The scheduler runs inside the Nimbot Server, once at startup and every 30 seconds.
 It records each occurrence, enqueues its task, and advances the next run in one
@@ -380,7 +392,7 @@ The following ideas are deferred, not supported features or delivery commitments
 - **Messaging:** WhatsApp, Slack, shared agents, groups/topics, photo and media messages, Discord attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
 - **Nimbot messaging app:** a dedicated messaging app with [Matrix](https://matrix.org/) connectivity.
 - **Agent capabilities:** multi-hop orchestration, shared memory and workspaces, richer memory retrieval, external MCP OAuth, arbitrary MCP stdio commands, and a tool marketplace.
-- **Scheduled automation:** chat-created schedules, Discord delivery, cron expressions, additional event triggers, and chained automations.
+- **Scheduled automation:** Discord delivery, cron expressions, additional event triggers, and chained automations.
 - **User experience:** advanced dashboards and analytics, web chat, richer configuration, templates, browser terminals, workspace browsing, conversation search, and additional panel accounts.
 - **Operations:** multi-server and distributed execution, advanced monitoring, automated backups, image management, alternative runtimes, and stronger isolation.
 - **Managed hosting:** a separate paid offering; hosted accounts, billing, subscriptions, public registration, public multi-tenant hosting, organizations, marketplaces, and automatic external infrastructure provisioning remain outside the self-hosted product's current scope.

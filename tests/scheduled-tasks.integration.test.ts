@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import { createHostApi } from "../apps/agent-host/src/http.js";
 import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-store.js";
@@ -60,9 +61,35 @@ async function fixture(
   const answers: boolean[] = [];
   let release = () => {};
   const engine: Engine = {
-    async run(prompt, onText, progress, approval) {
+    async run(prompt, onText, progress, approval, execution) {
       const scheduled = prompt.startsWith("Scheduled task");
       context.push(prompt);
+      if (mode === "create-from-chat" && !scheduled) {
+        const signal = new AbortController().signal;
+        const local = (await execution!.requestTool!(
+          "schedule.context",
+          {},
+          randomUUID(),
+          signal,
+        )) as { timeZone: string };
+        expect(local).toEqual({
+          timeZone: "America/Argentina/Catamarca",
+          localDate: "2027-01-01",
+          localTime: "05:00",
+        });
+        const response = await execution!.requestTool!(
+          "schedule.propose",
+          {
+            name: "Review invoices",
+            prompt: "Remind the owner to review invoices.",
+            timeZone: local.timeZone,
+            cadence: { kind: "weekly", weekdays: [1], time: "09:00" },
+          },
+          randomUUID(),
+          signal,
+        );
+        expect(response).toMatchObject({ status: "awaiting_confirmation" });
+      }
       progress?.("Checking workspace");
       if (scheduled && mode === "slow")
         await new Promise<void>((resolve) => {
@@ -119,6 +146,9 @@ async function fixture(
       agentId: id,
       store,
       ownerId: () => 42,
+      ...(mode === "create-from-chat"
+        ? { schedules: { store: schedules, now: () => clock.now } }
+        : {}),
       ...(toolsEnabled
         ? {
             toolPolicy: {
@@ -143,6 +173,8 @@ async function fixture(
       {
         telegramBotToken: "123:test-token",
         agent: { id: "dev", name: "Dev", ownerId: 42 },
+        schedules: () => schedules.listByAgent("dev"),
+        answerSchedule: tasks.answerSchedule,
       },
       () => {},
       tasks.submit,
@@ -312,6 +344,82 @@ it("fires through the Host API without tool access, sends only the named final r
       serverTaskId: taskId,
     });
     expect(f.submissions[0]?.tools).toBeUndefined();
+  } finally {
+    await f.close();
+  }
+});
+
+it("proposes a Telegram schedule, creates it once on owner confirmation, lists it, and delivers the due result", async () => {
+  const f = await fixture("create-from-chat");
+  try {
+    f.schedules.setDefaultTimeZone("America/Argentina/Catamarca");
+    const owner = { id: 42, is_bot: false as const, first_name: "Owner" };
+    const chat = { id: 42, type: "private" as const };
+    await f.bot.handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 0,
+        chat,
+        from: owner,
+        text: "Remind me every Monday at 9 AM to review invoices",
+      },
+    });
+    await f.tasks.idle();
+    const preview = f.sent.find(({ markup }) => markup);
+    expect(preview?.text).toContain("Every Monday at 09:00");
+    expect(preview?.text).toContain("America/Argentina/Catamarca");
+    expect(preview?.text).toContain("Remind the owner to review invoices.");
+    const keyboard = preview?.markup as {
+      inline_keyboard: { text: string; callback_data: string }[][];
+    };
+    expect(keyboard.inline_keyboard[0]?.map(({ text }) => text)).toEqual([
+      "Confirm",
+      "Cancel",
+    ]);
+    const data = keyboard.inline_keyboard[0]![0]!.callback_data;
+    const confirm = (updateId: number, ownerId: number) =>
+      f.bot.handleUpdate({
+        update_id: updateId,
+        callback_query: {
+          id: String(updateId),
+          chat_instance: "owner-chat",
+          data,
+          from: { ...owner, id: ownerId },
+          message: { message_id: 2, date: 1, chat, text: preview!.text },
+        },
+      });
+    await confirm(2, 73);
+    expect(f.schedules.listByAgent("dev")).toHaveLength(0);
+    await confirm(3, 42);
+    await confirm(4, 42);
+    const [schedule] = f.schedules.listByAgent("dev");
+    expect(f.schedules.listByAgent("dev")).toHaveLength(1);
+    expect(schedule?.nextRunAt).toBe(Date.parse("2027-01-04T12:00:00Z"));
+    await f.bot.handleUpdate({
+      update_id: 5,
+      message: {
+        message_id: 5,
+        date: 0,
+        chat,
+        from: owner,
+        text: "/schedules",
+        entities: [{ type: "bot_command", offset: 0, length: 10 }],
+      },
+    });
+    expect(f.sent.at(-1)?.text).toContain("Review invoices");
+    f.clock.now = schedule!.nextRunAt!;
+    await f.scheduler.tick();
+    await f.tasks.idle();
+    expect(f.sent.at(-1)?.text).toBe(
+      'Scheduled task "Review invoices":\n\nScheduled result',
+    );
+    expect(f.submissions.at(-1)?.tools).toBeUndefined();
+    await f.restart();
+    expect(f.schedules.getDefaultTimeZone()).toBe(
+      "America/Argentina/Catamarca",
+    );
+    expect(f.schedules.listByAgent("dev")).toHaveLength(1);
   } finally {
     await f.close();
   }

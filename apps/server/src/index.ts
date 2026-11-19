@@ -335,6 +335,7 @@ async function main(): Promise<void> {
           usage.record(id, taskId, hostId, reading),
         store: taskStore,
         ownerId: () => registry.get(id)?.ownerId ?? 0,
+        schedules: { store: scheduleStore },
         approvals: { store: approvalStore, rules: approvalRules },
         notificationStore,
         approvalReach: canReach,
