@@ -101,6 +101,37 @@ do not migrate saved state. Keep the original backup until recovery is verified.
    ownership when extracting the existing `.tar.gz` archives (Agent Hosts run as
    UID 1000). Docker volume labels are not part of those archives.
 
+From the directory containing the destination Compose file, restore the Server
+archive first. Set `COMPOSE_PROJECT_NAME` to the original project name and put
+the backup in `./backup` for these commands. If the destination volume already
+exists, inspect it and resolve the conflict before continuing.
+
+```sh
+(
+  set -eu
+  state_volume="${COMPOSE_PROJECT_NAME:?Set the original Compose project name}_server-state"
+  test -f "backup/$state_volume.tar.gz"
+  existing=$(docker volume ls --format '{{.Name}}')
+  if printf '%s\n' "$existing" | grep -Fxq "$state_volume"; then
+    docker volume inspect "$state_volume"
+    printf '%s\n' "Restore stopped because $state_volume already exists." >&2
+    exit 1
+  fi
+  docker compose create server
+  docker volume inspect "$state_volume" >/dev/null
+  docker run --rm --network none --user 0:0 \
+    --mount "type=volume,src=$state_volume,dst=/data,volume-nocopy" \
+    --mount "type=bind,src=$PWD/backup,dst=/backup,readonly" \
+    node:22-bookworm-slim sh -ec '
+      test -z "$(ls -A /data)"
+      tar --numeric-owner --same-owner -xzpf "/backup/$1.tar.gz" -C /data
+    ' sh "$state_volume"
+)
+```
+
+Compose creates the Server container in a stopped state and labels its volume.
+Keep the Server stopped until all agent volume archives have been restored.
+
 From the matching release's source directory, use the restore helper once for
 each saved agent ID (Node.js 22.13 or newer is required). Pass the original
 installation identity from the restored configuration, not a new ID:

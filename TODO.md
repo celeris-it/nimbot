@@ -16,4 +16,4 @@
 
 - [x] Add a Docker integration test that restores a backed-up agent with new container and network IDs. Verify preservation of workspace files, engine and task state, owner binding, and queued work. Confirm the recreated container stays stopped until **Start**.
 - [x] Test a missing volume, mismatched labels, a conflicting container name, concurrent recovery requests, and restart after a lost Docker response. Verify these paths preserve the volumes and prevent premature task execution.
-- [ ] Update the README and run `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm test`, including the opt-in Docker recovery test.
+- [x] Update the README and run `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm test`, including the opt-in Docker recovery test.
