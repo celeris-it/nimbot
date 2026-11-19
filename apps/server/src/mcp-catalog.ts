@@ -260,15 +260,18 @@ export function openMcpCatalog(
       reference: string | null,
     ): boolean {
       if (!agentExists(agentId)) return false;
+      // Rotate even when removing a secret: returning to null must not revive
+      // an earlier credential-free capability or stale credential update.
       return (
         db
           .prepare(
-            `UPDATE mcp_grants SET secret_ref = ?
+            `UPDATE mcp_grants SET secret_ref = ?, scope = ?
          WHERE agent_id = ? AND definition_id = ? AND scope = ? AND secret_ref IS ?
          AND EXISTS (SELECT 1 FROM mcp_definitions WHERE id = ? AND revision = ?)`,
           )
           .run(
             reference,
+            randomUUID(),
             agentId,
             id,
             previous.scope,
