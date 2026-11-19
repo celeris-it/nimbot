@@ -6,6 +6,7 @@ import {
   readFile,
   cp,
   rm,
+  symlink,
   stat,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -76,6 +77,10 @@ elif args[0] == 'info': pass
 elif args[:2] == ['compose', 'version']: print('Docker Compose version v2.39.0')
 elif args[0] == 'version': print(os.environ.get('FAKE_API', '1.47'))
 elif args[0] == 'build': pass
+elif args[0] == 'image' and args[1] == 'inspect': print('sha256:' + 'a'*64)
+elif args[0] == 'run' and 'stat' in args: print('0')
+elif args[0] == 'run' and '/app/scripts/upgrade.mjs' in args:
+    print('Upgrade helper invoked')
 elif args[0] == 'run':
     password = sys.stdin.read()
     if len(password) < 12 or len(password) > 256: sys.exit(1)
@@ -122,7 +127,13 @@ async function fixture() {
   const destination = join(dir, "installation with spaces");
   await mkdir(bin);
   await mkdir(source);
-  for (const name of ["compose.yaml", "uninstall.sh"])
+  for (const name of [
+    "compose.yaml",
+    "install.sh",
+    "uninstall.sh",
+    "upgrade.sh",
+    "release.json",
+  ])
     await cp(join(root, name), join(source, name));
   const archive = join(dir, "source.tar.gz");
   await exec("tar", ["-czf", archive, "-C", dir, "source"]);
@@ -151,7 +162,7 @@ async function fixture() {
     DOCKER_CONTEXT: "",
   };
   async function run(
-    script: "install" | "uninstall",
+    script: "install" | "uninstall" | "upgrade",
     answers: string[][],
     extra: string[] = [],
     overrides: Record<string, string> = {},
@@ -429,4 +440,68 @@ it("cancels uninstall without changes and cleans incomplete setup resources", as
   expect(result.code, result.output).toBe(0);
   expect((await f.readState()).network).toEqual({});
   expect((await f.readState()).volume!.pending).toEqual({ owner });
+});
+
+it("installs a pinned release and rejects switching tags through the installer", async () => {
+  const f = await fixture();
+  const result = await f.run(
+    "install",
+    [
+      ["Panel URL [", ""],
+      ["characters, hidden): ", "long-enough-password"],
+      ["Repeat password: ", "long-enough-password"],
+    ],
+    ["--version", "v1.0.0"],
+  );
+  expect(result.code).toBe(0);
+  expect(await readFile(join(f.destination, ".nimbot-release"), "utf8")).toBe(
+    "v1.0.0\n",
+  );
+  const retry = await f.run("install", [], ["--version", "v2.0.0"]);
+  expect(retry.code).not.toBe(0);
+  expect(retry.output).toContain("Use upgrade.sh");
+});
+
+it("stages the release for a custom directory and leaves the service alone on build failure", async () => {
+  const f = await fixture();
+  expect((await f.install()).code).toBe(0);
+  await rm(join(f.destination, ".nimbot-release"));
+  const before = await f.readState();
+  const failed = await f.run("upgrade", [], ["--version", "v1.0.0"], {
+    FAKE_FAIL: "build",
+  });
+  expect(failed.code).not.toBe(0);
+  expect(await f.readState()).toEqual(before);
+  const completed = await f.run("upgrade", [], ["--version", "v1.0.0"]);
+  expect(completed.code).toBe(0);
+  expect(completed.output).toContain("Upgrade helper invoked");
+});
+
+it("serializes maintenance and routes an interrupted upgrade to recovery", async () => {
+  const f = await fixture();
+  expect((await f.install()).code).toBe(0);
+  await writeFile(join(f.destination, ".nimbot-upgrade.json"), "{}");
+  const before = await f.readState();
+  const refused = await f.run("uninstall", [], []);
+  expect(refused.code).not.toBe(0);
+  expect(refused.output).toContain("An upgrade is pending");
+  const owner = (
+    await readFile(join(f.destination, ".nimbot-installation"), "utf8")
+  ).split("\n")[0];
+  await writeFile(
+    join(f.destination, ".nimbot-upgrade-helper"),
+    `nimbot-upgrade-${owner}:v1.0.0\n`,
+  );
+  await symlink(
+    String(process.pid),
+    join(f.destination, ".nimbot-maintenance"),
+  );
+  const busy = await f.run("upgrade", [], ["--rollback"]);
+  expect(busy.code).not.toBe(0);
+  expect(busy.output).toContain("maintenance is still running");
+  await rm(join(f.destination, ".nimbot-maintenance"));
+  const resumed = await f.run("upgrade", [], ["--rollback"]);
+  expect(resumed.code).toBe(0);
+  expect(resumed.output).toContain("Upgrade helper invoked");
+  expect(await f.readState()).toEqual(before);
 });

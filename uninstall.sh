@@ -26,6 +26,10 @@ case "$socket" in /*) ;; *) fail 'Invalid Docker socket in installation marker.'
 unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
 export DOCKER_HOST="unix://$socket"
 docker info >/dev/null || fail 'Cannot access the saved Docker Engine.'
+lock="$install_dir/.nimbot-maintenance"
+ln -s "$$" "$lock" 2>/dev/null || fail 'Installation maintenance is already in progress.'
+trap 'rm -f -- "$lock"' EXIT
+[ ! -f "$install_dir/.nimbot-upgrade.json" ] || fail 'An upgrade is pending. Run upgrade.sh --rollback.'
 exec 3<> /dev/tty || fail 'An interactive terminal is required.'
 project="nimbot-$installation_id"
 label="io.nimbot.installation=$installation_id"
@@ -51,7 +55,7 @@ if [ -n "$server" ]; then
 fi
 printf 'Uninstall Nimbot from %s.\nContainers and networks for this installation will be removed.\n' "$install_dir"
 if "$purge"; then
-  printf 'ALL agent files, conversations, credentials, server state and .env will also be deleted.\n'
+  printf 'Live agent files, conversations, credentials, server state and .env will be deleted. Upgrade backups are kept.\n'
 else
   printf 'All volumes, credentials, .env, images and source files will be kept.\nRetained data does not automatically recreate removed agent containers.\n'
 fi
