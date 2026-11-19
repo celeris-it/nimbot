@@ -61,7 +61,63 @@ Restart panel-created agent containers from the panel, or with `docker start nim
 
 ## Restore
 
-On a host where Nimbot is installed and stopped (`docker compose down`, without `-v`):
+Restore with the **same Nimbot version that created the backup**, including its
+Server and Agent Host images. A restore is not an upgrade: pre-stable releases
+do not migrate saved state. Keep the original backup until recovery is verified.
+
+### Prepare a replacement Docker host
+
+1. Install Docker and prepare the matching Nimbot release and images on the
+   destination, without starting Nimbot. Copy the protected backup there. Keep
+   the source deployment available for inspection until its backup is verified.
+2. Before activating the destination, stop the source Server and every
+   panel-created agent container. Prevent the source deployment from restarting
+   during recovery. Two Servers using the restored bot credentials must not poll
+   or execute work concurrently. If the source is unreachable, isolate it before
+   activating its replacement.
+3. Stop any destination deployment with `docker compose down`, without `-v`.
+   Restore `env.backup` to `.env` and, for installer-managed deployments,
+   `installation.backup` to `.nimbot-installation`. Keep both files private.
+   Restore the original `NIMBOT_INSTALLATION_ID` and Compose project name; do not
+   generate a replacement installation identity. For installer-managed deployments,
+   the project name is `nimbot-<identity from .nimbot-installation>`; manual
+   deployments must retain their original project name and configured identity
+   (`manual` by default).
+4. Adjust destination-specific Docker socket path/group and, if necessary,
+   `PANEL_URL` in the restored configuration. Ensure the configured Server
+   container name is available. Make the matching Agent Host image available
+   locally, retaining the configured image ID or digest when one is pinned.
+5. Restore the complete `<project>_server-state` archive, including
+   `server.sqlite` and all private credential directories. For **every** saved
+   agent ID, restore all three archives under their canonical volume names:
+   `nimbot-<agent-id>-workspace`, `nimbot-<agent-id>-engine`, and
+   `nimbot-<agent-id>-tasks`. Do not substitute the agent's display name or create
+   a new agent registration. Missing engine or task state is not a complete
+   restore, even when the workspace files are present.
+6. Before extraction, create the agent volumes with `io.nimbot.agent-id` set to
+   the saved agent ID and `io.nimbot.installation` set to the restored installation
+   identity. Inspect any existing destination volumes first and stop on conflicts;
+   never merge an archive into unrelated or nonempty data. Preserve numeric file
+   ownership when extracting the existing `.tar.gz` archives (Agent Hosts run as
+   UID 1000). Docker volume labels are not part of those archives.
+
+The Server database preserves agent IDs, owners, chat bindings, schedules and task
+history, but its container and network IDs refer to the source Docker host. Those
+resources are not restored by extracting volume archives. **Replacement-host
+activation is not supported yet:** the panel cannot currently recreate missing
+containers and networks. Keep the destination stopped after restoring data until
+the recovery workflow is available. Do not delete and register agents again or
+purge their retained volumes to work around missing Docker resources.
+
+### Restore on the original Docker host
+
+The commands below apply only when the original agent containers, networks and
+correctly labelled agent volumes still exist. Stop both the Server and every
+panel-created agent before extraction. Use new, empty destination volumes, or
+explicitly prepare the existing volumes for restoring this backup first; the tar
+command merges files and does not remove files absent from the archive.
+
+On the original host with Nimbot stopped (`docker compose down`, without `-v`):
 
 ```sh
 for f in backup/*.tar.gz; do
@@ -86,7 +142,8 @@ older occurrences become missed. It advances past the current time instead of
 replaying a backlog. Queued work remains in the ordinary task queue; interrupted
 running tasks are not replayed automatically.
 
-Limits of restoring on a different host: the server state is restored. Agents created in the panel keep their volumes and registry entries, but their containers and networks do not exist on the new host, and the panel cannot yet recreate them (it can start and stop existing containers, but it has no recreate action). Prefer restoring on the same Docker host, or keep the volumes and recreate those agents. Do not delete data from the panel while recovering.
+For a replacement host, follow the preparation section above instead of starting
+the Server with stale Docker references.
 
 ## Troubleshooting
 
