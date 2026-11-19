@@ -248,3 +248,60 @@ describe("Agent Host API", () => {
     },
   );
 });
+
+describe("Agent Host request validation order", () => {
+  const submit = vi.fn(async () => "task");
+  const app = createHostApi({ token, workspace: "/workspace" }, {
+    submit,
+  } as unknown as Parameters<typeof createHostApi>[1]);
+  const post = (body: string, contentType = "application/json") =>
+    app.request("/tasks", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": contentType,
+      },
+      body,
+    });
+  const error = async (response: Response) =>
+    ((await response.json()) as { error: string }).error;
+
+  it("reports the first failing field, as the hand-written checks did", async () => {
+    const identity = {
+      agentId: "agent",
+      serverTaskId: "a0000000-0000-4000-8000-000000000001",
+    };
+    for (const [body, message] of [
+      ["null", "prompt must contain 1–16000 characters"],
+      ['{"prompt":"  "}', "prompt must contain 1–16000 characters"],
+      [
+        '{"prompt":"hi","credentials":null,"execution":1}',
+        "Configure providers through this agent's provider settings",
+      ],
+      ['{"prompt":"hi","execution":1,"tools":1}', "Invalid execution identity"],
+      [
+        '{"prompt":"hi","tools":1,"sessionMode":"x"}',
+        "Invalid task tool access",
+      ],
+      [
+        JSON.stringify({ prompt: "hi", execution: identity, sessionMode: "x" }),
+        "Invalid session mode",
+      ],
+    ] as const) {
+      const response = await post(body);
+      expect(response.status).toBe(400);
+      expect(await error(response)).toBe(message);
+    }
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("answers malformed JSON in its own words, with or without a JSON content type", async () => {
+    for (const contentType of ["application/json", "text/plain"]) {
+      const response = await post("{", contentType);
+      expect(response.status).toBe(400);
+      expect(await error(response)).toBe("Invalid JSON");
+    }
+    const accepted = await post('{"prompt":"hi"}', "text/plain");
+    expect(accepted.status).toBe(202);
+  });
+});

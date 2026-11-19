@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { z } from "zod";
 import {
   McpCatalogValidationError,
   type McpCatalog,
@@ -45,11 +46,19 @@ async function jsonFields(c: Context): Promise<Record<string, unknown>> {
   return value as Record<string, unknown>;
 }
 
+const REVISION_ERROR = "Invalid MCP definition revision.";
+const revisionFields = z.object({
+  revision: z.int({ error: REVISION_ERROR }).min(1, { error: REVISION_ERROR }),
+});
+const discoveryFields = z.object({ agentId: z.string().optional() });
+const credentialFields = z.object({
+  token: z.string().refine(isMcpBearer).nullable(),
+});
+
 function revisionOf(fields: Record<string, unknown>): number {
-  const value = fields.revision;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
-    throw new McpCatalogValidationError("Invalid MCP definition revision.");
-  return value;
+  const result = revisionFields.safeParse(fields);
+  if (!result.success) throw new McpCatalogValidationError(REVISION_ERROR);
+  return result.data.revision;
 }
 
 /** Mount after the authenticated panel's session, Origin and request-size checks. */
@@ -105,11 +114,12 @@ export function createMcpPanel({
     const revision = revisionOf(fields);
     const definition = catalog.get(id);
     if (!definition || definition.revision !== revision) return changed(c);
-    const agentId = fields.agentId;
-    if (agentId !== undefined && typeof agentId !== "string")
+    const selection = discoveryFields.safeParse(fields);
+    if (!selection.success)
       throw new McpCatalogValidationError(
         "Invalid discovery credential selection.",
       );
+    const { agentId } = selection.data;
     const binding =
       agentId === undefined
         ? undefined
@@ -174,12 +184,13 @@ export function createMcpPanel({
   });
   app.post("/agents/:agentId/mcp/:definitionId/credential", async (c) => {
     const fields = await jsonFields(c);
-    const token = fields.token;
-    if (token !== null && (typeof token !== "string" || !isMcpBearer(token)))
+    const parsed = credentialFields.safeParse(fields);
+    if (!parsed.success)
       return c.json(
         { error: "Enter a bearer credential without whitespace." },
         400,
       );
+    const { token } = parsed.data;
     const result = await credentials.set(
       c.req.param("agentId"),
       c.req.param("definitionId"),

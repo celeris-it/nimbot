@@ -26,8 +26,26 @@ import {
 } from "./schedule-store.js";
 import { validateCadence } from "./schedule-time.js";
 import type { ScheduleRunNowResult } from "./scheduler.js";
-import { isDiscordId } from "./discord-identity.js";
-import { isProviderId, isApiKey } from "./provider-contracts.js";
+import { isProviderId } from "./provider-contracts.js";
+import { parseForm, validated } from "./validate.js";
+import {
+  approvalRuleForm,
+  confirmForm,
+  containerForm,
+  deleteAgentForm,
+  delegationParams,
+  discordConfigureForm,
+  discordTestForm,
+  loginAttemptParams,
+  memoryAccessForm,
+  peerGrantForm,
+  scheduleForm,
+  providerKeyForm,
+  registerAgentForm,
+  removeResourcesForm,
+  settingsForm,
+  tokenForm,
+} from "./panel-schemas.js";
 import { createMcpPanel, type McpPanelDeps } from "./mcp-panel.js";
 
 export interface RegisteredAgentSettings {
@@ -420,24 +438,15 @@ export function createPanel(
     }
   }
   async function scheduleInput(c: Context): Promise<ScheduleInput> {
-    const body = await scheduleFields(c);
-    if (
-      Object.keys(body).some(
-        (key) => !["name", "prompt", "cadence", "timeZone"].includes(key),
-      )
-    ) {
-      throw new ScheduleValidationError("Unknown schedule field.");
-    }
-    if (
-      typeof body.name !== "string" ||
-      typeof body.prompt !== "string" ||
-      typeof body.cadence !== "string" ||
-      typeof body.timeZone !== "string"
-    ) {
+    const fields = scheduleForm.safeParse(await scheduleFields(c));
+    if (!fields.success) {
       throw new ScheduleValidationError(
-        "Enter a name, prompt, cadence, and time zone.",
+        fields.error.issues.some((issue) => issue.code === "unrecognized_keys")
+          ? "Unknown schedule field."
+          : "Enter a name, prompt, cadence, and time zone.",
       );
     }
+    const body = fields.data;
     let cadence: unknown;
     try {
       cadence = JSON.parse(body.cadence);
@@ -594,26 +603,26 @@ export function createPanel(
   );
   app.post(
     "/api/agents/:id/providers/openai/device-login/:attempt/cancel",
-    async (c) => {
-      const attempt = c.req.param("attempt");
-      if (!/^[a-f0-9-]{36}$/.test(attempt))
-        return c.json({ error: "Invalid login attempt." }, 400);
-      return c.json(
-        await deps.providers!.cancelLogin(c.req.param("id"), attempt),
-      );
-    },
+    validated("param", loginAttemptParams.loose(), "Invalid login attempt."),
+    async (c) =>
+      c.json(
+        await deps.providers!.cancelLogin(
+          c.req.param("id"),
+          c.req.param("attempt"),
+        ),
+      ),
   );
   app.post("/api/agents/:id/providers/:provider", async (c) => {
     const provider = c.req.param("provider");
     if (!isProviderId(provider))
       return c.json({ error: "Unknown provider." }, 400);
-    const body = await c.req.parseBody({ all: true });
-    if (!isApiKey(body.key))
-      return c.json(
-        { error: "Enter an API key of 1–4096 characters without whitespace." },
-        400,
-      );
-    await deps.providers!.save(c.req.param("id"), provider, body.key);
+    const form = await parseForm(
+      c,
+      providerKeyForm,
+      "Enter an API key of 1–4096 characters without whitespace.",
+    );
+    if (form.response) return form.response;
+    await deps.providers!.save(c.req.param("id"), provider, form.data.key);
     return c.json({ saved: true });
   });
   app.post("/api/agents/:id/providers/:provider/remove", async (c) => {
@@ -638,23 +647,16 @@ export function createPanel(
   );
   for (const action of ["grant", "revoke"] as const)
     app.post(`/api/agents/:id/peers/${action}`, async (c) => {
-      const body = await c.req.parseBody({ all: true });
-      if (
-        typeof body.target !== "string" ||
-        !["note", "delegate"].includes(String(body.permission))
-      )
-        return c.json({ error: "Invalid grant." }, 400);
+      const form = await parseForm(c, peerGrantForm, "Invalid grant.");
+      if (form.response) return form.response;
+      const { target, permission } = form.data;
       const id = c.req.param("id");
-      const permission = body.permission as "note" | "delegate";
       if (action === "revoke")
-        return deps.peers!.grants.revoke(id, body.target, permission)
+        return deps.peers!.grants.revoke(id, target, permission)
           ? c.json({ revoked: true })
           : c.json({ error: "Grant not found." }, 404);
       try {
-        return c.json(
-          deps.peers!.grants.grant(id, body.target, permission),
-          201,
-        );
+        return c.json(deps.peers!.grants.grant(id, target, permission), 201);
       } catch {
         return c.json(
           { error: "Choose a different agent that shares the same owner." },
@@ -699,28 +701,28 @@ export function createPanel(
       ),
     ),
   );
-  app.post("/api/agents/:id/delegations/:delegationId/cancel", async (c) => {
-    const id = c.req.param("delegationId");
-    if (
-      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)
-    )
-      return c.json({ error: "Invalid delegation ID." }, 400);
-    const source = c.req.param("id");
-    const saved = deps.delegations!.store.getDelegation(source, id);
-    if (!saved) return c.json({ error: "Delegation not found." }, 404);
-    if (
-      saved.cancellationRequested ||
-      !["queued", "running"].includes(saved.childStatus ?? "")
-    )
-      return c.json({ error: "Delegation is no longer cancellable." }, 409);
-    try {
-      return (await deps.delegations!.cancel(source, id))
-        ? c.json({ cancellationRequested: true })
-        : c.json({ error: "Delegation is no longer cancellable." }, 409);
-    } catch {
-      return c.json({ error: "Delegation cancellation unavailable." }, 503);
-    }
-  });
+  app.post(
+    "/api/agents/:id/delegations/:delegationId/cancel",
+    validated("param", delegationParams.loose(), "Invalid delegation ID."),
+    async (c) => {
+      const id = c.req.param("delegationId");
+      const source = c.req.param("id");
+      const saved = deps.delegations!.store.getDelegation(source, id);
+      if (!saved) return c.json({ error: "Delegation not found." }, 404);
+      if (
+        saved.cancellationRequested ||
+        !["queued", "running"].includes(saved.childStatus ?? "")
+      )
+        return c.json({ error: "Delegation is no longer cancellable." }, 409);
+      try {
+        return (await deps.delegations!.cancel(source, id))
+          ? c.json({ cancellationRequested: true })
+          : c.json({ error: "Delegation is no longer cancellable." }, 409);
+      } catch {
+        return c.json({ error: "Delegation cancellation unavailable." }, 503);
+      }
+    },
+  );
   app.get("/api/agents/:id/approvals", (c) =>
     c.json(
       deps.approvals!.history.listByAgent(
@@ -738,23 +740,16 @@ export function createPanel(
     ),
   );
   app.post("/api/agents/:id/approvals/rules", async (c) => {
-    const body = await c.req.parseBody({ all: true });
-    const days = body.ttlDays === "" ? undefined : Number(body.ttlDays);
-    if (
-      typeof body.actionType !== "string" ||
-      typeof body.target !== "string" ||
-      !["ask", "deny", "allow"].includes(String(body.effect)) ||
-      (days !== undefined &&
-        (!Number.isInteger(days) || days < 1 || days > 365))
-    )
-      return c.json({ error: "Invalid rule." }, 400);
+    const form = await parseForm(c, approvalRuleForm, "Invalid rule.");
+    if (form.response) return form.response;
+    const { actionType, target, effect, ttlDays: days } = form.data;
     try {
       return c.json(
         deps.approvals!.rules.create({
           agentId: c.req.param("id"),
-          actionType: body.actionType.trim(),
-          target: body.target.trim(),
-          effect: body.effect as "ask" | "deny" | "allow",
+          actionType,
+          target,
+          effect,
           ...(days === undefined ? {} : { ttlMs: days * 86_400_000 }),
         }),
         201,
@@ -781,12 +776,16 @@ export function createPanel(
     if (!getAgentSetup?.(id)) return c.json({ error: "Agent not found." }, 404);
     if (!deps.memoryAccess)
       return c.json({ error: "Memory settings unavailable." }, 503);
-    const body = await c.req.parseBody({ all: true });
-    if (body.enabled !== "true" && body.enabled !== "false")
-      return c.json({ error: "Invalid memory setting." }, 400);
-    if (!deps.memoryAccess.set(id, body.enabled === "true"))
+    const form = await parseForm(
+      c,
+      memoryAccessForm,
+      "Invalid memory setting.",
+    );
+    if (form.response) return form.response;
+    const enabled = form.data.enabled === "true";
+    if (!deps.memoryAccess.set(id, enabled))
       return c.json({ error: "Agent not found." }, 404);
-    return c.json({ enabled: body.enabled === "true" });
+    return c.json({ enabled });
   });
   app.use("/api/agents/:id/memories", async (c, next) => {
     if (!getAgentSetup?.(c.req.param("id")!))
@@ -872,23 +871,14 @@ export function createPanel(
     const id = c.req.param("id");
     if (!agentSettings?.get(id))
       return c.json({ error: "Agent not found." }, 404);
-    const body = await c.req.parseBody({ all: true });
-    if (
-      typeof body.name !== "string" ||
-      !body.name.trim() ||
-      body.name.trim().length > 128 ||
-      typeof body.instructions !== "string" ||
-      body.instructions.length > 4000
-    )
-      return c.json(
-        {
-          error:
-            "Enter a name of up to 128 characters and instructions of up to 4000 characters.",
-        },
-        400,
-      );
+    const form = await parseForm(
+      c,
+      settingsForm,
+      "Enter a name of up to 128 characters and instructions of up to 4000 characters.",
+    );
+    if (form.response) return form.response;
     try {
-      agentSettings.save(id, body.name.trim(), body.instructions);
+      agentSettings.save(id, form.data.name, form.data.instructions);
       return c.json({ saved: true });
     } catch {
       return c.json({ error: "Could not save the changes. Try again." }, 500);
@@ -913,21 +903,17 @@ export function createPanel(
     const id = c.req.param("id");
     if (!deps.discord || !getAgentSetup?.(id))
       return c.json({ error: "Agent not found." }, 404);
-    const body = await c.req.parseBody({ all: true });
-    if (
-      !isDiscordId(body.ownerId) ||
-      typeof body.token !== "string" ||
-      !/^[A-Za-z0-9._-]{1,256}$/.test(body.token.trim())
-    )
-      return c.json(
-        { error: "Enter a valid Discord owner ID and bot token." },
-        400,
-      );
+    const form = await parseForm(
+      c,
+      discordConfigureForm,
+      "Enter a valid Discord owner ID and bot token.",
+    );
+    if (form.response) return form.response;
     try {
       const result = await deps.discord.configure(
         id,
-        body.ownerId,
-        body.token.trim(),
+        form.data.ownerId,
+        form.data.token,
       );
       return c.json({ saved: true, cleanupPending: result.cleanupPending });
     } catch {
@@ -944,15 +930,14 @@ export function createPanel(
     const id = c.req.param("id");
     if (!deps.discord?.test || !getAgentSetup?.(id))
       return c.json({ error: "Agent not found." }, 404);
-    const body = await c.req.parseBody({ all: true });
-    if (
-      typeof body.requestId !== "string" ||
-      !/^[A-Za-z0-9_-]{1,128}$/.test(body.requestId) ||
-      Object.keys(body).some((key) => key !== "requestId")
-    )
-      return c.json({ error: "Enter a valid notification request ID." }, 400);
+    const form = await parseForm(
+      c,
+      discordTestForm,
+      "Enter a valid notification request ID.",
+    );
+    if (form.response) return form.response;
     try {
-      return c.json(await deps.discord.test(id, body.requestId));
+      return c.json(await deps.discord.test(id, form.data.requestId));
     } catch {
       return c.json(
         {
@@ -967,9 +952,12 @@ export function createPanel(
     const id = c.req.param("id");
     if (!deps.discord || !getAgentSetup?.(id))
       return c.json({ error: "Agent not found." }, 404);
-    const body = await c.req.parseBody({ all: true });
-    if (body.confirm !== id)
-      return c.json({ error: "Confirm the agent ID to remove Discord." }, 400);
+    const form = await parseForm(
+      c,
+      confirmForm(id),
+      "Confirm the agent ID to remove Discord.",
+    );
+    if (form.response) return form.response;
     try {
       const result = await deps.discord.remove(id);
       return c.json({ removed: true, cleanupPending: result.cleanupPending });
@@ -984,15 +972,14 @@ export function createPanel(
     const id = c.req.param("id");
     if (!agentSettings?.get(id) || !agentSettings.saveToken)
       return c.json({ error: "Agent not found." }, 404);
-    const body = await c.req.parseBody({ all: true });
-    if (
-      typeof body.token !== "string" ||
-      !body.token.trim() ||
-      body.token.trim().length > 256
-    )
-      return c.json({ error: "Enter a valid token for the same bot." }, 400);
+    const form = await parseForm(
+      c,
+      tokenForm,
+      "Enter a valid token for the same bot.",
+    );
+    if (form.response) return form.response;
     try {
-      await agentSettings.saveToken(id, body.token.trim());
+      await agentSettings.saveToken(id, form.data.token);
       return c.json({ saved: true });
     } catch {
       return c.json(
@@ -1006,23 +993,14 @@ export function createPanel(
   });
   app.post("/api/agents", async (c) => {
     if (!registerAgent) return c.notFound();
-    const body = await c.req.parseBody({ all: true });
-    if (
-      typeof body.name !== "string" ||
-      typeof body.ownerId !== "string" ||
-      !/^[1-9]\d*$/.test(body.ownerId) ||
-      !Number.isSafeInteger(Number(body.ownerId)) ||
-      typeof body.token !== "string" ||
-      (body.instructions !== undefined && typeof body.instructions !== "string")
-    )
-      return c.json({ error: "Invalid agent settings" }, 400);
+    const form = await parseForm(
+      c,
+      registerAgentForm,
+      "Invalid agent settings",
+    );
+    if (form.response) return form.response;
     try {
-      const result = await registerAgent({
-        name: body.name,
-        ownerId: Number(body.ownerId),
-        token: body.token,
-        instructions: body.instructions ?? "",
-      });
+      const result = await registerAgent(form.data);
       return c.json(result, 201);
     } catch {
       return c.json(
@@ -1038,9 +1016,12 @@ export function createPanel(
     const id = c.req.param("id");
     if (!getAgentSetup?.(id) || !agentSettings?.cancelProvisioning)
       return c.json({ error: "Agent not found." }, 404);
-    const body = await c.req.parseBody({ all: true });
-    if (body.confirm !== id)
-      return c.json({ error: "Confirm the agent to cancel its setup." }, 400);
+    const form = await parseForm(
+      c,
+      confirmForm(id),
+      "Confirm the agent to cancel its setup.",
+    );
+    if (form.response) return form.response;
     try {
       agentSettings.cancelProvisioning(id);
       return c.json({ agentId: id, cancellation: "requested" }, 202);
@@ -1068,22 +1049,13 @@ export function createPanel(
   app.post("/api/agents/:id/resources/remove", async (c) => {
     if (!removeResources) return c.notFound();
     const id = c.req.param("id");
-    const body = await c.req.parseBody({ all: true });
-    if (
-      !/^[a-z0-9][a-z0-9-]{0,47}$/.test(id) ||
-      body.confirm !== id ||
-      (body.deleteData !== undefined &&
-        body.deleteData !== "true" &&
-        body.deleteData !== "false")
-    )
-      return c.json(
-        {
-          error:
-            "Confirm the agent ID and explicitly select whether to delete data",
-        },
-        400,
-      );
-    const deleteData = body.deleteData === "true";
+    const form = await parseForm(
+      c,
+      removeResourcesForm(id),
+      "Confirm the agent ID and explicitly select whether to delete data",
+    );
+    if (form.response) return form.response;
+    const deleteData = form.data.deleteData === "true";
     try {
       await removeResources(id, deleteData);
       return c.json({
@@ -1104,26 +1076,16 @@ export function createPanel(
   app.post("/api/agents/:id/delete", async (c) => {
     if (!deleteAgent) return c.notFound();
     const id = c.req.param("id");
-    const body = await c.req.parseBody({ all: true });
-    if (
-      !/^[a-z0-9][a-z0-9-]{0,47}$/.test(id) ||
-      body.confirm !== id ||
-      (body.deleteData !== "true" && body.deleteData !== "false")
-    )
-      return c.json(
-        {
-          error:
-            "Confirm the agent ID and explicitly select whether to delete data",
-        },
-        400,
-      );
+    const form = await parseForm(
+      c,
+      deleteAgentForm(id),
+      "Confirm the agent ID and explicitly select whether to delete data",
+    );
+    if (form.response) return form.response;
+    const deleteData = form.data.deleteData === "true";
     try {
-      await deleteAgent(id, body.deleteData === "true");
-      return c.json({
-        agentId: id,
-        deleted: true,
-        dataDeleted: body.deleteData === "true",
-      });
+      await deleteAgent(id, deleteData);
+      return c.json({ agentId: id, deleted: true, dataDeleted: deleteData });
     } catch {
       return c.json(
         { error: "Deletion failed; retry after checking the agent" },
@@ -1134,22 +1096,16 @@ export function createPanel(
   app.post("/api/agents/:id/container", async (c) => {
     if (!containerAction) return c.notFound();
     const id = c.req.param("id");
-    const body = await c.req.parseBody({ all: true });
-    if (
-      !/^[a-z0-9][a-z0-9-]{0,47}$/.test(id) ||
-      (body.action !== "start" && body.action !== "stop") ||
-      (body.action === "stop" && body.confirm !== id)
-    )
-      return c.json(
-        {
-          error:
-            "Select start or stop; stopping requires confirmation of the agent ID",
-        },
-        400,
-      );
+    const form = await parseForm(
+      c,
+      containerForm(id),
+      "Select start or stop; stopping requires confirmation of the agent ID",
+    );
+    if (form.response) return form.response;
+    const { action } = form.data;
     try {
-      await containerAction(id, body.action);
-      return c.json({ agentId: id, action: body.action, status: "completed" });
+      await containerAction(id, action);
+      return c.json({ agentId: id, action, status: "completed" });
     } catch {
       return c.json(
         {

@@ -18,7 +18,7 @@ The MVP is complete. The Agent Host lives in `apps/agent-host/`, the Nimbot Serv
 
 ## Stack
 
-TypeScript (strict mode) on Node.js LTS, pnpm workspaces, Hono, grammY, Drizzle with SQLite, Docker, Playwright, Vitest, ESLint, and Prettier.
+TypeScript (strict mode) on Node.js LTS, pnpm workspaces, Hono, Zod for input validation, grammY, Drizzle with SQLite, Docker, Playwright, Vitest, ESLint, and Prettier.
 
 Use pnpm, not npm or yarn.
 

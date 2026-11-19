@@ -4,9 +4,17 @@ import { Hono } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import { HTTPException } from "hono/http-exception";
 import { bodyLimit } from "hono/body-limit";
+import { createMiddleware } from "hono/factory";
+import { z } from "zod";
+import { parseJson, validated } from "./validate.js";
 import type { TaskRunner } from "./tasks.js";
 import type { MemoryStore } from "./memory-store.js";
-import { isTaskIdentity, isTaskToolAccess } from "./task-identity.js";
+import {
+  isTaskIdentity,
+  isTaskToolAccess,
+  type TaskIdentity,
+  type TaskToolAccess,
+} from "./task-identity.js";
 import {
   isInvocationId,
   isToolOutcome,
@@ -19,6 +27,72 @@ import {
   isApiKey,
   type EngineAuth,
 } from "./engine-auth.js";
+
+const PROMPT_ERROR = "prompt must contain 1–16000 characters";
+/** Fields are listed in check order: the first failure is the one reported. */
+const taskRequest = z
+  .object(
+    {
+      prompt: z
+        .string({ error: PROMPT_ERROR })
+        .refine((prompt) => prompt.trim() && prompt.length <= 16_000, {
+          error: PROMPT_ERROR,
+        }),
+      credentials: z
+        .never({
+          error: "Configure providers through this agent's provider settings",
+        })
+        .optional(),
+      execution: z
+        .custom<TaskIdentity>(isTaskIdentity, {
+          error: "Invalid execution identity",
+        })
+        .optional(),
+      tools: z.unknown().optional(),
+      sessionMode: z.unknown().optional(),
+    },
+    { error: PROMPT_ERROR },
+  )
+  .superRefine((request, ctx) => {
+    if (
+      request.tools !== undefined &&
+      (!request.execution || !isTaskToolAccess(request.tools))
+    )
+      ctx.addIssue({ code: "custom", message: "Invalid task tool access" });
+    if (
+      request.sessionMode !== undefined &&
+      (request.sessionMode !== "fresh" || !request.execution)
+    )
+      ctx.addIssue({ code: "custom", message: "Invalid session mode" });
+  });
+const approvalRequest = z.object(
+  { decision: z.enum(["allow", "deny"]) },
+  { error: "decision must be allow or deny" },
+);
+const invocationParams = z.object(
+  { invocationId: z.string().refine(isInvocationId) },
+  { error: "Invalid invocation ID" },
+);
+const eventsQuery = z.object({
+  after: z
+    .string()
+    .regex(/^\d+$/)
+    .refine((after) => Number.isSafeInteger(Number(after)))
+    .default("0"),
+});
+const pageQuery = z.object({
+  page: z
+    .string()
+    .default("1")
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(1000)),
+});
+
+/** Answers 503 before any validation when an optional service is not wired. */
+const available = (present: () => unknown, message: string) =>
+  createMiddleware(async (c, next) =>
+    present() ? next() : c.json({ error: message }, 503),
+  );
 
 export interface HostConfig {
   token: string;
@@ -69,66 +143,53 @@ export function createHostApi(
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );
-  app.get("/tasks/:id/tool-requests/:invocationId", async (c) => {
-    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
-    if (!isInvocationId(c.req.param("invocationId")))
-      return c.json({ error: "Invalid invocation ID" }, 400);
-    return c.json({
-      pending: await runner.isToolPending(
+  const needsRunner = available(() => runner, "Task execution unavailable");
+  app.get(
+    "/tasks/:id/tool-requests/:invocationId",
+    needsRunner,
+    validated("param", invocationParams),
+    async (c) =>
+      c.json({
+        pending: await runner!.isToolPending(
+          c.req.param("id"),
+          c.req.param("invocationId"),
+        ),
+      }),
+  );
+  app.post(
+    "/tasks/:id/tool-requests/:invocationId/result",
+    needsRunner,
+    validated("param", invocationParams),
+    async (c) => {
+      const body: unknown = await c.req.json().catch(() => null);
+      if (!isToolOutcome(body))
+        return c.json({ error: "Invalid tool outcome" }, 400);
+      try {
+        toolJson(body, TOOL_RESULT_BYTES);
+      } catch {
+        return c.json({ error: "Invalid or oversized tool outcome" }, 400);
+      }
+      return (await runner!.replyTool(
         c.req.param("id"),
         c.req.param("invocationId"),
-      ),
+        body,
+      ))
+        ? c.json({ status: "recorded" })
+        : c.json({ error: "Tool request is not awaiting this outcome" }, 409);
+    },
+  );
+  app.post("/tasks", needsRunner, async (c) => {
+    const parsed = await parseJson(c, taskRequest, {
+      malformed: "Invalid JSON",
     });
-  });
-  app.post("/tasks/:id/tool-requests/:invocationId/result", async (c) => {
-    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
-    if (!isInvocationId(c.req.param("invocationId")))
-      return c.json({ error: "Invalid invocation ID" }, 400);
-    const body: unknown = await c.req.json().catch(() => null);
-    if (!isToolOutcome(body))
-      return c.json({ error: "Invalid tool outcome" }, 400);
-    try {
-      toolJson(body, TOOL_RESULT_BYTES);
-    } catch {
-      return c.json({ error: "Invalid or oversized tool outcome" }, 400);
-    }
-    return (await runner.replyTool(
-      c.req.param("id"),
-      c.req.param("invocationId"),
-      body,
-    ))
-      ? c.json({ status: "recorded" })
-      : c.json({ error: "Tool request is not awaiting this outcome" }, 409);
-  });
-  app.post("/tasks", async (c) => {
-    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON" }, 400);
-    }
-    const prompt =
-      typeof body === "object" && body !== null && "prompt" in body
-        ? body.prompt
-        : undefined;
-    if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 16_000)
-      return c.json({ error: "prompt must contain 1–16000 characters" }, 400);
-    if ("credentials" in (body as Record<string, unknown>))
-      return c.json(
-        { error: "Configure providers through this agent's provider settings" },
-        400,
-      );
-    const execution = (body as Record<string, unknown>).execution;
-    if (execution !== undefined && !isTaskIdentity(execution))
-      return c.json({ error: "Invalid execution identity" }, 400);
-    const tools = (body as Record<string, unknown>).tools;
-    if (tools !== undefined && (!execution || !isTaskToolAccess(tools)))
-      return c.json({ error: "Invalid task tool access" }, 400);
-    const sessionMode = (body as Record<string, unknown>).sessionMode;
-    if (sessionMode !== undefined && (sessionMode !== "fresh" || !execution))
-      return c.json({ error: "Invalid session mode" }, 400);
-    const id = await runner.submit(prompt, execution, tools, sessionMode);
+    if (parsed.response) return parsed.response;
+    const { prompt, execution, tools, sessionMode } = parsed.data;
+    const id = await runner!.submit(
+      prompt,
+      execution,
+      tools as TaskToolAccess | undefined,
+      sessionMode as "fresh" | undefined,
+    );
     return id
       ? c.json({ id, status: "accepted" }, 202)
       : c.json({ error: "Agent is busy" }, 409);
@@ -146,24 +207,15 @@ export function createHostApi(
       return c.json({ error: "Task state unavailable" }, 503);
     }
   });
-  app.post("/tasks/:id/approvals/:approvalId", async (c) => {
-    if (!runner) return c.json({ error: "Task execution unavailable" }, 503);
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON" }, 400);
-    }
-    const decision =
-      typeof body === "object" && body !== null && "decision" in body
-        ? body.decision
-        : undefined;
-    if (decision !== "allow" && decision !== "deny")
-      return c.json({ error: "decision must be allow or deny" }, 400);
-    return runner.decide(
+  app.post("/tasks/:id/approvals/:approvalId", needsRunner, async (c) => {
+    const parsed = await parseJson(c, approvalRequest, {
+      malformed: "Invalid JSON",
+    });
+    if (parsed.response) return parsed.response;
+    return runner!.decide(
       c.req.param("id"),
       c.req.param("approvalId"),
-      decision === "allow",
+      parsed.data.decision === "allow",
     )
       ? c.json({ status: "recorded" })
       : c.json({ error: "No such pending approval" }, 404);
@@ -187,18 +239,21 @@ export function createHostApi(
       return c.json({ error: "Task state unavailable" }, 503);
     }
   });
-  app.get("/tasks/:id/events", async (c) => {
-    const after = c.req.query("after") ?? "0";
-    if (!/^\d+$/.test(after) || !Number.isSafeInteger(Number(after)))
-      return c.json(
-        { error: "after must be a non-negative safe integer" },
-        400,
-      );
-    const id = c.req.param("id");
-    if (!runner || !(await runner.get(id)))
-      return c.json({ error: "Task not found" }, 404);
-    return c.json({ id, events: await runner.getEvents(id, Number(after)) });
-  });
+  app.get(
+    "/tasks/:id/events",
+    validated(
+      "query",
+      eventsQuery,
+      "after must be a non-negative safe integer",
+    ),
+    async (c) => {
+      const { after } = c.req.valid("query");
+      const id = c.req.param("id");
+      if (!runner || !(await runner.get(id)))
+        return c.json({ error: "Task not found" }, 404);
+      return c.json({ id, events: await runner.getEvents(id, Number(after)) });
+    },
+  );
   app.get("/tasks/:id", async (c) => {
     const task = await runner?.get(c.req.param("id"));
     return task ? c.json(task) : c.json({ error: "Task not found" }, 404);
@@ -225,13 +280,12 @@ export function createHostApi(
       );
     }
   });
-  app.get("/memories", (c) => {
-    if (!memory) return c.json({ error: "Memory unavailable" }, 503);
-    const page = Number(c.req.query("page") ?? "1");
-    if (!Number.isSafeInteger(page) || page < 1 || page > 1000)
-      return c.json({ error: "Invalid page" }, 400);
-    return c.json(memory.list(page));
-  });
+  app.get(
+    "/memories",
+    available(() => memory, "Memory unavailable"),
+    validated("query", pageQuery, "Invalid page"),
+    (c) => c.json(memory!.list(c.req.valid("query").page)),
+  );
   app.post("/memories/:id/delete", (c) => {
     if (!memory) return c.json({ error: "Memory unavailable" }, 503);
     return memory.delete(c.req.param("id"))
