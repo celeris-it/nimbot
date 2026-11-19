@@ -10,6 +10,8 @@ import {
   type ToolBridge,
 } from "./tool-bridge.js";
 import { setTimeout as delay } from "node:timers/promises";
+import type { ModelReference } from "./engine-usage.js";
+import type { createOpenCodeUsage } from "./opencode-usage.js";
 
 /** Grants one action only (never "always"); denial picks a reject option if offered. */
 export function chooseOption(
@@ -80,6 +82,10 @@ export function createOpenCodeEngine(
   sessions?: SessionStore,
   startRetryDelaysMs: readonly number[] = ENGINE_START_RETRY_DELAYS_MS,
   tools: readonly BridgeTool[] = [],
+  telemetry?: {
+    usage: ReturnType<typeof createOpenCodeUsage>;
+    hasCost(model: ModelReference): Promise<boolean>;
+  },
 ): Engine {
   let active: ReturnType<typeof spawnOpenCode> | undefined;
   let stopped = false;
@@ -170,6 +176,12 @@ export function createOpenCodeEngine(
               // Losing continuity must not fail the task.
               await sessionStore?.write(session).catch(() => undefined);
             }
+            if (context?.model)
+              await engine.client.setModel(
+                session,
+                context.model.providerId,
+                context.model.modelId,
+              );
             return { engine, session };
           } catch (error) {
             await shutdown(engine);
@@ -190,16 +202,42 @@ export function createOpenCodeEngine(
             if (stopped) throw error;
           }
         }
+        const baseline =
+          telemetry && context?.model
+            ? await telemetry.usage.read(
+                ready.session,
+                context.model,
+                await telemetry.hasCost(context.model).catch(() => false),
+              )
+            : undefined;
+        let promptStarted = false;
+        let promptFinished = false;
         try {
-          return await ready.engine.client.prompt(
+          if (controller.signal.aborted) throw new Error("Task stopped");
+          if (baseline)
+            await context?.recordUsageBaseline?.(baseline).catch(() => {});
+          if (controller.signal.aborted) throw new Error("Task stopped");
+          promptStarted = true;
+          const reason = await ready.engine.client.prompt(
             ready.session,
             withEnvironmentNotes(prompt),
           );
+          promptFinished = reason !== "cancelled";
+          return reason;
         } finally {
           // End tool access as soon as the prompt ends, before engine exit grace.
           controller.abort();
-          await activeBridge?.close();
-          await shutdown(ready.engine);
+          try {
+            await activeBridge?.close();
+            await shutdown(ready.engine);
+          } finally {
+            if (baseline && promptStarted && telemetry)
+              await context
+                ?.recordUsage?.(
+                  await telemetry.usage.finish(baseline, !promptFinished),
+                )
+                .catch(() => {});
+          }
         }
       } finally {
         controller.abort();

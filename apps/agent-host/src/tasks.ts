@@ -9,6 +9,7 @@ import {
   type TaskToolAccess,
 } from "./task-identity.js";
 import { createToolRequests, type ToolOutcome } from "./tool-requests.js";
+import { modelReference, type ModelReference } from "./engine-usage.js";
 
 const MAX_PROGRESS_EVENTS = 100;
 
@@ -50,6 +51,7 @@ export function createTaskRunner(
       identity?: TaskIdentity,
       tools?: TaskToolAccess,
       sessionMode?: "fresh",
+      model?: ModelReference,
     ): Promise<string | undefined> {
       if (identity !== undefined && !isTaskIdentity(identity))
         throw new Error("Invalid task identity");
@@ -57,6 +59,8 @@ export function createTaskRunner(
         throw new Error("Invalid task tool access");
       if (sessionMode !== undefined && (sessionMode !== "fresh" || !identity))
         throw new Error("Invalid session mode");
+      if (model && !identity) throw new Error("Invalid task model");
+      model = model === undefined ? undefined : modelReference.parse(model);
       // Copy before the first await: caller mutation cannot change the running turn.
       const executionIdentity =
         identity === undefined ? undefined : { ...identity };
@@ -66,7 +70,13 @@ export function createTaskRunner(
       if (!release) return undefined;
       const id = randomUUID();
       try {
-        inserting = store.insert(id, prompt, executionIdentity, sessionMode);
+        inserting = store.insert(
+          id,
+          prompt,
+          executionIdentity,
+          sessionMode,
+          model,
+        );
         await inserting;
       } catch (error) {
         release();
@@ -145,6 +155,17 @@ export function createTaskRunner(
         let timer: ReturnType<typeof setTimeout> | undefined;
         let output = "";
         let progressCount = 0;
+        const recordUnavailableUsage = async () => {
+          if (model)
+            await store
+              .recordUsage(id, {
+                model,
+                tokens: null,
+                costUsd: null,
+                state: "unavailable",
+              })
+              .catch(() => log.warn("task.usage_unavailable", { taskId: id }));
+        };
         try {
           await store.update(id, { status: "running" });
           if (closing) throw new Error("Host is stopping");
@@ -167,6 +188,14 @@ export function createTaskRunner(
               {
                 hostTaskId: id,
                 ...(sessionMode ? { sessionMode } : {}),
+                ...(model
+                  ? {
+                      model,
+                      recordUsageBaseline: (reading) =>
+                        store.recordUsageBaseline(id, reading),
+                      recordUsage: (usage) => store.recordUsage(id, usage),
+                    }
+                  : {}),
                 ...(executionIdentity
                   ? { identity: { ...executionIdentity } }
                   : {}),
@@ -192,6 +221,7 @@ export function createTaskRunner(
           const status = closing ? "interrupted" : "completed";
           if (status !== "completed") discardAttachment?.(id);
           log.info("task.finished", { taskId: id, status, stopReason: reason });
+          await recordUnavailableUsage();
           await store.update(id, { status, output, stopReason: reason });
         } catch {
           discardAttachment?.(id);
@@ -204,6 +234,10 @@ export function createTaskRunner(
               ? "cancelled"
               : "failed";
           log.warn("task.finished", { taskId: id, status });
+          if (model) {
+            await engine.stop().catch(() => {});
+            await recordUnavailableUsage();
+          }
           await store.update(id, { status, output });
         } finally {
           if (timer) clearTimeout(timer);
@@ -256,6 +290,7 @@ export function createTaskRunner(
     getCurrent: store.getCurrent,
     get: store.get,
     getEvents: store.getEvents,
+    getUsage: store.getUsage,
     isBusy: () => busy,
     async close() {
       closing = true;

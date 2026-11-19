@@ -133,6 +133,20 @@ export class AcpClient {
       throw new Error("The ACP engine does not support HTTP MCP servers");
   }
 
+  async setModel(sessionId: string, providerId: string, modelId: string) {
+    const value = `${providerId}/${modelId}`;
+    const result = (await this.request("session/set_config_option", {
+      sessionId,
+      configId: "model",
+      value,
+    })) as { configOptions?: { id: string; currentValue: string }[] };
+    if (
+      result.configOptions?.find((option) => option.id === "model")
+        ?.currentValue !== value
+    )
+      throw new Error("OpenCode could not select the configured model");
+  }
+
   /** Sends a text prompt; resolves with the stop reason once the turn ends. */
   async prompt(sessionId: string, text: string): Promise<string> {
     const result = (await this.request("session/prompt", {

@@ -13,6 +13,11 @@ import { createMiddleware } from "hono/factory";
 import { z } from "zod";
 import { parseJson, validated } from "./validate.js";
 import type { TaskRunner } from "./tasks.js";
+import {
+  modelAdmission,
+  modelReference,
+  type EngineModels,
+} from "./engine-usage.js";
 import type { MemoryStore } from "./memory-store.js";
 import {
   isTaskIdentity,
@@ -55,6 +60,7 @@ const taskRequest = z
         .optional(),
       tools: z.unknown().optional(),
       sessionMode: z.unknown().optional(),
+      admission: modelAdmission.optional(),
     },
     { error: PROMPT_ERROR },
   )
@@ -69,6 +75,8 @@ const taskRequest = z
       (request.sessionMode !== "fresh" || !request.execution)
     )
       ctx.addIssue({ code: "custom", message: "Invalid session mode" });
+    if (request.admission && !request.execution)
+      ctx.addIssue({ code: "custom", message: "Invalid model admission" });
   });
 const approvalRequest = z.object(
   { decision: z.enum(["allow", "deny"]) },
@@ -121,6 +129,7 @@ export function createHostApi(
   auth?: EngineAuth,
   memory?: Pick<MemoryStore, "list" | "delete">,
   attachments?: ReturnType<typeof createAttachments>,
+  models?: EngineModels,
 ) {
   const app = new Hono();
   app.use("*", async (c, next) => {
@@ -231,12 +240,15 @@ export function createHostApi(
       malformed: "Invalid JSON",
     });
     if (parsed.response) return parsed.response;
-    const { prompt, execution, tools, sessionMode } = parsed.data;
+    const { prompt, execution, tools, sessionMode, admission } = parsed.data;
+    if (admission && (runner!.isBusy() || !models?.accept(admission)))
+      return c.json({ error: "Model admission expired" }, 412);
     const id = await runner!.submit(
       prompt,
       execution,
       tools as TaskToolAccess | undefined,
       sessionMode as "fresh" | undefined,
+      admission?.model,
     );
     return id
       ? c.json({ id, status: "accepted" }, 202)
@@ -310,6 +322,11 @@ export function createHostApi(
       });
     },
   );
+  app.get("/tasks/:id/usage", needsRunner, async (c) => {
+    const id = c.req.param("id");
+    if (!(await runner!.get(id))) return c.notFound();
+    return c.json({ usage: await runner!.getUsage(id) });
+  });
   app.get("/tasks/:id", async (c) => {
     const task = await runner?.get(c.req.param("id"));
     return task ? c.json(task) : c.json({ error: "Task not found" }, 404);
@@ -354,6 +371,34 @@ export function createHostApi(
       maxSize: 16_384,
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
+  );
+  app.get("/models", async (c) => {
+    if (!models) return c.json({ error: "Model catalog unavailable" }, 503);
+    try {
+      return c.json({ models: await models.list() });
+    } catch {
+      return c.json({ error: "Model catalog unavailable" }, 503);
+    }
+  });
+  app.post(
+    "/models/check",
+    bodyLimit({
+      maxSize: 2048,
+      onError: (c) => c.json({ error: "Request too large" }, 413),
+    }),
+    async (c) => {
+      if (!models) return c.json({ error: "Model catalog unavailable" }, 503);
+      const parsed = await parseJson(
+        c,
+        z.strictObject({
+          model: modelReference.nullable(),
+          issue: z.boolean(),
+        }),
+        { malformed: "Invalid JSON" },
+      );
+      if (parsed.response) return parsed.response;
+      return c.json(await models.check(parsed.data.model, parsed.data.issue));
+    },
   );
   app.get("/providers", async (c) => {
     if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);

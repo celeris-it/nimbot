@@ -3,6 +3,11 @@ import { drizzle } from "drizzle-orm/libsql";
 import { eq, gt, and, asc, inArray } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import type { TaskIdentity } from "./task-identity.js";
+import type {
+  ModelReference,
+  TaskUsage,
+  UsageReading,
+} from "./engine-usage.js";
 import {
   isInvocationId,
   isToolOutcome,
@@ -19,6 +24,7 @@ const tasks = sqliteTable("tasks", {
   agentId: text("agent_id"),
   serverTaskId: text("server_task_id"),
   sessionMode: text("session_mode").$type<"fresh">(),
+  model: text("model", { mode: "json" }).$type<ModelReference>(),
   status: text("status", {
     enum: [
       "accepted",
@@ -40,7 +46,12 @@ const events = sqliteTable("task_events", {
     .references(() => tasks.id),
   status: text("status")
     .$type<
-      Task["status"] | "progress" | "approval" | "tool_request" | "tool_cancel"
+      | Task["status"]
+      | "progress"
+      | "approval"
+      | "tool_request"
+      | "tool_cancel"
+      | "usage"
     >()
     .notNull(),
   output: text("output").notNull().default(""),
@@ -55,9 +66,10 @@ export async function openTaskStore(url: string) {
     await client.execute("PRAGMA foreign_keys = ON");
     await client.batch(
       [
-        "CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, agent_id TEXT, server_task_id TEXT, session_mode TEXT CHECK(session_mode IS NULL OR (session_mode = 'fresh' AND agent_id IS NOT NULL)), status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT, CHECK ((agent_id IS NULL AND server_task_id IS NULL) OR (agent_id IS NOT NULL AND server_task_id IS NOT NULL)), UNIQUE (agent_id, server_task_id))",
+        "CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, agent_id TEXT, server_task_id TEXT, session_mode TEXT CHECK(session_mode IS NULL OR (session_mode = 'fresh' AND agent_id IS NOT NULL)), model TEXT, status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT, CHECK ((agent_id IS NULL AND server_task_id IS NULL) OR (agent_id IS NOT NULL AND server_task_id IS NOT NULL)), UNIQUE (agent_id, server_task_id))",
         "CREATE TABLE IF NOT EXISTS task_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), status TEXT NOT NULL, output TEXT NOT NULL DEFAULT '', stop_reason TEXT)",
         "CREATE INDEX IF NOT EXISTS task_events_task_sequence ON task_events(task_id, sequence)",
+        "CREATE TABLE IF NOT EXISTS task_usage (task_id TEXT PRIMARY KEY REFERENCES tasks(id), baseline TEXT, result TEXT)",
         `CREATE TABLE IF NOT EXISTS tool_requests (task_id TEXT NOT NULL REFERENCES tasks(id), invocation_id TEXT NOT NULL,
           operation TEXT NOT NULL, arguments_json TEXT NOT NULL CHECK(length(CAST(arguments_json AS BLOB)) <= ${TOOL_REQUEST_BYTES}),
           deadline INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'failed', 'cancelled', 'interrupted')),
@@ -87,6 +99,47 @@ export async function openTaskStore(url: string) {
     CASE WHEN length(CAST(result_json AS BLOB)) <= ${TOOL_RESULT_BYTES} THEN result_json ELSE NULL END AS result
     FROM tool_requests WHERE task_id = ? AND invocation_id = ?`;
   return {
+    async recordUsageBaseline(id: string, reading: UsageReading) {
+      await client.execute({
+        sql: "INSERT INTO task_usage (task_id, baseline) VALUES (?, ?) ON CONFLICT(task_id) DO NOTHING",
+        args: [id, JSON.stringify(reading)],
+      });
+    },
+    async recordUsage(id: string, usage: TaskUsage) {
+      const result = JSON.stringify(usage);
+      await client.batch(
+        [
+          {
+            sql: "INSERT INTO task_usage (task_id, result) VALUES (?, ?) ON CONFLICT(task_id) DO UPDATE SET result = excluded.result, baseline = NULL WHERE task_usage.result IS NULL",
+            args: [id, result],
+          },
+          {
+            sql: "INSERT INTO task_events (task_id, status, output) SELECT ?, 'usage', ? WHERE changes() = 1",
+            args: [id, result],
+          },
+        ],
+        "write",
+      );
+    },
+    async getUsage(id: string): Promise<TaskUsage | null> {
+      const rows = await client.execute({
+        sql: "SELECT result FROM task_usage WHERE task_id = ?",
+        args: [id],
+      });
+      const result = rows.rows[0]?.result;
+      return typeof result === "string"
+        ? (JSON.parse(result) as TaskUsage)
+        : null;
+    },
+    async unfinishedUsage() {
+      const { rows } = await client.execute(
+        "SELECT task_id, baseline FROM task_usage WHERE result IS NULL AND baseline IS NOT NULL",
+      );
+      return rows.map((row) => ({
+        id: String(row.task_id),
+        baseline: JSON.parse(String(row.baseline)) as UsageReading,
+      }));
+    },
     /** Save the outbox request and its event together; duplicate IDs never emit a second request. */
     async beginToolRequest(
       taskId: string,
@@ -185,6 +238,7 @@ export async function openTaskStore(url: string) {
       prompt: string,
       identity?: TaskIdentity,
       sessionMode?: "fresh",
+      model?: ModelReference,
     ) {
       await db.batch([
         db.insert(tasks).values({
@@ -194,6 +248,7 @@ export async function openTaskStore(url: string) {
           agentId: identity?.agentId,
           serverTaskId: identity?.serverTaskId,
           sessionMode,
+          model,
         }),
         db.insert(events).values({ taskId: id, status: "accepted" }),
       ]);

@@ -1,4 +1,9 @@
 import type { TaskIdentity, TaskToolAccess } from "./task-identity.js";
+import type {
+  ModelReference,
+  TaskUsage,
+  UsageReading,
+} from "./engine-usage.js";
 
 /** Runtime identity and optional tool access stay separate from the model's prompt. */
 export interface EngineTaskContext {
@@ -7,6 +12,9 @@ export interface EngineTaskContext {
   tools?: TaskToolAccess;
   /** A separate conversation that must never read or replace the saved owner session. */
   sessionMode?: "fresh";
+  model?: ModelReference;
+  recordUsageBaseline?: (reading: UsageReading) => Promise<void>;
+  recordUsage?: (usage: TaskUsage) => Promise<void>;
   /** Host outbox transport; the receiving Server must enforce its own authorization. */
   requestTool?: (
     operation: string,

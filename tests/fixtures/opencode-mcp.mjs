@@ -19,6 +19,14 @@ const { createOpenCodeEngine, createSessionFile } =
   await import("/app/apps/agent-host/dist/opencode-engine.js");
 const { openMemoryStore } =
   await import("/app/apps/agent-host/dist/memory-store.js");
+const { createOpenCodeApi } =
+  await import("/app/apps/agent-host/dist/opencode-api.js");
+const { createOpenCodeModels } =
+  await import("/app/apps/agent-host/dist/opencode-models.js");
+const { createOpenCodeUsage } =
+  await import("/app/apps/agent-host/dist/opencode-usage.js");
+const { createOpenCodeAuth } =
+  await import("/app/apps/agent-host/dist/opencode-auth.js");
 const { createMemoryTools } =
   await import("/app/apps/agent-host/dist/memory-tools.js");
 
@@ -43,6 +51,7 @@ const calls = [];
 let mode = "echo";
 let discovered = 0;
 let modelCalls = 0;
+const countedModels = [];
 const memoryResults = [];
 const isolationCalls = [];
 const bridges = [];
@@ -100,6 +109,8 @@ const server = createServer(async (req, res) => {
   const message = JSON.parse(body);
   assert.equal(req.url, "/v1/chat/completions");
   modelCalls++;
+  if (mode === "counted" && message.stream && message.tools?.length)
+    countedModels.push(message.model);
   if (!message.tools?.length) {
     res.writeHead(200, { "content-type": "application/json" }).end(
       JSON.stringify({
@@ -120,7 +131,8 @@ const server = createServer(async (req, res) => {
     return;
   }
   const memoryMode = mode.startsWith("memory_");
-  const plainMode = mode === "plain" || mode.startsWith("isolation_");
+  const plainMode =
+    mode === "plain" || mode === "counted" || mode.startsWith("isolation_");
   const tool = message.tools?.find((t) =>
     t.function.name.endsWith(memoryMode ? mode : remoteName),
   );
@@ -131,7 +143,10 @@ const server = createServer(async (req, res) => {
       "Direct chat must not inherit the previous process's MCP adapter",
     );
   else {
-    assert.ok(tool, "MCP tool must be discovered by the actual model request");
+    assert.ok(
+      tool,
+      `MCP tool must be discovered for ${mode}, discovered tools: ${message.tools.map((entry) => entry.function.name).join(", ")}`,
+    );
     assert.ok(
       tool.function.name.length <= 64,
       "Qualified provider tool names must fit 64 characters",
@@ -210,6 +225,15 @@ const server = createServer(async (req, res) => {
       `data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", created: 1, model: "fixture", choices: [{ index: 0, delta: data, finish_reason }] })}\n\n`,
     );
   }
+  res.write(
+    `data: ${JSON.stringify({
+      id: "fixture",
+      object: "chat.completion.chunk",
+      model: message.model,
+      choices: [],
+      usage: { prompt_tokens: 13, completion_tokens: 5, total_tokens: 18 },
+    })}\n\n`,
+  );
   res.end("data: [DONE]\n\n");
 });
 server.listen(0, "127.0.0.1");
@@ -226,6 +250,11 @@ await writeFile(
         options: { baseURL: `${base}/v1`, apiKey: "fixture-only" },
         models: {
           fixture: { name: "fixture", limit: { context: 16000, output: 1000 } },
+          counted: {
+            name: "counted",
+            limit: { context: 16000, output: 1000 },
+            cost: { input: 1, output: 2 },
+          },
         },
       },
     },
@@ -361,6 +390,86 @@ try {
     assert.match(answer, /Fixture complete/);
   } finally {
     await direct.stop();
+  }
+  const openCode = createOpenCodeApi(root);
+  const models = createOpenCodeModels(openCode.request, () => false);
+  const counted = { providerId: "fixture", modelId: "counted" };
+  try {
+    const auth = createOpenCodeAuth(
+      openCode.request,
+      () => () => {},
+      () => false,
+      models.changed,
+    );
+    await auth.save("openai", "fixture-only");
+    assert.equal(
+      (await auth.status()).providers.find(
+        (provider) => provider.id === "openai",
+      ).method,
+      "api_key",
+    );
+    await auth.remove("openai");
+    assert.equal(
+      (await auth.status()).providers.find(
+        (provider) => provider.id === "openai",
+      ).method,
+      null,
+    );
+    assert.equal(
+      (await openCode.request("/api/experimental/usage/limits")).data,
+      null,
+    );
+    assert.ok(
+      (await models.list()).some((model) => model.modelId === "counted"),
+    );
+    assert.equal((await models.check(null, false)).model.modelId, "fixture");
+
+    mode = "counted";
+    const session = createSessionFile(join(root, "counted-session.json"));
+    const usage = createOpenCodeUsage(openCode.request);
+    const readings = [];
+    for (const model of [counted, (await models.check(null, false)).model]) {
+      const engine = createOpenCodeEngine(root, session, [], [], {
+        usage,
+        hasCost: models.hasCost,
+      });
+      try {
+        await engine.run(
+          "Return the fixture response.",
+          () => {},
+          undefined,
+          undefined,
+          {
+            hostTaskId: randomUUID(),
+            model,
+            recordUsage: async (reading) => {
+              readings.push(reading);
+            },
+          },
+        );
+      } finally {
+        await engine.stop();
+      }
+    }
+    assert.deepEqual(countedModels, ["counted", "fixture"]);
+    assert.equal(readings.length, 2);
+    for (const reading of readings) {
+      assert.equal(reading.state, "reported");
+      assert.ok(
+        reading.tokens.input >= 13 && reading.tokens.input < 26,
+        JSON.stringify(reading),
+      );
+      assert.ok(
+        reading.tokens.output >= 5 && reading.tokens.output < 10,
+        JSON.stringify(reading),
+      );
+    }
+    assert.ok(readings[0].costUsd > 0, JSON.stringify(readings[0]));
+    console.log(
+      "Verified model selection and per-turn usage on a reused OpenCode session.",
+    );
+  } finally {
+    await openCode.close();
   }
   const ownerSessions = createSessionFile(join(root, "owner-session.json"));
   let ownerId;

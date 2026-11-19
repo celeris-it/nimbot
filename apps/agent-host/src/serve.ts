@@ -11,6 +11,8 @@ import { log } from "./logger.js";
 import { readTaskTimeoutMs } from "./task-timeout.js";
 import { createOpenCodeAuth } from "./opencode-auth.js";
 import { createOpenCodeApi } from "./opencode-api.js";
+import { createOpenCodeModels } from "./opencode-models.js";
+import { createOpenCodeUsage } from "./opencode-usage.js";
 import { openMemoryStore } from "./memory-store.js";
 import { createMemoryTools } from "./memory-tools.js";
 import { createPeerToolDefinitions } from "./peer-tools.js";
@@ -26,6 +28,11 @@ try {
   const memory = openMemoryStore(resolve(stateDir, "memory.sqlite"));
   const attachments = createAttachments(config.workspace);
   const openCode = createOpenCodeApi(config.workspace);
+  const usage = createOpenCodeUsage(openCode.request);
+  for (const { id, baseline } of await store.unfinishedUsage())
+    await store.recordUsage(id, await usage.finish(baseline, true));
+  let isBusy = () => false;
+  const models = createOpenCodeModels(openCode.request, () => isBusy());
   const runner = createTaskRunner(
     store,
     createOpenCodeEngine(
@@ -37,19 +44,21 @@ try {
         ...createPeerToolDefinitions(),
         attachments.tool,
       ],
+      { usage, hasCost: models.hasCost },
     ),
     readTaskTimeoutMs(process.env),
     undefined,
     undefined,
     attachments.discard,
   );
+  isBusy = runner.isBusy;
   const auth = createOpenCodeAuth(
     openCode.request,
     runner.reserve,
     runner.isBusy,
-    () => {},
+    models.changed,
   );
-  const app = createHostApi(config, runner, auth, memory, attachments);
+  const app = createHostApi(config, runner, auth, memory, attachments, models);
   const server = serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 3001 });
   server.on("error", () => {
     log.error("host.http_start_failed");
