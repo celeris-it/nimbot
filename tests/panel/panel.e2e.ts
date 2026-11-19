@@ -195,6 +195,61 @@ test("keeps changed MCP tools disabled until an explicit schema review is saved"
   await expect(page.getByText("Review needed", { exact: true })).toHaveCount(0);
 });
 
+test("manages peer grants, reads approval history and deletes private memory", async ({
+  page,
+  request,
+}) => {
+  const researcher = randomUUID();
+  expect((await request.post(`/__test/capabilities/${researcher}`)).ok()).toBe(
+    true,
+  );
+  await login(page);
+  await page.goto("/agents/dev/setup");
+  await page.getByRole("link", { name: "Agent access" }).click();
+  await expect(page.getByText("No grants.", { exact: false })).toBeVisible();
+  await page.getByLabel("Target agent").selectOption({ label: "Researcher" });
+  await page.getByLabel("Permission").selectOption({ label: "Delegate tasks" });
+  await page.getByRole("button", { name: "Add grant" }).click();
+  const revoke = page.getByRole("button", {
+    name: "Revoke Delegate tasks to Researcher",
+  });
+  await expect(revoke).toBeVisible();
+  await page.reload();
+  await revoke.click();
+  await expect(page.getByText("No grants.", { exact: false })).toBeVisible();
+
+  await page.goto(`/agents/${researcher}/setup`);
+  await page.getByRole("link", { name: "Approvals", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Decision history" }),
+  ).toBeVisible();
+  const decision = page
+    .getByRole("listitem")
+    .filter({ hasText: "Send research note" });
+  await expect(decision).toContainText("approved");
+  await expect(decision).toContainText("decided by telegram:42");
+  await expect(decision).toContainText("execution: completed");
+  await page.getByRole("link", { name: "Back to agent" }).click();
+  await page.getByRole("link", { name: "Review memory" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Research notes" }),
+  ).toBeVisible();
+  await expect(page.getByText("Primary source verified")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Delete note Research notes" })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "No saved notes" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Memory of Researcher" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "No saved notes" }),
+  ).toBeVisible();
+});
+
 test("pages through delegation history and cancels only the selected child", async ({
   page,
   request,

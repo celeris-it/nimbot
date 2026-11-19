@@ -108,7 +108,8 @@ The memory tools are the interface, not a guarantee: the model can edit the stor
 
 ## 6. Verify and document the release
 
-- [ ] Add a panel Playwright scenario for catalog and peer grants, approval history, and memory deletion. Keep the main test suite independent of live chat and cloud AI providers. Exercise Telegram and Discord with the existing simulated adapters.
+- [x] Add a panel Playwright scenario for catalog and peer grants, approval history, and memory deletion. Keep the main test suite independent of live chat and cloud AI providers. Exercise Telegram and Discord with the existing simulated adapters.
+  - Playwright covers catalog grants and review, peer grant creation and revocation across reloads, decision history with a persisted execution outcome, and deletion through the authenticated Host memory API. The MCP catalog flow integration covers approval routing through both simulated chat channels.
 - [x] Build the Agent Host image and rerun the pinned OpenCode compatibility checks inside it. Assert that a real MCP handshake and tool call work under the non-root container configuration. Verify that the capabilities remain opt-in and that an existing direct chat task still runs without enabling them.
 - [ ] Update `README.md` and `docs/OPERATIONS.md` in the implementation phases that ship each capability. Document defaults, approval and cancellation behavior, what remote MCP servers receive, and how backup and explicit volume deletion affect new state. Keep storage and runtime constraints consistent with `AGENTS.md`.
 - [ ] Before marking a phase complete, run its focused suite with `pnpm test <file-or-filter>` and then `pnpm lint`, `pnpm typecheck`, and `pnpm test`. Each must exit successfully. When the panel changes, run `pnpm build` and `pnpm test:panel`. For the image and isolation checks, follow the opt-in Docker integration command in the README.

@@ -3,10 +3,17 @@ import process from "node:process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { URL } from "node:url";
 import { openTaskStore } from "../../apps/server/dist/task-queue.js";
 import { openScheduleStore } from "../../apps/server/dist/schedule-store.js";
 import { openMcpCatalog } from "../../apps/server/dist/mcp-catalog.js";
 import { openMcpCredentials } from "../../apps/server/dist/mcp-credentials.js";
+import { openAgentGrants } from "../../apps/server/dist/agent-grants.js";
+import { openApprovalRules } from "../../apps/server/dist/approval-rules.js";
+import { openApprovalStore } from "../../apps/server/dist/approval-store.js";
+import { createHostMemories } from "../../apps/server/dist/host-memories.js";
+import { openMemoryStore } from "../../apps/agent-host/dist/memory-store.js";
+import { createHostApi } from "../../apps/agent-host/dist/http.js";
 import { createScheduler } from "../../apps/server/dist/scheduler.js";
 import { HostProviderError } from "../../apps/server/dist/host-providers.js";
 import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/index.mjs";
@@ -22,6 +29,24 @@ const stateDir = mkdtempSync(join(tmpdir(), "nimbot-panel-fixture-"));
 const statePath = join(stateDir, "server.sqlite");
 const tasks = openTaskStore(statePath);
 const schedules = openScheduleStore(statePath);
+const grants = openAgentGrants(statePath, {
+  exists: (id) => agents.has(id),
+  telegramOwner: (id) => agents.get(id)?.ownerId,
+  discordOwner: () => undefined,
+});
+const rules = openApprovalRules(statePath, () => false);
+const history = openApprovalStore(statePath);
+const memoryStores = new Map();
+const memoryApis = new Map();
+const memories = createHostMemories(
+  async (id) => {
+    const host = memoryApis.get(id);
+    if (!host) throw new Error("No fixture Host");
+    return { url: `http://${id}.test`, token: host.token };
+  },
+  (url, init) =>
+    memoryApis.get(new URL(url).hostname.slice(0, -5)).api.request(url, init),
+);
 const mcpCatalog = openMcpCatalog(statePath, (id) => agents.has(id));
 const mcpCredentials = await openMcpCredentials(
   mcpCatalog,
@@ -58,6 +83,10 @@ function reset() {
   keys.clear();
   logins.clear();
   agents.clear();
+  grants.prune();
+  for (const memory of memoryStores.values()) memory.close();
+  memoryStores.clear();
+  memoryApis.clear();
   agents.set("dev", {
     name: "Developer",
     instructions: "Be brief",
@@ -75,6 +104,20 @@ const panel = createPanel(
     port: 3199,
   },
   {
+    peers: {
+      grants,
+      candidates: (id) => {
+        const owner = agents.get(id)?.ownerId;
+        return [...agents]
+          .filter(
+            ([target, agent]) =>
+              target !== id && owner !== undefined && agent.ownerId === owner,
+          )
+          .map(([target, agent]) => ({ id: target, name: agent.name }));
+      },
+    },
+    approvals: { rules, history },
+    memories,
     mcp: {
       catalog: mcpCatalog,
       credentials: mcpCredentials,
@@ -258,6 +301,52 @@ app.post("/__test/reset", (c) => {
   reset();
   return c.json({ ok: true });
 });
+app.post("/__test/capabilities/:id", (c) => {
+  const id = c.req.param("id");
+  const ownerId = 42;
+  agents.get("dev").ownerId = ownerId;
+  agents.set(id, {
+    ...agents.get("dev"),
+    name: "Researcher",
+    ownerId,
+    container: "running",
+  });
+  const memory = openMemoryStore(":memory:");
+  memoryStores.set(id, memory);
+  memory.create(
+    {
+      title: "Research notes",
+      content: "Primary source verified",
+      tags: ["research"],
+    },
+    null,
+  );
+  const token = randomUUID().repeat(2);
+  memoryApis.set(id, {
+    token,
+    api: createHostApi(
+      { token, workspace: stateDir },
+      undefined,
+      undefined,
+      memory,
+    ),
+  });
+  const entry = history.create({
+    agentId: id,
+    taskId: randomUUID(),
+    origin: "telegram:123:42",
+    actor: "telegram:123:42",
+    actionType: "agent.note.send",
+    target: "dev",
+    summary: "Send research note",
+    arguments: { content: "Primary source verified" },
+    ttlMs: 30_000,
+  });
+  history.decide(entry.id, true, "telegram:42");
+  history.beginExecution(entry.id, entry.fingerprint);
+  history.finishExecution(entry.id, "completed");
+  return c.json({ ok: true });
+});
 app.post("/__test/mcp/:id/block/:tool", (c) => {
   const definition = mcpCatalog.get(c.req.param("id"));
   return c.json({
@@ -341,6 +430,10 @@ process.once("SIGTERM", () => {
   server.close(() => {
     schedules.close();
     mcpCatalog.close();
+    grants.close();
+    rules.close();
+    history.close();
+    for (const memory of memoryStores.values()) memory.close();
     tasks.close();
     rmSync(stateDir, { recursive: true, force: true });
   });
