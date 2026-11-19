@@ -7,6 +7,7 @@ import {
 import type { AcpHttpMcpServer } from "./acp-client.js";
 import type { EngineTaskContext } from "./engine.js";
 import { isTaskIdentity, isTaskToolAccess } from "./task-identity.js";
+import { createServerTool } from "./server-tool.js";
 
 export interface ToolInvocation {
   context: Required<
@@ -61,11 +62,17 @@ export async function createToolBridge(
   const snapshot: ToolInvocation["context"] = {
     hostTaskId: context.hostTaskId,
     identity: { ...context.identity },
-    tools: { ...context.tools, operations: [...context.tools.operations] },
+    tools: structuredClone(context.tools),
     ...(context.requestTool ? { requestTool: context.requestTool } : {}),
   };
   const tools = new Map<string, BridgeTool>();
-  for (const definition of definitions) {
+  const remote = (snapshot.tools.remoteTools ?? []).map((tool) =>
+    createServerTool({
+      ...tool,
+      description: `Call approved external tool ${tool.name}.`,
+    }),
+  );
+  for (const definition of [...definitions, ...remote]) {
     if (!snapshot.tools.operations.includes(definition.operation)) continue;
     if (
       tools.size >= 32 ||

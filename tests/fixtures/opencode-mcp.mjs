@@ -39,40 +39,43 @@ const isolationCalls = [];
 const bridges = [];
 const signals = [];
 async function adapter() {
+  const operation = `mcp.${"a".repeat(64)}`;
+  const name = "mcp_fixture_echo";
   const bridge = await createToolBridge(
     {
       hostTaskId: randomUUID(),
       identity: { agentId: "fixture", serverTaskId: randomUUID() },
       tools: {
         token: "e".repeat(64),
-        operations: ["fixture.echo"],
+        operations: [operation],
         expiresAt: Date.now() + 120000,
+        remoteTools: [
+          {
+            name,
+            operation,
+            inputSchema: {
+              type: "object",
+              properties: { value: { type: "string" } },
+              required: ["value"],
+              additionalProperties: false,
+            },
+          },
+        ],
+      },
+      async requestTool(selected, args, invocationId, signal) {
+        assert.equal(selected, operation);
+        assert.match(invocationId, /^[a-f0-9-]{36}$/);
+        assert.equal(typeof args.value, "string");
+        assert.equal(Object.keys(args).length, 1);
+        calls.push({ name, arguments: args });
+        if (args.value === "wait") {
+          signals.push(signal);
+          return new Promise(() => {});
+        }
+        return { echoed: args.value };
       },
     },
-    [
-      {
-        name: "echo",
-        operation: "fixture.echo",
-        description: "Echo a structured fixture value",
-        inputSchema: {
-          type: "object",
-          properties: { value: { type: "string" } },
-          required: ["value"],
-          additionalProperties: false,
-        },
-        async invoke(args, invocation) {
-          assert.equal(typeof args.value, "string");
-          assert.equal(Object.keys(args).length, 1);
-          assert.equal(invocation.context.identity.agentId, "fixture");
-          calls.push({ name: "echo", arguments: args });
-          if (args.value === "wait") {
-            signals.push(invocation.signal);
-            return new Promise(() => {});
-          }
-          return { echoed: args.value };
-        },
-      },
-    ],
+    [],
   );
   bridges.push(bridge);
   return bridge;
@@ -109,7 +112,7 @@ const server = createServer(async (req, res) => {
   const memoryMode = mode.startsWith("memory_");
   const plainMode = mode === "plain" || mode.startsWith("isolation_");
   const tool = message.tools?.find((t) =>
-    t.function.name.endsWith(memoryMode ? mode : "echo"),
+    t.function.name.endsWith(memoryMode ? mode : "mcp_fixture_echo"),
   );
   if (plainMode)
     assert.equal(
@@ -302,7 +305,7 @@ try {
     });
   assert.equal((await prompt(first)).stopReason, "end_turn");
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].name, "echo");
+  assert.equal(calls[0].name, "mcp_fixture_echo");
   assert.deepEqual(calls[0].arguments, { value: "echo" });
   assert.ok(
     first.updates.some(
@@ -448,6 +451,9 @@ try {
   assert.notEqual(memorySessions[0], memorySessions[1]);
   assert.deepEqual(memoryResults, ["memory_create", "memory_search"]);
   console.log("Verified private memory retrieval in a fresh OpenCode session.");
+  console.log(
+    "Verified Server-issued remote tool metadata through the bundled bridge.",
+  );
   console.log(
     "Verified pinned OpenCode MCP discovery, structured calls, restored registration, and cancellation as uid 1000.",
   );

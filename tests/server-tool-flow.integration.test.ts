@@ -26,7 +26,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(agentId = "a") {
+async function fixture(agentId = "a", remote = false) {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-server-tool-flow-"));
   const store = openTaskStore(join(dir, "server.sqlite"));
   const hostStore = await openHostStore(
@@ -36,6 +36,16 @@ async function fixture(agentId = "a") {
   let context!: EngineTaskContext;
   let execution!: HostTaskExecution;
   let bridge: ToolBridge | undefined;
+  const tool = {
+    name: remote ? "mcp_fixture_write" : "fixture_write",
+    operation: remote ? `mcp.${"a".repeat(64)}` : "fixture.write",
+    inputSchema: {
+      type: "object",
+      properties: { n: { type: "integer" } },
+      required: ["n"],
+      additionalProperties: false,
+    },
+  };
   let release!: () => void;
   const hold = new Promise<void>((resolve) => {
     release = resolve;
@@ -45,19 +55,17 @@ async function fixture(agentId = "a") {
     {
       async run(_prompt, onText, _progress, _approve, current) {
         context = current!;
-        bridge = await createToolBridge(context, [
-          createServerTool({
-            name: "fixture_write",
-            operation: "fixture.write",
-            description: "Fixture Server write",
-            inputSchema: {
-              type: "object",
-              properties: { n: { type: "integer" } },
-              required: ["n"],
-              additionalProperties: false,
-            },
-          }),
-        ]);
+        bridge = await createToolBridge(
+          context,
+          remote
+            ? []
+            : [
+                createServerTool({
+                  ...tool,
+                  description: "Fixture Server write",
+                }),
+              ],
+        );
         try {
           await hold;
           onText("done");
@@ -95,11 +103,21 @@ async function fixture(agentId = "a") {
     ownerId: () => 42,
     toolPolicy: {
       canExecute: () => true,
-      allowedOperations: () => (allowed ? ["fixture.write"] : []),
+      allowedOperations: () => (allowed && !remote ? [tool.operation] : []),
+      remoteTools: () =>
+        allowed && remote
+          ? [
+              {
+                ...tool,
+                endpoint: "https://private.example.test/mcp",
+                credential: "example-private-bearer",
+              },
+            ]
+          : [],
     },
     toolHandlers: [
       {
-        operation: "fixture.write",
+        operation: tool.operation,
         write: true,
         validate(args) {
           if (!args || typeof args !== "object" || Array.isArray(args))
@@ -162,7 +180,7 @@ async function fixture(agentId = "a") {
         jsonrpc: "2.0",
         id: ++nextId,
         method: "tools/call",
-        params: { name: "fixture_write", arguments: args },
+        params: { name: tool.name, arguments: args },
       }),
     });
     return response;
@@ -185,6 +203,25 @@ async function fixture(agentId = "a") {
     },
   };
 }
+
+it("passes only task-scoped remote metadata to the Host and relays the selected operation", async () => {
+  const f = await fixture("a", true);
+  expect(f.context.tools?.remoteTools).toEqual([
+    {
+      name: "mcp_fixture_write",
+      operation: `mcp.${"a".repeat(64)}`,
+      inputSchema: {
+        type: "object",
+        properties: { n: { type: "integer" } },
+        required: ["n"],
+        additionalProperties: false,
+      },
+    },
+  ]);
+  const response = await (await f.call({ n: 7 })).json();
+  expect(response.result.structuredContent).toEqual({ written: 7 });
+  expect(f.execute).toHaveBeenCalledOnce();
+});
 
 it("routes MCP through Host polling to Server validation and durable write replay, then denies stale calls", async () => {
   const f = await fixture();

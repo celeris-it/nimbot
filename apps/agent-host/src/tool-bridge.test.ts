@@ -128,6 +128,86 @@ it("discovers only granted registered tools and returns structured results witho
   expect(JSON.stringify(failed)).not.toContain("private");
 });
 
+it("registers task-scoped remote tool metadata and relays only the operation and arguments", async () => {
+  const operation = `mcp.${"a".repeat(64)}`;
+  const remote = {
+    operation,
+    name: "mcp_lookup_123",
+    inputSchema: { type: "object", properties: { query: { type: "string" } } },
+  };
+  const scope = context();
+  scope.tools!.operations.push(operation);
+  scope.tools!.remoteTools = [remote];
+  const requestTool = vi.fn<NonNullable<EngineTaskContext["requestTool"]>>(
+    async () => ({ text: "found" }),
+  );
+  scope.requestTool = requestTool;
+  const bridge = await createToolBridge(scope, [
+    definition(async () => "ordinary"),
+  ]);
+  bridges.push(bridge);
+
+  remote.inputSchema.properties.query.type = "integer";
+  scope.tools!.remoteTools.length = 0;
+  const discovery = await (
+    await send(bridge, { jsonrpc: "2.0", id: 1, method: "tools/list" })
+  ).json();
+  expect(discovery.result.tools).toEqual([
+    expect.objectContaining({ name: "echo" }),
+    {
+      name: "mcp_lookup_123",
+      description: "Call approved external tool mcp_lookup_123.",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+    },
+  ]);
+  const response = await (
+    await send(bridge, {
+      ...call(2),
+      params: { name: "mcp_lookup_123", arguments: { query: "drafts" } },
+    })
+  ).json();
+  expect(response.result.structuredContent).toEqual({ text: "found" });
+  expect(requestTool).toHaveBeenCalledExactlyOnceWith(
+    operation,
+    { query: "drafts" },
+    expect.stringMatching(/^[a-f0-9-]{36}$/),
+    expect.any(AbortSignal),
+  );
+});
+
+it("rejects remote metadata for ungranted operations and rejects extra connection fields", async () => {
+  const scope = context();
+  const operation = `mcp.${"a".repeat(64)}`;
+  const remote = {
+    operation,
+    name: "mcp_lookup_123",
+    inputSchema: { type: "object" },
+    endpoint: "https://fixture.example.test",
+    credential: "example-fixture",
+  };
+  scope.tools!.remoteTools = [remote];
+  await expect(createToolBridge(scope, [])).rejects.toThrow(
+    "Invalid task tool context",
+  );
+  scope.tools!.operations.push(operation);
+  await expect(createToolBridge(scope, [])).rejects.toThrow(
+    "Invalid task tool context",
+  );
+  scope.tools!.remoteTools = [
+    {
+      operation,
+      name: remote.name,
+      inputSchema: { type: "object", description: "x".repeat(16_384) },
+    },
+  ];
+  await expect(createToolBridge(scope, [])).rejects.toThrow(
+    "Invalid task tool context",
+  );
+});
+
 it("rejects foreign authentication, browser origins, unknown tools, and invalid arguments before invocation", async () => {
   const invoke = vi.fn<BridgeTool["invoke"]>();
   const bridge = await setup(invoke);

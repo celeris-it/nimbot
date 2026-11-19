@@ -5,6 +5,13 @@ export interface TaskCapability {
   token: string;
   operations: string[];
   expiresAt: number;
+  remoteTools?: RemoteToolDefinition[];
+}
+
+export interface RemoteToolDefinition {
+  operation: string;
+  name: string;
+  inputSchema: Record<string, unknown>;
 }
 
 export interface CapabilityCallIdentity {
@@ -62,6 +69,7 @@ export function createTaskCapabilities(config: {
   policy?: {
     canExecute(task: RoutedTask): boolean;
     allowedOperations(task: RoutedTask): readonly string[];
+    remoteTools?(task: RoutedTask): readonly RemoteToolDefinition[];
   };
   now?: () => number;
 }) {
@@ -111,8 +119,26 @@ export function createTaskCapabilities(config: {
           !config.policy.canExecute(task)
         )
           return undefined;
-        const allowed = operations(config.policy.allowedOperations(task));
+        const staticOperations = config.policy.allowedOperations(task);
+        if (staticOperations.some((operation) => operation.startsWith("mcp.")))
+          return undefined;
+        const remote = config.policy.remoteTools?.(task) ?? [];
+        if (
+          remote.some(({ operation }) => !/^mcp\.[a-f0-9]{64}$/.test(operation))
+        )
+          return undefined;
+        const allowed = operations([
+          ...staticOperations,
+          ...remote.map(({ operation }) => operation),
+        ]);
         if (!allowed?.length) return undefined;
+        const remoteTools = remote.map(({ operation, name, inputSchema }) => ({
+          operation,
+          name,
+          inputSchema,
+        }));
+        const metadata = JSON.stringify(remoteTools);
+        if (Buffer.byteLength(metadata) > 16_384) return undefined;
         const at = now();
         if (!Number.isSafeInteger(at) || !Number.isSafeInteger(at + lifetimeMs))
           return undefined;
@@ -133,7 +159,14 @@ export function createTaskCapabilities(config: {
         lease.timer.unref();
         leases.set(taskId, lease);
         signal.addEventListener("abort", lease.onAbort, { once: true });
-        return { token, operations: [...allowed], expiresAt: lease.expiresAt };
+        return {
+          token,
+          operations: [...allowed],
+          expiresAt: lease.expiresAt,
+          ...(remoteTools.length
+            ? { remoteTools: JSON.parse(metadata) as RemoteToolDefinition[] }
+            : {}),
+        };
       } catch {
         return undefined;
       }
@@ -165,7 +198,12 @@ export function createTaskCapabilities(config: {
           revoke(lease);
           return undefined;
         }
-        const current = operations(config.policy.allowedOperations(task));
+        const current = operations([
+          ...config.policy.allowedOperations(task),
+          ...(config.policy.remoteTools?.(task) ?? []).map(
+            ({ operation }) => operation,
+          ),
+        ]);
         if (
           !current ||
           lease.operations.some((operation) => !current.includes(operation))

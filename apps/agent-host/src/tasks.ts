@@ -60,9 +60,7 @@ export function createTaskRunner(
       const executionIdentity =
         identity === undefined ? undefined : { ...identity };
       const toolAccess =
-        tools === undefined
-          ? undefined
-          : { ...tools, operations: [...tools.operations] };
+        tools === undefined ? undefined : structuredClone(tools);
       const release = reserve();
       if (!release) return undefined;
       const id = randomUUID();
@@ -173,10 +171,7 @@ export function createTaskRunner(
                   : {}),
                 ...(toolAccess
                   ? {
-                      tools: {
-                        ...toolAccess,
-                        operations: [...toolAccess.operations],
-                      },
+                      tools: structuredClone(toolAccess),
                       requestTool: requests!.request,
                     }
                   : {}),

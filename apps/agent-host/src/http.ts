@@ -51,7 +51,7 @@ export function createHostApi(
   app.use(
     "/tasks",
     bodyLimit({
-      maxSize: 32_768,
+      maxSize: 49_152,
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );

@@ -120,6 +120,7 @@ export function createBotTasks(config: {
               admit(task) && config.toolPolicy!.canExecute(task),
             allowedOperations: (task) =>
               config.toolPolicy!.allowedOperations(task),
+            remoteTools: config.toolPolicy.remoteTools,
           },
         }
       : {}),

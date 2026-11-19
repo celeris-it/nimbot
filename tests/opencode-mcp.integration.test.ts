@@ -45,6 +45,7 @@ it.skipIf(!image)(
       { encoding: "utf8", timeout: 180000 },
     );
     expect(output).toContain("Verified pinned OpenCode MCP");
+    expect(output).toContain("Verified Server-issued remote tool metadata");
     expect(output).toContain(
       "Verified private memory retrieval in a fresh OpenCode session.",
     );
