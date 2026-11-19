@@ -39,6 +39,7 @@ export function createScheduleAdmission(
   registry: ReturnType<typeof openAgentRegistry>,
   hosts: { read(agentId: string): Promise<AgentHostConfig> },
   status: (host: AgentHostConfig) => Promise<HostStatus> = getHostStatus,
+  allowsWork: (id: string) => boolean = () => true,
 ) {
   return async (schedule: Schedule): Promise<ScheduleOrigin | undefined> => {
     try {
@@ -47,12 +48,18 @@ export function createScheduleAdmission(
       if (!agent || agent.botId === null || chatId === undefined)
         return undefined;
       const access = createAgentAccess(registry, agent.id);
-      if (!access.canExecute(agent.botId, agent.ownerId, chatId))
+      if (
+        !allowsWork(agent.id) ||
+        !access.canExecute(agent.botId, agent.ownerId, chatId)
+      )
         return undefined;
       const host = await hosts.read(agent.id);
       if ((await status(host)) === "unavailable") return undefined;
       // Identity, setup, or the owner binding may change during network I/O.
-      if (!access.canExecute(agent.botId, agent.ownerId, chatId))
+      if (
+        !allowsWork(agent.id) ||
+        !access.canExecute(agent.botId, agent.ownerId, chatId)
+      )
         return undefined;
       return { platform: "telegram", botId: agent.botId, chatId };
     } catch {

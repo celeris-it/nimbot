@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+import { createRecoveryWorkGate } from "./recovery-work-gate.js";
 import { createTelegramAttachments } from "./telegram-attachments.js";
 import { createAgentTaskServices } from "./agent-task-services.js";
 import {
@@ -68,7 +70,7 @@ import { readTaskTimeoutSeconds, taskWaitMs } from "./task-timeout.js";
 
 async function main(): Promise<void> {
   let panelConfig;
-  let provisioningConfig;
+  let provisioningConfig: ReturnType<typeof readProvisioningConfig>;
   let taskTimeoutSeconds: number;
   try {
     provisioningConfig = readProvisioningConfig(process.env);
@@ -193,12 +195,40 @@ async function main(): Promise<void> {
     taskStore.close();
     registry.close();
   });
+  async function inspectContainer(id: string) {
+    const target = registry.get(id)?.containerRef;
+    if (!target) return "missing" as const;
+    if (!provisioningConfig) return "unavailable" as const;
+    return createContainerControl({
+      socketPath: provisioningConfig.socketPath,
+      target,
+      agentId: id,
+    }).status();
+  }
+  async function inspectHost(id: string) {
+    try {
+      return await getHostStatus(await hostCredentials!.read(id));
+    } catch {
+      return "unavailable" as const;
+    }
+  }
+  const workGate = createRecoveryWorkGate(
+    registry,
+    inspectContainer,
+    inspectHost,
+  );
+  if (provisioningConfig) {
+    const ids = registry.listIds();
+    for (let offset = 0; offset < ids.length; offset += 8)
+      await Promise.all(ids.slice(offset, offset + 8).map(workGate.check));
+  }
   const discord = createDiscordConfiguration(registry, discordSecrets);
   const discordDelivery = createDiscordNotifications(discord.resolve);
   function discordAdmit(task: DiscordQueuedTask) {
     const connection = registry.getDiscordConnection(task.agentId);
     const setup = registry.getProvisioning(task.agentId);
     return (
+      workGate.allowsWork(task.agentId) &&
       connection?.botId === task.origin.botId &&
       connection.ownerId === task.origin.ownerId &&
       discordInbox.getBinding(task.agentId) === task.origin.channelId &&
@@ -283,6 +313,7 @@ async function main(): Promise<void> {
       });
       return {
         agentId: id,
+        canClaim: () => workGate.allowsWork(id),
         store: taskStore,
         ownerId: () => registry.get(id)?.ownerId ?? 0,
         approvals: { store: approvalStore, rules: approvalRules },
@@ -359,6 +390,7 @@ async function main(): Promise<void> {
       },
       targetStatus: (id) => {
         if (!registry.get(id)) return "deleted";
+        if (!workGate.allowsWork(id)) return "paused";
         const operation = registry.getContainerOperation(id);
         return operation?.status === "pending" ||
           (operation?.action === "stop" &&
@@ -470,7 +502,12 @@ async function main(): Promise<void> {
   const scheduler = createScheduler({
     store: scheduleStore,
     admit: hostCredentials
-      ? createScheduleAdmission(registry, hostCredentials)
+      ? createScheduleAdmission(
+          registry,
+          hostCredentials,
+          undefined,
+          workGate.allowsWork,
+        )
       : async () => undefined,
     isOverlapping: taskStore.isScheduleOverlapping,
     kick: async (id) => {
@@ -575,6 +612,20 @@ async function main(): Promise<void> {
       ? async (id, action) => {
           requireAgent(id);
           await containerAction(id, action);
+          if (action === "start") {
+            for (let attempt = 0; attempt < 10; attempt++) {
+              await workGate.check(id);
+              if (workGate.allowsWork(id)) {
+                registeredBots?.start(id);
+                void registeredDiscord.start(id);
+                break;
+              }
+              if (attempt < 9)
+                await delay(200, undefined, {
+                  signal: provisioningShutdown.signal,
+                });
+            }
+          }
           await taskServices.wake([id]);
         }
       : undefined,
@@ -610,22 +661,8 @@ async function main(): Promise<void> {
               ? { name: agent.name, instructions: agent.instructions }
               : undefined;
           },
-          containerStatus: async (id) => {
-            const ref = registry.get(id)?.containerRef;
-            if (!ref) return "missing";
-            return createContainerControl({
-              socketPath: provisioningConfig!.socketPath,
-              target: ref,
-              agentId: id,
-            }).status();
-          },
-          hostStatus: async (id) => {
-            try {
-              return await getHostStatus(await hostCredentials!.read(id));
-            } catch {
-              return "unavailable";
-            }
-          },
+          containerStatus: inspectContainer,
+          hostStatus: inspectHost,
           stopObservation: async (id) =>
             registry.get(id) ? observeStop(id) : undefined,
           cancelProvisioning: (id) => {
@@ -684,9 +721,11 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  for (const id of registry.listIds()) void registeredDiscord.start(id);
-  for (const agent of registry.listResourceReferences())
-    registeredBots?.start(agent.id);
+  for (const id of registry.listIds()) {
+    if (!workGate.allowsWork(id)) continue;
+    void registeredDiscord.start(id);
+    registeredBots?.start(id);
+  }
   void taskServices.resumeDelegations(taskStore).catch(() => {
     log.warn("server.delegation_resume_failed");
   });

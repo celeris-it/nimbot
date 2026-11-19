@@ -14,6 +14,7 @@
 - [ ] Persist the recovery state and resource creation intents before Docker mutations. Serialize recovery with start, stop, provisioning, and deletion. After a crash or lost Docker response, use read-only inspection to reconcile resources attributable to the saved recovery attempt. Leave conflicting resources and restored volumes intact.
   - Recovery attempts and resource intents persist in SQLite and exclude conflicting lifecycle transitions. Retrying after restart reconciles each uncertain Docker mutation from inspection before proceeding, without resending it.
 - [ ] Check for missing containers before resuming agent work on startup. Hold queued work for affected agents throughout recovery. Once the administrator selects **Start** and the authenticated Agent Host responds, resume polling and the existing queue. Preserve the current rules for interrupted tasks and missed schedules.
+  - Startup inspection and the work gate now cover polling, the shared queue, and schedule admission. Restored agents require a completed Start and authenticated Host readiness. The panel recovery flow still needs end-to-end verification.
 
 ## Verify recovery
 

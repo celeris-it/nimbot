@@ -98,6 +98,7 @@ export function createBotTasks(config: {
     allow: boolean,
   ) => Promise<boolean>;
   access?: BotAccess;
+  canClaim?(): boolean;
   discord?: {
     admit(task: DiscordQueuedTask): boolean;
     progress(task: DiscordQueuedTask, message: string): Promise<void>;
@@ -375,7 +376,8 @@ export function createBotTasks(config: {
         }
       : {}),
     ready: (task) =>
-      task.origin.platform === "delegated"
+      (config.canClaim?.() ?? true) &&
+      (task.origin.platform === "delegated"
         ? !!(
             (config.delegation?.canClaim?.() ?? true) &&
             config.delegation?.canExecute &&
@@ -384,7 +386,7 @@ export function createBotTasks(config: {
             config.decide &&
             config.notificationStore
           )
-        : task.origin.platform !== "telegram" || !!bot,
+        : task.origin.platform !== "telegram" || !!bot),
     execute: async (task, report, signal) => {
       // Resolve correlation and callback origin from Server state, never the prompt
       // or a Host-provided identity. A missing policy grants no application tools.
