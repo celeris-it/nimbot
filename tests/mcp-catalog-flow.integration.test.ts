@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, expect, it, vi } from "vitest";
 import type { EngineTaskContext } from "../apps/agent-host/src/engine.js";
 import { createHostApi } from "../apps/agent-host/src/http.js";
@@ -471,6 +471,7 @@ async function fixture(
   return {
     directory,
     store,
+    execute,
     approvals,
     rules,
     catalog,
@@ -756,3 +757,193 @@ it("times out a hung remote call and releases the upstream connection", async ()
   expect(f.calls()).toHaveLength(1);
   await vi.waitFor(() => expect(f.remote.closedCalls).toBe(1));
 });
+import { execFileSync } from "node:child_process";
+
+const dockerImage = process.env.NIMBOT_TEST_DOCKER_IMAGE;
+it.skipIf(!dockerImage)(
+  "keeps upstream MCP connection data outside a non-root Agent Host container",
+  async () => {
+    const f = await fixture();
+    const agentId = "a";
+    const token = randomUUID().repeat(2);
+    const name = `nimbot-mcp-${randomUUID()}`;
+    const docker = (...args: string[]) =>
+      execFileSync(
+        "docker",
+        [
+          "--host",
+          `unix://${process.env.NIMBOT_TEST_DOCKER_SOCKET ?? "/var/run/docker.sock"}`,
+          ...args,
+        ],
+        { timeout: 15_000, maxBuffer: 4 * 1024 * 1024 },
+      );
+    const script = fileURLToPath(
+      new URL("fixtures/mcp-container-host.mjs", import.meta.url),
+    );
+    const canReach = (task: RoutedTask) =>
+      task.agentId === agentId &&
+      task.origin.platform === "discord" &&
+      task.origin.botId === "101" &&
+      task.origin.ownerId === "456" &&
+      task.origin.channelId === "10";
+    const tools = createMcpTools({
+      agentId,
+      catalog: f.catalog,
+      tasks: f.store,
+      rules: f.rules,
+      canReach,
+      execute: f.execute,
+    });
+    const captured: Buffer[] = [];
+    docker(
+      "run",
+      "--detach",
+      "--name",
+      name,
+      "--init",
+      "--read-only",
+      "--tmpfs",
+      "/tmp:rw,nosuid,nodev,size=16m",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges:true",
+      "--memory",
+      "512m",
+      "--pids-limit",
+      "128",
+      "--publish",
+      "127.0.0.1::3001",
+      "--env",
+      `AGENT_HOST_TOKEN=${token}`,
+      "--mount",
+      `type=bind,src=${script},dst=/mcp-container-host.mjs,readonly`,
+      "--entrypoint",
+      "node",
+      dockerImage!,
+      "/mcp-container-host.mjs",
+    );
+    try {
+      const port = docker("port", name, "3001/tcp")
+        .toString()
+        .trim()
+        .split(":")
+        .at(-1);
+      const url = `http://127.0.0.1:${port}`;
+      await vi.waitFor(
+        async () => {
+          const response = await fetch(`${url}/health`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(300),
+          });
+          expect(response.status).toBe(200);
+        },
+        { timeout: 10_000 },
+      );
+      const request: typeof fetch = async (input, init) => {
+        if (init?.body) captured.push(Buffer.from(String(init.body)));
+        const response = await fetch(input, init);
+        captured.push(Buffer.from(await response.clone().arrayBuffer()));
+        return response;
+      };
+      const deliver = vi.fn();
+      const service = createBotTasks({
+        agentId,
+        store: f.store,
+        ownerId: () => 42,
+        approvals: { store: f.approvals, rules: f.rules },
+        toolPolicy: {
+          canExecute: canReach,
+          allowedOperations: () => [],
+          remoteTools: tools.descriptors,
+        },
+        resolveToolHandler: tools.resolve,
+        run: createHostTasks({ url, token }, request),
+        discord: {
+          admit: canReach,
+          progress: async () => {},
+          deliver,
+          sendApproval: async () => {
+            throw new Error("Fixture read unexpectedly asked for approval");
+          },
+        },
+      });
+      try {
+        service.submitDiscord(
+          {
+            platform: "discord",
+            botId: "101",
+            ownerId: "456",
+            channelId: "10",
+            messageId: "1",
+          },
+          "Run the approved search tool",
+        );
+        await service.idle();
+        expect(deliver).toHaveBeenCalledOnce();
+        expect(deliver.mock.calls[0]?.[1]).toMatchObject({
+          ok: true,
+          output: expect.stringContaining(
+            '"structuredContent":{"agent":"a","n":7}',
+          ),
+        });
+        expect(f.calls()).toMatchObject([
+          {
+            authorization: `Bearer ${credential("a")}`,
+            params: { name: "search", arguments: { n: 7 } },
+          },
+        ]);
+        // The image root and script are read-only. Check the writable mounts and
+        // the container configuration and process environment after execution.
+        const artifacts = docker(
+          "exec",
+          name,
+          "tar",
+          "-cf",
+          "-",
+          "-C",
+          "/",
+          "workspace",
+          "tmp",
+        );
+        expect(artifacts.includes("workspace/tool-exchange.json")).toBe(true);
+        expect(artifacts.includes("tmp/tasks.sqlite")).toBe(true);
+        const environment = docker(
+          "inspect",
+          "--format",
+          "{{json .Config.Env}}",
+          name,
+        );
+        const pid = docker("exec", name, "cat", "/tmp/host.pid").toString();
+        expect(pid).toMatch(/^\d+$/);
+        const processEnvironment = docker(
+          "exec",
+          name,
+          "cat",
+          `/proc/${pid}/environ`,
+        );
+        expect(processEnvironment.includes(`AGENT_HOST_TOKEN=${token}\0`)).toBe(
+          true,
+        );
+        for (const artifact of [
+          artifacts,
+          environment,
+          processEnvironment,
+          ...captured,
+        ])
+          for (const privateValue of [
+            endpoint,
+            credential("a"),
+            credential("b"),
+          ])
+            expect(artifact.includes(privateValue)).toBe(false);
+      } finally {
+        service.close();
+        await service.idle();
+      }
+    } finally {
+      docker("rm", "--force", "--volumes", name);
+    }
+  },
+  45_000,
+);
