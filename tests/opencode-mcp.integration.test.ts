@@ -14,7 +14,7 @@ it.skipIf(!image)(
       ),
       "utf8",
     );
-    const version = /opencode-ai@([\d.]+)/.exec(dockerfile)?.[1];
+    const version = /@opencode\/cli@([\d.]+)/.exec(dockerfile)?.[1];
     expect(version).toBeTruthy();
     const output = execFileSync(
       "docker",

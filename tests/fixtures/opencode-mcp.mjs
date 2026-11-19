@@ -25,11 +25,20 @@ const { createMemoryTools } =
 // Also bounds a hung child shutdown, so a timed-out Docker client cannot leave work running.
 const deadline = setTimeout(() => process.exit(1), 170000);
 assert.equal(
-  execFileSync("opencode", ["--version"], { encoding: "utf8" }).trim(),
+  execFileSync("opencode", ["--version"], { encoding: "utf8" })
+    .trim()
+    .replace(/^opencode v/, ""),
   process.argv[2],
 );
 assert.equal(process.getuid(), 1000);
 const root = await mkdtemp(join(tmpdir(), "nimbot-mcp-"));
+Object.assign(process.env, {
+  XDG_DATA_HOME: join(root, "data"),
+  XDG_CONFIG_HOME: join(root, "config"),
+  XDG_CACHE_HOME: join(root, "cache"),
+  XDG_STATE_HOME: join(root, "state"),
+  OPENCODE_DISABLE_MODELS_FETCH: "true",
+});
 const calls = [];
 let mode = "echo";
 let discovered = 0;
@@ -226,14 +235,7 @@ const children = [];
 function connect() {
   const child = spawn("opencode", ["acp"], {
     cwd: root,
-    env: {
-      ...process.env,
-      HOME: root,
-      XDG_DATA_HOME: join(root, "data"),
-      XDG_CONFIG_HOME: join(root, "config"),
-      XDG_CACHE_HOME: join(root, "cache"),
-      OPENCODE_DISABLE_MODELS_FETCH: "true",
-    },
+    env: process.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   children.push(child);

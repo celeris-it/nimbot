@@ -4,6 +4,7 @@ export const providers = [
   { id: "anthropic", name: "Anthropic" },
   { id: "google", name: "Google" },
   { id: "openrouter", name: "OpenRouter" },
+  { id: "opencode", name: "OpenCode Console" },
 ] as const;
 export type ProviderId = (typeof providers)[number]["id"];
 export function isProviderId(id: string): id is ProviderId {
@@ -18,7 +19,10 @@ export function isApiKey(key: unknown): key is string {
     !key.includes("\0")
   );
 }
+export type DeviceProvider = "openai" | "opencode";
+
 export interface DeviceLogin {
+  provider?: DeviceProvider;
   id: string;
   state:
     | "starting"
@@ -48,7 +52,7 @@ export interface EngineAuth {
   status(): Promise<ProviderSettings>;
   save(id: ProviderId, key: string): Promise<void>;
   remove(id: ProviderId): Promise<void>;
-  startLogin(): DeviceLogin;
-  cancelLogin(id: string): Promise<DeviceLogin>;
+  startLogin(provider?: DeviceProvider): DeviceLogin;
+  cancelLogin(id: string, provider?: DeviceProvider): Promise<DeviceLogin>;
   close(): Promise<void>;
 }

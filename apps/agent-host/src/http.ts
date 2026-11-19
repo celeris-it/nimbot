@@ -359,13 +359,24 @@ export function createHostApi(
     if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
     return c.json(await auth.status());
   });
-  app.post("/providers/openai/device-login", (c) => {
+  app.post("/providers/:provider/device-login", (c) => {
     if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
-    return c.json(auth.startLogin(), 202);
+    const provider = c.req.param("provider");
+    if (provider !== "openai" && provider !== "opencode") return c.notFound();
+    return c.json(
+      provider === "openai" ? auth.startLogin() : auth.startLogin(provider),
+      202,
+    );
   });
-  app.post("/providers/openai/device-login/:attempt/cancel", async (c) => {
+  app.post("/providers/:provider/device-login/:attempt/cancel", async (c) => {
     if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
-    return c.json(await auth.cancelLogin(c.req.param("attempt")));
+    const { provider, attempt } = c.req.param();
+    if (provider !== "openai" && provider !== "opencode") return c.notFound();
+    return c.json(
+      await (provider === "openai"
+        ? auth.cancelLogin(attempt)
+        : auth.cancelLogin(attempt, provider)),
+    );
   });
   app.post("/providers/:provider", async (c) => {
     if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);

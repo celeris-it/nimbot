@@ -1,287 +1,250 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  chmod,
-  lstat,
-  readFile,
-  writeFile,
-  rename,
-  rm,
-  mkdtemp,
-} from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { stripVTControlCharacters } from "node:util";
-import { StringDecoder } from "node:string_decoder";
+import { setTimeout as delay } from "node:timers/promises";
+import { z } from "zod";
 import {
   EngineAuthError,
   isApiKey,
-  isProviderId,
   providers,
-  type EngineAuth,
   type DeviceLogin,
+  type DeviceProvider,
+  type EngineAuth,
   type ProviderId,
 } from "./engine-auth.js";
-import { stopEngine } from "./stop-engine.js";
+import type { OpenCodeRequest } from "./opencode-api.js";
 
-type Credential =
-  | { type: "api"; key: string }
-  | {
-      type: "oauth";
-      access: string;
-      refresh: string;
-      expires: number;
-      accountId?: string;
-    };
-type Credentials = Record<string, Credential>;
+const credentialList = z.object({
+  data: z.array(
+    z.object({
+      id: z.string(),
+      integrationID: z.string(),
+      active: z.boolean(),
+      value: z.object({ type: z.enum(["key", "oauth", "external"]) }),
+    }),
+  ),
+});
+const authorization = z.object({
+  data: z.object({
+    attemptID: z.string().min(1),
+    url: z.url(),
+    instructions: z.string(),
+    mode: z.literal("auto"),
+  }),
+});
+const attemptStatus = z.object({
+  data: z.object({
+    status: z.enum(["pending", "complete", "failed", "expired"]),
+  }),
+});
+
+export async function readOpenCodeCredentials(request: OpenCodeRequest) {
+  return credentialList.parse(await request("/api/credential")).data;
+}
+
 const pending = (login: DeviceLogin) =>
   login.state === "starting" || login.state === "awaiting_authorization";
 
-/** Never inherit the former shared credential override, including during OAuth refresh. */
-export function openCodeEnvironment(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  delete env.OPENCODE_AUTH_CONTENT;
-  return env;
+export function deviceAuthorizationUrl(
+  provider: DeviceProvider,
+  value: string,
+) {
+  const url = new URL(value);
+  return (
+    !url.username &&
+    !url.password &&
+    (provider === "openai"
+      ? value === "https://auth.openai.com/codex/device"
+      : url.origin === "https://opencode.ai" &&
+        url.pathname.startsWith("/console/"))
+  );
 }
 
-/** All credential reads/writes and the login process stay inside this agent's container. */
-export async function createOpenCodeAuth(
-  directory: string,
+/** OpenCode owns its credentials. This adapter exports only connection status and device instructions. */
+export function createOpenCodeAuth(
+  request: OpenCodeRequest,
   reserve: () => (() => void) | undefined,
   isBusy: () => boolean,
-  options: {
-    loginTimeoutMs?: number;
-    executable?: string;
-    temporaryRoot?: string;
-  } = {},
-): Promise<EngineAuth> {
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  if (!(await lstat(directory)).isDirectory())
-    throw new EngineAuthError("unavailable");
-  await chmod(directory, 0o700);
-  const file = join(directory, "auth.json");
+  changed: () => void,
+  options: { loginTimeoutMs?: number; pollMs?: number } = {},
+): EngineAuth {
   let closed = false;
   let attempt:
     | {
         public: DeviceLogin;
+        cancel: AbortController;
         done: Promise<void>;
-        child?: ChildProcess;
-        abort?: "cancelled" | "expired";
-        committing: boolean;
       }
     | undefined;
-  async function read(path = file): Promise<Credentials> {
-    try {
-      const info = await lstat(path);
-      if (!info.isFile() || info.mode & 0o077) throw new Error();
-      const data: unknown = JSON.parse(await readFile(path, "utf8"));
-      if (!data || typeof data !== "object" || Array.isArray(data))
-        throw new Error();
-      for (const value of Object.values(data)) {
-        if (!value || typeof value !== "object") throw new Error();
-        const entry = value as Record<string, unknown>;
-        if (entry.type === "api" && isApiKey(entry.key)) continue;
-        if (
-          entry.type === "oauth" &&
-          typeof entry.access === "string" &&
-          entry.access &&
-          typeof entry.refresh === "string" &&
-          entry.refresh &&
-          typeof entry.expires === "number" &&
-          Number.isFinite(entry.expires) &&
-          entry.expires >= 0 &&
-          (entry.accountId === undefined || typeof entry.accountId === "string")
-        )
-          continue;
-        throw new Error();
-      }
-      return data as Credentials;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-      throw new EngineAuthError("unavailable");
-    }
-  }
-  async function change(id: ProviderId, credential?: Credential) {
-    const data = await read();
-    if (credential) data[id] = credential;
-    else delete data[id];
-    const temporary = join(directory, `${randomUUID()}.tmp`);
-    try {
-      await writeFile(temporary, JSON.stringify(data), {
-        flag: "wx",
-        mode: 0o600,
-      });
-      await rename(temporary, file);
-    } finally {
-      await rm(temporary, { force: true });
-    }
-  }
+
   function acquire() {
     if (closed) throw new EngineAuthError("unavailable");
     const release = reserve();
     if (!release) throw new EngineAuthError("busy");
     return release;
   }
-  async function mutate(id: ProviderId, credential?: Credential) {
-    if (!isProviderId(id)) throw new EngineAuthError("invalid");
+
+  async function removeCredentials(ids: string[]) {
+    for (const id of ids)
+      await request(`/api/credential/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+  }
+
+  async function mutate(provider: ProviderId, key?: string) {
     const release = acquire();
     try {
-      await change(id, credential);
-      if (id === "openai") attempt = undefined;
+      const previous = (await readOpenCodeCredentials(request))
+        .filter((entry) => entry.integrationID === provider)
+        .map((entry) => entry.id);
+      if (key !== undefined)
+        await request("/api/credential", {
+          body: {
+            integrationID: provider,
+            value: { type: "key", key },
+            activate: true,
+          },
+        });
+      await removeCredentials(previous);
+      if (attempt?.public.provider === provider) attempt = undefined;
+    } catch {
+      throw new EngineAuthError("unavailable");
     } finally {
+      changed();
       release();
     }
   }
+
   return {
     async status() {
-      const data = await read();
+      const credentials = await readOpenCodeCredentials(request).catch(() => {
+        throw new EngineAuthError("unavailable");
+      });
       return {
-        providers: providers.map((provider) => ({
-          ...provider,
-          method:
-            data[provider.id]?.type === "oauth"
-              ? ("device" as const)
-              : data[provider.id]
-                ? ("api_key" as const)
-                : null,
-        })),
+        providers: providers.map((provider) => {
+          const type = credentials.find(
+            (entry) => entry.active && entry.integrationID === provider.id,
+          )?.value.type;
+          return {
+            ...provider,
+            method:
+              type === "oauth" ? "device" : type === "key" ? "api_key" : null,
+          };
+        }),
         busy: isBusy(),
         login: attempt ? { ...attempt.public } : null,
       };
     },
-    save(id, key) {
-      if (!isApiKey(key)) throw new EngineAuthError("invalid");
-      return mutate(id, { type: "api", key });
+    save(provider, key) {
+      if (!isApiKey(key) || provider === "opencode")
+        throw new EngineAuthError("invalid");
+      return mutate(provider, key);
     },
-    remove: (id) => mutate(id),
-    startLogin() {
+    remove: (provider) => mutate(provider),
+    startLogin(provider = "openai") {
       const release = acquire();
       const current: NonNullable<typeof attempt> = {
-        public: { id: randomUUID(), state: "starting" },
+        public: { id: randomUUID(), provider, state: "starting" },
+        cancel: new AbortController(),
         done: Promise.resolve(),
-        committing: false,
       };
       attempt = current;
+      const deadline = AbortSignal.timeout(options.loginTimeoutMs ?? 600_000);
+      const signal = AbortSignal.any([deadline, current.cancel.signal]);
+      const path = `/api/integration/${provider}/connect/oauth`;
       current.done = (async () => {
-        let temporary: string | undefined;
-        let result: DeviceLogin["state"] = "failed";
-        const timer = setTimeout(() => {
-          if (current.committing) return;
-          current.abort = "expired";
-          if (current.child?.pid) void stopEngine(current.child);
-        }, options.loginTimeoutMs ?? 600_000);
+        let remote: string | undefined;
+        let state: DeviceLogin["state"] = "failed";
+        let previous: string[] = [];
         try {
-          temporary = await mkdtemp(
-            join(options.temporaryRoot ?? tmpdir(), "nimbot-login-"),
-          );
-          if (current.abort) return;
-          const child = spawn(
-            options.executable ?? "opencode",
-            [
-              "auth",
-              "login",
-              "--provider",
-              "openai",
-              "--method",
-              "ChatGPT Pro/Plus (headless)",
-              "--pure",
-            ],
-            {
-              cwd: temporary,
-              env: {
-                ...openCodeEnvironment(),
-                XDG_DATA_HOME: join(temporary, "data"),
-                XDG_CONFIG_HOME: join(temporary, "config"),
-                XDG_CACHE_HOME: join(temporary, "cache"),
-                XDG_STATE_HOME: join(temporary, "state"),
+          previous = (await readOpenCodeCredentials(request))
+            .filter((entry) => entry.integrationID === provider)
+            .map((entry) => entry.id);
+          signal.throwIfAborted();
+          const data = authorization.parse(
+            await request(path, {
+              body: {
+                methodID:
+                  provider === "opencode" ? "device" : "chatgpt-headless",
               },
-              stdio: ["ignore", "pipe", "pipe"],
-            },
-          );
-          current.child = child;
-          // Decode complete lines before extracting codes; chunks may end mid-code or mid-ANSI sequence.
-          const attach = (stream: NodeJS.ReadableStream | null) => {
-            const decoder = new StringDecoder("utf8");
-            let buffer = "";
-            stream?.on("data", (chunk: Buffer) => {
-              buffer = (buffer + decoder.write(chunk)).slice(-8192);
-              const lines = buffer.split(/[\r\n]/);
-              buffer = lines.pop() ?? "";
-              for (const line of lines) {
-                if (current.abort || !pending(current.public)) continue;
-                const text = stripVTControlCharacters(line);
-                if (text.includes("https://auth.openai.com/codex/device"))
-                  current.public.url = "https://auth.openai.com/codex/device";
-                const code = text.match(
-                  /Enter code:\s*([A-Za-z0-9-]{4,32})(?:\s|$)/,
-                )?.[1];
-                if (code) current.public.code = code;
-                if (current.public.url && current.public.code)
-                  current.public.state = "awaiting_authorization";
-              }
-            });
+            }),
+          ).data;
+          remote = `${path}/${encodeURIComponent(data.attemptID)}`;
+          signal.throwIfAborted();
+          const code = /Enter code:\s*([A-Za-z0-9-]{4,32})(?:\s|$)/.exec(
+            data.instructions,
+          )?.[1];
+          if (!code || !deviceAuthorizationUrl(provider, data.url))
+            throw new Error("Invalid device instructions");
+          current.public = {
+            ...current.public,
+            state: "awaiting_authorization",
+            url: data.url,
+            code,
           };
-          attach(child.stdout);
-          attach(child.stderr);
-          const code = await new Promise<number | null>((resolve, reject) => {
-            child.once("error", reject);
-            child.once("close", resolve);
-          });
-          if (current.abort || code !== 0) return;
-          const credential = (
-            await read(join(temporary, "data", "opencode", "auth.json"))
-          ).openai;
-          if (!credential || credential.type !== "oauth" || current.abort)
-            return;
-          // Once committing begins, cancellation observes the completed result instead of promising rollback.
-          current.committing = true;
-          clearTimeout(timer);
-          await change("openai", credential);
-          result = "completed";
+          while (!signal.aborted) {
+            const { data } = attemptStatus.parse(await request(remote));
+            if (data.status === "complete") {
+              state = "completed";
+              break;
+            }
+            if (data.status !== "pending") {
+              state = data.status;
+              break;
+            }
+            await delay(options.pollMs ?? 1_000, undefined, { signal });
+          }
         } catch {
-          result = "failed";
+          /* Preserve the previous connection on an unsuccessful authorization. */
         } finally {
-          clearTimeout(timer);
-          try {
-            if (current.child?.pid) await stopEngine(current.child);
-          } finally {
-            try {
-              if (temporary)
-                await rm(temporary, { recursive: true, force: true });
-            } finally {
-              current.public = {
-                id: current.public.id,
-                state: current.abort ?? result,
-              };
-              release();
+          if (remote && state !== "completed") {
+            await request(remote, { method: "DELETE" }).catch(() => {});
+            // OpenCode may already be committing the credential when cancellation arrives.
+            for (let attempt = 0; signal.aborted && attempt < 3; attempt++) {
+              const raw = await request(remote, { timeout: 500 }).catch(
+                () => null,
+              );
+              const parsed = attemptStatus.safeParse(raw);
+              if (!parsed.success) break;
+              if (parsed.data.data.status === "complete") state = "completed";
+              if (parsed.data.data.status !== "pending") break;
+              await delay(50);
             }
           }
+          if (state === "completed")
+            await removeCredentials(previous).catch(() => {});
+          current.public = {
+            id: current.public.id,
+            provider,
+            state:
+              state === "completed"
+                ? state
+                : current.cancel.signal.aborted
+                  ? "cancelled"
+                  : deadline.aborted
+                    ? "expired"
+                    : state,
+          };
+          changed();
+          release();
         }
       })();
-      // Cleanup errors must not leak paths or produce unhandled rejections.
-      void current.done.catch(() => {});
       return { ...current.public };
     },
-    async cancelLogin(id) {
+    async cancelLogin(id, provider = "openai") {
       const current = attempt;
-      if (!current || current.public.id !== id)
+      if (
+        !current ||
+        current.public.id !== id ||
+        current.public.provider !== provider
+      )
         throw new EngineAuthError("not_found");
-      if (pending(current.public) && !current.committing) {
-        current.abort ??= "cancelled";
-        if (current.child?.pid) await stopEngine(current.child);
-      }
+      if (pending(current.public)) current.cancel.abort();
       await current.done;
       return { ...current.public };
     },
     async close() {
       closed = true;
-      const current = attempt;
-      if (current && pending(current.public)) {
-        if (!current.committing) current.abort ??= "cancelled";
-        if (current.child?.pid) await stopEngine(current.child);
-        await current.done;
-      }
+      attempt?.cancel.abort();
+      await attempt?.done;
     },
   };
 }

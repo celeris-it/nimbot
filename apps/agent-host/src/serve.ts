@@ -10,7 +10,7 @@ import { createHostApi, readHostConfig } from "./http.js";
 import { log } from "./logger.js";
 import { readTaskTimeoutMs } from "./task-timeout.js";
 import { createOpenCodeAuth } from "./opencode-auth.js";
-import { homedir } from "node:os";
+import { createOpenCodeApi } from "./opencode-api.js";
 import { openMemoryStore } from "./memory-store.js";
 import { createMemoryTools } from "./memory-tools.js";
 import { createPeerToolDefinitions } from "./peer-tools.js";
@@ -25,6 +25,7 @@ try {
   );
   const memory = openMemoryStore(resolve(stateDir, "memory.sqlite"));
   const attachments = createAttachments(config.workspace);
+  const openCode = createOpenCodeApi(config.workspace);
   const runner = createTaskRunner(
     store,
     createOpenCodeEngine(
@@ -42,13 +43,11 @@ try {
     undefined,
     attachments.discard,
   );
-  const auth = await createOpenCodeAuth(
-    resolve(
-      process.env.XDG_DATA_HOME || resolve(homedir(), ".local/share"),
-      "opencode",
-    ),
+  const auth = createOpenCodeAuth(
+    openCode.request,
     runner.reserve,
     runner.isBusy,
+    () => {},
   );
   const app = createHostApi(config, runner, auth, memory, attachments);
   const server = serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 3001 });
@@ -67,8 +66,12 @@ try {
       try {
         await auth.close();
       } finally {
-        await runner.close();
-        memory.close();
+        try {
+          await runner.close();
+        } finally {
+          await openCode.close();
+          memory.close();
+        }
       }
     } catch {
       log.error("host.shutdown_finalize_failed");

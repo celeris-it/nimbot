@@ -6,7 +6,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
  && rm -rf /var/lib/apt/lists/* \
- && npm install -g opencode-ai@1.18.32 pnpm@10
+ && npm install -g @opencode/cli@2.2.7 pnpm@10
 
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
@@ -26,6 +26,8 @@ RUN mkdir -p /workspace /home/node/.local/share/opencode /home/node/.local/share
  && chown -R node:node /workspace /home/node/.local
 USER node
 ENV WORKSPACE=/workspace
+# Preserve direct tool definitions for Nimbot's ACP bridge and permission flow.
+ENV OPENCODE_CONFIG_CONTENT='{"permissions":[{"action":"execute","resource":"*","effect":"deny"}]}'
 VOLUME /workspace
 WORKDIR /workspace
 

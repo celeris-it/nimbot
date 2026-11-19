@@ -1,4 +1,4 @@
-import { openCodeEnvironment } from "./opencode-auth.js";
+import { openCodeEnvironment } from "./opencode-api.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
