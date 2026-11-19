@@ -54,6 +54,7 @@ export function createBotTasks(config: {
   ownerId: () => number;
   attachments?: ReturnType<typeof createTelegramAttachments>;
   schedules?: Pick<Parameters<typeof createChatSchedules>[0], "store" | "now">;
+  onScheduleOutcome?: (scheduleId: string) => Promise<void>;
 
   /** Internal service policy: must resolve exact operations from Server-owned grants. */
   toolPolicy?: Parameters<typeof createTaskCapabilities>[0]["policy"];
@@ -425,16 +426,23 @@ export function createBotTasks(config: {
           },
         }
       : {}),
-    ...(config.delegation
+    ...(config.delegation || config.onScheduleOutcome
       ? {
           finalize(task, status, signal, outcome) {
             const targets = config.store.finishWithDelegations(
               task.id,
               status,
-              config.delegation!.canHandoff,
+              config.delegation?.canHandoff ?? (() => false),
               signal.aborted,
               outcome,
             );
+            if (task.scheduleId && config.onScheduleOutcome) {
+              void config.onScheduleOutcome(task.scheduleId).catch(() =>
+                log.warn("schedule.alert_failed", {
+                  agentId: config.agentId,
+                }),
+              );
+            }
             if (targets.length)
               void Promise.resolve()
                 .then(() => config.delegation!.wake(targets))

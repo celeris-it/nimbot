@@ -25,6 +25,8 @@ import { MEMORY_OPERATIONS } from "./memory-operations.js";
 import type { ChatTask, DiscordQueuedTask, RoutedTask } from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
+import { openOperationalAlertStore } from "./operational-alert-store.js";
+import { createOperationalAlerts } from "./operational-alerts.js";
 import { openNotificationStore } from "./notification-store.js";
 import { createDurableNotifications } from "./durable-notifications.js";
 import { createNotifications } from "./notifications.js";
@@ -126,6 +128,7 @@ async function main(): Promise<void> {
   let agentGrants;
   let agentNotes;
   let notificationStore;
+  let operationalAlertStore;
   let discordInbox!: ReturnType<typeof openDiscordInbox>;
   let registry!: ReturnType<typeof openAgentRegistry>;
   let botSecrets;
@@ -157,6 +160,7 @@ async function main(): Promise<void> {
       );
     discordInbox = openDiscordInbox(statePath);
     notificationStore = openNotificationStore(statePath);
+    operationalAlertStore = openOperationalAlertStore(statePath);
     taskStore = openTaskStore(statePath);
     usageStore = openAgentUsage(statePath);
     scheduleStore = openScheduleStore(statePath);
@@ -183,6 +187,7 @@ async function main(): Promise<void> {
     taskStore?.close();
     usageStore?.close();
     discordInbox?.close();
+    operationalAlertStore?.close();
     notificationStore?.close();
     registry?.close();
     log.error("server.state_init_failed", {
@@ -199,6 +204,7 @@ async function main(): Promise<void> {
     approvalStore.close();
     scheduleStore.close();
     discordInbox.close();
+    operationalAlertStore.close();
     notificationStore.close();
     taskStore.close();
     usageStore.close();
@@ -336,6 +342,8 @@ async function main(): Promise<void> {
         store: taskStore,
         ownerId: () => registry.get(id)?.ownerId ?? 0,
         schedules: { store: scheduleStore },
+        onScheduleOutcome: async (scheduleId: string) =>
+          await operationalAlerts?.scheduleOutcome(id, scheduleId),
         approvals: { store: approvalStore, rules: approvalRules },
         notificationStore,
         approvalReach: canReach,
@@ -429,6 +437,7 @@ async function main(): Promise<void> {
           schedules: scheduleStore,
           tasks: (id) => taskServices.get(id),
           taskWaitMs: taskWaitMs(taskTimeoutSeconds),
+          allowsWork: workGate.allowsWork,
         },
         botSecrets,
         hostCredentials,
@@ -552,6 +561,28 @@ async function main(): Promise<void> {
       ...(registeredBots ? { telegram: registeredBots.notifications } : {}),
     }),
   );
+  const providers = hostCredentials
+    ? createHostProviders((id) => hostCredentials.read(id))
+    : undefined;
+  const operationalAlerts =
+    provisioningConfig && providers && registeredBots
+      ? createOperationalAlerts({
+          registry,
+          tasks: taskStore,
+          schedules: scheduleStore,
+          store: operationalAlertStore,
+          notifications,
+          outbox: notificationStore,
+          canNotify: registeredBots.canNotify,
+          observeContainer: (id, target) =>
+            createContainerControl({
+              socketPath: provisioningConfig.socketPath,
+              agentId: id,
+              target,
+            }).observe(),
+          checkProviders: providers.checks,
+        })
+      : undefined;
   const scheduler = createScheduler({
     store: scheduleStore,
     admit: hostCredentials
@@ -585,9 +616,7 @@ async function main(): Promise<void> {
       runNow: scheduler.runNow,
       ownerLinked: (id) => registry.getOwnerChat(id) !== undefined,
     },
-    providers: hostCredentials
-      ? createHostProviders((id) => hostCredentials!.read(id))
-      : undefined,
+    providers,
     usage: { ...usage, wake: (id) => taskServices.wake([id]) },
     approvals: { rules: approvalRules, history: approvalStore },
     delegations: {
@@ -726,6 +755,7 @@ async function main(): Promise<void> {
           },
           containerStatus: inspectContainer,
           hostStatus: inspectHost,
+          providerChecks: operationalAlerts?.checks,
           stopObservation: async (id) =>
             registry.get(id) ? observeStop(id) : undefined,
           cancelProvisioning: (id) => {
@@ -751,6 +781,7 @@ async function main(): Promise<void> {
               "Remove the Discord connection before deleting the agent",
             );
           await deleteAgent(id, deleteData);
+          operationalAlerts?.removeAgent(id);
           if ((await mcpCredentials.cleanup()).cleanupPending)
             log.warn("mcp.credential_cleanup_pending");
           await taskServices.wake([id]);
@@ -786,6 +817,9 @@ async function main(): Promise<void> {
   usageTimer.unref();
   const stop = () => {
     clearInterval(usageTimer);
+    void operationalAlerts
+      ?.close()
+      .catch(() => log.warn("operational_alert.poll_failed"));
     void scheduler.close();
     registeredDiscord.close();
     taskServices.close();
@@ -801,6 +835,11 @@ async function main(): Promise<void> {
   process.once("SIGTERM", stop);
   for (const id of registry.listIds()) {
     if (!workGate.allowsWork(id)) {
+      // A registered owner can receive an outage notice while Docker identity
+      // is unresolved. The work gate still applies to Telegram admission.
+      const recoveryState = registry.getRecovery(id);
+      if (!recoveryState || recoveryState.status === "activated")
+        registeredBots?.start(id);
       resumeWhenHostReady(id);
       continue;
     }
@@ -814,6 +853,7 @@ async function main(): Promise<void> {
     log.warn("server.delegation_result_resume_failed");
   });
   void scheduler.start();
+  operationalAlerts?.start();
   refreshQueues();
 }
 
