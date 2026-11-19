@@ -1,6 +1,6 @@
 services:
   server:
-    image: nimbot-server
+    image: ${NIMBOT_SERVER_IMAGE:-nimbot-server}
     container_name: ${SERVER_CONTAINER_NAME:-nimbot-server}
     build:
       context: .
@@ -21,6 +21,7 @@ services:
       AGENT_HOST_IMAGE: ${AGENT_HOST_IMAGE:-nimbot-agent-host:latest}
       SERVER_CONTAINER_NAME: ${SERVER_CONTAINER_NAME:-nimbot-server}
       NIMBOT_INSTALLATION_ID: ${NIMBOT_INSTALLATION_ID:-manual}
+      NIMBOT_UPGRADE_TOKEN: ${NIMBOT_UPGRADE_TOKEN:-}
       TASK_TIMEOUT_SECONDS: ${TASK_TIMEOUT_SECONDS:-600}
     group_add:
       - "${DOCKER_SOCKET_GID:-0}"

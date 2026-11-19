@@ -1,4 +1,5 @@
 import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
+import { waitForUpgradeActivation } from "./upgrade-activation.js";
 import { createAgentRecovery } from "./agent-recovery.js";
 import { createRecoveryWorkGate } from "./recovery-work-gate.js";
 import { createTelegramAttachments } from "./telegram-attachments.js";
@@ -793,8 +794,12 @@ async function main(): Promise<void> {
         }
       : undefined,
   });
+  const activation = waitForUpgradeActivation(
+    stateDir,
+    process.env.NIMBOT_UPGRADE_TOKEN,
+  );
   const server = serve({
-    fetch: panel.fetch,
+    fetch: (request) => activation.fetch(request, panel.fetch),
     hostname: panelConfig.hostname,
     port: panelConfig.port,
   });
@@ -802,6 +807,7 @@ async function main(): Promise<void> {
     log.error("server.panel_start_failed", {
       hint: "Check PANEL_HOST and PANEL_PORT.",
     });
+    activation.close();
     stop();
     process.exitCode = 1;
   });
@@ -818,9 +824,12 @@ async function main(): Promise<void> {
         recoveringUsage = false;
       });
   };
-  const usageTimer = setInterval(refreshQueues, 30_000);
+  const usageTimer = setInterval(() => {
+    if (activation.isActive()) refreshQueues();
+  }, 30_000);
   usageTimer.unref();
   const stop = () => {
+    activation.close();
     clearInterval(usageTimer);
     void operationalAlerts
       ?.close()
@@ -838,6 +847,7 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+  if (!(await activation.wait())) return;
   for (const id of registry.listIds()) {
     if (!workGate.allowsWork(id)) {
       // A registered owner can receive an outage notice while Docker identity
