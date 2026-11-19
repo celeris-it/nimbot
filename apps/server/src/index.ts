@@ -1,5 +1,4 @@
 import { createAgentRecovery } from "./agent-recovery.js";
-import { setTimeout as delay } from "node:timers/promises";
 import { createRecoveryWorkGate } from "./recovery-work-gate.js";
 import { createTelegramAttachments } from "./telegram-attachments.js";
 import { createAgentTaskServices } from "./agent-task-services.js";
@@ -503,6 +502,29 @@ async function main(): Promise<void> {
       ? { get: (id) => taskServices.get(id), inbox: discordInbox }
       : undefined,
   );
+  const pendingActivation = new Set<string>();
+  function resumeWhenHostReady(id: string) {
+    if (pendingActivation.has(id)) return;
+    pendingActivation.add(id);
+    void workGate
+      .waitForStartedHost(id, provisioningShutdown.signal)
+      .then(async (ready) => {
+        if (
+          !ready ||
+          !workGate.allowsWork(id) ||
+          provisioningShutdown.signal.aborted
+        )
+          return;
+        registeredBots?.start(id);
+        void registeredDiscord.start(id);
+        await taskServices.wake([id]);
+      })
+      .catch(() => {
+        if (!provisioningShutdown.signal.aborted)
+          log.warn("server.recovery_activation_failed", { agentId: id });
+      })
+      .finally(() => pendingActivation.delete(id));
+  }
   const notifications = createDurableNotifications(
     notificationStore,
     createNotifications({
@@ -635,20 +657,15 @@ async function main(): Promise<void> {
           requireAgent(id);
           const workWasHeld = !workGate.allowsWork(id);
           await containerAction(id, action);
-          if (action === "start") {
-            for (let attempt = 0; attempt < 10; attempt++) {
-              await workGate.check(id);
-              if (workGate.allowsWork(id)) {
-                if (workWasHeld) {
-                  registeredBots?.start(id);
-                  void registeredDiscord.start(id);
-                }
-                break;
-              }
-              if (attempt < 9)
-                await delay(200, undefined, {
-                  signal: provisioningShutdown.signal,
-                });
+          if (action === "start" && workWasHeld) {
+            if (registry.getRecovery(id)?.status === "restored") {
+              resumeWhenHostReady(id);
+              return;
+            }
+            await workGate.check(id);
+            if (workGate.allowsWork(id)) {
+              registeredBots?.start(id);
+              void registeredDiscord.start(id);
             }
           }
           await taskServices.wake([id]);
@@ -747,7 +764,10 @@ async function main(): Promise<void> {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   for (const id of registry.listIds()) {
-    if (!workGate.allowsWork(id)) continue;
+    if (!workGate.allowsWork(id)) {
+      resumeWhenHostReady(id);
+      continue;
+    }
     void registeredDiscord.start(id);
     registeredBots?.start(id);
   }

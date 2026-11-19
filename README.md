@@ -305,6 +305,11 @@ docker build -f infrastructure/docker/agent-host.Dockerfile -t nimbot-agent-host
 NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.Id}}') pnpm test integration
 ```
 
+The replacement server recovery test restores the three agent volume archives
+and the saved Server state. It checks that Docker assigns new container and
+network IDs, that the owner binding and queued task survive, and that the queue
+stays held until an explicit **Start** and authenticated Host readiness.
+
 The Docker suite includes `tests/opencode-mcp.integration.test.ts`, a compatibility gate for the exact OpenCode version pinned in the Agent Host Dockerfile. It verifies the bundled adapter's HTTP MCP discovery, structured tool calls, registration on a new session and a session restored in a new ACP process, and cancellation during a pending tool call. It also runs the production engine without tool access and checks that the previous process's adapter is absent. It also starts a fresh isolated turn between two ordinary turns and verifies that their histories stay separate and the saved owner session remains unchanged. The same fixture creates a private memory note through the production engine, reopens its SQLite store, and retrieves the note in a distinct fresh session with only search access. The container lifecycle test verifies that memory survives container recreation with retained volumes and is absent after explicit volume purge. The fixture runs as the image's non-root user with external networking disabled, using a local simulated model, a fixture-only echo handler, and the production memory handlers. Run it separately with `NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.Id}}') pnpm test tests/opencode-mcp.integration.test.ts`. This gate enables tools only inside its fixtures; direct chat tasks without a grant still pass no MCP servers.
 
 `NIMBOT_TEST_DOCKER_SOCKET` optionally selects a different Unix socket. Tests create uniquely named resources and clean them up. CI runs lint, type checking, build, tests, and panel browser tests.

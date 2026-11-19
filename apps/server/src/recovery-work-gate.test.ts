@@ -85,3 +85,18 @@ it("does not release held work if Stop begins while authenticated readiness is c
   expect(f.activate).not.toHaveBeenCalled();
   expect(f.gate.allowsWork("dev")).toBe(false);
 });
+
+it("continues checking after Start until a delayed Host responds", async () => {
+  const f = fixture();
+  f.restore();
+  f.start();
+  f.inspect.mockResolvedValue("running");
+  f.host
+    .mockResolvedValueOnce("unavailable")
+    .mockResolvedValueOnce("unavailable");
+  await expect(
+    f.gate.waitForStartedHost("dev", new AbortController().signal, 1),
+  ).resolves.toBe(true);
+  expect(f.host).toHaveBeenCalledTimes(3);
+  expect(f.gate.allowsWork("dev")).toBe(true);
+});

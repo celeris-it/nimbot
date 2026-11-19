@@ -1,6 +1,7 @@
 import type { openAgentRegistry } from "./agent-registry.js";
 import type { HostStatus } from "./agent-host.js";
 import type { ContainerControl } from "./container-control.js";
+import { setTimeout as delay } from "node:timers/promises";
 
 /** Keeps queued work held while Docker identity or recovery readiness is unresolved. */
 export function createRecoveryWorkGate(
@@ -47,5 +48,27 @@ export function createRecoveryWorkGate(
       registry.activateRecovery(id, recovery.operationId);
   }
 
-  return { allowsWork, check };
+  async function waitForStartedHost(
+    id: string,
+    signal: AbortSignal,
+    interval = 1000,
+  ) {
+    while (!signal.aborted) {
+      const recovery = registry.getRecovery(id);
+      const operation = registry.getContainerOperation(id);
+      if (
+        recovery?.status !== "restored" ||
+        operation?.action !== "start" ||
+        operation.status !== "completed"
+      )
+        return false;
+      await check(id);
+      if (signal.aborted) return false;
+      if (allowsWork(id)) return true;
+      await delay(interval, undefined, { signal, ref: false });
+    }
+    return false;
+  }
+
+  return { allowsWork, check, waitForStartedHost };
 }

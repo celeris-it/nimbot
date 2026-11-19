@@ -140,15 +140,9 @@ it.runIf(image)(
           agentId,
           "start",
         );
-        await expect
-          .poll(
-            async () => {
-              await gate.check(agentId);
-              return gate.allowsWork(agentId);
-            },
-            { timeout: 12000 },
-          )
-          .toBe(true);
+        await expect(
+          gate.waitForStartedHost(agentId, AbortSignal.timeout(12000), 200),
+        ).resolves.toBe(true);
         expect(claim()).toMatchObject({ id: queued.id, prompt: "Saved task" });
         for (const [index, target] of targets.entries())
           expect(
