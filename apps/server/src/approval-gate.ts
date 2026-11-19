@@ -29,6 +29,13 @@ export type GateResult<T> =
   | { status: "uncertain"; requestId: string }
   | { status: "denied"; requestId: string | null; reason: DeniedReason };
 
+/** A service lost confirmation after starting an effect; a normal failure would be misleading. */
+export class UncertainExecutionError extends Error {
+  constructor() {
+    super("Execution outcome is uncertain");
+  }
+}
+
 /** Where a decision may be given; the callback must come from exactly here. */
 export type Conversation = ChatTask["origin"];
 export type Responder =
@@ -186,13 +193,15 @@ export function createApprovalGate(config: {
       const result = await run(signal);
       config.store.finishExecution(request.id, "completed");
       return { status: "executed", requestId: request.id, result };
-    } catch {
+    } catch (error) {
       // After an abort the effect may or may not have happened; never retry it.
-      if (signal.aborted) {
+      if (signal.aborted || error instanceof UncertainExecutionError) {
         config.store.finishExecution(
           request.id,
           "uncertain",
-          "task ended during execution",
+          signal.aborted
+            ? "task ended during execution"
+            : "execution outcome could not be confirmed",
         );
         return { status: "uncertain", requestId: request.id };
       }

@@ -14,8 +14,8 @@ interface SelectedTool {
 const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-// Leave room in the 32-operation lease for memory and peer operations.
-const MAX_TOOLS = 24;
+// Leave room in the 32-operation lease for four memory and five peer operations.
+const MAX_TOOLS = 23;
 const MAX_METADATA_BYTES = 16_384;
 
 /**

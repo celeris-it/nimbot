@@ -15,6 +15,13 @@ export type ToolOutcome =
         | "interrupted";
     };
 
+/** A trusted handler may report only one of the public, payload-free failure codes. */
+export class ToolExecutionError extends Error {
+  constructor(readonly code: Extract<ToolOutcome, { ok: false }>["error"]) {
+    super("Tool execution did not complete");
+  }
+}
+
 const MAX_ARGUMENT_BYTES = 16_384;
 const MAX_RESULT_BYTES = 16_384;
 
@@ -84,6 +91,11 @@ export function createToolDispatcher(config: {
   store: Pick<TaskStore, "beginToolInvocation" | "settleToolInvocation">;
   authorize(call: CapabilityCallIdentity): RoutedTask | undefined;
   handlers: readonly ServerToolHandler[];
+  /** Resolve dynamic Server-owned catalog operations only after capability authorization. */
+  resolveHandler?(
+    task: RoutedTask,
+    operation: string,
+  ): ServerToolHandler | undefined;
   timeoutMs?: number;
 }) {
   const handlers = new Map(config.handlers.map((h) => [h.operation, h]));
@@ -99,8 +111,17 @@ export function createToolDispatcher(config: {
         hostTaskId: request.hostTaskId,
         operation: request.operation,
       });
-      const handler = handlers.get(request.operation);
-      if (!task || !handler) return { ok: false, error: "denied" };
+      if (!task) return { ok: false, error: "denied" };
+      let handler: ServerToolHandler | undefined;
+      try {
+        handler =
+          handlers.get(request.operation) ??
+          config.resolveHandler?.(task, request.operation);
+      } catch {
+        return { ok: false, error: "denied" };
+      }
+      if (!handler || handler.operation !== request.operation)
+        return { ok: false, error: "denied" };
       if (signal.aborted) return { ok: false, error: "cancelled" };
       let args: Record<string, unknown> | undefined;
       let argumentsJson: string;
@@ -222,13 +243,15 @@ export function createToolDispatcher(config: {
         return finish({
           ok: false,
           error:
-            error === denied
-              ? "denied"
-              : error instanceof Error && error.message === "timeout"
-                ? "timeout"
-                : signal.aborted
-                  ? "cancelled"
-                  : "failed",
+            error instanceof ToolExecutionError
+              ? error.code
+              : error === denied
+                ? "denied"
+                : error instanceof Error && error.message === "timeout"
+                  ? "timeout"
+                  : signal.aborted
+                    ? "cancelled"
+                    : "failed",
         });
       } finally {
         if (timer) clearTimeout(timer);

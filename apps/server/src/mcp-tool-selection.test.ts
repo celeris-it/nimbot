@@ -135,7 +135,7 @@ it("bounds tool count and total metadata, preserving room for local operations",
     })),
   });
   f.grant();
-  expect(f.selection.descriptors("a")).toHaveLength(24);
+  expect(f.selection.descriptors("a")).toHaveLength(23);
   f.catalog.update(f.definition.id, 2, {
     ...settings,
     tools: [
@@ -193,6 +193,56 @@ it("validates arguments only against currently granted pinned schemas", () => {
   });
   f.catalog.revoke("a", f.definition.id);
   expect(f.selection.validate("a", changed, { count: 1 })).toBeUndefined();
+});
+
+it("fits catalog tools alongside all memory and peer operations in one capability", () => {
+  const f = fixture();
+  f.catalog.update(f.definition.id, 1, {
+    ...settings,
+    tools: Array.from({ length: 32 }, (_, index) => ({
+      ...settings.tools[0],
+      name: `tool_${index}`,
+    })),
+  });
+  f.grant();
+  const store = openTaskStore(":memory:");
+  cleanups.push(() => store.close());
+  const task = store.enqueue({
+    agentId: "a",
+    botId: 1,
+    chatId: 2,
+    prompt: "Use tools",
+  });
+  store.claimNextTask("a");
+  const local = [
+    "memory.create",
+    "memory.search",
+    "memory.update",
+    "memory.delete",
+    "agent.list",
+    "agent.note.send",
+    "agent.note.read",
+    "agent.delegate",
+    "agent.delegation.status",
+  ];
+  const capabilities = createTaskCapabilities({
+    store,
+    policy: {
+      canExecute: () => true,
+      allowedOperations: () => local,
+      remoteTools: (task) => f.selection.descriptors(task.agentId),
+    },
+  });
+  cleanups.push(() => capabilities.close());
+  const lease = capabilities.issue(
+    "a",
+    task.id,
+    new AbortController().signal,
+    10_000,
+  )!;
+  expect(lease.operations).toHaveLength(32);
+  expect(lease.operations).toEqual(expect.arrayContaining(local));
+  expect(lease.remoteTools).toHaveLength(23);
 });
 
 it("revokes a live task capability when its pinned catalog revision changes", () => {

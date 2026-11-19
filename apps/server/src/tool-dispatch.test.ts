@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createToolDispatcher,
+  ToolExecutionError,
   type ServerToolHandler,
 } from "./tool-dispatch.js";
 import { openTaskStore, type RoutedTask } from "./task-queue.js";
@@ -15,6 +16,83 @@ const identity = { agentId: "a", serverTaskId, token: "t".repeat(64) };
 const task = { id: serverTaskId, agentId: "a" } as RoutedTask;
 
 afterEach(() => vi.useRealTimers());
+
+it("resolves dynamic handlers only for authorized operations and denies faulty resolvers", async () => {
+  const store = openTaskStore(":memory:");
+  const execute = vi.fn(async () => "done");
+  const handler: ServerToolHandler = {
+    operation: "dynamic.read",
+    write: false,
+    validate: () => ({}),
+    execute,
+  };
+  const resolveHandler = vi.fn(() => handler);
+  let authorized = false;
+  const dispatcher = createToolDispatcher({
+    store,
+    handlers: [],
+    authorize: () => (authorized ? task : undefined),
+    resolveHandler,
+  });
+  const request = {
+    hostTaskId,
+    invocationId,
+    operation: handler.operation,
+    arguments: {},
+  };
+  try {
+    expect(
+      await dispatcher.dispatch(
+        identity,
+        request,
+        new AbortController().signal,
+      ),
+    ).toEqual({ ok: false, error: "denied" });
+    expect(resolveHandler).not.toHaveBeenCalled();
+    authorized = true;
+    expect(
+      await dispatcher.dispatch(
+        identity,
+        request,
+        new AbortController().signal,
+      ),
+    ).toEqual({ ok: true, result: "done" });
+    resolveHandler.mockReturnValueOnce({
+      ...handler,
+      operation: "foreign.operation",
+    });
+    expect(
+      await dispatcher.dispatch(
+        identity,
+        request,
+        new AbortController().signal,
+      ),
+    ).toEqual({ ok: false, error: "denied" });
+    resolveHandler.mockImplementationOnce(() => {
+      throw new Error("private resolver detail");
+    });
+    expect(
+      await dispatcher.dispatch(
+        identity,
+        request,
+        new AbortController().signal,
+      ),
+    ).toEqual({ ok: false, error: "denied" });
+    expect(execute).toHaveBeenCalledTimes(1);
+  } finally {
+    store.close();
+  }
+});
+
+it("persists a handler's uncertain outcome without exposing details or repeating execution", async () => {
+  const execute = vi.fn(async () => {
+    throw new ToolExecutionError("interrupted");
+  });
+  const f = setup({ execute });
+  expect(await f.call()).toEqual({ ok: false, error: "interrupted" });
+  expect(await f.call()).toEqual({ ok: false, error: "interrupted" });
+  expect(execute).toHaveBeenCalledTimes(1);
+});
 
 function setup(handler: Partial<ServerToolHandler> = {}, authorized = true) {
   const store = openTaskStore(join(mkdtempSync(join(tmpdir(), "td-")), "t.db"));

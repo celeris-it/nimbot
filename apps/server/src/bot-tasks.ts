@@ -50,6 +50,12 @@ export function createBotTasks(config: {
   toolHandlers?:
     | readonly ServerToolHandler[]
     | ((guard: ApprovalGate["guard"]) => readonly ServerToolHandler[]);
+  /** Dynamic catalog entries are resolved from current Server state for each call. */
+  resolveToolHandler?(
+    task: RoutedTask,
+    operation: string,
+    guard: ApprovalGate["guard"],
+  ): ServerToolHandler | undefined;
   toolLifetimeMs?: number;
   notificationStore?: ReturnType<typeof openNotificationStore>;
   /** Server relay for a child's committed result; never accepts model-supplied output. */
@@ -284,6 +290,8 @@ export function createBotTasks(config: {
       typeof config.toolHandlers === "function"
         ? config.toolHandlers(guardAction)
         : (config.toolHandlers ?? []),
+    resolveHandler: (task, operation) =>
+      config.resolveToolHandler?.(task, operation, guardAction),
   });
   /** Asks the owner, in the chat that sent the task; any failure means deny. */
   async function askOwner(

@@ -2,7 +2,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApprovalGate, type GateAction } from "./approval-gate.js";
+import {
+  createApprovalGate,
+  UncertainExecutionError,
+  type GateAction,
+} from "./approval-gate.js";
 import { openApprovalRules } from "./approval-rules.js";
 import { openApprovalStore } from "./approval-store.js";
 import type { RoutedTask } from "./task-queue.js";
@@ -68,6 +72,29 @@ function setup(over: Partial<Parameters<typeof createApprovalGate>[0]> = {}) {
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const tg = { platform: "telegram" as const, botId: 1, chatId: 2 };
+
+it("records an explicitly uncertain remote execution even while the task remains active", async () => {
+  const f = setup();
+  try {
+    const pending = f.gate.guard(
+      telegram(),
+      action,
+      async () => {
+        throw new UncertainExecutionError();
+      },
+      new AbortController().signal,
+    );
+    await tick();
+    expect(f.gate.answer(f.sent[0]!.keys.approve, tg)).toBe("ok");
+    const result = await pending;
+    expect(result.status).toBe("uncertain");
+    expect(f.store.get(result.requestId!)?.execution).toBe("uncertain");
+  } finally {
+    f.gate.close();
+    f.rules.close();
+    f.store.close();
+  }
+});
 
 describe("approval gate", () => {
   it("requires a saved owner conversation route for an internal delegated origin", async () => {
