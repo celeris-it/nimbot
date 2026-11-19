@@ -11,6 +11,7 @@
   - Read-only recovery inspection is implemented and tested: saved container absence, Host credential availability, all three canonical volumes, ownership labels, and conflicting names. Panel/API wiring awaits the durable recovery workflow below.
 - [ ] Verify all three restored volumes before mutating Docker. Reuse the provisioning template, pinned image, and saved Agent Host credential to create the private network, connect the Server, and create the agent container stopped. Save the new Docker references while preserving the agent ID, credentials, chat bindings, schedules, and task history.
 - [ ] Persist the recovery state and resource creation intents before Docker mutations. Serialize recovery with start, stop, provisioning, and deletion. After a crash or lost Docker response, use read-only inspection to reconcile resources attributable to the saved recovery attempt. Leave conflicting resources and restored volumes intact.
+  - Recovery attempts and resource intents now persist in SQLite and exclude conflicting lifecycle transitions. Restart preserves uncertain intents and marks attempts interrupted. Docker orchestration and read-only reconciliation remain pending.
 - [ ] Check for missing containers before resuming agent work on startup. Hold queued work for affected agents throughout recovery. Once the administrator selects **Start** and the authenticated Agent Host responds, resume polling and the existing queue. Preserve the current rules for interrupted tasks and missed schedules.
 
 ## Verify recovery

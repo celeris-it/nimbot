@@ -3,6 +3,7 @@ import type { CurrentHostTask } from "./host-current-task.js";
 import { randomUUID } from "node:crypto";
 import { CHAT_BINDINGS_SCHEMA } from "./chat-binding.js";
 import { isDiscordId } from "./discord-identity.js";
+import { RECOVERY_SCHEMA, recoveryRegistry } from "./recovery-registry.js";
 
 export interface DiscordConnection {
   botId: string;
@@ -127,6 +128,7 @@ export function openAgentRegistry(path: string) {
         PRIMARY KEY (agent_id, kind, name, operation_id)
       );
       ${CHAT_BINDINGS_SCHEMA}
+      ${RECOVERY_SCHEMA}
     `);
     db.prepare(
       "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
@@ -134,6 +136,9 @@ export function openAgentRegistry(path: string) {
     // A lost response cannot establish whether Docker completed the operation.
     db.prepare(
       "UPDATE container_operations SET status = 'interrupted', updated_at = ? WHERE status = 'pending'",
+    ).run(Date.now());
+    db.prepare(
+      "UPDATE agent_recovery SET status = 'interrupted', updated_at = ? WHERE status = 'recovering'",
     ).run(Date.now());
     db.exec("COMMIT");
   } catch (error) {
@@ -165,6 +170,7 @@ export function openAgentRegistry(path: string) {
     if (other) throw new Error("Bot is already assigned to another agent");
   }
   return {
+    ...recoveryRegistry(db),
     getDiscordConnection(id: string): DiscordConnection | undefined {
       return db
         .prepare(
@@ -346,7 +352,7 @@ export function openAgentRegistry(path: string) {
     beginResourceRemoval(id: string) {
       const result = db
         .prepare(
-          "UPDATE agent_provisioning SET status = 'provisioning', cancel_requested_at = NULL, updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'ready', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending')",
+          "UPDATE agent_provisioning SET status = 'provisioning', cancel_requested_at = NULL, updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'ready', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending') AND NOT EXISTS (SELECT 1 FROM agent_recovery r WHERE r.agent_id = agent_provisioning.agent_id AND r.status IN ('recovering', 'interrupted', 'failed'))",
         )
         .run(Date.now(), id, id);
       if (!result.changes) throw new Error("Agent resources cannot be removed");
@@ -364,6 +370,10 @@ export function openAgentRegistry(path: string) {
         db.prepare("UPDATE agents SET container_ref = NULL WHERE id = ?").run(
           id,
         );
+        db.prepare(
+          "DELETE FROM recovery_resource_intents WHERE agent_id = ?",
+        ).run(id);
+        db.prepare("DELETE FROM agent_recovery WHERE agent_id = ?").run(id);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -373,7 +383,7 @@ export function openAgentRegistry(path: string) {
     beginProvisioning(id: string) {
       const result = db
         .prepare(
-          "UPDATE agent_provisioning SET status = 'provisioning', cancel_requested_at = NULL, updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending')",
+          "UPDATE agent_provisioning SET status = 'provisioning', cancel_requested_at = NULL, updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending') AND NOT EXISTS (SELECT 1 FROM agent_recovery r WHERE r.agent_id = agent_provisioning.agent_id AND r.status IN ('recovering', 'interrupted', 'failed'))",
         )
         .run(Date.now(), id, id);
       if (!result.changes) throw new Error("Agent cannot begin provisioning");
@@ -543,6 +553,7 @@ export function openAgentRegistry(path: string) {
             `INSERT INTO container_operations (agent_id, action, status, updated_at)
         SELECT agent_id, ?, 'pending', ? FROM agent_provisioning
         WHERE agent_id = ? AND status = 'ready'
+        AND NOT EXISTS (SELECT 1 FROM agent_recovery r WHERE r.agent_id = agent_provisioning.agent_id AND r.status IN ('recovering', 'interrupted', 'failed'))
         ON CONFLICT(agent_id) DO UPDATE SET action = excluded.action, status = 'pending', updated_at = excluded.updated_at
         WHERE container_operations.status <> 'pending'`,
           )
