@@ -12,14 +12,17 @@ export function createDurableNotifications(
   delivery: ReturnType<typeof createNotifications>,
   logger: Logger = defaultLog,
 ) {
+  const canSend = (agentId: string) =>
+    store.countRecent(agentId, Date.now() - 60_000) < 5;
   return {
+    canSend,
     async send(
       agentId: string,
       requestId: string,
       channel: NotificationChannel,
       text: string,
     ): Promise<NotificationRecord> {
-      const limited = store.countRecent(agentId, Date.now() - 60000) >= 5;
+      const limited = !canSend(agentId);
       const intent = store.begin(agentId, requestId, channel, text, !limited);
       if (!intent.fresh) return intent.record;
       if (limited) {

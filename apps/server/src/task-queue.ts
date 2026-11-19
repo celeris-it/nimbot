@@ -231,6 +231,9 @@ export function openTaskStore(path: string) {
       "CREATE INDEX IF NOT EXISTS tasks_agent_queue ON tasks (agent_id, status, seq)",
     );
     db.exec(
+      "CREATE INDEX IF NOT EXISTS tasks_schedule_outcomes ON tasks (agent_id, schedule_id, status, seq) WHERE schedule_id IS NOT NULL",
+    );
+    db.exec(
       "CREATE INDEX IF NOT EXISTS tasks_telegram_document ON tasks (agent_id, bot_id, chat_id, telegram_document_id) WHERE telegram_document_id IS NOT NULL",
     );
     db.exec(
@@ -1119,6 +1122,25 @@ export function openTaskStore(path: string) {
         status: row.status as TaskStatus,
         ...scheduleMetadata(row),
       };
+    },
+    scheduleFailureIncident(
+      agentId: string,
+      scheduleId: string,
+    ): string | undefined {
+      const task = db
+        .prepare(
+          `
+        SELECT id FROM tasks
+        WHERE agent_id = ? AND schedule_id = ? AND schedule_id IS NOT NULL AND status = 'failed'
+          AND seq > COALESCE((
+            SELECT MAX(seq) FROM tasks
+            WHERE agent_id = ? AND schedule_id = ? AND schedule_id IS NOT NULL AND status = 'completed'
+          ), 0)
+        ORDER BY seq LIMIT 1 OFFSET 2
+      `,
+        )
+        .get(agentId, scheduleId, agentId, scheduleId);
+      return task ? String(task.id) : undefined;
     },
     isScheduleOverlapping(scheduleId: string): boolean {
       return !!db

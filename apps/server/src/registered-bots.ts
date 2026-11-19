@@ -42,6 +42,7 @@ export function createRegisteredBots(
     statePath: string;
     taskStore: TaskStore;
     schedules?: Pick<ScheduleStore, "listByAgent">;
+    allowsWork?: (id: string) => boolean;
     /** Upper bound for waiting on one task; omit for the default. */
     taskWaitMs?: number;
     /** Shared agent runner owned outside the Telegram polling lifecycle. */
@@ -116,7 +117,11 @@ export function createRegisteredBots(
         tasks.submit,
         binding,
         () => getHostStatus(host, request),
-        access,
+        {
+          ...access,
+          canExecute: (...args) =>
+            (config.allowsWork?.(id) ?? true) && access.canExecute(...args),
+        },
         tasks.control,
         tasks.approvals,
       );
@@ -208,49 +213,51 @@ export function createRegisteredBots(
       await connection.done;
     }
   }
+  function notificationTarget(id: string) {
+    const connection = connections.get(id);
+    const agent = registry.get(id);
+    const bot = connection?.bot;
+    const chat = registry.getOwnerChat(id);
+    if (
+      closed ||
+      !agent ||
+      !bot ||
+      connection?.state.status !== "polling" ||
+      !agent.credentialRef ||
+      bot.botInfo.id !== agent.botId ||
+      chat !== agent.ownerId
+    )
+      return undefined;
+    return {
+      async send(text: string) {
+        const current = registry.get(id);
+        if (
+          closed ||
+          connection.controller.signal.aborted ||
+          connection.state.status !== "polling" ||
+          connections.get(id) !== connection ||
+          current?.ownerId !== agent.ownerId ||
+          current?.botId !== agent.botId ||
+          current?.credentialRef !== agent.credentialRef ||
+          registry.getOwnerChat(id) !== chat
+        )
+          return false;
+        await bot.api.sendMessage(
+          chat,
+          text,
+          {},
+          AbortSignal.any([
+            connection.controller.signal,
+            AbortSignal.timeout(10000),
+          ]) as unknown as Parameters<typeof bot.api.sendMessage>[3],
+        );
+        return true;
+      },
+    };
+  }
   return {
-    notifications: createTelegramNotifications((id) => {
-      const connection = connections.get(id);
-      const agent = registry.get(id);
-      const bot = connection?.bot;
-      const chat = registry.getOwnerChat(id);
-      if (
-        closed ||
-        !agent ||
-        !bot ||
-        connection?.state.status !== "polling" ||
-        !agent.credentialRef ||
-        bot.botInfo.id !== agent.botId ||
-        chat !== agent.ownerId
-      )
-        return undefined;
-      return {
-        async send(text) {
-          const current = registry.get(id);
-          if (
-            closed ||
-            connection.controller.signal.aborted ||
-            connection.state.status !== "polling" ||
-            connections.get(id) !== connection ||
-            current?.ownerId !== agent.ownerId ||
-            current?.botId !== agent.botId ||
-            current?.credentialRef !== agent.credentialRef ||
-            registry.getOwnerChat(id) !== chat
-          )
-            return false;
-          await bot.api.sendMessage(
-            chat,
-            text,
-            {},
-            AbortSignal.any([
-              connection.controller.signal,
-              AbortSignal.timeout(10000),
-            ]) as unknown as Parameters<typeof bot.api.sendMessage>[3],
-          );
-          return true;
-        },
-      };
-    }),
+    notifications: createTelegramNotifications(notificationTarget),
+    canNotify: (id: string) => !!notificationTarget(id),
     start(id: string) {
       if (closed || connections.get(id)?.finished === false) return;
       const connection: Connection = {
