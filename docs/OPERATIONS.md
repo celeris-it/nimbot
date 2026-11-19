@@ -20,11 +20,13 @@ Use the same Docker context/socket used during installation. The installer print
 | Task records and results, tool request outbox, and saved tool outcomes | Per-agent task-state volume |
 | Delegation handoffs and bounded child outcomes (`delegations`) | `server.sqlite` in the server state volume; included in Server backups |
 | Peer note inboxes (`agent_notes`) | `server.sqlite` in the server state volume; included in Server backups |
+| External MCP definitions and per-agent grants | `server.sqlite` in the server state volume |
+| External MCP bearer credentials | Private files under `mcp-secrets` in the server state volume |
 | Agent memory notes (`memory.sqlite`) | Per-agent task-state volume; included in backups of it, and removed only when the volume is explicitly purged |
 
 Compose stores server state in `<project>_server-state`. Every panel-created agent uses `nimbot-<agent-id>-workspace`, `-engine`, and `-tasks` volumes.
 
-Treat backups as secrets: they contain bot tokens, Agent Host tokens, and AI provider credentials. The panel password hash and other settings live in `.env`, which is not in a volume; back it up separately and keep it private.
+Server backups contain bot tokens, Agent Host tokens, and MCP bearer credentials. Agent backups can contain AI provider credentials. Keep the backups private, and back up the panel password hash and other `.env` settings separately.
 
 ## Backup
 

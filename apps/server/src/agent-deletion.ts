@@ -14,6 +14,7 @@ export function createAgentDeletion(deps: {
   removeResources: (id: string, deleteData: boolean) => Promise<void>;
   removeBotSecret: (ref: string) => Promise<void>;
   removeHostSecret: (ref: string) => Promise<void>;
+  revokeMcpGrants?: (id: string) => void;
 }) {
   return async (id: string, deleteData = false) => {
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id))
@@ -21,6 +22,7 @@ export function createAgentDeletion(deps: {
     await deps.stopBot(id);
     await deps.removeResources(id, deleteData);
     deps.schedules.removeByAgent(id);
+    deps.revokeMcpGrants?.(id);
     const refs = deps.registry.finishAgentDeletion(id);
     // Secrets are erased only after the registry stopped referencing them.
     if (refs.botCredentialRef)

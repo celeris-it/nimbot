@@ -28,6 +28,7 @@ import { validateCadence } from "./schedule-time.js";
 import type { ScheduleRunNowResult } from "./scheduler.js";
 import { isDiscordId } from "./discord-identity.js";
 import { isProviderId, isApiKey } from "./provider-contracts.js";
+import { createMcpPanel, type McpPanelDeps } from "./mcp-panel.js";
 
 export interface RegisteredAgentSettings {
   cancelProvisioning?(id: string): void;
@@ -43,6 +44,7 @@ export interface RegisteredAgentSettings {
   ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
 export interface PanelDeps {
+  mcp?: McpPanelDeps;
   schedules?: {
     store: Pick<
       ScheduleStore,
@@ -377,6 +379,7 @@ export function createPanel(
   };
   app.post("/logout", signOut);
   app.post("/api/logout", signOut);
+  if (deps.mcp) app.route("/api", createMcpPanel(deps.mcp));
   for (const path of [
     "/api/agents/:id/schedules",
     "/api/agents/:id/schedules/*",

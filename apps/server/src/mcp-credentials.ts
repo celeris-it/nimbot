@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { McpCatalog } from "./mcp-catalog.js";
 
 const MAX_TOKEN_LENGTH = 4096;
-const validToken = (token: string) =>
+export const isMcpBearer = (token: string) =>
   token.length <= MAX_TOKEN_LENGTH && /^[\x21-\x7e]+$/.test(token);
 const missing = (error: unknown) =>
   (error as NodeJS.ErrnoException).code === "ENOENT";
@@ -74,7 +74,7 @@ export async function openMcpCredentials(
     ) {
       const previous = catalog.credentialBinding(agentId, definitionId);
       if (!previous || previous.revision !== revision) return undefined;
-      if (token !== null && !validToken(token))
+      if (token !== null && !isMcpBearer(token))
         throw new Error("Invalid MCP bearer credential.");
 
       const reference = token === null ? null : await save(token);
@@ -112,7 +112,7 @@ export async function openMcpCredentials(
           after.reference !== before.reference
         )
           return undefined;
-        if (!validToken(token))
+        if (!isMcpBearer(token))
           throw new Error("MCP credential file is invalid.");
         return token;
       } catch (error) {

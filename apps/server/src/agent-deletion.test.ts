@@ -49,6 +49,10 @@ function deletion(
       }),
     removeBotSecret: async (ref) => void events.push(`bot-secret:${ref}`),
     removeHostSecret: async (ref) => void events.push(`host-secret:${ref}`),
+    revokeMcpGrants: (id) => {
+      expect(registry.get(id)).toBeDefined();
+      events.push(`revoke-mcp:${id}`);
+    },
   });
   return { run, events };
 }
@@ -62,6 +66,7 @@ describe("agent deletion", () => {
       "stop:dev",
       "resources:dev:false",
       "schedules:dev",
+      "revoke-mcp:dev",
       "bot-secret:file:telegram-saved",
       "host-secret:file:host-saved",
     ]);

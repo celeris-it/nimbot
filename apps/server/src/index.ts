@@ -47,6 +47,8 @@ import { openHostCredentials } from "./host-credentials.js";
 import { createContainerControl } from "./container-control.js";
 import { openBotSecrets } from "./bot-secret.js";
 import { openDiscordSecrets } from "./discord-secret.js";
+import { openMcpCatalog } from "./mcp-catalog.js";
+import { openMcpCredentials } from "./mcp-credentials.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
 import { openAgentRegistry } from "./agent-registry.js";
@@ -116,6 +118,8 @@ async function main(): Promise<void> {
   let registry!: ReturnType<typeof openAgentRegistry>;
   let botSecrets;
   let discordSecrets;
+  let mcpCatalog;
+  let mcpCredentials;
   let hostCredentials:
     Awaited<ReturnType<typeof openHostCredentials>> | undefined;
   try {
@@ -123,6 +127,13 @@ async function main(): Promise<void> {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     statePath = resolve(stateDir, "server.sqlite");
     registry = openAgentRegistry(statePath);
+    mcpCatalog = openMcpCatalog(statePath, (id) => !!registry.get(id));
+    mcpCredentials = await openMcpCredentials(
+      mcpCatalog,
+      resolve(stateDir, "mcp-secrets"),
+    );
+    if ((await mcpCredentials.cleanup()).cleanupPending)
+      log.warn("mcp.credential_cleanup_pending");
     botSecrets = await openBotSecrets(resolve(stateDir, "bot-secrets"));
     discordSecrets = await openDiscordSecrets(
       resolve(stateDir, "discord-secrets"),
@@ -150,6 +161,7 @@ async function main(): Promise<void> {
     // Grants that no longer qualify (changed owner, removed agent) do not survive a restart.
     agentGrants.prune();
   } catch {
+    mcpCatalog?.close();
     agentNotes?.close();
     agentGrants?.close();
     approvalRules?.close();
@@ -166,6 +178,7 @@ async function main(): Promise<void> {
     return;
   }
   process.once("exit", () => {
+    mcpCatalog.close();
     agentNotes.close();
     agentGrants.close();
     approvalRules.close();
@@ -393,6 +406,7 @@ async function main(): Promise<void> {
             }
           },
           removeHostSecret: (ref) => hostCredentials.remove(ref),
+          revokeMcpGrants: (id) => mcpCatalog.revokeAgent(id),
         })
       : undefined;
   const containerAction = provisioningConfig
@@ -446,6 +460,11 @@ async function main(): Promise<void> {
     notifySkip: createScheduleSkipNotifier(notifications),
   });
   const panel = createPanel(panelConfig, {
+    mcp: {
+      catalog: mcpCatalog,
+      credentials: mcpCredentials,
+      agentExists: (id) => !!registry.get(id),
+    },
     schedules: {
       store: scheduleStore,
       runNow: scheduler.runNow,
@@ -607,6 +626,8 @@ async function main(): Promise<void> {
               "Remove the Discord connection before deleting the agent",
             );
           await deleteAgent(id, deleteData);
+          if ((await mcpCredentials.cleanup()).cleanupPending)
+            log.warn("mcp.credential_cleanup_pending");
           await taskServices.wake([id]);
         }
       : undefined,

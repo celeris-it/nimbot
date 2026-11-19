@@ -30,6 +30,8 @@ const MAX_TOOLS = 32;
 const MAX_SCHEMA_BYTES = 16_384;
 const MAX_TOOLS_BYTES = 65_536;
 
+export class McpCatalogValidationError extends Error {}
+
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -48,12 +50,15 @@ function settings(input: unknown) {
     !Array.isArray(input.tools) ||
     input.tools.length > MAX_TOOLS
   )
-    throw new Error("Invalid MCP definition.");
+    throw new McpCatalogValidationError("Invalid MCP definition.");
 
   const url = URL.parse(input.endpoint);
   if (url?.protocol !== "https:" || url.username || url.password)
-    throw new Error("Use an HTTPS endpoint without embedded credentials.");
-  if (url.href.length > 2048) throw new Error("MCP endpoint is too long.");
+    throw new McpCatalogValidationError(
+      "Use an HTTPS endpoint without embedded credentials.",
+    );
+  if (url.href.length > 2048)
+    throw new McpCatalogValidationError("MCP endpoint is too long.");
 
   const names = new Set<string>();
   const tools = Array.from(input.tools as unknown[], (tool): McpCatalogTool => {
@@ -66,9 +71,9 @@ function settings(input: unknown) {
       !record(tool.inputSchema) ||
       tool.inputSchema.type !== "object"
     )
-      throw new Error("Invalid MCP tool definition.");
+      throw new McpCatalogValidationError("Invalid MCP tool definition.");
     if (Buffer.byteLength(JSON.stringify(tool.inputSchema)) > MAX_SCHEMA_BYTES)
-      throw new Error("MCP tool schema is too large.");
+      throw new McpCatalogValidationError("MCP tool schema is too large.");
     names.add(tool.name);
     return {
       name: tool.name,
@@ -78,7 +83,9 @@ function settings(input: unknown) {
   });
   const toolsJson = JSON.stringify(tools);
   if (Buffer.byteLength(toolsJson) > MAX_TOOLS_BYTES)
-    throw new Error("MCP definition has too much tool data.");
+    throw new McpCatalogValidationError(
+      "MCP definition has too much tool data.",
+    );
   return {
     label: input.label.trim(),
     endpoint: url.href,
@@ -163,7 +170,7 @@ export function openMcpCatalog(
           toolsJson,
           MAX_DEFINITIONS,
         );
-      if (!row) throw new Error("MCP catalog is full.");
+      if (!row) throw new McpCatalogValidationError("MCP catalog is full.");
       return definition(row);
     },
     update(
