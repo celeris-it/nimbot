@@ -22,7 +22,7 @@ To uninstall while retaining data, run `bash "$HOME/.local/share/nimbot/uninstal
 
 See [docs/INSTALL.md](docs/INSTALL.md) for a custom directory, HTTPS, BotFather linking, and AI provider authentication. [docs/OPERATIONS.md](docs/OPERATIONS.md) covers backup and restore, troubleshooting, and security limitations.
 
-Fresh installations start with zero agents. Sign in to the panel and create each agent with a name, optional instructions, its owner's numeric Telegram user ID, and a token from a distinct bot created in BotFather. Nimbot verifies the bot, provisions the agent, and provides its Telegram link. Open **Configure AI providers** on that agent’s setup page. Save an API key for OpenAI, Anthropic, Google, or OpenRouter, or sign in to OpenAI with a ChatGPT device code. Each agent has its own credentials and login method; then send its bot a private message. The chat is linked automatically on first contact; no /start command is required.
+Fresh installations start with zero agents. Sign in to the panel and create each agent with a name, optional instructions, its owner's numeric Telegram user ID, and a token from a distinct bot created in BotFather. Nimbot verifies the bot, provisions the agent, and provides its Telegram link. Open **Configure AI providers** on that agent’s setup page. Save an API key for OpenAI, Anthropic, Google, or OpenRouter, sign in to OpenAI with a ChatGPT device code, or connect an OpenCode Console workspace. Each agent has its own credentials and login method; then send its bot a private message. The chat is linked automatically on first contact; no /start command is required.
 
 No Telegram or per-agent environment variables are required. `.env` contains administrator authentication and trusted deployment settings; internal Agent Host credentials are generated automatically.
 
@@ -33,6 +33,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Optionally connect a Discord bot and owner DM to the same agent, workspace, AI context, and durable task queue. Configure, replace, test, and remove the connection from the panel.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
+- Choose a model per agent, review tokens and reported cost by agent or task, and pause the agent’s queue when OpenCode reports an exhausted Console budget or Go allowance.
 - Run saved prompts once, daily, weekly, at fixed intervals, or on authenticated webhook requests configured from the panel, with results delivered to the owner's Telegram chat.
 - Send documents up to 10 MiB to a Telegram agent and ask it to return generated files in the same chat.
 - Cancel a running task without affecting other agents or blocking later queued tasks.
@@ -150,6 +151,29 @@ Host-registered Server tools now use a durable outbox in the task database. Each
 
 Terminal and filesystem tools run through OpenCode inside the container. Browser automation uses headless Chromium through terminal execution with the bundled Playwright tooling; no external browser service is required. Client-side ACP filesystem and terminal capabilities remain disabled.
 
+### Model selection and usage
+
+Open **Model and usage** from an agent's setup page. Choose an enabled model or
+**Automatic** to use OpenCode's current default. The selection applies when the
+next task starts and uses the same conversation. If a saved model becomes
+unavailable, the queue waits for it to return or for the administrator to change
+the selection.
+
+Usage shows tokens and OpenCode's reported USD cost for each executed task, with
+agent totals for the UTC day and month. The figures reflect the engine's
+available observations, including when a task fails or is cancelled. Partial
+readings and missing costs are shown in the panel. Provider invoices and
+subscription fees can differ from these figures.
+
+For a connected OpenCode Console workspace, the applicable monthly Console
+budgets and the Go rolling, weekly, and monthly allowances come from OpenCode.
+An exhausted applicable limit or a temporary error checking a covered quota
+pauses new work. Chat, scheduled, and webhook tasks keep their normal enqueue
+rules and resume in order after OpenCode confirms that work can continue.
+Providers without published quota data remain usable, and the panel shows
+**Quota unavailable**. Limits apply at the start of a task and reflect a
+snapshot of a possibly shared account.
+
 ### Scheduled tasks
 
 Open **Manage schedules** on an agent's page to create, edit, pause, resume, run,
@@ -255,7 +279,7 @@ regenerate `{url, token}`. Create or edit with `cadence={"kind":"webhook"}` and
 
 Server state in `server.sqlite` includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, the durable task queue, and schedules with their saved prompts, cadences, time zones, UTC next-run timestamps, and private webhook tokens. It retains the latest 20 run records per schedule and reads execution status from the associated task row. Private `bot-secrets`, `discord-secrets`, and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
 
-Provider credentials are stored only in each agent's private engine-state volume. The panel forwards authentication operations over that agent's authenticated internal API; OAuth tokens never return to the server or browser. OpenAI supports an API key or ChatGPT device login; Anthropic, Google, and OpenRouter support API keys. The container must be running and idle to change authentication. Device login blocks new tasks for that agent as busy until it completes, is cancelled, or reaches its ten-minute local deadline; resend rejected tasks afterwards. Other agents remain independent. OpenCode renews OAuth tokens locally and still chooses the model automatically. Saving credentials does not verify balance or model access. Disconnecting removes the local credential without revoking it at the provider.
+Provider credentials are stored only in each agent's private engine-state volume. The panel forwards authentication operations over that agent's authenticated internal API; OAuth tokens never return to the server or browser. OpenAI supports an API key or ChatGPT device login, Anthropic, Google, and OpenRouter support API keys, and OpenCode Console uses device login. The container must be running and idle to change authentication. Tasks stay queued during device login and are eligible to start once the attempt ends. Other agents remain independent. OpenCode renews OAuth tokens locally. In **Model and usage**, choose an enabled model for the agent or use **Automatic** to follow the OpenCode default. Saving credentials does not verify balance or model access. Disconnecting removes the local credential without revoking it at the provider.
 
 Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner chat linking, container status, and authenticated Host readiness separately; readiness checks workspace access and busy state, not AI provider availability. Stopping an agent captures a task observation, and later refreshes confirm its persisted outcome when the Host is reachable.
 

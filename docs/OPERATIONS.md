@@ -261,6 +261,26 @@ held in memory for up to ten minutes. If delivery is uncertain, check the chat
 before asking again. Imported and exported workspace files are retained with
 the workspace volume and included in its backups.
 
+### Model and usage
+
+Use **Configure AI providers** on the agent's setup page and choose **Sign in to
+OpenCode Console** to connect a workspace with Console budgets or a Go
+subscription. This is per agent. Set spending policies in OpenCode Console.
+Nimbot reads applicable monthly budgets and Go allowances from OpenCode.
+
+When the queue is paused, **Model and usage** shows the model, the latest quota
+check, and reset times published by OpenCode. The server checks again every
+30 seconds while tasks are waiting and resumes when the limits allow it. If
+OpenCode cannot check a covered connection, verify the workspace login and
+network connectivity. For a removed model, select an available model or
+**Automatic**. A stopped container still needs to be started from the panel.
+
+A task is counted in the UTC day and month when it started. Reported costs come
+from OpenCode and may be estimated. A missing cost or partial reading is marked
+in the history. Work outside Nimbot's managed task sessions is outside this
+history and can still affect a shared Console or Go quota. A quota check can
+allow a task to start shortly before the account reaches a limit.
+
 ### Scheduled tasks
 
 Open **Manage schedules** on the agent page for the last run outcome, execution
