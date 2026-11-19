@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
@@ -9,18 +9,39 @@ import {
   type DeviceProvider,
   type EngineAuth,
   type ProviderId,
+  type ProviderCheckState,
+  type ProviderCheck,
 } from "./engine-auth.js";
+import { checkApiKey } from "./provider-check.js";
 import type { OpenCodeRequest } from "./opencode-api.js";
 
-const credentialList = z.object({
+const credentialValue = z.object({
+  type: z.enum(["key", "oauth", "external"]),
+});
+const credentialEntry = z.object({
+  id: z.string(),
+  integrationID: z.string(),
+  active: z.boolean(),
+  value: credentialValue,
+});
+const credentialList = z.object({ data: z.array(credentialEntry) });
+const probeCredentialList = z.object({
   data: z.array(
-    z.object({
-      id: z.string(),
-      integrationID: z.string(),
-      active: z.boolean(),
-      value: z.object({ type: z.enum(["key", "oauth", "external"]) }),
+    credentialEntry.extend({
+      value: credentialValue.extend({ key: z.string().optional() }),
     }),
   ),
+});
+const connectionList = z.object({
+  data: z.object({
+    connections: z.array(
+      z.object({
+        type: z.string(),
+        id: z.string().optional(),
+        status: z.object({ status: z.string() }).optional(),
+      }),
+    ),
+  }),
 });
 const authorization = z.object({
   data: z.object({
@@ -64,9 +85,73 @@ export function createOpenCodeAuth(
   reserve: () => (() => void) | undefined,
   isBusy: () => boolean,
   changed: () => void,
-  options: { loginTimeoutMs?: number; pollMs?: number } = {},
+  options: {
+    loginTimeoutMs?: number;
+    pollMs?: number;
+    fetch?: typeof fetch;
+  } = {},
 ): EngineAuth {
   let closed = false;
+  type Check = ProviderCheck & { revision: string | null };
+  let cached: { entries: Check[]; expiresAt: number } | undefined;
+  let checking: Promise<Check[]> | undefined;
+  let generation = 0;
+
+  function credentialsChanged() {
+    generation++;
+    cached = undefined;
+    checking = undefined;
+    changed();
+  }
+
+  async function checkProviders(current: number): Promise<Check[]> {
+    const credentials = await request("/api/credential")
+      .then((raw) => probeCredentialList.parse(raw).data)
+      .catch(() => {
+        throw new EngineAuthError("unavailable");
+      });
+    const entries = await Promise.all(
+      providers.map(async ({ id }) => {
+        const credential = credentials.find(
+          (entry) => entry.active && entry.integrationID === id,
+        );
+        let state: ProviderCheckState = "not_configured";
+        if (credential?.value.type === "key") {
+          state =
+            id !== "opencode" && credential.value.key
+              ? await checkApiKey(id, credential.value.key, options.fetch)
+              : "unverified";
+        } else if (credential?.value.type === "oauth") {
+          state = "unverified";
+          const raw = await request(`/api/integration/${id}`).catch(() => null);
+          const result = connectionList.safeParse(raw);
+          if (
+            result.success &&
+            result.data.data.connections.some(
+              (connection) =>
+                connection.type === "credential" &&
+                connection.id === credential.id &&
+                connection.status?.status === "needs_auth",
+            )
+          )
+            state = "rejected";
+        } else if (credential) {
+          state = "unverified";
+        }
+        return {
+          id,
+          state,
+          checkedAt: Date.now(),
+          revision: credential
+            ? createHash("sha256").update(credential.id).digest("hex")
+            : null,
+        };
+      }),
+    );
+    if (current !== generation) throw new EngineAuthError("unavailable");
+    cached = { entries, expiresAt: Date.now() + 300_000 };
+    return entries;
+  }
   let attempt:
     | {
         public: DeviceLogin;
@@ -91,10 +176,24 @@ export function createOpenCodeAuth(
 
   async function mutate(provider: ProviderId, key?: string) {
     const release = acquire();
+    let mutating = false;
     try {
+      if (key !== undefined && provider !== "opencode") {
+        const state = await checkApiKey(provider, key, options.fetch);
+        if (state !== "available") {
+          throw new EngineAuthError(
+            state === "rejected" ||
+              state === "restricted" ||
+              state === "rate_limited"
+              ? state
+              : "check_unavailable",
+          );
+        }
+      }
       const previous = (await readOpenCodeCredentials(request))
         .filter((entry) => entry.integrationID === provider)
         .map((entry) => entry.id);
+      mutating = true;
       if (key !== undefined)
         await request("/api/credential", {
           body: {
@@ -105,15 +204,27 @@ export function createOpenCodeAuth(
         });
       await removeCredentials(previous);
       if (attempt?.public.provider === provider) attempt = undefined;
-    } catch {
+    } catch (error) {
+      if (error instanceof EngineAuthError) throw error;
       throw new EngineAuthError("unavailable");
     } finally {
-      changed();
+      if (mutating) credentialsChanged();
       release();
     }
   }
 
   return {
+    async checkProviders() {
+      if (cached && Date.now() < cached.expiresAt) return cached.entries;
+      if (checking) return checking;
+      const current = checkProviders(generation);
+      checking = current;
+      try {
+        return await current;
+      } finally {
+        if (checking === current) checking = undefined;
+      }
+    },
     async status() {
       const credentials = await readOpenCodeCredentials(request).catch(() => {
         throw new EngineAuthError("unavailable");
@@ -223,7 +334,7 @@ export function createOpenCodeAuth(
                     ? "expired"
                     : state,
           };
-          changed();
+          credentialsChanged();
           release();
         }
       })();

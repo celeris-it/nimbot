@@ -95,3 +95,37 @@ it("rejects malformed metadata, arbitrary login links and unsafe errors", async 
     message: "Provider request failed",
   });
 });
+
+it("validates provider checks and strips extra fields from the Host response", async () => {
+  const entries = providers.map(({ id }) => ({
+    id,
+    state: "not_configured",
+    checkedAt: 100,
+    revision: null,
+  }));
+  const request = vi.fn<typeof fetch>(async () =>
+    Response.json(
+      entries.map((entry) => ({
+        ...entry,
+        token: "private-token",
+        error: "private-error",
+      })),
+    ),
+  );
+  const client = createHostProviders(
+    async () => ({ url: "http://host:3001", token: "host-token" }),
+    request,
+  );
+  expect(await client.checks("a")).toEqual(entries);
+  expect(request).toHaveBeenCalledWith(
+    "http://host:3001/providers/checks",
+    expect.objectContaining({
+      method: "GET",
+      headers: { Authorization: "Bearer host-token" },
+    }),
+  );
+  request.mockResolvedValueOnce(
+    Response.json(entries.map((entry) => ({ ...entry, id: "openai" }))),
+  );
+  await expect(client.checks("a")).rejects.toMatchObject({ status: 503 });
+});

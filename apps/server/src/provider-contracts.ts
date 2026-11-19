@@ -43,3 +43,19 @@ export interface ProviderSettings {
   busy: boolean;
   login: DeviceLogin | null;
 }
+
+export const providerCheckStates = [
+  "available",
+  "rejected",
+  "restricted",
+  "rate_limited",
+  "unavailable",
+  "unverified",
+  "not_configured",
+] as const;
+export type ProviderCheckState = (typeof providerCheckStates)[number];
+export interface ProviderCheck {
+  id: ProviderId;
+  state: ProviderCheckState;
+  checkedAt: number;
+}

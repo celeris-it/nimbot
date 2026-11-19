@@ -120,6 +120,25 @@ it("protects agent-scoped provider operations and keeps keys and login attempts 
   expect(
     (await post("/api/agents/a/providers/openai", "key=private-a")).status,
   ).toBe(409);
+  settings.save.mockRejectedValueOnce(new HostProviderError(422));
+  const rejected = await post(
+    "/api/agents/a/providers/openai",
+    "key=private-key",
+  );
+  expect(rejected.status).toBe(422);
+  expect(await rejected.json()).toEqual({
+    error: "The provider rejected the API key.",
+  });
+  settings.save.mockRejectedValueOnce(new HostProviderError(502));
+  const unavailable = await post(
+    "/api/agents/a/providers/openai",
+    "key=private-key",
+  );
+  expect(unavailable.status).toBe(502);
+  expect(await unavailable.json()).toEqual({
+    error:
+      "Could not validate the API key. Try again when the provider is available.",
+  });
   settings.save.mockRejectedValueOnce(new Error("private-key /secret/path"));
   const failure = await post(
     "/api/agents/a/providers/openai",

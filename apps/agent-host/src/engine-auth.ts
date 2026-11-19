@@ -44,15 +44,42 @@ export interface ProviderSettings {
   login: DeviceLogin | null;
 }
 export class EngineAuthError extends Error {
-  constructor(readonly kind: "busy" | "invalid" | "not_found" | "unavailable") {
+  constructor(
+    readonly kind:
+      | "busy"
+      | "invalid"
+      | "not_found"
+      | "unavailable"
+      | "rejected"
+      | "restricted"
+      | "rate_limited"
+      | "check_unavailable",
+  ) {
     super(kind);
   }
 }
 export interface EngineAuth {
+  checkProviders(): Promise<(ProviderCheck & { revision: string | null })[]>;
   status(): Promise<ProviderSettings>;
   save(id: ProviderId, key: string): Promise<void>;
   remove(id: ProviderId): Promise<void>;
   startLogin(provider?: DeviceProvider): DeviceLogin;
   cancelLogin(id: string, provider?: DeviceProvider): Promise<DeviceLogin>;
   close(): Promise<void>;
+}
+
+export const providerCheckStates = [
+  "available",
+  "rejected",
+  "restricted",
+  "rate_limited",
+  "unavailable",
+  "unverified",
+  "not_configured",
+] as const;
+export type ProviderCheckState = (typeof providerCheckStates)[number];
+export interface ProviderCheck {
+  id: ProviderId;
+  state: ProviderCheckState;
+  checkedAt: number;
 }

@@ -400,6 +400,10 @@ export function createHostApi(
       return c.json(await models.check(parsed.data.model, parsed.data.issue));
     },
   );
+  app.get("/providers/checks", async (c) => {
+    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
+    return c.json(await auth.checkProviders());
+  });
   app.get("/providers", async (c) => {
     if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
     return c.json(await auth.status());
@@ -450,11 +454,24 @@ export function createHostApi(
               invalid: "Invalid provider or API key.",
               not_found: "Login attempt not found. Start a new login.",
               unavailable: "Provider settings unavailable.",
+              rejected: "The provider rejected the API key.",
+              restricted: "The provider denied access with this API key.",
+              rate_limited:
+                "The provider rate limited the API key check. Try again shortly.",
+              check_unavailable:
+                "Could not validate the API key. Try again when the provider is available.",
             }[error.kind],
           },
-          { busy: 409, invalid: 400, not_found: 404, unavailable: 503 }[
-            error.kind
-          ] as 409 | 400 | 404 | 503,
+          {
+            busy: 409,
+            invalid: 400,
+            not_found: 404,
+            unavailable: 503,
+            rejected: 422,
+            restricted: 403,
+            rate_limited: 429,
+            check_unavailable: 502,
+          }[error.kind] as 409 | 400 | 404 | 503 | 422 | 403 | 429 | 502,
         )
       : error instanceof HTTPException
         ? error.getResponse()

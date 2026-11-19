@@ -1,14 +1,34 @@
+import { z } from "zod";
 import type { AgentHostConfig } from "./agent-host.js";
 import {
   providers,
+  providerCheckStates,
+  type ProviderCheck,
   type ProviderId,
   type ProviderSettings,
   type DeviceLogin,
   type DeviceProvider,
 } from "./provider-contracts.js";
 
+const providerChecks = z
+  .array(
+    z.object({
+      id: z.enum(providers.map(({ id }) => id)),
+      state: z.enum(providerCheckStates),
+      checkedAt: z.int().nonnegative().max(8_640_000_000_000_000),
+      revision: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .nullable(),
+    }),
+  )
+  .length(providers.length);
+
+const providerErrorStatuses = [400, 403, 404, 409, 422, 429, 502, 503] as const;
+type ProviderErrorStatus = (typeof providerErrorStatuses)[number];
+
 export class HostProviderError extends Error {
-  constructor(readonly status: 400 | 404 | 409 | 503) {
+  constructor(readonly status: ProviderErrorStatus) {
     super("Provider request failed");
   }
 }
@@ -83,14 +103,13 @@ export function createHostProviders(
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(body && "key" in body ? 30_000 : 20_000),
         redirect: "error",
       });
       if (!response.ok)
         throw new HostProviderError(
-          ([400, 404, 409].includes(response.status)
-            ? response.status
-            : 503) as 400 | 404 | 409 | 503,
+          providerErrorStatuses.find((status) => status === response.status) ??
+            503,
         );
       return await response.json();
     } catch (error) {
@@ -99,6 +118,17 @@ export function createHostProviders(
     }
   }
   return {
+    async checks(
+      id: string,
+    ): Promise<(ProviderCheck & { revision: string | null })[]> {
+      const parsed = providerChecks.safeParse(await call(id, "/checks"));
+      if (
+        !parsed.success ||
+        new Set(parsed.data.map((entry) => entry.id)).size !== providers.length
+      )
+        throw new HostProviderError(503);
+      return parsed.data;
+    },
     async status(id: string): Promise<ProviderSettings> {
       const raw = await call(id, "");
       if (!raw || typeof raw !== "object") throw new HostProviderError(503);

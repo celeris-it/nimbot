@@ -1,4 +1,5 @@
 import { RecoveryError, type createAgentRecovery } from "./agent-recovery.js";
+import type { ProviderCheck } from "./provider-contracts.js";
 import { HostProviderError } from "./host-providers.js";
 import type { createAgentUsage } from "./agent-usage.js";
 import { modelReference } from "./usage-contracts.js";
@@ -60,6 +61,7 @@ export interface RegisteredAgentSettings {
   containerStatus?(
     id: string,
   ): Promise<"running" | "stopped" | "missing" | "unavailable">;
+  providerChecks?(id: string): ProviderCheck[];
   hostStatus?(id: string): Promise<HostStatus>;
   stopObservation?(
     id: string,
@@ -90,8 +92,9 @@ export interface PanelDeps {
     ): Promise<ScheduleRunNowResult>;
     ownerLinked(agentId: string): boolean;
   };
-  providers?: ReturnType<
-    typeof import("./host-providers.js").createHostProviders
+  providers?: Omit<
+    ReturnType<typeof import("./host-providers.js").createHostProviders>,
+    "checks"
   >;
   usage?: ReturnType<typeof createAgentUsage> & {
     wake(id: string): Promise<void>;
@@ -956,6 +959,7 @@ export function createPanel(
       containerState,
       recovery,
       hostState,
+      providerChecks: agentSettings?.providerChecks?.(id),
       stopObservation: observation
         ? {
             availability: observation.availability,
@@ -1370,6 +1374,10 @@ export function createPanel(
               {
                 error: {
                   400: "Invalid provider request.",
+                  403: "The provider denied access with this API key.",
+                  422: "The provider rejected the API key.",
+                  429: "The provider rate limited the API key check. Try again shortly.",
+                  502: "Could not validate the API key. Try again when the provider is available.",
                   404: "Login attempt not found. Start a new login.",
                   409: "Agent is busy. Try again after the task or login finishes.",
                   503: "Provider settings unavailable. Start the agent and refresh to try again.",

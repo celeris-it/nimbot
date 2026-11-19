@@ -14,6 +14,10 @@ function fixture() {
   ];
   const attempt = { state: "pending", invalidUrl: false };
   const changed = vi.fn();
+  const providerFetch = vi.fn<typeof fetch>(
+    async () => new Response(null, { status: 200 }),
+  );
+  let needsAuth = false;
   const request = vi.fn<OpenCodeRequest>(async (path, options) => {
     if (path === "/api/credential" && !options?.body)
       return { data: [...credentials] };
@@ -35,6 +39,21 @@ function fixture() {
         1,
       );
       return;
+    }
+    if (path === "/api/integration/openai") {
+      return {
+        data: {
+          connections: [
+            {
+              type: "credential",
+              id: "device",
+              ...(needsAuth
+                ? { status: { status: "needs_auth", message: "private" } }
+                : {}),
+            },
+          ],
+        },
+      };
     }
     if (path.endsWith("/connect/oauth")) {
       return {
@@ -67,9 +86,19 @@ function fixture() {
     },
     () => busy,
     changed,
-    { pollMs: 5, loginTimeoutMs: 300 },
+    { pollMs: 5, loginTimeoutMs: 300, fetch: providerFetch },
   );
-  return { auth, request, changed, credentials, attempt };
+  return {
+    auth,
+    request,
+    changed,
+    credentials,
+    attempt,
+    providerFetch,
+    requireReauthentication() {
+      needsAuth = true;
+    },
+  };
 }
 
 it("uses OpenCode's credential API and publishes only provider status", async () => {
@@ -150,4 +179,85 @@ it("expires a pending login, releases the reservation, and closes without exposi
   expect(credentials[0]?.id).toBe("original");
   await auth.close();
   expect(() => auth.startLogin()).toThrow("unavailable");
+});
+
+it("preserves the active credential when validation fails or the provider is unavailable", async () => {
+  const { auth, credentials, providerFetch, request, changed } = fixture();
+  providerFetch.mockResolvedValueOnce(new Response(null, { status: 401 }));
+  await expect(auth.save("openai", "candidate")).rejects.toMatchObject({
+    kind: "rejected",
+  });
+  providerFetch.mockRejectedValueOnce(
+    new DOMException("Private response", "TimeoutError"),
+  );
+  await expect(auth.save("openai", "candidate")).rejects.toMatchObject({
+    kind: "check_unavailable",
+  });
+  providerFetch.mockResolvedValueOnce(new Response(null, { status: 403 }));
+  await expect(auth.save("openai", "candidate")).rejects.toMatchObject({
+    kind: "restricted",
+  });
+  providerFetch.mockResolvedValueOnce(new Response(null, { status: 429 }));
+  await expect(auth.save("openai", "candidate")).rejects.toMatchObject({
+    kind: "rate_limited",
+  });
+  expect(credentials.map(({ id }) => id)).toEqual(["original"]);
+  expect(request).not.toHaveBeenCalled();
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it("checks saved API keys at most every five minutes and invalidates the cache after changes", async () => {
+  const { auth, providerFetch } = fixture();
+  const now = vi.spyOn(Date, "now");
+  try {
+    const first = Date.now();
+    now.mockReturnValue(first);
+    expect((await auth.checkProviders())[0]).toMatchObject({
+      state: "available",
+      checkedAt: first,
+    });
+    expect((await auth.checkProviders())[0]).toMatchObject({
+      state: "available",
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    now.mockReturnValue(first + 300_000);
+    providerFetch.mockResolvedValueOnce(new Response(null, { status: 401 }));
+    const rejected = (await auth.checkProviders())[0];
+    expect(rejected).toMatchObject({
+      state: "rejected",
+      checkedAt: first + 300_000,
+    });
+    await auth.save("openai", "new-private-key");
+    const updated = (await auth.checkProviders())[0];
+    expect(updated?.state).toBe("available");
+    expect(updated?.revision).not.toBe(rejected?.revision);
+    expect(JSON.stringify(updated)).not.toContain("private");
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it("uses an explicit OpenCode reauthentication state for the active OAuth connection", async () => {
+  const { auth, credentials, providerFetch, requireReauthentication } =
+    fixture();
+  credentials[0] = {
+    id: "device",
+    active: true,
+    integrationID: "openai",
+    value: { type: "oauth", key: "private-token" },
+  };
+  const now = vi.spyOn(Date, "now");
+  try {
+    const first = Date.now();
+    now.mockReturnValue(first);
+    expect((await auth.checkProviders())[0]?.state).toBe("unverified");
+    requireReauthentication();
+    now.mockReturnValue(first + 300_000);
+    const checks = await auth.checkProviders();
+    expect(checks[0]?.state).toBe("rejected");
+    expect(JSON.stringify(checks)).not.toContain("private");
+    expect(providerFetch).not.toHaveBeenCalled();
+  } finally {
+    now.mockRestore();
+  }
 });
