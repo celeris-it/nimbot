@@ -100,8 +100,7 @@
       schedule?.cadence.kind === "interval"
         ? schedule.cadence.minutes
         : data.limits.minIntervalMinutes;
-    timeZone =
-      schedule?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    timeZone = schedule?.timeZone ?? data.defaultTimeZone;
     localError = "";
     invalid = undefined;
     formVisible = true;

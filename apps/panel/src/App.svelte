@@ -10,6 +10,7 @@
     PanelSession,
     PanelStatus,
     ScheduleList,
+    ScheduleDefaults,
     ScheduleSettings,
     Schedule,
     ScheduleRunNowResult,
@@ -49,6 +50,7 @@
   let usage = $state<AgentUsage>();
   let usageBefore = $state(usageCursor(location.search));
   let schedules = $state<ScheduleList>();
+  let scheduleTimeZone = $state("");
   let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
   let memoryPage = $state(1);
   let delegations = $state<DelegationHistory>();
@@ -151,6 +153,7 @@
     agent = undefined;
     providerSettings = undefined;
     schedules = undefined;
+    scheduleTimeZone = "";
     loaded = false;
     contentAvailable = false;
     missing = false;
@@ -184,7 +187,18 @@
         status = await request<PanelStatus>("/api/status", {
           signal: current.signal,
         });
-      else if (mcpRoute) {
+      else if (path === "/settings") {
+        if (!session.capabilities.scheduleSettings) missing = true;
+        else {
+          const defaults = await request<ScheduleDefaults>(
+            "/api/settings/schedules",
+            {
+              signal: current.signal,
+            },
+          );
+          if (!current.signal.aborted) scheduleTimeZone = defaults.timeZone;
+        }
+      } else if (mcpRoute) {
         const id = mcpRoute[1];
         if (!session.capabilities.mcp) missing = true;
         else if (!id) {
@@ -785,7 +799,10 @@
   });
 </script>
 
-<svelte:head><title>{title} · Nimbot</title></svelte:head>
+<svelte:head
+  ><title>{path === "/settings" ? "Settings" : title} · Nimbot</title
+  ></svelte:head
+>
 <a id="skip" href="#main">Skip to main content</a>
 <header>
   <a href="/" data-ui="wordmark" aria-label="Nimbot home"
@@ -815,6 +832,12 @@
           aria-current={path === "/agents/new" ? "page" : undefined}
           ><Icon name="plus" size={15} /> New agent</a
         >{/if}
+      {#if session.capabilities.scheduleSettings}
+        <a
+          href="/settings"
+          aria-current={path === "/settings" ? "page" : undefined}>Settings</a
+        >
+      {/if}
     </nav>
     <div data-ui="header-actions">
       <span data-ui="installation"
@@ -882,6 +905,41 @@
       canCreate={session?.capabilities.createAgent ?? false}
       refresh={() => load()}
     />
+  {:else if path === "/settings"}
+    <h1 tabindex="-1">Settings</h1>
+    <form
+      class="card"
+      aria-busy={busy}
+      aria-describedby="form-error"
+      onsubmit={(event) => {
+        event.preventDefault();
+        void mutate<ScheduleDefaults>(
+          "/api/settings/schedules",
+          { timeZone: scheduleTimeZone },
+          (result) => {
+            scheduleTimeZone = result.timeZone;
+            notice = "Schedule time zone saved.";
+          },
+        );
+      }}
+    >
+      <label for="schedule-default-zone">Schedule time zone</label>
+      <input
+        id="schedule-default-zone"
+        class="input"
+        aria-describedby="schedule-default-zone-help"
+        bind:value={scheduleTimeZone}
+        required
+        disabled={busy}
+        spellcheck="false"
+        placeholder="America/New_York"
+      />
+      <p id="schedule-default-zone-help">
+        Use an IANA time zone such as America/New_York or UTC. It applies to new
+        schedules in Telegram and prefills the schedule form in the panel.
+      </p>
+      <button type="submit" class="btn" disabled={busy}>Save settings</button>
+    </form>
   {:else if path === "/agents/new"}
     {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
   {:else if path === "/mcp"}

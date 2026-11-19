@@ -4,6 +4,7 @@ import {
   MIN_SCHEDULE_INTERVAL_MINUTES,
   nextRun,
   validateCadence,
+  validateTimeZone,
   type ScheduleCadence,
 } from "./schedule-time.js";
 import type { TaskStatus } from "./task-queue.js";
@@ -114,6 +115,10 @@ export function openScheduleStore(
       );
       CREATE INDEX IF NOT EXISTS schedules_due ON schedules (enabled, next_run_at);
       CREATE INDEX IF NOT EXISTS schedules_agent ON schedules (agent_id);
+      CREATE TABLE IF NOT EXISTS schedule_settings (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        timezone TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS schedule_runs (
         id TEXT PRIMARY KEY,
         schedule_id TEXT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
@@ -370,7 +375,49 @@ export function openScheduleStore(
       ).length >= WEBHOOK_REQUESTS_PER_MINUTE
     );
   }
+  function getDefaultTimeZone(): string {
+    const row = db
+      .prepare("SELECT timezone FROM schedule_settings WHERE id = 1")
+      .get();
+    return row ? String(row.timezone) : "UTC";
+  }
+
+  function prepareCreate(
+    input: ScheduleInput & { agentId: string },
+    at: number,
+  ) {
+    if (typeof input.agentId !== "string" || !input.agentId.trim()) {
+      throw new ScheduleValidationError("Agent ID is required.");
+    }
+    if (countByAgent(input.agentId) >= SCHEDULE_LIMITS.maxPerAgent) {
+      throw new ScheduleValidationError(
+        "An agent can have at most 20 schedules.",
+      );
+    }
+    const data = validate(input, at, at);
+    return { data, next: nextRun(data.cadence, data.timeZone, at) ?? null };
+  }
+
   return {
+    getDefaultTimeZone,
+    setDefaultTimeZone(value: string): string {
+      const timeZone = value.trim();
+      try {
+        validateTimeZone(timeZone);
+      } catch {
+        throw new ScheduleValidationError(
+          "Time zone must be a valid IANA time zone name.",
+        );
+      }
+      db.prepare(
+        `INSERT INTO schedule_settings (id, timezone) VALUES (1, ?)
+        ON CONFLICT(id) DO UPDATE SET timezone = excluded.timezone`,
+      ).run(timeZone);
+      return timeZone;
+    },
+    preview(input: ScheduleInput & { agentId: string }) {
+      return prepareCreate(input, now());
+    },
     webhookToken,
     authenticateWebhook,
     webhookLimited,
@@ -386,20 +433,22 @@ export function openScheduleStore(
     get,
     countByAgent,
     recentRuns,
-    create(input: ScheduleInput & { agentId: string }): Schedule {
+    create(
+      input: ScheduleInput & { agentId: string },
+      preview?: { nextRunAt: number | null },
+    ): Schedule {
       return transaction(() => {
-        if (typeof input.agentId !== "string" || !input.agentId.trim()) {
-          throw new ScheduleValidationError("Agent ID is required.");
-        }
-        if (countByAgent(input.agentId) >= SCHEDULE_LIMITS.maxPerAgent) {
+        if (preview && input.timeZone !== getDefaultTimeZone())
           throw new ScheduleValidationError(
-            "An agent can have at most 20 schedules.",
+            "The schedule time zone changed. Ask for the schedule again.",
           );
-        }
         const at = now();
-        const data = validate(input, at, at);
+        if (preview?.nextRunAt != null && preview.nextRunAt <= at)
+          throw new ScheduleValidationError(
+            "The first run time has passed. Ask for the schedule again.",
+          );
+        const { data, next } = prepareCreate(input, at);
         const id = randomUUID();
-        const next = nextRun(data.cadence, data.timeZone, at) ?? null;
         db.prepare(
           `INSERT INTO schedules
           (id, agent_id, name, prompt, cadence_kind, local_date, local_time, weekdays,

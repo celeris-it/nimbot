@@ -81,6 +81,8 @@ export interface PanelDeps {
       | "remove"
       | "listByAgent"
       | "recentRuns"
+      | "getDefaultTimeZone"
+      | "setDefaultTimeZone"
     >;
     runNow(
       schedule: Schedule,
@@ -399,6 +401,7 @@ export function createPanel(
       capabilities: {
         createAgent: !!registerAgent,
         ...(deps.mcp ? { mcp: true } : {}),
+        ...(deps.schedules ? { scheduleSettings: true } : {}),
       },
     } satisfies PanelSession),
   );
@@ -447,6 +450,18 @@ export function createPanel(
     } catch {
       throw new ScheduleValidationError("Invalid schedule form data.");
     }
+  }
+  if (deps.schedules) {
+    const { store } = deps.schedules;
+    app.get("/api/settings/schedules", (c) =>
+      c.json({ timeZone: store.getDefaultTimeZone() }),
+    );
+    app.post("/api/settings/schedules", async (c) => {
+      const { timeZone, ...extra } = await scheduleFields(c);
+      if (typeof timeZone !== "string" || Object.keys(extra).length)
+        throw new ScheduleValidationError("Enter a schedule time zone.");
+      return c.json({ timeZone: store.setDefaultTimeZone(timeZone) });
+    });
   }
   async function scheduleInput(c: Context): Promise<ScheduleInput> {
     const fields = scheduleForm.safeParse(await scheduleFields(c));
@@ -503,6 +518,7 @@ export function createPanel(
       }),
       limits: SCHEDULE_LIMITS,
       ownerLinked: deps.schedules!.ownerLinked(id),
+      defaultTimeZone: store.getDefaultTimeZone(),
     } satisfies ScheduleList);
   });
   app.post("/api/agents/:id/schedules", async (c) => {
@@ -1292,6 +1308,7 @@ export function createPanel(
       return c.redirect(back(id), 303);
     });
   app.get("/", entry);
+  if (deps.schedules) app.get("/settings", entry);
   if (deps.mcp) {
     app.get("/mcp", entry);
     app.get("/mcp/:definitionId", entry);

@@ -113,6 +113,7 @@ function requireHost(id, mutate = false) {
 
 function reset() {
   for (const id of agents.keys()) schedules.removeByAgent(id);
+  schedules.setDefaultTimeZone("UTC");
   keys.clear();
   logins.clear();
   agents.clear();

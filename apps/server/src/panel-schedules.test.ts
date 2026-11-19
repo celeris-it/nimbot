@@ -121,6 +121,30 @@ afterEach(async () => {
   await f.close();
 });
 
+it("protects and validates the global time zone and leaves saved schedules in their own zone", async () => {
+  const path = "/api/settings/schedules";
+  expect((await f.app.request(path)).status).toBe(401);
+  expect(
+    (
+      await f.app.request(path, {
+        method: "POST",
+        headers: { Cookie: f.cookie, Origin: "https://other.example" },
+      })
+    ).status,
+  ).toBe(403);
+  expect(await (await f.get(path)).json()).toEqual({ timeZone: "UTC" });
+  const schedule = await f.create();
+  expect((await f.post(path, { timeZone: "+03:00" })).status).toBe(400);
+  expect((await f.post(path, { timeZone: "Europe/Madrid" })).status).toBe(200);
+  expect(await (await f.get(path)).json()).toEqual({
+    timeZone: "Europe/Madrid",
+  });
+  expect(await (await f.get()).json()).toMatchObject({
+    defaultTimeZone: "Europe/Madrid",
+    schedules: [{ id: schedule.id, timeZone: "UTC" }],
+  });
+});
+
 it("requires a session and the configured Origin before reading or mutating schedules", async () => {
   const schedule = await f.create();
   for (const path of [

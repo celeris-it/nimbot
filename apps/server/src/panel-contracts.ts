@@ -38,6 +38,11 @@ export interface ScheduleList {
   })[];
   limits: typeof SCHEDULE_LIMITS;
   ownerLinked: boolean;
+  defaultTimeZone: string;
+}
+
+export interface ScheduleDefaults {
+  timeZone: string;
 }
 
 /** Browser-safe metadata. These imports are erased; no server runtime is bundled. */
@@ -46,7 +51,11 @@ export type AgentSummary = NonNullable<
 > & { id: string };
 export interface PanelSession {
   authenticated: true;
-  capabilities: { createAgent: boolean; mcp?: boolean };
+  capabilities: {
+    createAgent: boolean;
+    mcp?: boolean;
+    scheduleSettings?: boolean;
+  };
 }
 export interface DiscordConversationStatus {
   state: "connecting" | "ready" | "reconnecting" | "failed" | "stopped";

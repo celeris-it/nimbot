@@ -366,11 +366,8 @@ test("creates, edits, pauses, resumes, runs and deletes schedules with confirmat
     }),
   ).toBeVisible();
   await scheduleDraft(page);
-  const browserZone = await page.evaluate(
-    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
-  );
   await expect(page.getByLabel("Time zone", { exact: true })).toHaveValue(
-    browserZone,
+    "UTC",
   );
   await page.getByLabel("Time zone", { exact: true }).fill("Europe/Madrid");
   await page.getByLabel("Time of day").fill("10:30");
@@ -425,6 +422,28 @@ test("creates, edits, pauses, resumes, runs and deletes schedules with confirmat
   await expect(
     page.getByText("No schedules yet.", { exact: false }),
   ).toBeVisible();
+});
+
+test("edits the global schedule time zone and prefills new schedules", async ({
+  page,
+}) => {
+  await openSchedules(page);
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  const zone = page.getByLabel("Schedule time zone");
+  await expect(zone).toHaveValue("UTC");
+  await zone.fill("Europe/Madrid");
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Schedule time zone saved.",
+  );
+  await page.reload();
+  await expect(zone).toHaveValue("Europe/Madrid");
+  await page.goto("/agents/dev/schedules");
+  await scheduleDraft(page);
+  await expect(page.getByLabel("Time zone", { exact: true })).toHaveValue(
+    "Europe/Madrid",
+  );
 });
 
 for (const kind of ["once", "interval"] as const) {
