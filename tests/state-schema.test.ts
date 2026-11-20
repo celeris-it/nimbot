@@ -64,7 +64,9 @@ it.each([
     for (const path of [database, fresh]) {
       prepareStateSchema(path, kind);
       prepareStateSchema(path, kind);
-      expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 1 });
+      expect(read(path, "PRAGMA user_version")).toEqual({
+        user_version: kind === "server" ? 2 : 1,
+      });
     }
     expect(read(database, select)).toEqual({ data: "saved" });
   },
@@ -105,3 +107,43 @@ it("rolls back the failed step and safely retries an ordered migration", () => {
   });
   expect(read(database, "PRAGMA user_version")).toEqual({ user_version: 3 });
 });
+
+it.each([0, 1])(
+  "upgrades populated server schema %i with task references and history",
+  (version) => {
+    const path = fixture(
+      "server",
+      `${legacy("server")}
+    PRAGMA user_version = ${version};
+    INSERT INTO agents (id, name, owner_id) VALUES ('a', 'Agent', 42);
+    INSERT INTO tasks (seq, id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at)
+      VALUES (10, 't', 'a', 1, 42, 'queued', 'queued', 1, 1),
+             (20, 'deleted', 'a', 1, 42, 'old', 'completed', 1, 1);
+    DELETE FROM tasks WHERE id = 'deleted';
+    INSERT INTO schedules (id, agent_id, name, prompt, cadence_kind, timezone, enabled, created_at, updated_at, webhook_token)
+      VALUES ('s', 'a', 'Saved', 'Prompt', 'webhook', 'UTC', 1, 1, 1, 'saved-token');
+    INSERT INTO schedule_runs (id, schedule_id, agent_id, scheduled_for, outcome, task_id, created_at)
+      VALUES ('r', 's', 'a', 1, 'enqueued', 't', 1);
+  `,
+    );
+    prepareStateSchema(path, "server", { existing: true });
+    expect(
+      read(path, "SELECT delivery_channel, webhook_token FROM schedules"),
+    ).toEqual({
+      delivery_channel: "telegram",
+      webhook_token: "saved-token",
+    });
+    expect(read(path, "SELECT seq, id, status FROM tasks")).toEqual({
+      seq: 10,
+      id: "t",
+      status: "queued",
+    });
+    expect(read(path, "SELECT task_id FROM schedule_runs")).toEqual({
+      task_id: "t",
+    });
+    expect(
+      read(path, "SELECT seq FROM sqlite_sequence WHERE name = 'tasks'"),
+    ).toEqual({ seq: 20 });
+    expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
+  },
+);

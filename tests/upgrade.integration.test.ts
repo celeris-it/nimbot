@@ -230,12 +230,12 @@ it.skipIf(!helper || !serverImage || !hostImage)(
           `
           import { DatabaseSync } from "node:sqlite";
           import { writeFileSync } from "node:fs";
-          const [state, id, ref, network, workspace, credential, token] = process.argv.slice(1);
+          const [state, id, ref, network, workspace, credential, token, legacy] = process.argv.slice(1);
           const db = new DatabaseSync(state + "/server.sqlite");
           db.prepare("INSERT INTO agents (id, name, owner_id, container_ref) VALUES (?, ?, 1, ?)").run(id, id, ref);
           db.prepare("INSERT INTO agent_provisioning (agent_id, status, volume_ref, network_ref, updated_at) VALUES (?, 'ready', ?, ?, 1)").run(id, workspace, network);
           db.prepare("INSERT INTO agent_host_credentials (agent_id, credential_ref) VALUES (?, ?)").run(id, "file:" + credential);
-          db.exec("PRAGMA user_version = 0");
+          if (legacy === "legacy") db.exec("PRAGMA user_version = 0");
           writeFileSync(state + "/host-secrets/" + credential, token, { mode: 0o600 });
         `,
           state,
@@ -245,6 +245,7 @@ it.skipIf(!helper || !serverImage || !hostImage)(
           names.volumes[0]!,
           credential,
           token,
+          sourceServer ? "legacy" : "current",
         );
         if (running) {
           command(["start", ref]);
@@ -330,7 +331,7 @@ it.skipIf(!helper || !serverImage || !hostImage)(
           `import { DatabaseSync } from "node:sqlite"; const db = new DatabaseSync(process.argv[1]); console.log(db.prepare("PRAGMA user_version").get().user_version);`,
           `${state}/server.sqlite`,
         ),
-      ).toBe(sourceServer ? "0" : "1");
+      ).toBe(sourceServer ? "0" : "2");
       for (const [agent, { ref }] of oldAgents) {
         expect(inspect(`nimbot-${agent}`, "{{.Id}}")).toBe(ref);
         expect(inspect(ref, "{{.State.Running}}")).toBe(
@@ -347,11 +348,12 @@ it.skipIf(!helper || !serverImage || !hostImage)(
           "  server:\n    runtime: nimbot-fixture-missing-runtime\n",
         ),
       );
-      code(
-        server,
-        `import { DatabaseSync } from "node:sqlite"; new DatabaseSync(process.argv[1]).exec("PRAGMA user_version = 0");`,
-        `${state}/server.sqlite`,
-      );
+      if (sourceServer)
+        code(
+          server,
+          `import { DatabaseSync } from "node:sqlite"; new DatabaseSync(process.argv[1]).exec("PRAGMA user_version = 0");`,
+          `${state}/server.sqlite`,
+        );
       // Force a failure after Hosts have been replaced and the original Server has been removed.
       expect(upgrade).toThrow(
         /Docker compose[\s\S]*returned to the previous version/,
@@ -367,11 +369,12 @@ it.skipIf(!helper || !serverImage || !hostImage)(
       }
       writeFileSync(targetCompose, compose);
       // Restore the unversioned marker after the fixture's previous runtime reopened the database.
-      code(
-        server,
-        `import { DatabaseSync } from "node:sqlite"; new DatabaseSync(process.argv[1]).exec("PRAGMA user_version = 0");`,
-        `${state}/server.sqlite`,
-      );
+      if (sourceServer)
+        code(
+          server,
+          `import { DatabaseSync } from "node:sqlite"; new DatabaseSync(process.argv[1]).exec("PRAGMA user_version = 0");`,
+          `${state}/server.sqlite`,
+        );
       expect(upgrade()).toContain(`Nimbot ${version} is active`);
       expect(inspect(server, "{{.Id}}")).not.toBe(restoredServer);
       expect(

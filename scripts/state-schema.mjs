@@ -2,8 +2,26 @@ import { URL } from "node:url";
 import { readFileSync, lstatSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
+const serverV2 = readFileSync(
+  new URL("./state-schema/server-v2.sql", import.meta.url),
+  "utf8",
+);
 const definitions = {
-  server: { version: 1, migrations: {} },
+  server: {
+    version: 2,
+    get current() {
+      return baseline("server") + "\n" + serverV2;
+    },
+    migrations: {
+      2(db) {
+        db.exec(serverV2);
+        if (db.prepare("PRAGMA foreign_key_check").get())
+          throw new Error(
+            "Server schema migration produced invalid references.",
+          );
+      },
+    },
+  },
   tasks: { version: 1, migrations: {} },
   memory: { version: 1, migrations: {} },
 };
@@ -74,6 +92,9 @@ export function prepareStateSchema(path, kind, options = {}) {
     if (!file && options.existing) throw new Error("Database is missing.");
     db = new DatabaseSync(path);
     db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON");
+    // The server v2 migration rebuilds a referenced table. SQLite requires
+    // disabling enforcement outside the transaction and checking before commit.
+    if (definition === definitions.server) db.exec("PRAGMA foreign_keys = OFF");
     let current = false;
     while (!current) {
       transaction(db, () => {
