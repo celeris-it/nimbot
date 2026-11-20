@@ -22,6 +22,7 @@ for tool in curl tar docker mktemp stty; do command -v "$tool" >/dev/null || fai
 exec 3<> /dev/tty || fail 'An interactive terminal is required.'
 tty_settings=$(stty -g <&3)
 ask() { printf '%s' "$1" >&3; IFS= read -r answer <&3 || fail 'Input cancelled.'; }
+valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535)); }
 
 # Only local Unix sockets work with the server's bind mount.
 if [ -n "${DOCKER_CONTEXT:-}" ]; then
@@ -118,16 +119,36 @@ if [ "$source_dir" = "$install_dir" ] || [ -z "$server" ]; then
   docker build -f "$source_dir/infrastructure/docker/agent-host.Dockerfile" -t "$host_image" "$source_dir"
 fi
 
+custom_port_supported=false
+if grep -Fq '${PANEL_PUBLISH_PORT:-3000}' "$source_dir/compose.yaml"; then
+  custom_port_supported=true
+fi
 if [ ! -f .env ]; then
   socket_gid=$(docker run --rm --network none --read-only --cap-drop ALL \
     -v "$socket:/var/run/docker.sock:ro" "$server_image" stat -c '%g' /var/run/docker.sock)
   [[ "$socket_gid" =~ ^[0-9]+$ ]] || fail 'Cannot determine the Docker socket group inside Docker.'
-  ask 'Panel URL [http://localhost:3000, or your existing HTTPS origin]: '
-  panel_url="${answer:-http://localhost:3000}"
-  if [ "$panel_url" != 'http://localhost:3000' ]; then
-    [[ "$panel_url" =~ ^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$ ]] || fail 'Enter an HTTPS origin without a path, query, or credentials.'
-    printf 'Configure your existing HTTPS proxy to forward to 127.0.0.1:3000.\n'
+  panel_port=3000
+  if [ "$custom_port_supported" = true ]; then
+    while :; do
+      ask 'Panel host port [default: 3000]: '
+      if [ -z "$answer" ]; then break; fi
+      if valid_port "$answer"; then panel_port=$((10#$answer)); break; fi
+      printf 'Enter a port between 1 and 65535.\n' >&3
+    done
+  else
+    printf 'This release publishes the panel on host port 3000.\n'
   fi
+  local_panel_url="http://localhost:$panel_port"
+  while :; do
+    ask "Panel URL [default: $local_panel_url, or enter an HTTPS origin]: "
+    panel_url="${answer:-$local_panel_url}"
+    if [ "$panel_url" = "$local_panel_url" ]; then break; fi
+    if [[ "$panel_url" =~ ^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:([0-9]{1,5}))?$ ]]; then
+      https_port="${BASH_REMATCH[2]:-}"
+      if [ -z "$https_port" ] || valid_port "$https_port"; then break; fi
+    fi
+    printf 'Enter %s or an HTTPS origin with a valid port and no path, query, or credentials.\n' "$local_panel_url" >&3
+  done
   while :; do
     stty -echo <&3
     printf 'Panel password (12–256 characters, hidden): ' >&3
@@ -143,8 +164,8 @@ if [ ! -f .env ]; then
   unset password confirmation
   [[ "$password_hash" =~ ^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$ ]] || fail 'Password helper returned an invalid hash.'
   env_file=$(mktemp "$install_dir/.env.XXXXXX")
-  printf "PANEL_PASSWORD_HASH='%s'\nPANEL_URL='%s'\nDOCKER_SOCKET_PATH='%s'\nDOCKER_SOCKET_GID=%s\nAGENT_HOST_IMAGE=%s\nSERVER_CONTAINER_NAME=nimbot-server\nTASK_TIMEOUT_SECONDS=600\nNIMBOT_INSTALLATION_ID=%s\n" \
-    "$password_hash" "$panel_url" "$socket" "$socket_gid" "$host_image" "$installation_id" > "$env_file"
+  printf "PANEL_PASSWORD_HASH='%s'\nPANEL_URL='%s'\nPANEL_PUBLISH_PORT=%s\nDOCKER_SOCKET_PATH='%s'\nDOCKER_SOCKET_GID=%s\nAGENT_HOST_IMAGE=%s\nSERVER_CONTAINER_NAME=nimbot-server\nTASK_TIMEOUT_SECONDS=600\nNIMBOT_INSTALLATION_ID=%s\n" \
+    "$password_hash" "$panel_url" "$panel_port" "$socket" "$socket_gid" "$host_image" "$installation_id" > "$env_file"
   chmod 600 "$env_file"
   mv "$env_file" .env
   unset password_hash
@@ -152,10 +173,20 @@ else
   grep -qx "NIMBOT_INSTALLATION_ID=$installation_id" .env || fail 'Configuration does not match the installation marker.'
   panel_url=$(sed -n "s/^PANEL_URL='\([^']*\)'$/\1/p" .env)
   [ -n "$panel_url" ] || fail 'Cannot read PANEL_URL from the saved configuration.'
+  panel_port=$(sed -n 's/^PANEL_PUBLISH_PORT=//p' .env)
+  panel_port="${panel_port:-3000}"
+  valid_port "$panel_port" || fail 'Set PANEL_PUBLISH_PORT to a port between 1 and 65535 in the saved configuration.'
+  panel_port=$((10#$panel_port))
+  if [ "$custom_port_supported" = false ] && [ "$panel_port" != 3000 ]; then
+    fail 'This release only supports PANEL_PUBLISH_PORT=3000.'
+  fi
   chmod 600 .env
 fi
+if [[ "$panel_url" == https://* ]]; then
+  printf 'Configure your existing HTTPS proxy to forward to 127.0.0.1:%s.\n' "$panel_port"
+fi
 # Prevent inherited deployment variables from overriding this installation's .env.
-unset NIMBOT_SERVER_IMAGE NIMBOT_UPGRADE_TOKEN PANEL_PASSWORD_HASH PANEL_URL DOCKER_SOCKET_PATH DOCKER_SOCKET_GID AGENT_HOST_IMAGE SERVER_CONTAINER_NAME TASK_TIMEOUT_SECONDS NIMBOT_INSTALLATION_ID COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
+unset NIMBOT_SERVER_IMAGE NIMBOT_UPGRADE_TOKEN PANEL_PASSWORD_HASH PANEL_URL PANEL_PUBLISH_PORT DOCKER_SOCKET_PATH DOCKER_SOCKET_GID AGENT_HOST_IMAGE SERVER_CONTAINER_NAME TASK_TIMEOUT_SECONDS NIMBOT_INSTALLATION_ID COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 launch=(up -d)
 if [ "$source_dir" != "$install_dir" ]; then
   export NIMBOT_SERVER_IMAGE="$server_image" AGENT_HOST_IMAGE="$host_image"
@@ -174,8 +205,8 @@ if [ ! -f .nimbot-release ] && [ -f .nimbot-install-source ]; then
   mv .nimbot-release.tmp .nimbot-release
 fi
 printf '\nNimbot is ready at %s\nInstallation: %s\n' "$panel_url" "$install_dir"
-if [ "$panel_url" = 'http://localhost:3000' ]; then
-  printf 'For a remote server: ssh -L 3000:127.0.0.1:3000 YOUR_USER@YOUR_SERVER\nThen open http://localhost:3000 on your computer.\n'
+if [ "$panel_url" = "http://localhost:$panel_port" ]; then
+  printf 'For a remote server: ssh -L %s:127.0.0.1:%s YOUR_USER@YOUR_SERVER\nThen open %s on your computer.\n' "$panel_port" "$panel_port" "$panel_url"
 fi
 printf 'Logs: docker --host %q logs -f nimbot-server\n' "$endpoint"
 printf 'Uninstall (keeps data): bash %q --directory %q\n' "$install_dir/uninstall.sh" "$install_dir"

@@ -10,10 +10,10 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${PANEL_PUBLISH_PORT:-3000}:3000"
     environment:
       PANEL_PASSWORD_HASH: ${PANEL_PASSWORD_HASH:?Set PANEL_PASSWORD_HASH}
-      PANEL_URL: ${PANEL_URL:-http://localhost:3000}
+      PANEL_URL: ${PANEL_URL:-http://localhost:${PANEL_PUBLISH_PORT:-3000}}
       PANEL_HOST: 0.0.0.0
       PANEL_PORT: 3000
       SERVER_STATE_DIR: /home/node/.local/share/nimbot

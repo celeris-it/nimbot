@@ -6,7 +6,9 @@ COPY scripts/state-schema.mjs scripts/state-schema.d.mts scripts/
 COPY scripts/state-schema/ scripts/state-schema/
 COPY apps/server apps/server
 COPY apps/panel apps/panel
-RUN npm install -g pnpm@10 \
+# Installed source can be owner-only; the runtime user needs to read it.
+RUN chmod -R a+rX /app \
+ && npm install -g pnpm@10 \
  && pnpm install --frozen-lockfile \
  && pnpm --filter @nimbot/panel build \
  && pnpm --filter @nimbot/server build
@@ -22,5 +24,6 @@ USER root
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 COPY scripts/upgrade*.mjs scripts/
+RUN chmod a+r /app/scripts/upgrade*.mjs
 
 FROM server AS runtime

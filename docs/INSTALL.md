@@ -10,7 +10,7 @@ Run this command in an interactive terminal:
 curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash
 ```
 
-The installer downloads the source into `~/.local/share/nimbot`, builds both Docker images, asks for the panel URL and a password, generates private configuration, and starts Nimbot. It supports Linux and macOS and detects the local Docker socket and its group automatically. Remote Docker contexts are unsupported. Building the images requires internet access and can take several minutes.
+The installer downloads the source into `~/.local/share/nimbot`, builds both Docker images, asks for the panel host port, panel URL, and password, generates private configuration, and starts Nimbot. It supports Linux and macOS and detects the local Docker socket and its group automatically. Remote Docker contexts are unsupported. Building the images requires internet access and can take several minutes.
 
 To choose another installation directory:
 
@@ -22,17 +22,19 @@ Add `--version vX.Y.Z` after `bash -s --` to install a specific release tag. Use
 
 You can download and inspect the script before running it. Only one Nimbot installation per Docker Engine is supported. Running the installer again reuses the saved source and configuration; it does not update Nimbot or reset the password. Failed installation resources are kept so you can fix the reported error and retry with the same directory.
 
-The default panel URL is <http://localhost:3000>. On a remote server, open a tunnel from your computer:
+Press Enter at the **Panel host port** prompt to use port `3000`. Older release tags that use a fixed port skip this prompt. At the **Panel URL** prompt, pressing Enter uses `http://localhost` with the selected port. With both defaults, the panel URL is <http://localhost:3000>. On a remote server, open a tunnel from your computer:
 
 ```sh
 ssh -L 3000:127.0.0.1:3000 YOUR_USER@YOUR_SERVER
 ```
 
-Then open <http://localhost:3000> and sign in with your chosen password.
+Then open <http://localhost:3000> and sign in with your chosen password. If you chose a different port, use it on both sides of the tunnel and in the browser URL.
+
+If Docker reports that the port is already in use during setup, edit `PANEL_PUBLISH_PORT` in the saved `.env` and rerun the installer. For local access, update the port in the saved `PANEL_URL` too. For HTTPS access, update the reverse proxy upstream to use the new port.
 
 ### Using your own HTTPS domain
 
-If you already have a reverse proxy, enter your HTTPS origin, for example `https://nimbot.example.com`, when prompted. Configure the proxy to forward to `127.0.0.1:3000`. With Caddy:
+If you already have a reverse proxy, enter its browser-facing origin at the **Panel URL** prompt, for example `https://nimbot.example.com` or `https://nimbot.example.com:8443`. Configure the proxy to forward to `127.0.0.1` on the selected host port. With Caddy and the default host port:
 
 ```text
 nimbot.example.com {

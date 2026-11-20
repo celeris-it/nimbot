@@ -86,6 +86,7 @@ elif args[0] == 'run':
     if len(password) < 12 or len(password) > 256: sys.exit(1)
     print('scrypt:' + 'a'*32 + ':' + 'b'*128)
 elif args[0] == 'compose':
+    if os.environ.get('FAKE_CHECK_PORT_ENV') and 'PANEL_PUBLISH_PORT' in os.environ: sys.exit(1)
     if 'up' in args:
         if os.environ.get('FAKE_FAIL') == 'health': sys.exit(1)
         state['container']['server'] = {'owner': owner, 'project': 'nimbot-' + owner}
@@ -119,7 +120,14 @@ elif args[0] in ['container', 'network', 'volume'] or args[0] in ['ps', 'inspect
 else: sys.exit(2)
 `;
 
-async function fixture() {
+const hostPortPrompt = "Panel host port [default: 3000]: ";
+const defaultUrlPrompt = "Panel URL [default: http://localhost:3000,";
+const defaultPanelAnswers = [
+  [hostPortPrompt, ""],
+  [defaultUrlPrompt, ""],
+];
+
+async function fixture(legacyCompose = false) {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-installer-"));
   temporary.push(dir);
   const bin = join(dir, "bin");
@@ -135,6 +143,14 @@ async function fixture() {
     "release.json",
   ])
     await cp(join(root, name), join(source, name));
+  if (legacyCompose) {
+    const composePath = join(source, "compose.yaml");
+    const compose = await readFile(composePath, "utf8");
+    await writeFile(
+      composePath,
+      compose.replaceAll("${PANEL_PUBLISH_PORT:-3000}", "3000"),
+    );
+  }
   const archive = join(dir, "source.tar.gz");
   await exec("tar", ["-czf", archive, "-C", dir, "source"]);
   await writeFile(join(bin, "docker"), docker, { mode: 0o755 });
@@ -215,7 +231,7 @@ async function fixture() {
   };
   const install = () =>
     runStable("install", [
-      ["Panel URL [", ""],
+      ...defaultPanelAnswers,
       ["characters, hidden): ", "long-enough-password"],
       ["Repeat password: ", "long-enough-password"],
     ]);
@@ -252,7 +268,7 @@ it("installs through piped stdin, writes private configuration, and waits for he
   const result = await f.run(
     "install",
     [
-      ["Panel URL [", ""],
+      ...defaultPanelAnswers,
       ["characters, hidden): ", "long-enough-password"],
       ["Repeat password: ", "long-enough-password"],
     ],
@@ -264,6 +280,8 @@ it("installs through piped stdin, writes private configuration, and waits for he
   expect(result.output).toContain("Nimbot is ready at http://localhost:3000");
   expect(result.output).not.toContain("long-enough-password");
   const config = await readFile(join(f.destination, ".env"), "utf8");
+  expect(config).toContain("PANEL_PUBLISH_PORT=3000\n");
+  expect(config).toContain("PANEL_URL='http://localhost:3000'\n");
   expect(config).toContain("DOCKER_SOCKET_GID=");
   expect(config).toContain("NIMBOT_INSTALLATION_ID=");
   expect(config).not.toContain("long-enough-password");
@@ -279,6 +297,64 @@ it("reuses an installation without replacing its password or downloading updates
   expect(result.code, result.output).toBe(0);
   expect(result.output).toContain("Reusing existing installation");
   expect(await readFile(join(f.destination, ".env"), "utf8")).toBe(config);
+});
+
+it("uses the selected port in the default URL and keeps it on retry", async () => {
+  const f = await fixture();
+  const urlPrompt = "Panel URL [default: http://localhost:4000,";
+  const result = await f.run("install", [
+    [hostPortPrompt, "0"],
+    [hostPortPrompt, "65536"],
+    [hostPortPrompt, "abc"],
+    [hostPortPrompt, "4000"],
+    [urlPrompt, "http://localhost:3000"],
+    [urlPrompt, ""],
+    ["characters, hidden): ", "long-enough-password"],
+    ["Repeat password: ", "long-enough-password"],
+  ]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain("Enter a port between 1 and 65535.");
+  expect(result.output).toContain(
+    "Enter http://localhost:4000 or an HTTPS origin",
+  );
+  expect(result.output).toContain("Nimbot is ready at http://localhost:4000");
+  expect(result.output).toContain("ssh -L 4000:127.0.0.1:4000");
+  const configPath = join(f.destination, ".env");
+  const config = await readFile(configPath, "utf8");
+  expect(config).toContain("PANEL_PUBLISH_PORT=4000\n");
+  expect(config).toContain("PANEL_URL='http://localhost:4000'\n");
+
+  const retry = await f.run("install", [], [], {
+    PANEL_PUBLISH_PORT: "9999",
+    FAKE_CHECK_PORT_ENV: "1",
+  });
+  expect(retry.code, retry.output).toBe(0);
+  expect(retry.output).toContain("Nimbot is ready at http://localhost:4000");
+  expect(await readFile(configPath, "utf8")).toBe(config);
+});
+
+it("uses port 3000 with legacy Compose and a saved configuration without a host port", async () => {
+  const f = await fixture(true);
+  const result = await f.run("install", [
+    [defaultUrlPrompt, "http://localhost:3000"],
+    ["characters, hidden): ", "long-enough-password"],
+    ["Repeat password: ", "long-enough-password"],
+  ]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain(
+    "This release publishes the panel on host port 3000.",
+  );
+  const configPath = join(f.destination, ".env");
+  const config = (await readFile(configPath, "utf8")).replace(
+    "PANEL_PUBLISH_PORT=3000\n",
+    "",
+  );
+  await writeFile(configPath, config);
+
+  const retry = await f.run("install", []);
+  expect(retry.code, retry.output).toBe(0);
+  expect(retry.output).toContain("ssh -L 3000:127.0.0.1:3000");
+  expect(await readFile(configPath, "utf8")).toBe(config);
 });
 
 it("rejects remote contexts and unrelated destination directories before builds", async () => {
@@ -298,8 +374,11 @@ it("rejects remote contexts and unrelated destination directories before builds"
 
 it("allows password correction and an existing HTTPS origin", async () => {
   const f = await fixture();
+  const urlPrompt = "Panel URL [default: http://localhost:4000,";
   const result = await f.run("install", [
-    ["Panel URL [", "https://nimbot.example.com"],
+    [hostPortPrompt, "4000"],
+    [urlPrompt, "https://nimbot.example.com:65536"],
+    [urlPrompt, "https://nimbot.example.com:8443"],
     ["characters, hidden): ", "short"],
     ["Repeat password: ", "short"],
     ["characters, hidden): ", "long-enough-password"],
@@ -310,9 +389,13 @@ it("allows password correction and an existing HTTPS origin", async () => {
   expect(result.code, result.output).toBe(0);
   expect(result.output).toContain("Password was rejected");
   expect(result.output).toContain("Passwords do not match");
+  expect(result.output).toContain("forward to 127.0.0.1:4000");
   expect(result.output).toContain(
-    "Nimbot is ready at https://nimbot.example.com",
+    "Nimbot is ready at https://nimbot.example.com:8443",
   );
+  const config = await readFile(join(f.destination, ".env"), "utf8");
+  expect(config).toContain("PANEL_PUBLISH_PORT=4000\n");
+  expect(config).toContain("PANEL_URL='https://nimbot.example.com:8443'\n");
 });
 
 it.each(["build", "health"])(
@@ -324,7 +407,7 @@ it.each(["build", "health"])(
       failure === "build"
         ? []
         : [
-            ["Panel URL [", ""],
+            ...defaultPanelAnswers,
             ["characters, hidden): ", "long-enough-password"],
             ["Repeat password: ", "long-enough-password"],
           ],
@@ -447,7 +530,7 @@ it("installs a pinned release and rejects switching tags through the installer",
   const result = await f.run(
     "install",
     [
-      ["Panel URL [", ""],
+      ...defaultPanelAnswers,
       ["characters, hidden): ", "long-enough-password"],
       ["Repeat password: ", "long-enough-password"],
     ],

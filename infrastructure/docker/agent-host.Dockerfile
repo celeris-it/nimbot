@@ -12,7 +12,9 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY apps/agent-host/package.json apps/agent-host/package.json
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
-RUN pnpm install --frozen-lockfile \
+# Installed source can be owner-only; the runtime user needs to read it.
+RUN chmod -R a+rX /app \
+ && pnpm install --frozen-lockfile \
  && pnpm --filter @nimbot/agent-host exec playwright install --with-deps chromium \
  && chmod -R a+rX /opt/playwright \
  && rm -rf /var/lib/apt/lists/*
@@ -21,7 +23,8 @@ COPY scripts/state-schema.mjs scripts/state-schema.d.mts scripts/
 COPY scripts/state-schema/ scripts/state-schema/
 COPY apps/agent-host/src apps/agent-host/src
 COPY apps/agent-host/tsconfig.json apps/agent-host/tsconfig.json
-RUN pnpm --filter @nimbot/agent-host build
+RUN chmod -R a+rX scripts apps/agent-host/src apps/agent-host/tsconfig.json \
+ && pnpm --filter @nimbot/agent-host build
 
 # The base image ships a non-root "node" user (uid 1000).
 RUN mkdir -p /workspace /home/node/.local/share/opencode /home/node/.local/share/nimbot \
