@@ -2,6 +2,7 @@ import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
 import { waitForUpgradeActivation } from "./upgrade-activation.js";
 import { createAgentRecovery } from "./agent-recovery.js";
 import { createRecoveryWorkGate } from "./recovery-work-gate.js";
+import { createDiscordAttachments } from "./discord-attachments.js";
 import { createTelegramAttachments } from "./telegram-attachments.js";
 import { createAgentTaskServices } from "./agent-task-services.js";
 import {
@@ -24,7 +25,13 @@ import { createPeerTools } from "./peer-tools.js";
 import { createDelegationExecution } from "./delegation-execution.js";
 import { openApprovalRules } from "./approval-rules.js";
 import { MEMORY_OPERATIONS } from "./memory-operations.js";
-import type { ChatTask, DiscordQueuedTask, RoutedTask } from "./task-queue.js";
+import type {
+  ChatTask,
+  DiscordConversation,
+  DiscordDestination,
+  DiscordQueuedTask,
+  RoutedTask,
+} from "./task-queue.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
 import { openOperationalAlertStore } from "./operational-alert-store.js";
@@ -245,14 +252,30 @@ async function main(): Promise<void> {
   }
   const discord = createDiscordConfiguration(registry, discordSecrets);
   const discordDelivery = createDiscordNotifications(discord.resolve);
-  function discordAdmit(task: DiscordQueuedTask) {
-    const connection = registry.getDiscordConnection(task.agentId);
+  function linkedDiscord(id: string): DiscordConversation | undefined {
+    const connection = registry.getDiscordConnection(id);
+    const channelId = discordInbox.getBinding(id);
+    if (!connection || !channelId) return undefined;
+    return {
+      platform: "discord",
+      botId: connection.botId,
+      ownerId: connection.ownerId,
+      channelId,
+    };
+  }
+  function matchesDiscord(task: DiscordDestination) {
+    const current = linkedDiscord(task.agentId);
+    return (
+      current?.botId === task.origin.botId &&
+      current.ownerId === task.origin.ownerId &&
+      current.channelId === task.origin.channelId
+    );
+  }
+  function discordAdmit(task: DiscordDestination) {
     const setup = registry.getProvisioning(task.agentId);
     return (
       workGate.allowsWork(task.agentId) &&
-      connection?.botId === task.origin.botId &&
-      connection.ownerId === task.origin.ownerId &&
-      discordInbox.getBinding(task.agentId) === task.origin.channelId &&
+      matchesDiscord(task) &&
       setup?.status === "ready" &&
       !!registry.get(task.agentId)?.containerRef &&
       !!setup.volumeRef &&
@@ -262,10 +285,12 @@ async function main(): Promise<void> {
       registry.getProvisioningCancellation(task.agentId) === undefined
     );
   }
-  async function sendDiscordTask(task: DiscordQueuedTask, text: string) {
+  async function sendDiscordTask(task: DiscordDestination, text: string) {
     if (!discordAdmit(task))
       throw new Error("Discord destination is unavailable");
-    const result = await discordDelivery.sendTask(task, text);
+    const result = await discordDelivery.sendTask(task, text, () =>
+      discordAdmit(task),
+    );
     if (result.status !== "delivered")
       throw new Error("Discord delivery could not be confirmed");
   }
@@ -386,16 +411,27 @@ async function main(): Promise<void> {
         access: createAgentAccess(registry, id),
         discord: {
           admit: discordAdmit,
+          attachments: createDiscordAttachments(host, discord.resolve),
+          sendFile: discordDelivery.sendFile,
           progress: (task, message) =>
             sendDiscordTask(task, `Working: ${message}`),
           deliver: (task, outcome) =>
             sendDiscordTask(
               task,
-              outcome.ok
-                ? outcome.output || "The task finished without a text response."
-                : outcome.kind === "cancelled"
-                  ? "The task was cancelled. You can send a new task."
-                  : "The task could not be completed. Check the agent status before trying again.",
+              !outcome.ok &&
+                outcome.kind === "attachment_unavailable" &&
+                task.discordAttachment?.error === "multiple"
+                ? "Send one document at a time."
+                : !outcome.ok &&
+                    outcome.kind === "attachment_unavailable" &&
+                    task.discordAttachment?.error === "too_large"
+                  ? "Documents must be 10 MiB or smaller."
+                  : outcome.ok
+                    ? outcome.output ||
+                      "The task finished without a text response."
+                    : outcome.kind === "cancelled"
+                      ? "The task was cancelled. You can send a new task."
+                      : "The task could not be completed. Check the agent status before trying again.",
             ),
           sendApproval: discordDelivery.sendApproval,
           sendDelegation: (task, text, canSend) =>

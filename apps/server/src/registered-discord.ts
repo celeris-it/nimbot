@@ -61,11 +61,17 @@ export function createRegisteredDiscord(
               channelId: saved.channelId,
               messageId: saved.messageId,
             };
-            if (saved.content.trim() === "/stop") {
+            if (
+              !saved.attachment?.document &&
+              !saved.attachment?.error &&
+              saved.content.trim() === "/stop"
+            ) {
               tasks.inbox.markHandled(saved.id);
               runner.discordControl.stop(origin);
             } else {
-              runner.submitDiscord(origin, saved.content);
+              if (saved.attachment)
+                runner.submitDiscord(origin, saved.content, saved.attachment);
+              else runner.submitDiscord(origin, saved.content);
               tasks.inbox.markHandled(saved.id);
             }
           }

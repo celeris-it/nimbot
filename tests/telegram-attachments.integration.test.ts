@@ -433,7 +433,7 @@ describe("Telegram document tasks", () => {
     }
   });
 
-  it("exposes no delivery tool to Discord, scheduled, webhook or delegated tasks", async () => {
+  it("restricts the Telegram delivery tool to Telegram chat tasks", async () => {
     const f = await setup();
     try {
       f.attach();
