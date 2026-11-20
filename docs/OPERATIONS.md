@@ -298,6 +298,21 @@ held in memory for up to ten minutes. If delivery is uncertain, check the chat
 before asking again. Imported and exported workspace files are retained with
 the workspace volume and included in its backups.
 
+### Discord attachments
+
+In the linked owner DM, send one file of up to 10 MiB. Text in the same
+message runs a task using the file. A file sent by itself is saved to
+`attachments/<task-id>/` without using the AI provider. Reply directly to the
+original message or use the confirmed workspace path in a later task.
+
+Queued imports can resume after a Server restart. The Server fetches the
+original Discord message when the task runs, so leave the original attachment
+available until Nimbot saves it. If the import fails, resend the file.
+
+Ask the agent in the DM to return a file. After a successful chat task, it can
+send one file of up to 10 MiB from that task's exports directory. Check the DM
+before asking again if delivery is uncertain.
+
 ### Model and usage
 
 Use **Configure AI providers** on the agent's setup page and choose **Sign in to
@@ -322,15 +337,17 @@ allow a task to start shortly before the account reaches a limit.
 
 Open **Manage schedules** on the agent page for the last run outcome, execution
 status, and recent history. The owner can use `/schedules` to check next run times
-and enabled state without contacting the Host. The server checks schedules at
+enabled state, and delivery channels in Telegram or Discord without contacting the
+Host. Choose **Delivery channel** when creating or editing a schedule in the panel.
+A schedule confirmed in chat delivers to that chat. The server checks schedules at
 startup and every 30 seconds, so admission is not guaranteed at the exact second
 shown in the panel. Once enqueued, a task can also wait behind earlier work in the
 agent's FIFO queue.
 
 **Skipped: agent unavailable or owner chat unlinked.** Check that provisioning is
 complete, the container is running, the Host is reachable, and the owner's private
-Telegram chat is linked. The owner must send that bot a private message; a
-connected polling loop alone does not link the chat. Nimbot never starts a stopped
+chat on the selected channel is linked. The owner must send that bot a private
+message to link it. Nimbot never starts a stopped
 container for a schedule. Only the first not-ready skip of a consecutive streak
 attempts a notice through durable notifications; a missing owner chat, unavailable
 bot, or notification quota can prevent that notice. Further skips remain visible

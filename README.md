@@ -46,7 +46,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
 - Choose a model per agent, review tokens and reported cost by agent or task, and pause the agent’s queue when OpenCode reports an exhausted Console budget or Go allowance.
-- Run saved prompts once, daily, weekly, at fixed intervals, or on authenticated webhook requests configured from the panel, with results delivered to the owner's Telegram chat.
+- Run saved prompts once, daily, weekly, at fixed intervals, or on authenticated webhook requests configured from the panel, with results delivered to the owner's Telegram or Discord chat, as selected for each schedule.
 - Send documents up to 10 MiB to a Telegram agent and ask it to return generated files in the same chat.
 - Cancel a running task without affecting other agents or blocking later queued tasks.
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
@@ -190,17 +190,20 @@ snapshot of a possibly shared account.
 
 Open **Manage schedules** on an agent's page to create, edit, pause, resume, run,
 or delete saved prompts. The panel shows each schedule's next local run time,
-enabled state, and recent run outcomes. `/schedules` lists schedules in the owner's
-Telegram chat even if the container is stopped.
+enabled state, delivery channel, and recent run outcomes. `/schedules` lists
+schedules in the owner's Telegram chat or Discord DM even if the container is
+stopped. Edit **Delivery channel** to route future runs to a different linked
+owner chat. Existing schedules and new panel schedules default to Telegram.
 
-To create a timed schedule in Telegram, message your agent as usual, for example
+To create a timed schedule in Telegram or Discord, message your agent as usual, for example
 “Remind me every Monday at 9 AM to review invoices.” The agent asks for any
 missing details. Review the task, cadence, time zone, and first run, then choose
 **Confirm** to save it or **Cancel** to discard it. A newer preview replaces the
 previous one, and previews expire after ten minutes or on server restart.
+The schedule delivers to the channel where you confirmed it.
 
 Set the installation's **Schedule time zone** in the panel under **Settings**.
-It starts at `UTC`, applies to new schedules created from Telegram, and prefills
+It starts at `UTC`, applies to new schedules created in chat, and prefills
 the editable time zone for new schedules in the panel. Saved schedules retain
 their own time zone.
 
@@ -221,7 +224,9 @@ no scheduler-specific environment variables.
 The same operations are available under the authenticated
 `/api/agents/:id/schedules` API. Mutations use POST. Schedule settings are form
 fields `name`, `prompt`, `timeZone`, and `cadence` (a JSON object with its kind and
-matching fields); interval anchors are assigned by the server.
+matching fields). The optional `deliveryChannel` field accepts `telegram` or
+`discord`. Omitting it on edit preserves the saved channel. The server assigns
+interval anchors.
 Read or change the global zone with `GET` or `POST /api/settings/schedules`.
 The POST accepts the `timeZone` form field.
 
@@ -239,8 +244,8 @@ durable notification only for the first not-ready skip of a consecutive streak.
 Each executed run uses the agent's AI provider credits and shares its existing conversation
 context and FIFO queue with chat messages. Only the final result or failure is
 sent, prefixed with the schedule name saved at enqueue time; there are no
-`Working: …` messages. Approvals and `/stop` use the owner's Telegram chat as
-usual. Scheduled delivery is Telegram-only.
+`Working: …` messages. Results, approvals, and `/stop` use the linked owner chat
+saved when the run was queued. A new destination applies to future runs.
 
 **Run now** uses the same readiness and overlap checks and records its outcome
 without changing the next timed occurrence. A paused schedule can still be run
@@ -275,7 +280,7 @@ queued, `401` for invalid credentials, `400` for invalid JSON, `413` for an
 oversized body, or `415` for an unsupported content type. A paused, changed,
 or not-ready schedule returns `409`; an unavailable scheduler returns `503`.
 Responses contain only an `outcome` and, on failure, an `error` message.
-Results and approvals use the owner's Telegram chat.
+Results and approvals use the schedule's selected owner chat.
 
 A request that arrives while an earlier run of the same schedule is still
 queued or running is not skipped: it becomes its own task, with its own
@@ -403,6 +408,12 @@ runner as Telegram. Progress, results, errors, and approval buttons return to th
 saved origin; `/stop` in the Discord owner DM cancels its running task. Approval
 interactions verify the active task and owner before applying a decision.
 Task services belong to agents independently of their channel connections.
+The owner can send one file up to 10 MiB per Discord message. Include
+instructions to use it immediately or send the file alone to save it. Reply to
+the original message to use the saved file. Ask the agent to return a file to
+receive one attachment of up to 10 MiB from a successful chat task.
+See [Discord attachments](docs/OPERATIONS.md#discord-attachments).
+
 Inbox admission is idempotent after restart; interrupted running tasks are not
 replayed. The panel reports Discord conversation state and owner DM linking separately
 from Telegram polling and Host readiness. Recovery tests cover session resume,
@@ -412,10 +423,10 @@ replayed events, cross-channel deduplication and context, and restored FIFO work
 
 The following ideas are deferred, not supported features or delivery commitments:
 
-- **Messaging:** WhatsApp, Slack, shared agents, groups/topics, photo and media messages, Discord attachments, voice messages, management bots, and Telegram Managed Bots provisioning.
+- **Messaging:** WhatsApp, Slack, shared agents, groups/topics, photo and media messages, voice messages, management bots, and Telegram Managed Bots provisioning.
 - **Nimbot messaging app:** a dedicated messaging app with [Matrix](https://matrix.org/) connectivity.
 - **Agent capabilities:** multi-hop orchestration, shared memory and workspaces, richer memory retrieval, external MCP OAuth, arbitrary MCP stdio commands, and a tool marketplace.
-- **Scheduled automation:** Discord delivery, cron expressions, additional event triggers, and chained automations.
+- **Scheduled automation:** cron expressions, additional event triggers, and chained automations.
 - **User experience:** advanced dashboards and analytics, web chat, richer configuration, templates, browser terminals, workspace browsing, conversation search, and additional panel accounts.
 - **Operations:** multi-server and distributed execution, advanced monitoring, automated backups, image management, alternative runtimes, and stronger isolation.
 - **Managed hosting:** a separate paid offering; hosted accounts, billing, subscriptions, public registration, public multi-tenant hosting, organizations, marketplaces, and automatic external infrastructure provisioning remain outside the self-hosted product's current scope.
