@@ -2,7 +2,10 @@ import type {
   openNotificationStore,
   NotificationRecord,
 } from "./notification-store.js";
-import type { NotificationChannel } from "./notifications.js";
+import type {
+  NotificationChannel,
+  NotificationResult,
+} from "./notifications.js";
 import { createNotifications } from "./notifications.js";
 import { log as defaultLog, type Logger } from "./logger.js";
 
@@ -21,6 +24,7 @@ export function createDurableNotifications(
       requestId: string,
       channel: NotificationChannel,
       text: string,
+      sendToSavedOrigin?: () => Promise<NotificationResult>,
     ): Promise<NotificationRecord> {
       const limited = !canSend(agentId);
       const intent = store.begin(agentId, requestId, channel, text, !limited);
@@ -37,7 +41,9 @@ export function createDurableNotifications(
       logger.info("notification.sending", { agentId, channel });
       let result;
       try {
-        result = await delivery.send(agentId, channel, text);
+        result = await (sendToSavedOrigin
+          ? sendToSavedOrigin()
+          : delivery.send(agentId, channel, text));
       } catch {
         result = {
           status: "uncertain",

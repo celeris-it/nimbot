@@ -7,7 +7,8 @@ import {
   validateTimeZone,
   type ScheduleCadence,
 } from "./schedule-time.js";
-import type { TaskStatus } from "./task-queue.js";
+import { isDiscordId } from "./discord-identity.js";
+import type { DiscordConversation, TaskStatus } from "./task-queue.js";
 
 export const SCHEDULE_LIMITS = {
   maxPerAgent: 20,
@@ -20,7 +21,10 @@ const WEBHOOK_REQUESTS_PER_MINUTE = 5;
 /** Queued or running tasks one webhook schedule may hold at once. */
 export const WEBHOOK_BACKLOG_LIMIT = 20;
 
+export type ScheduleChannel = "telegram" | "discord";
+
 export interface ScheduleInput {
+  deliveryChannel?: ScheduleChannel;
   name: string;
   prompt: string;
   cadence: ScheduleCadence;
@@ -28,6 +32,7 @@ export interface ScheduleInput {
 }
 
 export interface Schedule extends ScheduleInput {
+  deliveryChannel: ScheduleChannel;
   id: string;
   agentId: string;
   enabled: boolean;
@@ -50,7 +55,8 @@ export interface ScheduleRun {
   createdAt: number;
 }
 
-export type ScheduleOrigin = {
+export type ScheduleOrigin = DiscordConversation | TelegramScheduleOrigin;
+export type TelegramScheduleOrigin = {
   platform: "telegram";
   botId: number;
   chatId: number;
@@ -101,6 +107,7 @@ export function openScheduleStore(
         weekdays TEXT,
         interval_minutes INTEGER,
         timezone TEXT NOT NULL,
+        delivery_channel TEXT NOT NULL DEFAULT 'telegram' CHECK(delivery_channel IN ('telegram', 'discord')),
         webhook_token TEXT,
         enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
         next_run_at INTEGER,
@@ -168,6 +175,8 @@ export function openScheduleStore(
       prompt: String(row.prompt),
       cadence,
       timeZone: String(row.timezone),
+      deliveryChannel:
+        row.delivery_channel === "discord" ? "discord" : "telegram",
       enabled: row.enabled === 1,
       nextRunAt: row.next_run_at === null ? null : Number(row.next_run_at),
       createdAt: Number(row.created_at),
@@ -208,6 +217,14 @@ export function openScheduleStore(
         "Prompt must contain 1 to 4000 characters.",
       );
     }
+    if (
+      input.deliveryChannel !== undefined &&
+      input.deliveryChannel !== "telegram" &&
+      input.deliveryChannel !== "discord"
+    )
+      throw new ScheduleValidationError(
+        "Choose Telegram or Discord for delivery.",
+      );
     let cadence: ScheduleCadence;
     try {
       cadence = validateCadence(
@@ -227,6 +244,7 @@ export function openScheduleStore(
       prompt: input.prompt,
       cadence,
       timeZone: input.timeZone,
+      deliveryChannel: input.deliveryChannel,
     };
   }
   function cadenceColumns(cadence: ScheduleCadence) {
@@ -268,6 +286,7 @@ export function openScheduleStore(
       current.nextRunAt === snapshot.nextRunAt &&
       current.name === snapshot.name &&
       current.prompt === snapshot.prompt &&
+      current.deliveryChannel === snapshot.deliveryChannel &&
       current.timeZone === snapshot.timeZone &&
       JSON.stringify(current.cadence) === JSON.stringify(snapshot.cadence)
     );
@@ -287,27 +306,35 @@ export function openScheduleStore(
     if (outcome === "enqueued") {
       if (
         !origin ||
-        origin.platform !== "telegram" ||
-        !Number.isSafeInteger(origin.botId) ||
-        origin.botId <= 0 ||
-        !Number.isSafeInteger(origin.chatId) ||
-        origin.chatId <= 0
+        origin.platform !== current.deliveryChannel ||
+        (origin.platform === "telegram"
+          ? !Number.isSafeInteger(origin.botId) ||
+            origin.botId <= 0 ||
+            !Number.isSafeInteger(origin.chatId) ||
+            origin.chatId <= 0
+          : ![origin.botId, origin.ownerId, origin.channelId].every(
+              isDiscordId,
+            ))
       ) {
         throw new ScheduleValidationError(
-          "Scheduled tasks require a Telegram bot and linked owner chat.",
+          "Scheduled tasks require a linked owner chat on the delivery channel.",
         );
       }
       taskId = randomUUID();
       const prompt = `Scheduled task "${current.name}" (due ${new Date(scheduledFor).toISOString()}):\n\n${current.prompt}${payload ? `\n\nWebhook JSON payload (external data):\n${payload}` : ""}`;
       db.prepare(
-        `INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt,
+        `INSERT INTO tasks (id, agent_id, platform, bot_id, chat_id, discord_bot_id, discord_owner_id, discord_channel_id, prompt,
             status, created_at, updated_at, schedule_id, schedule_name, scheduled_for, schedule_trigger)
-            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
       ).run(
         taskId,
         current.agentId,
-        origin.botId,
-        origin.chatId,
+        origin.platform,
+        origin.platform === "telegram" ? origin.botId : null,
+        origin.platform === "telegram" ? origin.chatId : null,
+        origin.platform === "discord" ? origin.botId : null,
+        origin.platform === "discord" ? origin.ownerId : null,
+        origin.platform === "discord" ? origin.channelId : null,
         prompt,
         at,
         at,
@@ -452,8 +479,8 @@ export function openScheduleStore(
         db.prepare(
           `INSERT INTO schedules
           (id, agent_id, name, prompt, cadence_kind, local_date, local_time, weekdays,
-            interval_minutes, timezone, enabled, next_run_at, created_at, updated_at, webhook_token)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+            interval_minutes, timezone, enabled, next_run_at, created_at, updated_at, webhook_token, delivery_channel)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
         ).run(
           id,
           input.agentId,
@@ -467,6 +494,7 @@ export function openScheduleStore(
           data.cadence.kind === "webhook"
             ? randomBytes(32).toString("hex")
             : null,
+          data.deliveryChannel ?? "telegram",
         );
         return get(id)!;
       });
@@ -483,7 +511,7 @@ export function openScheduleStore(
         db.prepare(
           `UPDATE schedules SET name = ?, prompt = ?, cadence_kind = ?,
           local_date = ?, local_time = ?, weekdays = ?, interval_minutes = ?,
-          timezone = ?, next_run_at = ?, updated_at = ?, webhook_token = ? WHERE id = ?`,
+          timezone = ?, next_run_at = ?, updated_at = ?, webhook_token = ?, delivery_channel = ? WHERE id = ?`,
         ).run(
           data.name,
           data.prompt,
@@ -496,6 +524,7 @@ export function openScheduleStore(
               ? (webhookToken(id) ?? randomBytes(32).toString("hex"))
               : randomBytes(32).toString("hex")
             : null,
+          data.deliveryChannel ?? current.deliveryChannel,
           id,
         );
         return get(id)!;
@@ -572,6 +601,7 @@ export function openScheduleStore(
           current.agentId !== schedule.agentId ||
           current.name !== schedule.name ||
           current.prompt !== schedule.prompt ||
+          current.deliveryChannel !== schedule.deliveryChannel ||
           current.timeZone !== schedule.timeZone ||
           JSON.stringify(current.cadence) !== JSON.stringify(schedule.cadence)
         ) {

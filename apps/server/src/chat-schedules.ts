@@ -5,6 +5,7 @@ import type { RoutedTask } from "./task-queue.js";
 import {
   SCHEDULE_LIMITS,
   ScheduleValidationError,
+  type Schedule,
   type ScheduleInput,
   type ScheduleOrigin,
   type ScheduleStore,
@@ -67,6 +68,35 @@ function describeCadence(cadence: ScheduleInput["cadence"]) {
   }
 }
 
+export type ListedSchedule = Pick<
+  Schedule,
+  "name" | "enabled" | "nextRunAt" | "timeZone"
+> &
+  Partial<Pick<Schedule, "deliveryChannel">> & {
+    cadence: Pick<Schedule["cadence"], "kind">;
+  };
+
+export function formatScheduleList(
+  schedules: ListedSchedule[],
+  agentName: string,
+  manage: string,
+) {
+  if (!schedules.length) return `No schedules for ${agentName}. ${manage}`;
+  const rows = schedules.map((schedule) => {
+    const state = `${schedule.name} — ${schedule.enabled ? "Enabled" : "Disabled"}`;
+    const channel =
+      schedule.deliveryChannel === "discord" ? "Discord" : "Telegram";
+    const next =
+      schedule.cadence.kind === "webhook"
+        ? "Runs on webhook request"
+        : schedule.nextRunAt === null
+          ? `Next run: No upcoming run (${schedule.timeZone})`
+          : `Next run: ${formatRun(schedule.nextRunAt, schedule.timeZone)}`;
+    return `${state}\n${next}\nDelivery via ${channel}`;
+  });
+  return `Schedules for ${agentName}:\n\n${rows.join("\n\n")}\n\n${manage}`;
+}
+
 export function createChatSchedules(config: {
   agentId: string;
   store: Pick<ScheduleStore, "getDefaultTimeZone" | "preview" | "create">;
@@ -76,7 +106,7 @@ export function createChatSchedules(config: {
     text: string,
     key: string,
     signal: AbortSignal,
-  ): Promise<void>;
+  ): Promise<string | void>;
   now?: () => number;
 }) {
   const now = config.now ?? Date.now;
@@ -86,13 +116,14 @@ export function createChatSchedules(config: {
     input: ScheduleInput & { agentId: string };
     nextRunAt: number | null;
     expiresAt: number;
+    messageId?: string;
   };
   let pending: Draft | undefined;
 
   function eligible(task: RoutedTask) {
     return (
       task.agentId === config.agentId &&
-      task.origin.platform === "telegram" &&
+      task.origin.platform !== "delegated" &&
       task.scheduleId === undefined &&
       config.canReach(task.origin)
     );
@@ -131,7 +162,7 @@ export function createChatSchedules(config: {
       validate: (args) => proposal.safeParse(args).data,
       authorize: eligible,
       async execute(task, args, { signal }) {
-        if (task.origin.platform !== "telegram" || !eligible(task))
+        if (task.origin.platform === "delegated" || !eligible(task))
           throw new Error("Schedule proposals are unavailable");
         const { name, prompt, cadence, timeZone } = proposal.parse(args);
         if (timeZone !== config.store.getDefaultTimeZone())
@@ -143,6 +174,7 @@ export function createChatSchedules(config: {
         const input = {
           agentId: config.agentId,
           name,
+          deliveryChannel: task.origin.platform,
           prompt,
           timeZone,
           cadence:
@@ -152,7 +184,7 @@ export function createChatSchedules(config: {
         };
         try {
           const { data, next } = config.store.preview(input);
-          const draft = {
+          const draft: Draft = {
             key: randomBytes(12).toString("base64url"),
             origin: task.origin,
             input: { ...data, agentId: config.agentId },
@@ -173,7 +205,13 @@ export function createChatSchedules(config: {
           signal.throwIfAborted();
           pending = draft;
           try {
-            await config.send(task.origin, text, draft.key, signal);
+            const messageId = await config.send(
+              task.origin,
+              text,
+              draft.key,
+              signal,
+            );
+            if (typeof messageId === "string") draft.messageId = messageId;
           } catch (error) {
             if (pending === draft) pending = undefined;
             throw error;
@@ -192,13 +230,26 @@ export function createChatSchedules(config: {
     handlers,
     operations: (task: RoutedTask) =>
       eligible(task) ? [CONTEXT, PROPOSE] : [],
-    answer(key: string, confirm: boolean, origin: ScheduleOrigin) {
+    answer(
+      key: string,
+      confirm: boolean,
+      origin: ScheduleOrigin,
+      messageId?: string,
+    ) {
       const draft = pending;
       if (
         !draft ||
         key !== draft.key ||
+        origin.platform !== draft.origin.platform ||
         origin.botId !== draft.origin.botId ||
-        origin.chatId !== draft.origin.chatId ||
+        (origin.platform === "telegram"
+          ? draft.origin.platform !== "telegram" ||
+            origin.chatId !== draft.origin.chatId
+          : draft.origin.platform !== "discord" ||
+            origin.ownerId !== draft.origin.ownerId ||
+            origin.channelId !== draft.origin.channelId ||
+            !messageId ||
+            messageId !== draft.messageId) ||
         !config.canReach(origin)
       )
         return "This schedule proposal has expired or was already answered.";

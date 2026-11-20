@@ -17,7 +17,7 @@ let now: number;
 let store: ReturnType<typeof openScheduleStore>;
 let service: ReturnType<typeof createChatSchedules>;
 const send = vi.fn<
-  (origin: ScheduleOrigin, text: string, key: string) => Promise<void>
+  (origin: ScheduleOrigin, text: string, key: string) => Promise<string | void>
 >(async () => {});
 let reachable: boolean;
 beforeEach(() => {
@@ -38,6 +38,7 @@ afterEach(() => store.close());
 function propose(
   cadence: Record<string, unknown>,
   timeZone = store.getDefaultTimeZone(),
+  source: ChatTask = task,
 ) {
   const handler = service.handlers.find(
     ({ operation }) => operation === "schedule.propose",
@@ -49,7 +50,7 @@ function propose(
     cadence,
   });
   expect(args).toBeDefined();
-  return handler.execute(task, args!, {
+  return handler.execute(source, args!, {
     invocationId: "test",
     signal: new AbortController().signal,
   });
@@ -112,7 +113,7 @@ it("rejects incomplete proposals, unsupported cadences and invalid intervals", a
   expect(send).not.toHaveBeenCalled();
 });
 
-it("only grants schedule tools to the reachable interactive Telegram task", () => {
+it("only grants schedule tools to reachable interactive chat tasks", () => {
   expect(service.operations(task)).toEqual([
     "schedule.context",
     "schedule.propose",
@@ -145,7 +146,7 @@ it("only grants schedule tools to the reachable interactive Telegram task", () =
         messageId: "4",
       },
     }),
-  ).toEqual([]);
+  ).toEqual(["schedule.context", "schedule.propose"]);
   reachable = false;
   expect(service.operations(task)).toEqual([]);
 });
@@ -193,4 +194,40 @@ it("expires a draft whose Telegram preview could not be sent", async () => {
   );
   expect(service.answer(key(), true, origin)).toContain("expired");
   expect(store.listByAgent("dev")).toEqual([]);
+});
+
+it("confirms a Discord proposal once from the same owner, DM and message", async () => {
+  const discord = {
+    platform: "discord",
+    botId: "11",
+    ownerId: "22",
+    channelId: "33",
+  } as const;
+  send.mockResolvedValue("44");
+  const source = {
+    id: "d",
+    agentId: "dev",
+    prompt: "Schedule a review",
+    origin: discord,
+  };
+  const cadence = { kind: "daily", time: "09:00" };
+  await propose(cadence, "UTC", source);
+  expect(
+    service.answer(key(), true, { ...discord, ownerId: "55" }, "44"),
+  ).toContain("expired");
+  expect(service.answer(key(), true, discord, "55")).toContain("expired");
+  expect(store.listByAgent("dev")).toEqual([]);
+  expect(service.answer(key(), true, discord, "44")).toContain(
+    'Schedule "Review" created.',
+  );
+  expect(service.answer(key(), true, discord, "44")).toContain(
+    "already answered",
+  );
+  expect(store.listByAgent("dev")).toMatchObject([
+    { deliveryChannel: "discord" },
+  ]);
+  await propose(cadence, "UTC", source);
+  now += 10 * MINUTE;
+  expect(service.answer(key(), true, discord, "44")).toContain("expired");
+  expect(store.listByAgent("dev")).toHaveLength(1);
 });

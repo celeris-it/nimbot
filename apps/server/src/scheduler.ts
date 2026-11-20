@@ -1,4 +1,5 @@
 import { createAgentAccess } from "./agent-access.js";
+import type { NotificationResult } from "./notifications.js";
 import type { createDurableNotifications } from "./durable-notifications.js";
 import type { openAgentRegistry } from "./agent-registry.js";
 import {
@@ -23,14 +24,33 @@ const MAX_LATENESS_MS = 10 * 60_000;
 /** Stable request IDs keep a skip notice idempotent in the existing outbox. */
 export function createScheduleSkipNotifier(
   notifications: Pick<ReturnType<typeof createDurableNotifications>, "send">,
+  discord?: {
+    origin(
+      id: string,
+    ): Extract<ScheduleOrigin, { platform: "discord" }> | undefined;
+    send(
+      id: string,
+      origin: Extract<ScheduleOrigin, { platform: "discord" }>,
+      text: string,
+    ): Promise<NotificationResult>;
+  },
 ) {
   return async (schedule: Schedule, run: ScheduleRun): Promise<void> => {
-    await notifications.send(
-      schedule.agentId,
-      `schedule-skip-${run.id}`,
-      "telegram",
-      `Scheduled task "${schedule.name}" was skipped because the agent is stopped or not ready, or its owner chat is not linked. Check the panel. Further skips will not send another notice until this streak ends.`,
-    );
+    const text = `Scheduled task "${schedule.name}" was skipped because the agent is stopped or not ready, or its owner chat is not linked. Check the panel. Further skips will not send another notice until this streak ends.`;
+    const requestId = `schedule-skip-${run.id}`;
+    if (schedule.deliveryChannel === "discord") {
+      const origin = discord?.origin(schedule.agentId);
+      if (!origin || !discord) return;
+      await notifications.send(
+        schedule.agentId,
+        requestId,
+        "discord",
+        text,
+        () => discord.send(schedule.agentId, origin, text),
+      );
+    } else {
+      await notifications.send(schedule.agentId, requestId, "telegram", text);
+    }
   };
 }
 
@@ -40,9 +60,28 @@ export function createScheduleAdmission(
   hosts: { read(agentId: string): Promise<AgentHostConfig> },
   status: (host: AgentHostConfig) => Promise<HostStatus> = getHostStatus,
   allowsWork: (id: string) => boolean = () => true,
+  discordOrigin?: (
+    id: string,
+  ) => Extract<ScheduleOrigin, { platform: "discord" }> | undefined,
 ) {
   return async (schedule: Schedule): Promise<ScheduleOrigin | undefined> => {
     try {
+      if (schedule.deliveryChannel === "discord") {
+        const origin = discordOrigin?.(schedule.agentId);
+        if (!origin || !allowsWork(schedule.agentId)) return undefined;
+        const host = await hosts.read(schedule.agentId);
+        if (
+          (await status(host)) === "unavailable" ||
+          !allowsWork(schedule.agentId)
+        )
+          return undefined;
+        const current = discordOrigin?.(schedule.agentId);
+        return current?.botId === origin.botId &&
+          current.ownerId === origin.ownerId &&
+          current.channelId === origin.channelId
+          ? origin
+          : undefined;
+      }
       const agent = registry.get(schedule.agentId);
       const chatId = registry.getOwnerChat(schedule.agentId);
       if (!agent || agent.botId === null || chatId === undefined)

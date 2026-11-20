@@ -341,6 +341,7 @@ describe("scheduled task listing", () => {
       enabled: true,
       nextRunAt: next,
       timeZone: "Europe/Madrid",
+      deliveryChannel: "discord" as const,
       cadence: { kind: "daily" as const },
     },
     {
@@ -348,6 +349,7 @@ describe("scheduled task listing", () => {
       enabled: false,
       nextRunAt: null,
       timeZone: "UTC",
+      deliveryChannel: "telegram" as const,
       cadence: { kind: "once" as const },
     },
     {
@@ -355,6 +357,7 @@ describe("scheduled task listing", () => {
       enabled: true,
       nextRunAt: null,
       timeZone: "UTC",
+      deliveryChannel: "telegram" as const,
       cadence: { kind: "webhook" as const },
     },
   ];
@@ -370,7 +373,7 @@ describe("scheduled task listing", () => {
     const f = setup(execute, undefined, hostStatus, undefined, undefined, read);
     await f.bot.handleUpdate(message("/schedules"));
     expect(f.sent).toEqual([
-      "Schedules for Test agent:\n\nMorning summary — Enabled\nNext run: Jan 2, 2027, 9:00 AM (Europe/Madrid)\n\nPaused check — Disabled\nNext run: No upcoming run (UTC)\n\nDeploy hook — Enabled\nRuns on webhook request\n\nCreate and manage schedules in this agent's panel.",
+      "Schedules for Test agent:\n\nMorning summary — Enabled\nNext run: Jan 2, 2027, 9:00 AM (Europe/Madrid)\nDelivery via Discord\n\nPaused check — Disabled\nNext run: No upcoming run (UTC)\nDelivery via Telegram\n\nDeploy hook — Enabled\nRuns on webhook request\nDelivery via Telegram\n\nCreate and manage schedules in this agent's panel.",
     ]);
     expect(f.destinations).toEqual([42]);
     expect(read).toHaveBeenCalledOnce();

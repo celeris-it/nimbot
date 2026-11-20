@@ -13,6 +13,10 @@ export function createRegisteredDiscord(
   tasks?: {
     get(id: string): Promise<ReturnType<typeof createBotTasks>>;
     inbox: Pick<ReturnType<typeof openDiscordInbox>, "pending" | "markHandled">;
+    listSchedules?(
+      agentId: string,
+      origin: Parameters<ReturnType<typeof createBotTasks>["submitDiscord"]>[0],
+    ): Promise<void>;
   },
 ) {
   type Entry = {
@@ -68,6 +72,13 @@ export function createRegisteredDiscord(
             ) {
               tasks.inbox.markHandled(saved.id);
               runner.discordControl.stop(origin);
+            } else if (
+              !saved.attachment?.document &&
+              !saved.attachment?.error &&
+              saved.content.trim() === "/schedules"
+            ) {
+              tasks.inbox.markHandled(saved.id);
+              void tasks.listSchedules?.(id, origin).catch(() => {});
             } else {
               if (saved.attachment)
                 runner.submitDiscord(origin, saved.content, saved.attachment);

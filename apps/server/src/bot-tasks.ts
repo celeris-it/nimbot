@@ -117,6 +117,17 @@ export function createBotTasks(config: {
       file: WorkspaceFile,
       canSend: () => boolean,
     ): Promise<NotificationResult>;
+    sendScheduleProposal?(
+      task: DiscordDestination,
+      text: string,
+      key: string,
+      canSend: () => boolean,
+    ): Promise<string>;
+    sendText?(
+      task: DiscordDestination,
+      text: string,
+      canSend: () => boolean,
+    ): Promise<NotificationResult>;
     progress(task: DiscordQueuedTask, message: string): Promise<void>;
     deliver(task: DiscordQueuedTask, outcome: TaskOutcome): Promise<void>;
     sendDelegation?(
@@ -142,16 +153,38 @@ export function createBotTasks(config: {
             config.ownerId(),
             task.origin.chatId,
           );
+  const discordDestination = (
+    origin: DiscordDestination["origin"],
+  ): DiscordDestination => ({
+    agentId: config.agentId,
+    origin,
+  });
   const schedules =
     config.schedules &&
     createChatSchedules({
       agentId: config.agentId,
       ...config.schedules,
-      canReach: ({ botId, chatId }) =>
+      canReach: (origin) =>
         !closed &&
-        bot?.botInfo.id === botId &&
-        config.access?.canExecute(botId, config.ownerId(), chatId) === true,
+        (origin.platform === "discord"
+          ? !!config.discord?.sendScheduleProposal &&
+            config.discord.admit(discordDestination(origin))
+          : bot?.botInfo.id === origin.botId &&
+            config.access?.canExecute(
+              origin.botId,
+              config.ownerId(),
+              origin.chatId,
+            ) === true),
       async send(origin, text, key, signal) {
+        if (origin.platform === "discord") {
+          const task = discordDestination(origin);
+          return config.discord!.sendScheduleProposal!(
+            task,
+            text,
+            key,
+            () => !closed && !signal.aborted && !!config.discord?.admit(task),
+          );
+        }
         const target = bot;
         const parts = splitTelegramText(text);
         const sendSignal = AbortSignal.any([
@@ -714,7 +747,13 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
         const origin = bot;
         const chatId = task.origin.chatId;
         const sendText = () =>
-          sendTaskOutcome(origin.api, chatId, outcome, task.scheduleName);
+          sendTaskOutcome(
+            origin.api,
+            chatId,
+            outcome,
+            task.scheduleName,
+            task.scheduleId === undefined ? undefined : canDeliver,
+          );
         const hostTaskId =
           outcome.ok &&
           taskWithAttachment === task.id &&
@@ -835,6 +874,27 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
         ))
       )
         return "expired" as const;
+      const schedule = /^sc:([A-Za-z0-9_-]{16}):([yn])$/.exec(
+        interaction.customId,
+      );
+      if (schedule && schedules && config.discord.sendText) {
+        const task = discordDestination({
+          platform: "discord",
+          botId: interaction.botId,
+          ownerId: interaction.ownerId,
+          channelId: interaction.channelId,
+        });
+        const canSend = () => !closed && !!config.discord?.admit(task);
+        if (!canSend()) return "expired" as const;
+        const text = schedules.answer(
+          schedule[1]!,
+          schedule[2] === "y",
+          task.origin,
+          interaction.messageId,
+        );
+        await config.discord.sendText(task, text, canSend);
+        return "ok" as const;
+      }
       const key = /^ap:([A-Za-z0-9_-]{12}):(y|n)$/.exec(interaction.customId);
       if (key && gate) {
         const result = gate.answer(`${key[1]}`, {

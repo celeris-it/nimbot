@@ -99,7 +99,7 @@ async function fixture() {
     scheduler,
     get,
     post,
-    async create(agent = "a", body = fields) {
+    async create(agent = "a", body: Record<string, string> = fields) {
       const response = await post(`/api/agents/${agent}/schedules`, body);
       expect(response.status).toBe(201);
       return ((await response.json()) as { schedule: Schedule }).schedule;
@@ -680,4 +680,19 @@ it("revokes webhook access on activation changes and deletion", async () => {
   const currentToken = f.store.webhookToken(schedule.id)!;
   await f.post(`${base}/${schedule.id}/remove`);
   expect((await send("", currentToken)).status).toBe(401);
+});
+
+it("accepts Discord delivery and preserves it on edits from older API clients", async () => {
+  const schedule = await f.create("a", {
+    ...fields,
+    deliveryChannel: "discord",
+  });
+  expect(schedule.deliveryChannel).toBe("discord");
+  const path = `${base}/${schedule.id}`;
+  expect((await f.post(path, { ...fields, name: "Updated" })).status).toBe(200);
+  expect(f.store.get(schedule.id)?.deliveryChannel).toBe("discord");
+  expect(
+    (await f.post(path, { ...fields, deliveryChannel: "invalid" })).status,
+  ).toBe(400);
+  expect(f.store.get(schedule.id)?.deliveryChannel).toBe("discord");
 });

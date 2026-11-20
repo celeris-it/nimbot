@@ -19,7 +19,7 @@ export function createScheduleToolDefinitions() {
       operation: "schedule.propose",
       name: "schedule_propose",
       description:
-        "When the owner explicitly requests future or recurring work, propose one schedule for this agent. Ordinary requests to run a task now do not need this tool. Read schedule_context first and use its timeZone. If the requested zone differs, ask the owner to update the panel setting before proposing. Ask the owner for missing or ambiguous date, time, frequency, or task details before proposing. Supply a short name and a standalone prompt for the scheduled run. For a reminder, the prompt should ask the agent to notify the owner at run time. The server sends its own preview with Confirm and Cancel buttons. If awaiting_confirmation is returned, tell the owner to use the buttons. Only confirmation in Telegram saves the schedule.",
+        "When the owner explicitly requests future or recurring work, propose one schedule for this agent. Ordinary requests to run a task now do not need this tool. Read schedule_context first and use its timeZone. If the requested zone differs, ask the owner to update the panel setting before proposing. Ask the owner for missing or ambiguous date, time, frequency, or task details before proposing. Supply a short name and a standalone prompt for the scheduled run. For a reminder, the prompt should ask the agent to notify the owner at run time. The server sends its own preview with Confirm and Cancel buttons. If awaiting_confirmation is returned, tell the owner to use the buttons. Confirm in the current chat to save the schedule for delivery in that channel.",
       inputSchema: {
         type: "object",
         properties: {

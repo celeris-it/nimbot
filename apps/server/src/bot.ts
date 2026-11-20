@@ -10,7 +10,8 @@ import { splitTelegramText } from "./telegram-text.js";
 import type { TaskOutcome } from "./task-queue.js";
 import { Bot, type Api } from "grammy";
 import type { BotAccess } from "./agent-access.js";
-import type { Schedule, ScheduleOrigin } from "./schedule-store.js";
+import { formatScheduleList, type ListedSchedule } from "./chat-schedules.js";
+import type { TelegramScheduleOrigin } from "./schedule-store.js";
 
 const failureMessages = {
   attachment_unavailable:
@@ -34,14 +35,23 @@ export async function sendTaskOutcome(
   chatId: number,
   outcome: TaskOutcome,
   scheduleName?: string,
+  canSend: () => boolean = () => true,
 ) {
+  for (const part of splitTelegramText(
+    taskOutcomeText(outcome, scheduleName),
+  )) {
+    if (!canSend()) return;
+    await api.sendMessage(chatId, part);
+  }
+}
+
+export function taskOutcomeText(outcome: TaskOutcome, scheduleName?: string) {
   const prefix =
     scheduleName === undefined ? "" : `Scheduled task "${scheduleName}":\n\n`;
   const text = outcome.ok
     ? outcome.output || "The task finished without a text response."
     : failureMessages[outcome.kind];
-  for (const part of splitTelegramText(prefix + text))
-    await api.sendMessage(chatId, part);
+  return prefix + text;
 }
 
 /**
@@ -61,14 +71,11 @@ export interface BotConfig {
   telegramBotToken: string;
   agent: { id: string; name: string; ownerId: number };
   /** Server-owned, scoped to this agent. Prompts are never included in replies. */
-  schedules?: () => (Pick<
-    Schedule,
-    "name" | "enabled" | "nextRunAt" | "timeZone"
-  > & { cadence: Pick<Schedule["cadence"], "kind"> })[];
+  schedules?: () => ListedSchedule[];
   answerSchedule?(
     key: string,
     confirm: boolean,
-    origin: ScheduleOrigin,
+    origin: TelegramScheduleOrigin,
   ): string;
 }
 
@@ -217,25 +224,7 @@ export function createBot(
       const manage = config.answerSchedule
         ? "Ask in this chat to create a schedule. Manage schedules in this agent's panel."
         : "Create and manage schedules in this agent's panel.";
-      text =
-        schedules.length === 0
-          ? `No schedules for ${config.agent.name}. ${manage}`
-          : `Schedules for ${config.agent.name}:\n\n${schedules
-              .map((schedule) => {
-                const next =
-                  schedule.nextRunAt === null
-                    ? "No upcoming run"
-                    : new Intl.DateTimeFormat("en", {
-                        timeZone: schedule.timeZone,
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      }).format(schedule.nextRunAt);
-                const state = `${schedule.name} — ${schedule.enabled ? "Enabled" : "Disabled"}`;
-                return schedule.cadence.kind === "webhook"
-                  ? `${state}\nRuns on webhook request`
-                  : `${state}\nNext run: ${next} (${schedule.timeZone})`;
-              })
-              .join("\n\n")}\n\n${manage}`;
+      text = formatScheduleList(schedules, config.agent.name, manage);
     } catch {
       await ctx.reply(
         "I could not load schedules. Check the panel and try again.",

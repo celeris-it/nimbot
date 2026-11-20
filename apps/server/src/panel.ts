@@ -91,6 +91,7 @@ export interface PanelDeps {
       webhook?: WebhookInvocation,
     ): Promise<ScheduleRunNowResult>;
     ownerLinked(agentId: string): boolean;
+    discordOwnerLinked?(agentId: string): boolean;
   };
   providers?: Omit<
     ReturnType<typeof import("./host-providers.js").createHostProviders>,
@@ -503,6 +504,7 @@ export function createPanel(
         name: body.name,
         prompt: body.prompt,
         timeZone: body.timeZone,
+        deliveryChannel: body.deliveryChannel,
         cadence: validateCadence(cadence, body.timeZone, now()),
       };
     } catch (error) {
@@ -521,6 +523,7 @@ export function createPanel(
       }),
       limits: SCHEDULE_LIMITS,
       ownerLinked: deps.schedules!.ownerLinked(id),
+      discordOwnerLinked: deps.schedules!.discordOwnerLinked?.(id) ?? false,
       defaultTimeZone: store.getDefaultTimeZone(),
     } satisfies ScheduleList);
   });

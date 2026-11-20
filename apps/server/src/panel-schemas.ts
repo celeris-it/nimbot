@@ -97,6 +97,7 @@ export const delegationParams = z.object({
 
 /** Unknown fields are reported before missing or malformed ones. */
 export const scheduleForm = z.strictObject({
+  deliveryChannel: z.enum(["telegram", "discord"]).optional(),
   name: z.string(),
   prompt: z.string(),
   cadence: z.string(),

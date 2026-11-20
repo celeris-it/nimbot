@@ -401,3 +401,46 @@ it("rechecks lateness after slow admission and ignores a schedule paused during 
   expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(1);
   expect(f.kick).not.toHaveBeenCalled();
 });
+
+it("routes timed, manual and webhook runs to the saved Discord DM without a chat message ID", async () => {
+  const dm = {
+    platform: "discord",
+    botId: "111",
+    ownerId: "222",
+    channelId: "333",
+  } as const;
+  f.admit.mockResolvedValue(dm);
+  const timed = f.store.create({ ...input, deliveryChannel: "discord" });
+  vi.setSystemTime(timed.nextRunAt!);
+  const scheduler = f.scheduler();
+  await scheduler.tick();
+  const first = f.tasks.claimNextTask("a")!;
+  expect(first).toMatchObject({ origin: dm, scheduleName: input.name });
+  expect(first.origin).not.toHaveProperty("messageId");
+  f.tasks.finish(first.id, "completed");
+
+  const saved = f.store.get(timed.id)!;
+  expect(await scheduler.runNow(saved)).toMatchObject({ outcome: "enqueued" });
+  expect(f.store.get(timed.id)?.nextRunAt).toBe(saved.nextRunAt);
+  const webhook = f.store.create({
+    ...input,
+    cadence: { kind: "webhook" },
+    deliveryChannel: "discord",
+  });
+  expect(
+    await scheduler.runNow(webhook, {
+      token: f.store.webhookToken(webhook.id)!,
+      payload: '{"test":true}',
+    }),
+  ).toMatchObject({ outcome: "enqueued" });
+
+  for (const schedule of [timed, webhook]) {
+    const task = f.tasks.claimNextTask("a")!;
+    expect(task).toMatchObject({ origin: dm, scheduleId: schedule.id });
+    f.tasks.finish(task.id, "completed");
+  }
+  f.admit.mockResolvedValue(undefined);
+  expect(await scheduler.runNow(f.store.get(timed.id)!)).toMatchObject({
+    outcome: "skipped_not_ready",
+  });
+});

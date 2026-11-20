@@ -24,6 +24,7 @@ export interface McpAgentDefinition extends McpDefinitionSummary {
 }
 
 export interface ScheduleSettings {
+  deliveryChannel: Schedule["deliveryChannel"];
   name: string;
   prompt: string;
   timeZone: string;
@@ -38,6 +39,7 @@ export interface ScheduleList {
   })[];
   limits: typeof SCHEDULE_LIMITS;
   ownerLinked: boolean;
+  discordOwnerLinked: boolean;
   defaultTimeZone: string;
 }
 

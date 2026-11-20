@@ -3,6 +3,8 @@ import { waitForUpgradeActivation } from "./upgrade-activation.js";
 import { createAgentRecovery } from "./agent-recovery.js";
 import { createRecoveryWorkGate } from "./recovery-work-gate.js";
 import { createDiscordAttachments } from "./discord-attachments.js";
+import { formatScheduleList } from "./chat-schedules.js";
+import { taskOutcomeText } from "./bot.js";
 import { createTelegramAttachments } from "./telegram-attachments.js";
 import { createAgentTaskServices } from "./agent-task-services.js";
 import {
@@ -413,6 +415,8 @@ async function main(): Promise<void> {
           admit: discordAdmit,
           attachments: createDiscordAttachments(host, discord.resolve),
           sendFile: discordDelivery.sendFile,
+          sendText: discordDelivery.sendTask,
+          sendScheduleProposal: discordDelivery.sendScheduleProposal,
           progress: (task, message) =>
             sendDiscordTask(task, `Working: ${message}`),
           deliver: (task, outcome) =>
@@ -426,12 +430,7 @@ async function main(): Promise<void> {
                     outcome.kind === "attachment_unavailable" &&
                     task.discordAttachment?.error === "too_large"
                   ? "Documents must be 10 MiB or smaller."
-                  : outcome.ok
-                    ? outcome.output ||
-                      "The task finished without a text response."
-                    : outcome.kind === "cancelled"
-                      ? "The task was cancelled. You can send a new task."
-                      : "The task could not be completed. Check the agent status before trying again.",
+                  : taskOutcomeText(outcome, task.scheduleName),
             ),
           sendApproval: discordDelivery.sendApproval,
           sendDelegation: (task, text, canSend) =>
@@ -570,7 +569,24 @@ async function main(): Promise<void> {
     discordInbox,
     undefined,
     hostCredentials
-      ? { get: (id) => taskServices.get(id), inbox: discordInbox }
+      ? {
+          get: (id) => taskServices.get(id),
+          inbox: discordInbox,
+          async listSchedules(agentId, origin) {
+            const agent = registry.get(agentId);
+            if (!agent) return;
+            const task = { agentId, origin };
+            await discordDelivery.sendTask(
+              task,
+              formatScheduleList(
+                scheduleStore.listByAgent(agentId),
+                agent.name,
+                "Ask in this chat to create a schedule. Manage schedules in this agent's panel.",
+              ),
+              () => matchesDiscord(task),
+            );
+          },
+        }
       : undefined,
   );
   const pendingActivation = new Set<string>();
@@ -633,13 +649,25 @@ async function main(): Promise<void> {
           hostCredentials,
           undefined,
           workGate.allowsWork,
+          (id) => {
+            const origin = linkedDiscord(id);
+            return origin && discordAdmit({ agentId: id, origin })
+              ? origin
+              : undefined;
+          },
         )
       : async () => undefined,
     isOverlapping: taskStore.isScheduleOverlapping,
     kick: async (id) => {
       (await taskServices.get(id)).resume();
     },
-    notifySkip: createScheduleSkipNotifier(notifications),
+    notifySkip: createScheduleSkipNotifier(notifications, {
+      origin: linkedDiscord,
+      send(agentId, origin, text) {
+        const task = { agentId, origin };
+        return discordDelivery.sendTask(task, text, () => matchesDiscord(task));
+      },
+    }),
   });
   const panel = createPanel(panelConfig, {
     mcp: {
@@ -657,6 +685,7 @@ async function main(): Promise<void> {
       store: scheduleStore,
       runNow: scheduler.runNow,
       ownerLinked: (id) => registry.getOwnerChat(id) !== undefined,
+      discordOwnerLinked: (id) => !!linkedDiscord(id),
     },
     providers,
     usage: { ...usage, wake: (id) => taskServices.wake([id]) },

@@ -11,6 +11,7 @@ import { createScheduleAdmission } from "./scheduler.js";
 
 const schedule: Schedule = {
   id: "summary",
+  deliveryChannel: "telegram",
   agentId: "dev",
   name: "Summary",
   prompt: "Private prompt",
@@ -153,3 +154,31 @@ it.each(["registry", "credentials", "health"])(
     expect(await f.admit(schedule)).toBeUndefined();
   },
 );
+
+it("uses the Discord binding and rechecks it after Host status", async () => {
+  const origin = {
+    platform: "discord",
+    botId: "123",
+    ownerId: "456",
+    channelId: "789",
+  } as const;
+  const resolve = vi
+    .fn<() => typeof origin | undefined>()
+    .mockReturnValue(origin);
+  const admit = createScheduleAdmission(
+    f.registry,
+    f.hosts,
+    f.status,
+    () => true,
+    resolve,
+  );
+  const discord = { ...schedule, deliveryChannel: "discord" as const };
+  f.db.prepare("DELETE FROM chat_bindings").run();
+  expect(await admit(discord)).toEqual(origin);
+  resolve.mockReturnValueOnce(origin).mockReturnValueOnce(undefined);
+  expect(await admit(discord)).toBeUndefined();
+  resolve.mockReturnValue(undefined);
+  f.hosts.read.mockClear();
+  expect(await admit(discord)).toBeUndefined();
+  expect(f.hosts.read).not.toHaveBeenCalled();
+});

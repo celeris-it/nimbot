@@ -37,6 +37,7 @@ async function fixture() {
     return { close, getState: () => "ready" };
   };
   return {
+    path,
     registry,
     inbox,
     callbacks,
@@ -140,25 +141,31 @@ it("keeps credential failures isolated from other agents", async () => {
   }
 });
 
-it("executes persisted Gateway messages without Telegram and cancels from the owner DM", async () => {
+it("dispatches persisted Discord messages and cancels a scheduled run from the owner DM", async () => {
   const { createAgentTaskServices } = await import("./agent-task-services.js");
   const { openTaskStore } = await import("./task-queue.js");
   const { HostTaskError } = await import("./host-tasks.js");
+  const { openScheduleStore } = await import("./schedule-store.js");
   const f = await fixture();
-  const store = openTaskStore(":memory:");
+  const store = openTaskStore(f.path);
+  const scheduleStore = openScheduleStore(f.path);
   const outcomes: string[] = [];
+  const listSchedules = vi.fn(async () => {});
+  const progress = vi.fn(async () => {});
   const run = vi.fn(
     async (
       prompt: string,
-      _report?: (message: string) => void,
+      report?: (message: string) => void,
       signal?: AbortSignal,
     ) => {
-      if (prompt === "long")
+      if (prompt.endsWith("long")) {
+        report?.("working");
         await new Promise<void>((_resolve, reject) =>
           signal!.addEventListener("abort", () =>
             reject(new HostTaskError("cancelled")),
           ),
         );
+      }
       return prompt;
     },
   );
@@ -169,7 +176,7 @@ it("executes persisted Gateway messages without Telegram and cancels from the ow
     run,
     discord: {
       admit: () => true,
-      progress: async () => {},
+      progress,
       sendApproval: async () => "1",
       deliver: async (_task, outcome) => {
         outcomes.push(outcome.ok ? outcome.output : outcome.kind);
@@ -181,7 +188,7 @@ it("executes persisted Gateway messages without Telegram and cancels from the ow
     { read: async () => "secret" },
     f.inbox,
     f.makeGateway,
-    { get: (id) => services.get(id), inbox: f.inbox },
+    { get: (id) => services.get(id), inbox: f.inbox, listSchedules },
   );
   try {
     const identity = f.registry.getDiscordConnection("a")!;
@@ -213,7 +220,36 @@ it("executes persisted Gateway messages without Telegram and cancels from the ow
     });
     await runner.idle();
     expect(run).toHaveBeenCalledOnce();
-    f.callbacks[0]!.message({ id: "2", channelId: "999", content: "long" });
+    const list = { id: "22", channelId: "999", content: "/schedules" };
+    f.callbacks[0]!.message(list);
+    f.callbacks[0]!.message(list);
+    expect(listSchedules).toHaveBeenCalledExactlyOnceWith("a", {
+      platform: "discord",
+      botId: identity.botId,
+      ownerId: identity.ownerId,
+      channelId: list.channelId,
+      messageId: list.id,
+    });
+    expect(run).toHaveBeenCalledOnce();
+    const schedule = scheduleStore.create({
+      agentId: "a",
+      name: "Summary",
+      prompt: "long",
+      timeZone: "UTC",
+      cadence: { kind: "daily", time: "12:00" },
+      deliveryChannel: "discord",
+    });
+    const saved = scheduleStore.runNow(schedule, "enqueued", {
+      platform: "discord",
+      botId: identity.botId,
+      ownerId: identity.ownerId,
+      channelId: "999",
+    });
+    expect(saved).toMatchObject({
+      recorded: true,
+      run: { outcome: "enqueued" },
+    });
+    runner.resume();
     await vi.waitFor(() =>
       expect(
         runner.discordControl.isRunning({
@@ -228,10 +264,12 @@ it("executes persisted Gateway messages without Telegram and cancels from the ow
     f.callbacks[0]!.message({ id: "3", channelId: "999", content: "/stop" });
     await runner.idle();
     expect(outcomes).toEqual(["saved before restart", "cancelled"]);
+    expect(progress).not.toHaveBeenCalled();
     expect(f.inbox.pending("a")).toEqual([]);
   } finally {
     manager.close();
     services.close();
+    scheduleStore.close();
     store.close();
     await f.close();
   }
