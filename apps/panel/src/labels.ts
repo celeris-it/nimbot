@@ -43,9 +43,7 @@ export const scheduleText = {
   count: (count: number, max: number) => `${count} of ${max} schedules`,
   limit: "Schedule limit reached. Delete a schedule to create another.",
   costs:
-    "Every run uses this agent's AI provider credits. Results arrive in the owner's private Telegram chat.",
-  unlinked:
-    "Owner chat is not linked. The owner must send this agent's Telegram bot a private message. Runs are skipped until the chat is linked.",
+    "Every run uses this agent's AI provider credits. Results arrive in the owner's private chat on the selected channel.",
   rules:
     "Stopped or unavailable agents are skipped; containers never start automatically. Runs more than 10 minutes late are missed, and overlapping timed or manual runs are skipped. Webhook requests queue instead.",
   promptHelp:
@@ -85,8 +83,7 @@ export const scheduleText = {
   confirm: (name: string) =>
     `Delete schedule "${name}" and its run history? Already queued or running tasks are kept.`,
   outcomes: {
-    enqueued:
-      "Task queued. Its result will arrive in the owner's Telegram chat.",
+    enqueued: "Task queued. Its result will arrive in the selected owner chat.",
     skipped_not_ready:
       "Not run: the agent is unavailable or its owner chat is not linked.",
     skipped_overlap:

@@ -67,6 +67,10 @@
   let weekdays = $state<number[]>([]);
   let minutes = $state<number | undefined>(15);
   let timeZone = $state("");
+  let deliveryChannel = $state<ScheduleSettings["deliveryChannel"]>("telegram");
+  const channelLabel = { telegram: "Telegram", discord: "Discord" };
+  const linked = (channel: ScheduleSettings["deliveryChannel"]) =>
+    channel === "telegram" ? data.ownerLinked : data.discordOwnerLinked;
   let localError = $state("");
   let invalid = $state<"weekdays" | "zone" | undefined>();
   let atLimit = $derived(data.schedules.length >= data.limits.maxPerAgent);
@@ -100,6 +104,7 @@
       schedule?.cadence.kind === "interval"
         ? schedule.cadence.minutes
         : data.limits.minIntervalMinutes;
+    deliveryChannel = schedule?.deliveryChannel ?? "telegram";
     timeZone = schedule?.timeZone ?? data.defaultTimeZone;
     localError = "";
     invalid = undefined;
@@ -159,6 +164,7 @@
           prompt,
           timeZone: kind === "webhook" ? "UTC" : timeZone,
           cadence,
+          deliveryChannel,
         },
         editId,
       )
@@ -181,9 +187,12 @@
 <div data-ui="schedules">
   {#if webhookError}<p role="alert">{webhookError}</p>{/if}
   <p id="schedule-costs">{text.costs}</p>
-  {#if !data.ownerLinked}<p role="status" data-ui="schedule-warning">
-      {text.unlinked}
-    </p>{/if}
+  {#if !data.ownerLinked && !data.discordOwnerLinked}
+    <p role="status" data-ui="schedule-warning">
+      Owner chat is not linked. Send the agent's bot a private message on the
+      delivery channel to link it.
+    </p>
+  {/if}
   <div data-ui="schedule-actions">
     <a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
       >{text.back}</a
@@ -234,6 +243,20 @@
             aria-describedby="schedule-prompt-help"
             bind:value={prompt}></textarea>
           <p id="schedule-prompt-help">{text.promptHelp}</p>
+          <label for="schedule-delivery">Delivery channel</label>
+          <select
+            class="select"
+            id="schedule-delivery"
+            bind:value={deliveryChannel}
+          >
+            <option value="telegram">Telegram</option>
+            <option value="discord">Discord</option>
+          </select>
+          {#if !linked(deliveryChannel)}
+            <p role="status" data-ui="schedule-warning">
+              Link the {channelLabel[deliveryChannel]} owner chat to run this schedule.
+            </p>
+          {/if}
           <label for="schedule-kind">{text.kind}</label>
           <select class="select" id="schedule-kind" bind:value={kind}>
             {#each Object.entries(scheduleKinds) as [value, label] (value)}<option
@@ -327,6 +350,13 @@
         <span class="badge">{scheduleStateLabel(schedule)}</span>
       </div>
       <p>{scheduleCadenceLabel(schedule.cadence)}</p>
+      <p>
+        Delivery via {channelLabel[schedule.deliveryChannel]}{linked(
+          schedule.deliveryChannel,
+        )
+          ? ""
+          : " (owner chat unlinked)"}
+      </p>
       <dl>
         <dt>{text.next}</dt>
         <dd>

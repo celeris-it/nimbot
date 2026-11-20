@@ -400,6 +400,12 @@ test("creates, edits, pauses, resumes, runs and deletes schedules with confirmat
   ).toBeVisible();
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Schedule name", { exact: true }).fill("Weekly review");
+  const channel = page.getByLabel("Delivery channel", { exact: true });
+  await expect(channel).toHaveValue("telegram");
+  await channel.selectOption("discord");
+  await expect(
+    page.getByText("Link the Discord owner chat to run this schedule."),
+  ).toBeVisible();
   await page.getByLabel("Activation", { exact: true }).selectOption("weekly");
   await page.getByLabel("Monday", { exact: true }).check();
   await page.getByLabel("Friday", { exact: true }).check();
@@ -407,6 +413,9 @@ test("creates, edits, pauses, resumes, runs and deletes schedules with confirmat
     .getByRole("button", { name: "Save schedule", exact: true })
     .click();
   card = page.getByRole("region", { name: "Weekly review", exact: true });
+  await expect(
+    card.getByText("Delivery via Discord (owner chat unlinked)"),
+  ).toBeVisible();
   await expect(
     card.getByText("Every Monday, Friday at 10:30", { exact: true }),
   ).toBeVisible();
