@@ -1,4 +1,5 @@
-import type { DiscordQueuedTask } from "./task-queue.js";
+import type { WorkspaceFile } from "./telegram-attachments.js";
+import type { DiscordDestination } from "./task-queue.js";
 import type { NotificationResult } from "./notifications.js";
 import { isDiscordId as snowflake } from "./discord-identity.js";
 
@@ -33,9 +34,10 @@ export function createDiscordNotifications(
     target: DiscordNotificationTarget,
     text: string,
     approval?: {
-      task: DiscordQueuedTask;
+      task: DiscordDestination;
       canSend?: () => boolean;
       buttons?: { label: string; customId: string; allow: boolean }[];
+      file?: WorkspaceFile;
     },
   ): Promise<NotificationResult & { messageId?: string }> {
     let sentParts = 0;
@@ -54,9 +56,11 @@ export function createDiscordNotifications(
         redirect: "error",
         headers: {
           Authorization: `Bot ${target.token}`,
-          "Content-Type": "application/json",
+          ...(body instanceof FormData
+            ? {}
+            : { "Content-Type": "application/json" }),
         },
-        body: JSON.stringify(body),
+        body: body instanceof FormData ? body : JSON.stringify(body),
         signal: AbortSignal.timeout(10000),
       });
       let data: Record<string, unknown> = {};
@@ -132,14 +136,16 @@ export function createDiscordNotifications(
         part += character;
       }
       if (part) parts.push(part);
-      for (const content of parts) {
+      if (approval?.file) parts.push("");
+      for (const [index, content] of parts.entries()) {
         const unavailable = available();
         if (unavailable) return unavailable;
         sendingMessage = true;
-        const message = await post(`/channels/${dm.data.id}/messages`, {
+        const last = index === parts.length - 1;
+        const payload = {
           content,
           allowed_mentions: { parse: [] },
-          ...(approval?.buttons
+          ...(last && approval?.buttons
             ? {
                 components: [
                   {
@@ -154,7 +160,22 @@ export function createDiscordNotifications(
                 ],
               }
             : {}),
-        });
+        };
+        let body: unknown = payload;
+        if (last && approval?.file) {
+          const { bytes, name } = approval.file;
+          const form = new FormData();
+          form.set(
+            "payload_json",
+            JSON.stringify({
+              ...payload,
+              attachments: [{ id: 0, filename: name }],
+            }),
+          );
+          form.set("files[0]", new Blob([Uint8Array.from(bytes)]), name);
+          body = form;
+        }
+        const message = await post(`/channels/${dm.data.id}/messages`, body);
         if (!message.response.ok) return rejection(message.response.status);
         if (
           !snowflake(message.data.id) ||
@@ -179,12 +200,13 @@ export function createDiscordNotifications(
     agentId: string,
     text: string,
     approval?: {
-      task: DiscordQueuedTask;
+      task: DiscordDestination;
       canSend?: () => boolean;
       buttons?: { label: string; customId: string; allow: boolean }[];
+      file?: WorkspaceFile;
     },
   ): Promise<NotificationResult & { messageId?: string }> {
-    if (!text.trim())
+    if (!text.trim() && !approval?.file)
       return { status: "failed", sentParts: 0, reason: "invalid_text" };
     let target: DiscordNotificationTarget | undefined;
     try {
@@ -220,7 +242,7 @@ export function createDiscordNotifications(
   return {
     send,
     async sendTask(
-      task: DiscordQueuedTask,
+      task: DiscordDestination,
       content: string,
       canSend?: () => boolean,
     ) {
@@ -229,8 +251,32 @@ export function createDiscordNotifications(
         ...(canSend ? { canSend } : {}),
       });
     },
+    async sendFile(
+      task: DiscordDestination,
+      file: WorkspaceFile,
+      canSend: () => boolean,
+    ) {
+      return send(task.agentId, "", { task, file, canSend });
+    },
+    async sendScheduleProposal(
+      task: DiscordDestination,
+      text: string,
+      key: string,
+      canSend: () => boolean,
+    ) {
+      const buttons = [
+        { label: "Confirm", customId: `sc:${key}:y`, allow: true },
+        { label: "Cancel", customId: `sc:${key}:n`, allow: false },
+      ];
+      const result = await send(task.agentId, text, { task, buttons, canSend });
+      if (result.status !== "delivered" || !result.messageId)
+        throw new Error(
+          "Discord schedule proposal delivery could not be confirmed",
+        );
+      return result.messageId;
+    },
     async sendApproval(
-      task: DiscordQueuedTask,
+      task: DiscordDestination,
       content: string,
       buttons: { label: string; customId: string; allow: boolean }[],
     ) {

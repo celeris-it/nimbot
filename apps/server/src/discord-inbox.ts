@@ -1,3 +1,4 @@
+import type { DiscordAttachmentInput } from "./discord-attachments.js";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { isDiscordId } from "./discord-identity.js";
@@ -22,6 +23,7 @@ export function openDiscordInbox(path: string) {
         channel_id TEXT NOT NULL,
         message_id TEXT NOT NULL,
         content TEXT NOT NULL,
+        attachment TEXT,
         created_at INTEGER NOT NULL,
         handled_at INTEGER,
         UNIQUE(bot_id, message_id)
@@ -40,7 +42,9 @@ export function openDiscordInbox(path: string) {
       if (
         !isDiscordId(message.id) ||
         !isDiscordId(message.channelId) ||
-        !message.content.trim() ||
+        (!message.content.trim() &&
+          !message.attachment?.document &&
+          !message.attachment?.error) ||
         message.content.length > 4000
       )
         throw new Error("Invalid Discord message");
@@ -62,7 +66,7 @@ export function openDiscordInbox(path: string) {
           throw new Error("Discord connection is no longer current");
         const existing = db
           .prepare(
-            `SELECT id, agent_id, owner_id, channel_id, content
+            `SELECT id, agent_id, owner_id, channel_id, content, attachment
           FROM discord_incoming_messages WHERE bot_id = ? AND message_id = ?`,
           )
           .get(identity.botId, message.id);
@@ -71,7 +75,17 @@ export function openDiscordInbox(path: string) {
             existing.agent_id !== agentId ||
             existing.owner_id !== identity.ownerId ||
             existing.channel_id !== message.channelId ||
-            existing.content !== message.content
+            existing.content !== message.content ||
+            (existing.attachment !==
+              (message.attachment
+                ? JSON.stringify(message.attachment)
+                : null) &&
+              !(
+                existing.attachment === null &&
+                message.attachment?.replyMessageId &&
+                !message.attachment.document &&
+                !message.attachment.error
+              ))
           )
             throw new Error(
               "Discord message identity conflicts with saved message",
@@ -94,8 +108,8 @@ export function openDiscordInbox(path: string) {
         const id = randomUUID();
         db.prepare(
           `INSERT INTO discord_incoming_messages
-          (id, agent_id, bot_id, owner_id, channel_id, message_id, content, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, agent_id, bot_id, owner_id, channel_id, message_id, content, attachment, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           id,
           agentId,
@@ -104,6 +118,7 @@ export function openDiscordInbox(path: string) {
           message.channelId,
           message.id,
           message.content,
+          message.attachment ? JSON.stringify(message.attachment) : null,
           Date.now(),
         );
         db.prepare(
@@ -119,9 +134,9 @@ export function openDiscordInbox(path: string) {
       }
     },
     pending(agentId: string) {
-      return db
+      const rows = db
         .prepare(
-          `SELECT m.id, m.bot_id AS botId, m.owner_id AS ownerId, m.channel_id AS channelId, m.message_id AS messageId, m.content
+          `SELECT m.id, m.bot_id AS botId, m.owner_id AS ownerId, m.channel_id AS channelId, m.message_id AS messageId, m.content, m.attachment
         FROM discord_incoming_messages m JOIN agent_discord_connections d ON d.agent_id = m.agent_id AND d.bot_id = m.bot_id AND d.owner_id = m.owner_id
         JOIN agents a ON a.id = m.agent_id WHERE m.agent_id = ? AND m.handled_at IS NULL AND a.deleted_at IS NULL ORDER BY m.rowid`,
         )
@@ -132,7 +147,14 @@ export function openDiscordInbox(path: string) {
         channelId: string;
         messageId: string;
         content: string;
+        attachment: string | null;
       }[];
+      return rows.map(({ attachment, ...message }) => ({
+        ...message,
+        ...(attachment
+          ? { attachment: JSON.parse(attachment) as DiscordAttachmentInput }
+          : {}),
+      }));
     },
     markHandled(id: string) {
       db.prepare(

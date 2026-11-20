@@ -127,46 +127,49 @@ it("drops an invalid session and identifies again", () => {
   f.gateway.close();
 });
 
-it("accepts only the owner's DM approval interactions for this application", () => {
-  const f = fixture();
-  const socket = f.sockets[0]!;
-  f.ready(socket);
-  const interaction = {
-    id: "1",
-    type: 3,
-    application_id: "123",
-    user: { id: "456" },
-    channel_id: "789",
-    message: { id: "999" },
-    token: "private",
-    data: { custom_id: "ap:abcdefghijkl:y" },
-  };
-  for (const change of [
-    { guild_id: "1" },
-    { application_id: "2" },
-    { user: { id: "2" } },
-    { user: { id: "456", bot: true } },
-    { data: { custom_id: "other" } },
-  ])
-    socket.receive({
-      op: 0,
-      s: 2,
-      t: "INTERACTION_CREATE",
-      d: { ...interaction, ...change },
+it.each(["ap:abcdefghijkl:y", "sc:abcdefghijklmnop:y"])(
+  "accepts interaction %s only from the owner's DM for this application",
+  (customId) => {
+    const f = fixture();
+    const socket = f.sockets[0]!;
+    f.ready(socket);
+    const interaction = {
+      id: "1",
+      type: 3,
+      application_id: "123",
+      user: { id: "456" },
+      channel_id: "789",
+      message: { id: "999" },
+      token: "private",
+      data: { custom_id: customId },
+    };
+    for (const change of [
+      { guild_id: "1" },
+      { application_id: "2" },
+      { user: { id: "2" } },
+      { user: { id: "456", bot: true } },
+      { data: { custom_id: "other" } },
+    ])
+      socket.receive({
+        op: 0,
+        s: 2,
+        t: "INTERACTION_CREATE",
+        d: { ...interaction, ...change },
+      });
+    expect(f.interaction).not.toHaveBeenCalled();
+    socket.receive({ op: 0, s: 3, t: "INTERACTION_CREATE", d: interaction });
+    expect(f.interaction).toHaveBeenCalledWith({
+      id: "1",
+      botId: "123",
+      ownerId: "456",
+      channelId: "789",
+      messageId: "999",
+      token: "private",
+      customId,
     });
-  expect(f.interaction).not.toHaveBeenCalled();
-  socket.receive({ op: 0, s: 3, t: "INTERACTION_CREATE", d: interaction });
-  expect(f.interaction).toHaveBeenCalledWith({
-    id: "1",
-    botId: "123",
-    ownerId: "456",
-    channelId: "789",
-    messageId: "999",
-    token: "private",
-    customId: "ap:abcdefghijkl:y",
-  });
-  f.gateway.close();
-});
+    f.gateway.close();
+  },
+);
 
 it("preserves the session on reconnect and accepts replayed DMs before RESUMED", () => {
   const f = fixture();
@@ -259,5 +262,37 @@ it("ignores approval interactions from group and other private-channel contexts"
       d: { ...data, ...extra },
     });
   expect(f.interaction).not.toHaveBeenCalled();
+  f.gateway.close();
+});
+
+it("admits attachment-only DMs with sanitized metadata and no CDN URL", () => {
+  const f = fixture();
+  const socket = f.sockets[0]!;
+  f.ready(socket);
+  socket.receive({
+    op: 0,
+    s: 2,
+    t: "MESSAGE_CREATE",
+    d: {
+      id: "789",
+      channel_id: "987",
+      author: { id: "456" },
+      content: "",
+      attachments: [
+        {
+          id: "1",
+          filename: "../file.txt",
+          size: 5,
+          url: "https://example.com",
+        },
+      ],
+    },
+  });
+  expect(f.message).toHaveBeenCalledExactlyOnceWith({
+    id: "789",
+    channelId: "987",
+    content: "",
+    attachment: { document: { id: "1", name: "file.txt", size: 5 } },
+  });
   f.gateway.close();
 });

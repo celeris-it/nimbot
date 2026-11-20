@@ -1,3 +1,7 @@
+import type {
+  DiscordAttachmentInput,
+  DiscordDocument,
+} from "./discord-attachments.js";
 import type { TelegramDocument } from "./telegram-attachments.js";
 import { isDiscordId } from "./discord-identity.js";
 import { randomUUID } from "node:crypto";
@@ -21,17 +25,26 @@ export interface QueuedTask {
   scheduledFor?: number;
 }
 
-export interface DiscordQueuedTask {
-  id: string;
+export interface DiscordConversation {
+  platform: "discord";
+  botId: string;
+  ownerId: string;
+  channelId: string;
+}
+
+export interface DiscordDestination {
   agentId: string;
+  origin: DiscordConversation;
+}
+
+export interface DiscordQueuedTask extends DiscordDestination {
+  id: string;
   prompt: string;
-  origin: {
-    platform: "discord";
-    botId: string;
-    ownerId: string;
-    channelId: string;
-    messageId: string;
-  };
+  origin: DiscordConversation & { messageId?: string };
+  discordAttachment?: DiscordAttachmentInput;
+  scheduleId?: string;
+  scheduleName?: string;
+  scheduledFor?: number;
 }
 export type ChatTask = (
   | DiscordQueuedTask
@@ -201,6 +214,7 @@ export function openTaskStore(path: string) {
       discord_owner_id TEXT,
       discord_channel_id TEXT,
       discord_message_id TEXT,
+      discord_attachment TEXT,
       prompt TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'interrupted', 'cancelled')),
       created_at INTEGER NOT NULL,
@@ -220,9 +234,9 @@ export function openTaskStore(path: string) {
       parent_task_id TEXT,
       source_agent_id TEXT,
       CHECK ((schedule_id IS NULL AND scheduled_for IS NULL) OR
-        (schedule_id IS NOT NULL AND scheduled_for IS NOT NULL AND platform = 'telegram')),
+        (schedule_id IS NOT NULL AND scheduled_for IS NOT NULL AND platform IN ('telegram', 'discord'))),
       CHECK ((platform = 'telegram' AND bot_id IS NOT NULL AND chat_id IS NOT NULL AND discord_bot_id IS NULL AND discord_owner_id IS NULL AND discord_channel_id IS NULL AND discord_message_id IS NULL)
-        OR (platform = 'discord' AND bot_id IS NULL AND chat_id IS NULL AND update_id IS NULL AND discord_bot_id IS NOT NULL AND discord_owner_id IS NOT NULL AND discord_channel_id IS NOT NULL AND discord_message_id IS NOT NULL)
+        OR (platform = 'discord' AND bot_id IS NULL AND chat_id IS NULL AND update_id IS NULL AND discord_bot_id IS NOT NULL AND discord_owner_id IS NOT NULL AND discord_channel_id IS NOT NULL AND ((schedule_id IS NULL AND discord_message_id IS NOT NULL) OR (schedule_id IS NOT NULL AND discord_message_id IS NULL)))
         OR (platform = 'delegated' AND bot_id IS NULL AND chat_id IS NULL AND update_id IS NULL AND discord_bot_id IS NULL AND discord_owner_id IS NULL AND discord_channel_id IS NULL AND discord_message_id IS NULL)),
       CHECK ((platform = 'delegated' AND delegation_id IS NOT NULL AND parent_task_id IS NOT NULL AND source_agent_id IS NOT NULL AND source_agent_id != agent_id AND parent_task_id != id AND schedule_id IS NULL AND schedule_name IS NULL AND scheduled_for IS NULL)
         OR (platform != 'delegated' AND delegation_id IS NULL AND parent_task_id IS NULL AND source_agent_id IS NULL))
@@ -290,7 +304,7 @@ export function openTaskStore(path: string) {
     throw error;
   }
   const columns =
-    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, schedule_name AS scheduleName, scheduled_for AS scheduledFor, delegation_id, parent_task_id, source_agent_id, telegram_document, reply_document_id";
+    "id, agent_id AS agentId, bot_id AS botId, chat_id AS chatId, prompt, schedule_id AS scheduleId, schedule_name AS scheduleName, scheduled_for AS scheduledFor, delegation_id, parent_task_id, source_agent_id, telegram_document, reply_document_id, discord_attachment";
   function scheduleMetadata(row: Record<string, unknown>) {
     return row.scheduleId == null
       ? {}
@@ -322,12 +336,21 @@ export function openTaskStore(path: string) {
     if (row.platform === "discord")
       return {
         ...base,
+        ...(typeof row.discord_attachment === "string"
+          ? {
+              discordAttachment: JSON.parse(
+                row.discord_attachment,
+              ) as DiscordAttachmentInput,
+            }
+          : {}),
         origin: {
           platform: "discord",
           botId: String(row.discord_bot_id),
           ownerId: String(row.discord_owner_id),
           channelId: String(row.discord_channel_id),
-          messageId: String(row.discord_message_id),
+          ...(typeof row.discord_message_id === "string"
+            ? { messageId: row.discord_message_id }
+            : {}),
         },
       };
     return {
@@ -860,7 +883,7 @@ export function openTaskStore(path: string) {
       return (
         db
           .prepare(
-            "UPDATE tasks SET attachment_saved = 1 WHERE id = ? AND status = 'running' AND telegram_document IS NOT NULL",
+            "UPDATE tasks SET attachment_saved = 1 WHERE id = ? AND status = 'running' AND (telegram_document IS NOT NULL OR discord_attachment IS NOT NULL)",
           )
           .run(taskId).changes === 1
       );
@@ -917,31 +940,61 @@ export function openTaskStore(path: string) {
           .run(Date.now(), id).changes === 1
       );
     },
-    enqueueDiscord(task: Omit<DiscordQueuedTask, "id">) {
-      const origin = task.origin;
-      if (
-        ![
+    savedDiscordDocument(
+      agentId: string,
+      origin: DiscordConversation,
+      messageId: string,
+    ) {
+      const row = db
+        .prepare(
+          `SELECT id, discord_attachment, attachment_saved FROM tasks
+        WHERE agent_id = ? AND platform = 'discord' AND discord_bot_id = ?
+          AND discord_owner_id = ? AND discord_channel_id = ? AND discord_message_id = ?`,
+        )
+        .get(
+          agentId,
           origin.botId,
           origin.ownerId,
           origin.channelId,
-          origin.messageId,
-        ].every(isDiscordId) ||
-        !task.prompt.trim()
+          messageId,
+        );
+      if (typeof row?.discord_attachment !== "string") return undefined;
+      const { document } = JSON.parse(row.discord_attachment) as {
+        document?: DiscordDocument;
+      };
+      if (!document) return undefined;
+      return row.attachment_saved === 1
+        ? `attachments/${String(row.id)}/${document.name}`
+        : null;
+    },
+    enqueueDiscord(task: Omit<DiscordQueuedTask, "id">) {
+      const origin = task.origin;
+      const messageId = origin.messageId;
+      const attachment = task.discordAttachment
+        ? JSON.stringify(task.discordAttachment)
+        : null;
+      if (
+        ![origin.botId, origin.ownerId, origin.channelId].every(isDiscordId) ||
+        !isDiscordId(messageId) ||
+        (!task.prompt.trim() &&
+          !task.discordAttachment?.document &&
+          !task.discordAttachment?.error)
       )
         throw new Error("Invalid Discord task");
       db.exec("BEGIN IMMEDIATE");
       try {
         const existing = db
           .prepare(
-            "SELECT id, agent_id, discord_owner_id, discord_channel_id, prompt FROM tasks WHERE platform = 'discord' AND discord_bot_id = ? AND discord_message_id = ?",
+            "SELECT id, agent_id, discord_owner_id, discord_channel_id, prompt, discord_attachment FROM tasks WHERE platform = 'discord' AND discord_bot_id = ? AND discord_message_id = ?",
           )
-          .get(origin.botId, origin.messageId);
+          .get(origin.botId, messageId);
         if (existing) {
           if (
             existing.agent_id !== task.agentId ||
             existing.discord_owner_id !== origin.ownerId ||
             existing.discord_channel_id !== origin.channelId ||
-            existing.prompt !== task.prompt
+            existing.prompt !== task.prompt ||
+            existing.discord_attachment !== attachment
           )
             throw new Error("Discord task identity conflict");
           db.exec("COMMIT");
@@ -957,14 +1010,15 @@ export function openTaskStore(path: string) {
         const id = randomUUID();
         const now = Date.now();
         db.prepare(
-          `INSERT INTO tasks (id, agent_id, platform, discord_bot_id, discord_owner_id, discord_channel_id, discord_message_id, prompt, status, created_at, updated_at) VALUES (?, ?, 'discord', ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+          `INSERT INTO tasks (id, agent_id, platform, discord_bot_id, discord_owner_id, discord_channel_id, discord_message_id, discord_attachment, prompt, status, created_at, updated_at) VALUES (?, ?, 'discord', ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
         ).run(
           id,
           task.agentId,
           origin.botId,
           origin.ownerId,
           origin.channelId,
-          origin.messageId,
+          messageId,
+          attachment,
           task.prompt,
           now,
           now,
@@ -1441,11 +1495,16 @@ export function createRoutedTaskQueue(
       queue.kick();
       return saved;
     },
-    submitDiscord(origin: DiscordQueuedTask["origin"], prompt: string) {
+    submitDiscord(
+      origin: DiscordQueuedTask["origin"],
+      prompt: string,
+      discordAttachment?: DiscordAttachmentInput,
+    ) {
       const saved = config.store.enqueueDiscord({
         agentId: config.agentId,
         origin,
         prompt,
+        discordAttachment,
       });
       queue.kick();
       return saved;

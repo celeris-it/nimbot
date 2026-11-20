@@ -1,3 +1,7 @@
+import {
+  discordAttachmentInput,
+  type DiscordAttachmentInput,
+} from "./discord-attachments.js";
 import type { DiscordApprovalInteraction } from "./discord-approvals.js";
 import { isDiscordId } from "./discord-identity.js";
 
@@ -5,6 +9,7 @@ export interface DiscordDirectMessage {
   id: string;
   channelId: string;
   content: string;
+  attachment?: DiscordAttachmentInput;
 }
 type Socket = Pick<WebSocket, "send" | "close" | "addEventListener">;
 type State = "connecting" | "ready" | "reconnecting" | "failed" | "stopped";
@@ -204,7 +209,9 @@ export function createDiscordGateway(
               typeof data.token === "string" &&
               /^[A-Za-z0-9._-]{1,512}$/.test(data.token) &&
               typeof component.custom_id === "string" &&
-              /^ap:[A-Za-z0-9_-]{12}:[yn]$/.test(component.custom_id)
+              /^(?:ap:[A-Za-z0-9_-]{12}|sc:[A-Za-z0-9_-]{16}):[yn]$/.test(
+                component.custom_id,
+              )
             ) {
               options.interaction?.({
                 id: data.id,
@@ -229,13 +236,20 @@ export function createDiscordGateway(
               isDiscordId(data.id) &&
               isDiscordId(data.channel_id) &&
               typeof data.content === "string" &&
-              data.content.trim()
+              data.content.length <= 4000
             ) {
-              options.message({
-                id: data.id,
-                channelId: data.channel_id,
-                content: data.content,
-              });
+              const attachment = discordAttachmentInput(data);
+              if (
+                data.content.trim() ||
+                attachment?.document ||
+                attachment?.error
+              )
+                options.message({
+                  id: data.id,
+                  channelId: data.channel_id,
+                  content: data.content,
+                  ...(attachment ? { attachment } : {}),
+                });
             }
           }
           sequence = payload.s;
