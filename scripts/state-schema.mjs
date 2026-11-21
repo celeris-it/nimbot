@@ -7,6 +7,11 @@ const serverV2 = readFileSync(
   "utf8",
 );
 const definitions = {
+  "server-process": {
+    version: 1,
+    applicationId: 0x4e494d50,
+    migrations: {},
+  },
   server: {
     version: 2,
     get current() {
@@ -92,12 +97,31 @@ export function prepareStateSchema(path, kind, options = {}) {
     if (!file && options.existing) throw new Error("Database is missing.");
     db = new DatabaseSync(path);
     db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON");
+    const { application_id: applicationId } = db
+      .prepare("PRAGMA application_id")
+      .get();
+    const processApplicationId = definitions["server-process"].applicationId;
+    if (kind === "server-process") {
+      if (
+        applicationId !== processApplicationId &&
+        (applicationId !== 0 || schema(db).length > 0)
+      )
+        throw new Error(
+          "A fresh subprocess installation is required. Existing data was retained; select a new data directory.",
+        );
+    } else if (kind === "server" && applicationId === processApplicationId) {
+      throw new Error(
+        "Subprocess Server state cannot be opened by the per-agent Docker runtime.",
+      );
+    }
     // The server v2 migration rebuilds a referenced table. SQLite requires
     // disabling enforcement outside the transaction and checking before commit.
     if (definition === definitions.server) db.exec("PRAGMA foreign_keys = OFF");
     let current = false;
     while (!current) {
       transaction(db, () => {
+        if (kind === "server-process")
+          db.exec(`PRAGMA application_id = ${processApplicationId}`);
         const { user_version: installed } = db
           .prepare("PRAGMA user_version")
           .get();

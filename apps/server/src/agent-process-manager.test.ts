@@ -2,11 +2,14 @@ import { mkdtemp, readFile, rm, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createAgentProcessManager,
   type AgentProcessState,
 } from "./agent-process-manager.js";
+import { openAgentProcessStore } from "./agent-process-store.js";
+import { openProcessHostCredentials } from "./process-host-credentials.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -96,6 +99,57 @@ async function inspect(host: { url: string; token: string }) {
 }
 
 describe("Server-managed Agent Host processes", () => {
+  it("restores only desired running agents from reopened SQLite and retains Host tokens", async () => {
+    const { directory, settings } = await setup();
+    const path = join(directory, "server.sqlite");
+    let store = openAgentProcessStore(path);
+    cleanup.push(async () => store.close());
+    const db = new DatabaseSync(path);
+    try {
+      db.exec(
+        "INSERT INTO agents (id,name,owner_id) VALUES ('first','First',42), ('second','Second',42)",
+      );
+    } finally {
+      db.close();
+    }
+    store.create("first");
+    store.create("second");
+    const secrets = join(directory, "host-secrets");
+    const credentials = await openProcessHostCredentials(secrets, store);
+    const manager = createAgentProcessManager({
+      ...settings,
+      store,
+      token: credentials.token,
+    });
+    cleanup.push(() => manager.close());
+    const first = await manager.start("first");
+    const second = await manager.start("second");
+    await manager.stop("second");
+    await manager.close();
+    store.close();
+    store = openAgentProcessStore(path);
+    const restoredCredentials = await openProcessHostCredentials(
+      secrets,
+      store,
+    );
+    const replacement = createAgentProcessManager({
+      ...settings,
+      store,
+      token: restoredCredentials.token,
+    });
+    cleanup.push(() => replacement.close());
+    const restored = await replacement.restore();
+    expect(restored).toHaveLength(1);
+    expect(restored[0]?.status).toBe("fulfilled");
+    expect(replacement.status("first")).toBe("running");
+    expect(replacement.status("second")).toBe("stopped");
+    expect(replacement.host("first")?.token).toBe(first.token);
+    expect(await restoredCredentials.token("second")).toBe(second.token);
+    expect((await inspect(replacement.host("first")!)).cwd).toBe(
+      join(directory, "agents", "first", "workspace"),
+    );
+  });
+
   it("starts concurrent agents on distinct loopback ports with separate state and credentials", async () => {
     const { manager, saved } = await setup();
     const [first, second] = await Promise.all([

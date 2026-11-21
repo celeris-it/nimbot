@@ -364,8 +364,12 @@ the subprocess manager now uses port zero so the OS assigns an available port.
 Hosts report their bound port to the Server over Node IPC and shut down if that
 connection is lost. The manager serializes lifecycle changes per agent, detects
 unexpected exits, terminates process groups during shutdown, and restores running
-intent through a store interface. Connecting it to the Server registry, panel,
-and Docker-free development entry point remains pending.
+intent from SQLite. A fresh subprocess Server schema omits Docker metadata and
+rejects previous Server databases without modifying them. Per-agent Host tokens
+remain in private files with references in SQLite; reopening state retains the
+same tokens, and damaged or missing saved files require repair instead of silent
+rotation. Connecting these components to agent registration, the Server entrypoint,
+the panel, and the Docker-free development entry point remains pending.
 
 The planned subprocess installation is a single trust domain under one OS
 account: agents can access each other’s data and Server state, including bot

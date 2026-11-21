@@ -49,20 +49,26 @@ path first, then the recommended Docker deployment in the next milestone.
       processes when the Server shuts down.
       Progress: subprocess manager implements start/stop/restart/removal, OS-assigned
       loopback ports, exit detection, process-group cleanup, startup cancellation,
-      and restoration through a desired-state store interface. Real-process tests
-      cover these paths. SQLite persistence and Server/panel integration remain
-      pending.
+      and restoration through a SQLite desired-state store. Real-process tests
+      cover restoration after reopening the database. Server entrypoint and panel
+      integration remain pending.
 - [ ] Start each Agent Host with an explicit minimal environment and its own
       Host API token. Do not pass Server configuration or secrets through
       the environment or arguments.
       Progress: subprocess configuration builds an explicit minimal environment
       with per-agent state paths, a supplied Host token, and loopback binding.
-      Server lifecycle integration and token persistence remain pending.
+      Private per-agent tokens now persist through a credential store with atomic
+      reference claiming and no silent rotation of missing or damaged files.
+      Server lifecycle integration remains pending.
 - [ ] Route panel lifecycle and status actions through the process manager.
       Explain the shared trust model in the panel, including agent access
       to Server secrets, and clearly identify native development mode.
 - [ ] Keep agent data on removal unless the administrator explicitly purges
       it. Use a fresh Server schema for process-managed agents.
+      Progress: the new versioned subprocess Server schema omits Docker metadata
+      and rejects previous Server databases without modifying them. The process
+      manager retains agent directories unless purge is explicitly requested;
+      wiring registration and deletion into the Server remains pending.
 - [ ] Verify native setup from a clean checkout, panel lifecycle operations,
       restart recovery, and concurrent OpenCode and browser sessions using
       distinct state directories.
