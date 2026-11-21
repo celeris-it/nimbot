@@ -33,19 +33,21 @@ async function helper() {
   }
   return join(dir, "password.mjs");
 }
-it("hashes stdin without printing or storing the password", async () => {
-  const password = "a private password with spaces and $characters";
-  const result = spawnSync(process.execPath, [await helper(), "--stdin"], {
-    input: password,
-    encoding: "utf8",
-  });
-  expect(result.status, result.stderr).toBe(0);
-  expect(result.stderr).toBe("");
-  expect(result.stdout).toMatch(/^scrypt:[a-f0-9]{32}:[a-f0-9]{128}\n$/);
-  expect(result.stdout).not.toContain(password);
-  expect(await verifyPassword(password, result.stdout.trim())).toBe(true);
-});
-it.each(["", "short", "a".repeat(257)])(
+it.each(["eight!#?", "a private password with spaces and $characters"])(
+  "hashes a valid password from stdin without echoing it",
+  async (password) => {
+    const result = spawnSync(process.execPath, [await helper(), "--stdin"], {
+      input: password,
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toMatch(/^scrypt:[a-f0-9]{32}:[a-f0-9]{128}\n$/);
+    expect(result.stdout).not.toContain(password);
+    expect(await verifyPassword(password, result.stdout.trim())).toBe(true);
+  },
+);
+it.each(["", "a".repeat(7), "a".repeat(257)])(
   "rejects invalid password length without echoing input",
   async (password) => {
     const result = spawnSync(process.execPath, [await helper(), "--stdin"], {
@@ -54,6 +56,6 @@ it.each(["", "short", "a".repeat(257)])(
     });
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("between 12 and 256");
+    expect(result.stderr).toContain("between 8 and 256");
   },
 );

@@ -151,7 +151,7 @@ if [ ! -f .env ]; then
   done
   while :; do
     stty -echo <&3
-    printf 'Panel password (12–256 characters, hidden): ' >&3
+    printf 'Panel password (8–256 characters, hidden): ' >&3
     IFS= read -r -s password <&3 || fail 'Input cancelled.'; printf '\n' >&3
     printf 'Repeat password: ' >&3
     IFS= read -r -s confirmation <&3 || fail 'Input cancelled.'; printf '\n' >&3

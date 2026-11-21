@@ -83,7 +83,7 @@ elif args[0] == 'run' and '/app/scripts/upgrade.mjs' in args:
     print('Upgrade helper invoked')
 elif args[0] == 'run':
     password = sys.stdin.read()
-    if len(password) < 12 or len(password) > 256: sys.exit(1)
+    if len(password) < 8 or len(password) > 256: sys.exit(1)
     print('scrypt:' + 'a'*32 + ':' + 'b'*128)
 elif args[0] == 'compose':
     if os.environ.get('FAKE_CHECK_PORT_ENV') and 'PANEL_PUBLISH_PORT' in os.environ: sys.exit(1)
@@ -379,12 +379,12 @@ it("allows password correction and an existing HTTPS origin", async () => {
     [hostPortPrompt, "4000"],
     [urlPrompt, "https://nimbot.example.com:65536"],
     [urlPrompt, "https://nimbot.example.com:8443"],
-    ["characters, hidden): ", "short"],
-    ["Repeat password: ", "short"],
+    ["8–256 characters, hidden): ", "seven!!"],
+    ["Repeat password: ", "seven!!"],
     ["characters, hidden): ", "long-enough-password"],
     ["Repeat password: ", "different"],
-    ["characters, hidden): ", "long-enough-password"],
-    ["Repeat password: ", "long-enough-password"],
+    ["characters, hidden): ", "eight!#?"],
+    ["Repeat password: ", "eight!#?"],
   ]);
   expect(result.code, result.output).toBe(0);
   expect(result.output).toContain("Password was rejected");
