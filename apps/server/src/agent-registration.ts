@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { Bot } from "grammy";
 import type { openAgentRegistry } from "./agent-registry.js";
-import type { ProvisioningState } from "./agent-registry.js";
 import type { openBotSecrets } from "./bot-secret.js";
+
+export type AgentSetupStatus = "pending" | "provisioning" | "ready" | "failed";
 
 export interface AgentRegistrationInput {
   name: string;
@@ -19,8 +20,7 @@ export function createAgentRegistration(
     token: string,
   ) => Promise<{ id: number; username?: string; is_bot: boolean }> = (token) =>
     new Bot(token, { client: { timeoutSeconds: 5 } }).api.getMe(),
-  setupStatus: (id: string) => ProvisioningState["status"] = (id) =>
-    registry.getProvisioning(id)!.status,
+  setupStatus: (id: string) => AgentSetupStatus,
 ) {
   return async (input: AgentRegistrationInput) => {
     const name = input.name.trim();

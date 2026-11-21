@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { openAgentProcessStore } from "./agent-process-store.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,17 +29,12 @@ async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-schedule-admission-"));
   const path = join(dir, "server.sqlite");
   const registry = openAgentRegistry(path);
+  const processes = openAgentProcessStore(path);
   registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
   registry.setCredentialRef("dev", "file:telegram-saved");
-  registry.beginProvisioning("dev");
-  registry.setHostCredentialRef("dev", "file:host-saved");
-  registry.recordProvisioningResources("dev", {
-    containerRef: "c".repeat(64),
-    volumeRef: "workspace",
-    networkRef: "network",
-  });
-  registry.finishProvisioning("dev", "ready");
+  processes.claimHostCredential("dev", `file:host-${randomUUID()}`);
+  processes.setDesiredState("dev", "running");
   const binding = openChatBinding(path, { id: "dev", ownerId: 42 });
   binding.save(123, 42);
   const db = new DatabaseSync(path);
@@ -47,6 +44,7 @@ async function fixture() {
       token: "private-token",
     })),
   };
+  const runtimeReady = vi.fn(() => true);
   const status = vi.fn(async () => "ready" as HostStatus);
   return {
     registry,
@@ -54,10 +52,12 @@ async function fixture() {
     db,
     hosts,
     status,
-    admit: createScheduleAdmission(registry, hosts, status),
+    runtimeReady,
+    admit: createScheduleAdmission(registry, hosts, status, runtimeReady),
     async close() {
       db.close();
       binding.close();
+      processes.close();
       registry.close();
       await rm(dir, { recursive: true, force: true });
     },
@@ -100,7 +100,7 @@ it.each([
   "bot_changed",
   "credentials_missing",
   "setup_incomplete",
-  "container_action",
+  "process_transition",
 ])("rejects persisted %s before contacting a Host", async (state) => {
   if (state === "owner_unlinked")
     f.db.prepare("DELETE FROM chat_bindings").run();
@@ -110,10 +110,8 @@ it.each([
     f.registry.bindBot("dev", 456, "replacement_bot");
   if (state === "credentials_missing")
     vi.spyOn(f.registry, "getHostCredentialRef").mockReturnValue(undefined);
-  if (state === "setup_incomplete")
-    vi.spyOn(f.registry, "getProvisioning").mockReturnValue(undefined);
-  if (state === "container_action")
-    f.registry.beginContainerAction("dev", "stop");
+  if (state === "setup_incomplete") f.runtimeReady.mockReturnValue(false);
+  if (state === "process_transition") f.runtimeReady.mockReturnValue(false);
   expect(await f.admit(schedule)).toBeUndefined();
   expect(f.hosts.read).not.toHaveBeenCalled();
   expect(f.status).not.toHaveBeenCalled();
@@ -133,7 +131,7 @@ it.each(["bot", "owner", "setup"])(
       if (state === "bot") f.registry.bindBot("dev", 456, "replacement_bot");
       if (state === "owner")
         f.db.prepare("UPDATE agents SET owner_id = 73 WHERE id = 'dev'").run();
-      if (state === "setup") f.registry.beginContainerAction("dev", "stop");
+      if (state === "setup") f.runtimeReady.mockReturnValue(false);
       return "ready";
     });
     expect(await f.admit(schedule)).toBeUndefined();

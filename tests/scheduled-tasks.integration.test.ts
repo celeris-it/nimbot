@@ -46,14 +46,7 @@ async function fixture(
   registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
   registry.bindBot("dev", 123, "dev_bot");
   registry.setCredentialRef("dev", "file:telegram-saved");
-  registry.beginProvisioning("dev");
-  registry.setHostCredentialRef("dev", "file:host-saved");
-  registry.recordProvisioningResources("dev", {
-    containerRef: "c".repeat(64),
-    volumeRef: "workspace",
-    networkRef: "network",
-  });
-  registry.finishProvisioning("dev", "ready");
+  vi.spyOn(registry, "getHostCredentialRef").mockReturnValue("file:host-saved");
   const binding = openChatBinding(path, { id: "dev", ownerId: 42 });
   binding.save(123, 42);
   const host = { url: "http://agent:3001", token: "a".repeat(64) };
@@ -163,7 +156,7 @@ async function fixture(
         () => new Promise((resolve) => setTimeout(resolve, 1)),
       ),
       decide: decisions,
-      access: createAgentAccess(registry, id),
+      access: createAgentAccess(registry, id, () => true),
     }));
   }
   let services = makeServices();
@@ -180,7 +173,7 @@ async function fixture(
       tasks.submit,
       binding,
       () => getHostStatus(host, request),
-      createAgentAccess(registry, "dev"),
+      createAgentAccess(registry, "dev", () => true),
       tasks.control,
       tasks.approvals,
     );
@@ -245,6 +238,7 @@ async function fixture(
         registry,
         { read: async () => host },
         (config) => getHostStatus(config, request),
+        () => true,
       ),
       isOverlapping: store.isScheduleOverlapping,
       kick: async (id) => {

@@ -28,9 +28,7 @@ it("creates its schema once and restores metadata without storing tokens", async
           botId: 123,
           botUsername: "developer_bot",
           credentialRef: "file:telegram-saved",
-          containerRef: null,
         });
-        expect(restored.getProvisioning("dev")?.status).toBe("pending");
       } finally {
         restored.close();
       }
@@ -45,14 +43,14 @@ it("creates its schema once and restores metadata without storing tokens", async
       expect(tables).toEqual(
         expect.arrayContaining([
           "agents",
-          "agent_provisioning",
+          "agent_processes",
           "agent_host_credentials",
-          "container_operations",
-          "container_stop_observations",
-          "provisioning_resource_intents",
           "chat_bindings",
         ]),
       );
+      expect(
+        tables.some((name) => /container|provision|recovery/.test(name)),
+      ).toBe(false);
       expect(
         JSON.stringify(db.prepare("SELECT * FROM agents").all()),
       ).not.toMatch(/\d+:[A-Za-z0-9_-]{20,}/);
@@ -85,6 +83,7 @@ it("rejects duplicate bot identities and missing agents", () => {
 it("refuses to link a bot that a chat binding still names for another agent", async () => {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-binding-reuse-"));
   const path = join(dir, "server.sqlite");
+  openAgentRegistry(path).close();
   const binding = openChatBinding(path, { id: "original", ownerId: 42 });
   try {
     binding.save(123, 42);
@@ -100,208 +99,6 @@ it("refuses to link a bot that a chat binding still names for another agent", as
     }
   } finally {
     binding.close();
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-it("persists lifecycle outcomes and marks only pending operations interrupted on restart", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-operations-"));
-  const path = join(dir, "server.sqlite");
-  try {
-    const registry = openAgentRegistry(path);
-    registry.createPending({ id: "a", name: "A", ownerId: 42 });
-    registry.createPending({ id: "b", name: "B", ownerId: 42 });
-    registry.recordContainerOperation("a", "start", "pending");
-    registry.recordContainerOperation("b", "stop", "completed");
-    expect(() =>
-      registry.recordContainerOperation("missing", "start", "pending"),
-    ).toThrow("not registered");
-    registry.close();
-    const restored = openAgentRegistry(path);
-    try {
-      expect(restored.getContainerOperation("a")).toEqual({
-        action: "start",
-        status: "interrupted",
-        updatedAt: expect.any(Number),
-      });
-      expect(restored.getContainerOperation("b")?.status).toBe("completed");
-      restored.recordContainerOperation("a", "start", "failed");
-      expect(restored.getContainerOperation("a")?.status).toBe("failed");
-      expect(restored.getContainerOperation("missing")).toBeUndefined();
-    } finally {
-      restored.close();
-    }
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-it("preserves provisioning resources across interruption and explicit retry", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-provisioning-"));
-  const path = join(dir, "server.sqlite");
-  try {
-    const registry = openAgentRegistry(path);
-    registry.createPending({ id: "new", name: " New agent ", ownerId: 42 });
-    expect(registry.get("new")?.name).toBe("New agent");
-    expect(registry.getProvisioning("new")?.status).toBe("pending");
-    expect(() =>
-      registry.createPending({ id: "new", name: "Duplicate", ownerId: 42 }),
-    ).toThrow();
-    expect(() => registry.finishProvisioning("new", "ready")).toThrow();
-    registry.beginProvisioning("new");
-    expect(() => registry.beginProvisioning("new")).toThrow();
-    registry.recordProvisioningResources("new", { volumeRef: "workspace-new" });
-    expect(() => registry.finishProvisioning("new", "ready")).toThrow();
-    registry.close();
-
-    const restored = openAgentRegistry(path);
-    try {
-      expect(restored.getProvisioning("new")).toMatchObject({
-        status: "interrupted",
-        volumeRef: "workspace-new",
-        networkRef: null,
-      });
-      restored.beginProvisioning("new");
-      restored.recordProvisioningResources("new", {
-        networkRef: "network-new",
-        containerRef: "container-new",
-      });
-      expect(() => restored.finishProvisioning("new", "ready")).toThrow();
-      restored.bindBot("new", 321, "new_bot");
-      restored.setCredentialRef("new", "file:telegram-saved");
-      restored.finishProvisioning("new", "failed");
-      restored.beginProvisioning("new");
-      expect(() => restored.finishProvisioning("new", "ready")).toThrow();
-      restored.setHostCredentialRef("new", "file:host-saved");
-      restored.finishProvisioning("new", "ready");
-      expect(restored.getProvisioning("new")).toMatchObject({
-        status: "ready",
-        volumeRef: "workspace-new",
-        networkRef: "network-new",
-      });
-      expect(restored.get("new")?.containerRef).toBe("container-new");
-      expect(() =>
-        restored.recordProvisioningResources("new", { volumeRef: "wrong" }),
-      ).toThrow();
-      expect(restored.getProvisioning("new")?.volumeRef).toBe("workspace-new");
-      expect(() => restored.beginProvisioning("missing")).toThrow();
-    } finally {
-      restored.close();
-    }
-    const again = openAgentRegistry(path);
-    expect(again.getProvisioning("new")?.status).toBe("ready");
-    again.close();
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-it("retains stop snapshots across restart without inferring a final task result", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-stop-observation-"));
-  const path = join(dir, "server.sqlite");
-  try {
-    const first = openAgentRegistry(path);
-    first.createPending({ id: "dev", name: "Dev", ownerId: 42 });
-    expect(() =>
-      first.recordStopObservation("dev", { availability: "unavailable" }),
-    ).toThrow("No pending");
-    first.recordContainerOperation("dev", "stop", "pending");
-    first.recordStopObservation("dev", {
-      availability: "available",
-      task: { id: "a0000000-0000-4000-8000-000000000001", status: "accepted" },
-    });
-    const saved = first.getStopObservation("dev");
-    first.close();
-    const restored = openAgentRegistry(path);
-    try {
-      expect(restored.getContainerOperation("dev")?.status).toBe("interrupted");
-      expect(restored.getStopObservation("dev")).toEqual(saved);
-      expect(() =>
-        restored.recordStopObservation("dev", {
-          availability: "available",
-          task: null,
-        }),
-      ).toThrow("No pending");
-      restored.recordContainerOperation("dev", "stop", "pending");
-      restored.recordStopObservation("dev", { availability: "unavailable" });
-      expect(restored.getStopObservation("dev")).toEqual({
-        availability: "unavailable",
-        observedAt: expect.any(Number),
-        observationId: expect.any(String),
-        finalStatus: null,
-      });
-    } finally {
-      restored.close();
-    }
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-it("preserves cancelled setup and resource references across restart and permits explicit recovery", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-cancelled-setup-"));
-  const path = join(dir, "server.sqlite");
-  try {
-    const first = openAgentRegistry(path);
-    first.createPending({ id: "dev", name: "Dev", ownerId: 42 });
-    first.beginProvisioning("dev");
-    first.recordProvisioningResources("dev", {
-      volumeRef: "workspace",
-      networkRef: "network",
-      containerRef: "container",
-    });
-    first.finishProvisioning("dev", "cancelled");
-    const saved = first.getProvisioning("dev");
-    first.close();
-    const restored = openAgentRegistry(path);
-    try {
-      expect(restored.getProvisioning("dev")).toEqual(saved);
-      expect(restored.get("dev")?.containerRef).toBe("container");
-      expect(() => restored.beginContainerAction("dev", "start")).toThrow();
-      restored.beginProvisioning("dev");
-      expect(restored.getProvisioning("dev")?.volumeRef).toBe("workspace");
-      restored.finishProvisioning("dev", "cancelled");
-      restored.beginResourceRemoval("dev");
-      restored.finishResourceRemoval("dev", false);
-      expect(restored.getProvisioning("dev")).toMatchObject({
-        status: "pending",
-        volumeRef: "workspace",
-        networkRef: null,
-      });
-      expect(restored.get("dev")?.containerRef).toBeNull();
-      expect(() => restored.finishProvisioning("dev", "cancelled")).toThrow();
-    } finally {
-      restored.close();
-    }
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-it("retains creation intentions when a process restarts before resource confirmation", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-intent-restart-"));
-  const path = join(dir, "state.sqlite");
-  try {
-    const first = openAgentRegistry(path);
-    first.createPending({ id: "dev", name: "Dev", ownerId: 42 });
-    first.beginProvisioning("dev");
-    first.recordProvisioningIntent(
-      "dev",
-      "container",
-      "nimbot-dev",
-      "a0000000-0000-4000-8000-000000000001",
-    );
-    const intents = first.listProvisioningIntents();
-    first.close();
-    const restored = openAgentRegistry(path);
-    try {
-      expect(restored.getProvisioning("dev")?.status).toBe("interrupted");
-      expect(restored.listProvisioningIntents()).toEqual(intents);
-      expect(() => restored.beginContainerAction("dev", "start")).toThrow();
-    } finally {
-      restored.close();
-    }
-  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

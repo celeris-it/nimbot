@@ -41,6 +41,6 @@ jobs:
       - run: pnpm test:panel
       - name: Build single-container application
         run: docker build -f infrastructure/docker/nimbot.Dockerfile -t nimbot:test .
-      - run: pnpm test tests/application-container.integration.test.ts
+      - run: pnpm test tests/application-container.integration.test.ts tests/opencode-mcp.integration.test.ts tests/memory-fts5.integration.test.ts
         env:
           NIMBOT_TEST_APPLICATION_IMAGE: nimbot:test

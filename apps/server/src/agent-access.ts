@@ -13,7 +13,7 @@ export interface AgentSetupAccess {
 export function createAgentAccess(
   registry: ReturnType<typeof openAgentRegistry>,
   agentId: string,
-  runtimeReady?: () => boolean,
+  runtimeReady: () => boolean,
 ) {
   function linked() {
     const agent = registry.get(agentId);
@@ -43,22 +43,7 @@ export function createAgentAccess(
           registry.getOwnerChat(agentId) !== chatId
         )
           return false;
-        if (runtimeReady)
-          return runtimeReady() && !!registry.getHostCredentialRef(agentId);
-        const setup = registry.getProvisioning(agentId);
-        if (
-          !setup ||
-          registry.getContainerOperation(agentId)?.status === "pending" ||
-          registry.getProvisioningCancellation(agentId) !== undefined
-        )
-          return false;
-        return (
-          setup.status === "ready" &&
-          !!registry.get(agentId)?.containerRef &&
-          !!setup.volumeRef &&
-          !!setup.networkRef &&
-          !!registry.getHostCredentialRef(agentId)
-        );
+        return runtimeReady() && !!registry.getHostCredentialRef(agentId);
       } catch {
         return false;
       }

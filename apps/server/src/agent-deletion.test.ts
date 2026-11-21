@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { openAgentProcessStore } from "./agent-process-store.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openAgentRegistry } from "./agent-registry.js";
 import { createAgentDeletion } from "./agent-deletion.js";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -7,19 +9,35 @@ import { join } from "node:path";
 import { openTaskStore } from "./task-queue.js";
 import { openScheduleStore } from "./schedule-store.js";
 
-function fixture(path = ":memory:") {
-  const registry = openAgentRegistry(path);
-  registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
-  registry.beginProvisioning("dev");
-  registry.recordProvisioningResources("dev", {
-    containerRef: "d".repeat(64),
-    networkRef: "c".repeat(64),
-    volumeRef: "nimbot-dev-workspace",
+const cleanups: (() => void)[] = [];
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
+});
+function fixture(savedPath?: string) {
+  const directory = savedPath
+    ? undefined
+    : mkdtempSync(join(tmpdir(), "nimbot-delete-"));
+  const path = savedPath ?? join(directory!, "server.sqlite");
+  const registry = Object.assign(openAgentRegistry(path), {
+    processes: openAgentProcessStore(path),
   });
-  registry.setHostCredentialRef("dev", "file:host-saved");
+  registry.createPending({ id: "dev", name: "Dev", ownerId: 42 });
+  registry.processes.claimHostCredential(
+    "dev",
+    "file:host-00000000-0000-4000-8000-000000000001",
+  );
   registry.setCredentialRef("dev", "file:telegram-saved");
   registry.bindBot("dev", 7, "dev_bot");
-  registry.finishProvisioning("dev", "ready");
+  const close = registry.close;
+  let closed = false;
+  registry.close = () => {
+    if (closed) return;
+    closed = true;
+    registry.processes.close();
+    close();
+    if (directory) rmSync(directory, { recursive: true, force: true });
+  };
+  cleanups.push(registry.close);
   return registry;
 }
 function deletion(
@@ -47,10 +65,9 @@ function deletion(
     removeResources:
       overrides.removeResources ??
       (async (id, data, stop) => {
-        registry.beginResourceRemoval(id);
         await stop();
         events.push(`resources:${id}:${data}`);
-        registry.finishResourceRemoval(id, data);
+        registry.processes.remove(id);
       }),
     removeBotSecret: async (ref) => void events.push(`bot-secret:${ref}`),
     removeHostSecret: async (ref) => void events.push(`host-secret:${ref}`),
@@ -73,23 +90,22 @@ describe("agent deletion", () => {
       "schedules:dev",
       "revoke-mcp:dev",
       "bot-secret:file:telegram-saved",
-      "host-secret:file:host-saved",
+      "host-secret:file:host-00000000-0000-4000-8000-000000000001",
     ]);
     expect(registry.get("dev")).toBeUndefined();
     expect(registry.listIds()).toEqual([]);
-    // The retained volume stays traceable and the bot can be linked again.
-    expect(registry.getProvisioning("dev")?.volumeRef).toBe(
-      "nimbot-dev-workspace",
-    );
+    // The retired process is no longer restorable and the bot can be linked again.
+    expect(registry.processes.getDesiredState("dev")).toBeUndefined();
     expect(registry.getHostCredentialRef("dev")).toBeUndefined();
     registry.createPending({ id: "other", name: "Other", ownerId: 42 });
     registry.bindBot("other", 7, "dev_bot");
   });
 
-  it("deletes the volume reference only when data deletion is requested", async () => {
+  it("passes an explicit purge request to runtime removal", async () => {
     const registry = fixture();
-    await deletion(registry).run("dev", true);
-    expect(registry.getProvisioning("dev")?.volumeRef).toBeNull();
+    const { run, events } = deletion(registry);
+    await run("dev", true);
+    expect(events).toContain("resources:dev:true");
   });
 
   it("keeps secrets and the agent when resource removal fails, and can be retried", async () => {
@@ -97,7 +113,7 @@ describe("agent deletion", () => {
     const fail = vi.fn(
       async (...[, , stop]: [string, boolean, () => Promise<void>]) => {
         await stop();
-        throw new Error("docker");
+        throw new Error("Host shutdown failed");
       },
     );
     const failing = deletion(registry, { removeResources: fail });
@@ -113,19 +129,6 @@ describe("agent deletion", () => {
     const { run, events } = deletion(registry);
     await expect(run("../x")).rejects.toThrow("Invalid agent ID");
     expect(events).toEqual([]);
-  });
-
-  it("leaves polling and retained resources untouched when recovery owns the lifecycle lock", async () => {
-    const registry = fixture();
-    try {
-      registry.beginRecovery("dev", `sha256:${"a".repeat(64)}`, "manual");
-      const { run, events } = deletion(registry);
-      await expect(run("dev", true)).rejects.toThrow("cannot be removed");
-      expect(events).toEqual([]);
-      expect(registry.getRecovery("dev")?.status).toBe("recovering");
-    } finally {
-      registry.close();
-    }
   });
 
   it("keeps the agent and secrets when schedule cleanup fails, then permits retry", async () => {
@@ -146,7 +149,7 @@ describe("agent deletion", () => {
     }
   });
 
-  it("deletes actual schedules and runs before the tombstone while retaining the volume and task history", async () => {
+  it("deletes actual schedules and runs before the tombstone while retaining task history", async () => {
     const dir = await mkdtemp(join(tmpdir(), "nimbot-delete-schedules-"));
     const path = join(dir, "server.sqlite");
     const registry = fixture(path);
@@ -180,9 +183,7 @@ describe("agent deletion", () => {
       }).run("dev");
       expect(tombstone).toHaveBeenCalledExactlyOnceWith("dev");
       expect(registry.get("dev")).toBeUndefined();
-      expect(registry.getProvisioning("dev")?.volumeRef).toBe(
-        "nimbot-dev-workspace",
-      );
+      expect(registry.processes.getDesiredState("dev")).toBeUndefined();
       expect(
         result.recorded && tasks.getTask(result.run.taskId!),
       ).toMatchObject({

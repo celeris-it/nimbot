@@ -3,7 +3,7 @@ import { log } from "./logger.js";
 import { GrammyError } from "grammy";
 import type { openAgentRegistry } from "./agent-registry.js";
 import type { openBotSecrets } from "./bot-secret.js";
-import type { openHostCredentials } from "./host-credentials.js";
+import type { AgentHostConfig } from "./agent-host.js";
 import { openChatBinding } from "./chat-binding.js";
 import { createAgentAccess } from "./agent-access.js";
 import { createBot } from "./bot.js";
@@ -43,14 +43,14 @@ export function createRegisteredBots(
     taskStore: TaskStore;
     schedules?: Pick<ScheduleStore, "listByAgent">;
     allowsWork?: (id: string) => boolean;
-    runtimeReady?: (id: string) => boolean;
+    runtimeReady: (id: string) => boolean;
     /** Upper bound for waiting on one task; omit for the default. */
     taskWaitMs?: number;
     /** Shared agent runner owned outside the Telegram polling lifecycle. */
     tasks?: (agentId: string) => Promise<ReturnType<typeof createBotTasks>>;
   },
   secrets: Pick<Awaited<ReturnType<typeof openBotSecrets>>, "read">,
-  hosts: Pick<Awaited<ReturnType<typeof openHostCredentials>>, "read">,
+  hosts: { read(id: string): Promise<AgentHostConfig> },
   request: typeof fetch = fetch,
   makeBot: typeof createBot = createBot,
   retryDelaysMs: readonly number[] = DEFAULT_RETRY_DELAYS_MS,
@@ -62,21 +62,12 @@ export function createRegisteredBots(
     let credentialsLoaded = false;
     try {
       const agent = registry.get(id);
-      const setup = config.runtimeReady
-        ? undefined
-        : registry.getProvisioning(id);
-      const runtimeReady = config.runtimeReady
-        ? config.runtimeReady(id)
-        : setup?.status === "ready" &&
-          !!agent?.containerRef &&
-          !!setup.volumeRef &&
-          !!setup.networkRef;
       if (
         !agent ||
         !agent.botId ||
         !agent.botUsername ||
         !agent.credentialRef ||
-        !runtimeReady
+        !config.runtimeReady(id)
       ) {
         connection.state = { status: "blocked", failure: "setup_incomplete" };
         return;
@@ -88,10 +79,8 @@ export function createRegisteredBots(
       credentialsLoaded = true;
       if (connection.controller.signal.aborted) return;
       binding = openChatBinding(config.statePath, agent);
-      const access = createAgentAccess(
-        registry,
-        id,
-        config.runtimeReady ? () => config.runtimeReady!(id) : undefined,
+      const access = createAgentAccess(registry, id, () =>
+        config.runtimeReady(id),
       );
       const tasks = config.tasks
         ? await config.tasks(id)

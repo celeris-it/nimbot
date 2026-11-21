@@ -1,9 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { CurrentHostTask } from "./host-current-task.js";
-import { randomUUID } from "node:crypto";
-import { CHAT_BINDINGS_SCHEMA } from "./chat-binding.js";
 import { isDiscordId } from "./discord-identity.js";
-import { RECOVERY_SCHEMA, recoveryRegistry } from "./recovery-registry.js";
 import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
 
 export interface DiscordConnection {
@@ -12,26 +8,6 @@ export interface DiscordConnection {
   ownerId: string;
   credentialRef: string;
 }
-import {
-  agentResourceNames,
-  type ResourceKind,
-} from "./container-resources.js";
-
-export interface ProvisioningIntent {
-  agentId: string;
-  kind: ResourceKind;
-  name: string;
-  operationId: string;
-  createdAt: number;
-}
-import type { FinalTaskStatus } from "./host-task-status.js";
-
-export type StopObservation = CurrentHostTask & {
-  observedAt: number;
-  observationId: string;
-  finalStatus: FinalTaskStatus | null;
-};
-
 export interface RegisteredAgent {
   id: string;
   name: string;
@@ -40,137 +16,23 @@ export interface RegisteredAgent {
   botId: number | null;
   botUsername: string | null;
   credentialRef: string | null;
-  containerRef: string | null;
-}
-
-export interface ProvisioningState {
-  status:
-    | "pending"
-    | "provisioning"
-    | "ready"
-    | "failed"
-    | "cancelled"
-    | "interrupted";
-  volumeRef: string | null;
-  networkRef: string | null;
-  updatedAt: number;
-}
-
-export interface ContainerOperation {
-  action: "start" | "stop";
-  status: "pending" | "completed" | "failed" | "interrupted";
-  updatedAt: number;
 }
 
 /** Metadata only; provider and Telegram tokens never enter the registry. */
-export function openAgentRegistry(
-  path: string,
-  runtime: "docker" | "process" = "docker",
-) {
-  if (runtime === "process")
+export function openAgentRegistry(path: string) {
+  if (path !== ":memory:")
     prepareStateSchema(path, "server-process", { legacy: false });
   const db = new DatabaseSync(path);
   try {
-    if (
-      runtime === "docker" &&
-      db.prepare("PRAGMA application_id").get()?.application_id === 0x4e494d50
-    )
-      throw new Error(
-        "Subprocess Server state cannot be opened by the per-agent Docker runtime.",
-      );
-    db.exec("BEGIN IMMEDIATE");
-    if (runtime === "docker") {
-      // Fresh installations use the current schema directly.
-      db.exec(`
-      CREATE TABLE IF NOT EXISTS agents (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        owner_id INTEGER NOT NULL,
-        instructions TEXT NOT NULL DEFAULT '',
-        bot_id INTEGER UNIQUE,
-        bot_username TEXT,
-        credential_ref TEXT,
-        container_ref TEXT,
-        deleted_at INTEGER
-      );
-      CREATE TABLE IF NOT EXISTS agent_discord_connections (
-        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-        bot_id TEXT NOT NULL UNIQUE,
-        bot_username TEXT NOT NULL,
-        owner_id TEXT NOT NULL,
-        credential_ref TEXT NOT NULL UNIQUE
-      );
-      CREATE TABLE IF NOT EXISTS agent_memory_access (
-        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-        enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
-      );
-      CREATE TABLE IF NOT EXISTS container_operations (
-        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-        action TEXT NOT NULL CHECK(action IN ('start', 'stop')),
-        status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'failed', 'interrupted')),
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS agent_provisioning (
-        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-        status TEXT NOT NULL CHECK(status IN ('pending', 'provisioning', 'ready', 'failed', 'interrupted', 'cancelled')),
-        volume_ref TEXT,
-        network_ref TEXT,
-        updated_at INTEGER NOT NULL,
-        cancel_requested_at INTEGER
-      );
-      CREATE TABLE IF NOT EXISTS agent_host_credentials (
-        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-        credential_ref TEXT NOT NULL UNIQUE
-      );
-      CREATE TABLE IF NOT EXISTS container_stop_observations (
-        agent_id TEXT PRIMARY KEY REFERENCES agents(id),
-        availability TEXT NOT NULL CHECK(availability IN ('available', 'unavailable')),
-        task_id TEXT,
-        task_status TEXT CHECK(task_status IN ('accepted', 'running')),
-        observed_at INTEGER NOT NULL,
-        observation_id TEXT NOT NULL DEFAULT '',
-        final_status TEXT CHECK(final_status IN ('completed', 'failed', 'interrupted')),
-        CHECK ((task_id IS NULL AND task_status IS NULL) OR
-          (availability = 'available' AND task_id IS NOT NULL AND task_status IS NOT NULL))
-      );
-      CREATE TABLE IF NOT EXISTS provisioning_resource_intents (
-        agent_id TEXT NOT NULL REFERENCES agents(id),
-        kind TEXT NOT NULL CHECK(kind IN ('container', 'volume', 'network')),
-        name TEXT NOT NULL,
-        operation_id TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        PRIMARY KEY (agent_id, kind, name, operation_id)
-      );
-      ${CHAT_BINDINGS_SCHEMA}
-      ${RECOVERY_SCHEMA}
-    `);
-      db.prepare(
-        "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
-      ).run(Date.now());
-      // A lost response cannot establish whether Docker completed the operation.
-      db.prepare(
-        "UPDATE container_operations SET status = 'interrupted', updated_at = ? WHERE status = 'pending'",
-      ).run(Date.now());
-      db.prepare(
-        "UPDATE agent_recovery SET status = 'interrupted', updated_at = ? WHERE status = 'recovering'",
-      ).run(Date.now());
-    }
-    db.exec("COMMIT");
+    if (path === ":memory:")
+      prepareStateSchema(db, "server-process", { legacy: false });
+    db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON");
   } catch (error) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      /* No active transaction. */
-    }
     db.close();
     throw error;
   }
   const columns =
-    "id, name, owner_id AS ownerId, instructions, bot_id AS botId, bot_username AS botUsername, credential_ref AS credentialRef, " +
-    (runtime === "process" ? "NULL" : "container_ref") +
-    " AS containerRef";
-  const provisioningColumns =
-    "status, volume_ref AS volumeRef, network_ref AS networkRef, updated_at AS updatedAt";
+    "id, name, owner_id AS ownerId, instructions, bot_id AS botId, bot_username AS botUsername, credential_ref AS credentialRef";
   function assertBotAvailable(id: string, botId: number) {
     // Refuse accidental bot reuse, including a chat binding that outlived its agent row.
     if (
@@ -187,7 +49,6 @@ export function openAgentRegistry(
     if (other) throw new Error("Bot is already assigned to another agent");
   }
   return {
-    ...recoveryRegistry(db),
     getDiscordConnection(id: string): DiscordConnection | undefined {
       return db
         .prepare(
@@ -243,47 +104,6 @@ export function openAgentRegistry(
       if (!result.changes)
         throw new Error("Discord connection changed or is unavailable");
     },
-    recordProvisioningIntent(
-      id: string,
-      kind: ResourceKind,
-      name: string,
-      operationId: string,
-    ) {
-      const names = agentResourceNames(id);
-      const expected = kind === "volume" ? names.volumes : [names[kind]];
-      if (
-        !expected.includes(name) ||
-        !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(operationId)
-      )
-        throw new Error("Invalid provisioning intent");
-      const result = db
-        .prepare(
-          `INSERT OR IGNORE INTO provisioning_resource_intents
-        (agent_id, kind, name, operation_id, created_at)
-        SELECT agent_id, ?, ?, ?, ? FROM agent_provisioning WHERE agent_id = ? AND status = 'provisioning'`,
-        )
-        .run(kind, name, operationId, Date.now(), id);
-      if (!result.changes)
-        throw new Error("Could not persist provisioning intent");
-    },
-    completeProvisioningIntent(
-      id: string,
-      kind: ResourceKind,
-      name: string,
-      operationId?: string,
-    ) {
-      db.prepare(
-        "DELETE FROM provisioning_resource_intents WHERE agent_id = ? AND kind = ? AND name = ? AND (? IS NULL OR operation_id = ?)",
-      ).run(id, kind, name, operationId ?? null, operationId ?? null);
-    },
-    listProvisioningIntents(): ProvisioningIntent[] {
-      return db
-        .prepare(
-          `SELECT agent_id AS agentId, kind, name, operation_id AS operationId,
-        created_at AS createdAt FROM provisioning_resource_intents ORDER BY agent_id, kind, name, operation_id`,
-        )
-        .all() as unknown as ProvisioningIntent[];
-    },
     getOwnerChat(id: string): number | undefined {
       const row = db
         .prepare(
@@ -298,24 +118,6 @@ export function openAgentRegistry(
         chatId > 0
         ? chatId
         : undefined;
-    },
-    listResourceReferences(): {
-      id: string;
-      containerRef: string | null;
-      volumeRef: string | null;
-      networkRef: string | null;
-    }[] {
-      return db
-        .prepare(
-          `SELECT a.id, a.container_ref AS containerRef, p.volume_ref AS volumeRef, p.network_ref AS networkRef
-        FROM agents a JOIN agent_provisioning p ON p.agent_id = a.id ORDER BY a.id`,
-        )
-        .all() as unknown as {
-        id: string;
-        containerRef: string | null;
-        volumeRef: string | null;
-        networkRef: string | null;
-      }[];
     },
     /** Opt-in per agent; off unless the administrator enabled it. */
     getMemoryEnabled(id: string): boolean {
@@ -345,128 +147,6 @@ export function openAgentRegistry(
           "SELECT credential_ref FROM agent_host_credentials WHERE agent_id = ?",
         )
         .get(id)?.credential_ref as string | undefined;
-    },
-    setHostCredentialRef(id: string, ref: string) {
-      if (
-        !db
-          .prepare(
-            "SELECT agent_id FROM agent_provisioning WHERE agent_id = ? AND status = 'provisioning'",
-          )
-          .get(id)
-      )
-        throw new Error("Agent is not provisioning");
-      db.prepare(
-        "INSERT INTO agent_host_credentials (agent_id, credential_ref) VALUES (?, ?)",
-      ).run(id, ref);
-    },
-    getProvisioning(id: string): ProvisioningState | undefined {
-      return db
-        .prepare(
-          `SELECT ${provisioningColumns} FROM agent_provisioning WHERE agent_id = ?`,
-        )
-        .get(id) as unknown as ProvisioningState | undefined;
-    },
-    beginResourceRemoval(id: string) {
-      const result = db
-        .prepare(
-          "UPDATE agent_provisioning SET status = 'provisioning', cancel_requested_at = NULL, updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'ready', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending') AND NOT EXISTS (SELECT 1 FROM agent_recovery r WHERE r.agent_id = agent_provisioning.agent_id AND r.status IN ('recovering', 'interrupted', 'failed'))",
-        )
-        .run(Date.now(), id, id);
-      if (!result.changes) throw new Error("Agent resources cannot be removed");
-    },
-    finishResourceRemoval(id: string, deleteData: boolean) {
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        const result = db
-          .prepare(
-            "UPDATE agent_provisioning SET status = 'pending', network_ref = NULL, volume_ref = CASE WHEN ? THEN NULL ELSE volume_ref END, updated_at = ? WHERE agent_id = ? AND status = 'provisioning'",
-          )
-          .run(deleteData ? 1 : 0, Date.now(), id);
-        if (!result.changes)
-          throw new Error("Agent resources are not being removed");
-        db.prepare("UPDATE agents SET container_ref = NULL WHERE id = ?").run(
-          id,
-        );
-        db.prepare(
-          "DELETE FROM recovery_resource_intents WHERE agent_id = ?",
-        ).run(id);
-        db.prepare("DELETE FROM agent_recovery WHERE agent_id = ?").run(id);
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-    },
-    beginProvisioning(id: string) {
-      const result = db
-        .prepare(
-          "UPDATE agent_provisioning SET status = 'provisioning', cancel_requested_at = NULL, updated_at = ? WHERE agent_id = ? AND status IN ('pending', 'failed', 'interrupted', 'cancelled') AND NOT EXISTS (SELECT 1 FROM container_operations WHERE agent_id = ? AND status = 'pending') AND NOT EXISTS (SELECT 1 FROM agent_recovery r WHERE r.agent_id = agent_provisioning.agent_id AND r.status IN ('recovering', 'interrupted', 'failed'))",
-        )
-        .run(Date.now(), id, id);
-      if (!result.changes) throw new Error("Agent cannot begin provisioning");
-    },
-    requestProvisioningCancellation(id: string) {
-      const result = db
-        .prepare(
-          `UPDATE agent_provisioning
-        SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
-        WHERE agent_id = ? AND status = 'provisioning'`,
-        )
-        .run(Date.now(), id);
-      if (!result.changes) throw new Error("Agent is not provisioning");
-    },
-    getProvisioningCancellation(id: string): number | undefined {
-      const value = db
-        .prepare(
-          "SELECT cancel_requested_at FROM agent_provisioning WHERE agent_id = ?",
-        )
-        .get(id)?.cancel_requested_at;
-      return typeof value === "number" ? value : undefined;
-    },
-    recordProvisioningResources(
-      id: string,
-      resources: {
-        containerRef?: string;
-        volumeRef?: string;
-        networkRef?: string;
-      },
-    ) {
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        const result = db
-          .prepare(
-            "UPDATE agent_provisioning SET volume_ref = COALESCE(?, volume_ref), network_ref = COALESCE(?, network_ref), updated_at = ? WHERE agent_id = ? AND status = 'provisioning'",
-          )
-          .run(
-            resources.volumeRef ?? null,
-            resources.networkRef ?? null,
-            Date.now(),
-            id,
-          );
-        if (!result.changes) throw new Error("Agent is not provisioning");
-        if (resources.containerRef !== undefined)
-          db.prepare("UPDATE agents SET container_ref = ? WHERE id = ?").run(
-            resources.containerRef,
-            id,
-          );
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-    },
-    finishProvisioning(id: string, status: "ready" | "failed" | "cancelled") {
-      const result = db
-        .prepare(
-          `UPDATE agent_provisioning SET status = ?, updated_at = ?
-        WHERE agent_id = ? AND status = 'provisioning'
-        AND (? <> 'ready' OR (volume_ref IS NOT NULL AND network_ref IS NOT NULL
-          AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND container_ref IS NOT NULL AND bot_id IS NOT NULL AND credential_ref IS NOT NULL)
-          AND EXISTS (SELECT 1 FROM agent_host_credentials WHERE agent_id = ?)
-          AND NOT EXISTS (SELECT 1 FROM provisioning_resource_intents WHERE agent_id = ?)))`,
-        )
-        .run(status, Date.now(), id, status, id, id, id);
-      if (!result.changes) throw new Error("Agent cannot finish provisioning");
     },
     registerLinkedAgent(
       agent: {
@@ -506,14 +186,9 @@ export function openAgentRegistry(
           bot.username,
           credentialRef,
         );
-        if (runtime === "process")
-          db.prepare(
-            "INSERT INTO agent_processes (agent_id, desired_state) VALUES (?, 'stopped')",
-          ).run(agent.id);
-        else
-          db.prepare(
-            "INSERT INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'pending', ?)",
-          ).run(agent.id, Date.now());
+        db.prepare(
+          "INSERT INTO agent_processes (agent_id, desired_state) VALUES (?, 'stopped')",
+        ).run(agent.id);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -542,14 +217,9 @@ export function openAgentRegistry(
         db.prepare(
           "INSERT INTO agents (id, name, owner_id, instructions) VALUES (?, ?, ?, ?)",
         ).run(agent.id, name, agent.ownerId, instructions);
-        if (runtime === "process")
-          db.prepare(
-            "INSERT INTO agent_processes (agent_id, desired_state) VALUES (?, 'stopped')",
-          ).run(agent.id);
-        else
-          db.prepare(
-            "INSERT INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'pending', ?)",
-          ).run(agent.id, Date.now());
+        db.prepare(
+          "INSERT INTO agent_processes (agent_id, desired_state) VALUES (?, 'stopped')",
+        ).run(agent.id);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -572,121 +242,6 @@ export function openAgentRegistry(
         .run(botId, botUsername, id);
       if (!result.changes) throw new Error("Agent is not registered");
     },
-    beginContainerAction(id: string, action: "start" | "stop") {
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        const result = db
-          .prepare(
-            `INSERT INTO container_operations (agent_id, action, status, updated_at)
-        SELECT agent_id, ?, 'pending', ? FROM agent_provisioning
-        WHERE agent_id = ? AND status = 'ready'
-        AND NOT EXISTS (SELECT 1 FROM agent_recovery r WHERE r.agent_id = agent_provisioning.agent_id AND r.status IN ('recovering', 'interrupted', 'failed'))
-        ON CONFLICT(agent_id) DO UPDATE SET action = excluded.action, status = 'pending', updated_at = excluded.updated_at
-        WHERE container_operations.status <> 'pending'`,
-          )
-          .run(action, Date.now(), id);
-        if (!result.changes)
-          throw new Error("Agent container action is not available");
-        if (action === "stop")
-          db.prepare(
-            "DELETE FROM container_stop_observations WHERE agent_id = ?",
-          ).run(id);
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-    },
-    recordStopObservation(id: string, observation: CurrentHostTask) {
-      const task =
-        observation.availability === "available" ? observation.task : null;
-      const result = db
-        .prepare(
-          `INSERT INTO container_stop_observations
-        (agent_id, availability, task_id, task_status, observed_at, observation_id)
-        SELECT agent_id, ?, ?, ?, ?, ? FROM container_operations
-        WHERE agent_id = ? AND action = 'stop' AND status = 'pending'
-        ON CONFLICT(agent_id) DO UPDATE SET availability = excluded.availability,
-        task_id = excluded.task_id, task_status = excluded.task_status,
-        observed_at = excluded.observed_at, observation_id = excluded.observation_id, final_status = NULL`,
-        )
-        .run(
-          observation.availability,
-          task?.id ?? null,
-          task?.status ?? null,
-          Date.now(),
-          randomUUID(),
-          id,
-        );
-      if (!result.changes) throw new Error("No pending container stop");
-    },
-    getStopObservation(id: string): StopObservation | undefined {
-      const row = db
-        .prepare(
-          `SELECT availability, task_id AS taskId, observation_id AS observationId, final_status AS finalStatus,
-        task_status AS taskStatus, observed_at AS observedAt
-        FROM container_stop_observations WHERE agent_id = ?`,
-        )
-        .get(id);
-      if (!row) return undefined;
-      if (row.availability === "unavailable")
-        return {
-          availability: "unavailable",
-          observedAt: row.observedAt as number,
-          observationId: row.observationId as string,
-          finalStatus: row.finalStatus as FinalTaskStatus | null,
-        };
-      return {
-        availability: "available",
-        task:
-          row.taskId === null
-            ? null
-            : {
-                id: row.taskId as string,
-                status: row.taskStatus as "accepted" | "running",
-              },
-        observedAt: row.observedAt as number,
-        observationId: row.observationId as string,
-        finalStatus: row.finalStatus as FinalTaskStatus | null,
-      };
-    },
-    confirmStopTask(
-      id: string,
-      observationId: string,
-      status: FinalTaskStatus,
-    ) {
-      // A slow refresh must never overwrite a newer stop snapshot or a confirmed outcome.
-      db.prepare(
-        `UPDATE container_stop_observations SET final_status = ?
-        WHERE agent_id = ? AND observation_id = ? AND task_id IS NOT NULL AND final_status IS NULL`,
-      ).run(status, id, observationId);
-    },
-    recordContainerOperation(
-      id: string,
-      action: ContainerOperation["action"],
-      status: ContainerOperation["status"],
-    ) {
-      if (!db.prepare("SELECT id FROM agents WHERE id = ?").get(id))
-        throw new Error("Agent is not registered");
-      db.prepare(
-        `INSERT INTO container_operations (agent_id, action, status, updated_at)
-        VALUES (?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET
-        action = excluded.action, status = excluded.status, updated_at = excluded.updated_at`,
-      ).run(id, action, status, Date.now());
-    },
-    getContainerOperation(id: string): ContainerOperation | undefined {
-      return db
-        .prepare(
-          "SELECT action, status, updated_at AS updatedAt FROM container_operations WHERE agent_id = ?",
-        )
-        .get(id) as unknown as ContainerOperation | undefined;
-    },
-    setContainerRef(id: string, containerId: string) {
-      const result = db
-        .prepare("UPDATE agents SET container_ref = ? WHERE id = ?")
-        .run(containerId, id);
-      if (!result.changes) throw new Error("Agent is not registered");
-    },
     setCredentialRef(id: string, ref: string) {
       const result = db
         .prepare("UPDATE agents SET credential_ref = ? WHERE id = ?")
@@ -700,12 +255,7 @@ export function openAgentRegistry(
         )
         .get(id) as unknown as RegisteredAgent | undefined;
     },
-    /**
-     * Retires an agent whose Docker resources were already removed. The row stays
-     * as a tombstone so a retained volume remains traceable. Bot identity,
-     * chat binding, and credential references are dropped; returns the secret
-     * references the caller must erase.
-     */
+    /** Retires a stopped, removed Host while retaining the agent row as a data tombstone. */
     finishAgentDeletion(id: string): {
       botCredentialRef: string | null;
       hostCredentialRef: string | null;
@@ -717,22 +267,9 @@ export function openAgentRegistry(
             "SELECT credential_ref FROM agents WHERE id = ? AND deleted_at IS NULL",
           )
           .get(id);
-        const setup =
-          runtime === "process"
-            ? undefined
-            : db
-                .prepare(
-                  "SELECT status, network_ref FROM agent_provisioning WHERE agent_id = ?",
-                )
-                .get(id);
-        const resourcesRemain =
-          runtime === "process"
-            ? !!db
-                .prepare(
-                  "SELECT agent_id FROM agent_processes WHERE agent_id = ?",
-                )
-                .get(id)
-            : setup?.status !== "pending" || !!setup.network_ref;
+        const resourcesRemain = !!db
+          .prepare("SELECT agent_id FROM agent_processes WHERE agent_id = ?")
+          .get(id);
         if (!agent || resourcesRemain)
           throw new Error("Agent resources must be removed before deletion");
         if (
@@ -758,9 +295,7 @@ export function openAgentRegistry(
           id,
         );
         db.prepare(
-          "UPDATE agents SET bot_id = NULL, bot_username = NULL, credential_ref = NULL, " +
-            (runtime === "docker" ? "container_ref = NULL, " : "") +
-            "deleted_at = ? WHERE id = ?",
+          "UPDATE agents SET bot_id = NULL, bot_username = NULL, credential_ref = NULL, deleted_at = ? WHERE id = ?",
         ).run(Date.now(), id);
         db.exec("COMMIT");
         return {

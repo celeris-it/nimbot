@@ -115,7 +115,7 @@ async function main(): Promise<void> {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     statePath = resolve(stateDir, "server.sqlite");
     prepareStateSchema(statePath, "server-process");
-    registry = openAgentRegistry(statePath, "process");
+    registry = openAgentRegistry(statePath);
     {
       processStore = openAgentProcessStore(statePath);
       processCredentials = await openProcessHostCredentials(
@@ -136,7 +136,7 @@ async function main(): Promise<void> {
     );
     discordInbox = openDiscordInbox(statePath);
     notificationStore = openNotificationStore(statePath);
-    operationalAlertStore = openOperationalAlertStore(statePath, "process");
+    operationalAlertStore = openOperationalAlertStore(statePath);
     taskStore = openTaskStore(statePath);
     usageStore = openAgentUsage(statePath);
     scheduleStore = openScheduleStore(statePath);
@@ -517,7 +517,6 @@ async function main(): Promise<void> {
               ? origin
               : undefined;
           },
-          runtimeReady,
         )
       : async () => undefined,
     isOverlapping: taskStore.isScheduleOverlapping,

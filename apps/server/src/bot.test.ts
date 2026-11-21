@@ -494,19 +494,13 @@ it("rechecks persisted setup after Host health and never executes incomplete age
   registry.createPending({ id: "test", name: "Test", ownerId: 42 });
   registry.bindBot("test", 123, "test_bot");
   registry.setCredentialRef("test", "file:telegram-saved");
-  registry.beginProvisioning("test");
-  registry.setHostCredentialRef("test", "file:host-saved");
-  registry.recordProvisioningResources("test", {
-    containerRef: "c".repeat(64),
-    volumeRef: "workspace",
-    networkRef: "network",
-  });
-  registry.finishProvisioning("test", "ready");
+  let running = true;
+  vi.spyOn(registry, "getHostCredentialRef").mockReturnValue("file:host-saved");
   const binding = openChatBinding(path, { id: "test", ownerId: 42 });
-  const access = createAgentAccess(registry, "test");
+  const access = createAgentAccess(registry, "test", () => running);
   let changeDuringHealth = true;
   const health = vi.fn(async () => {
-    if (changeDuringHealth) registry.beginContainerAction("test", "stop");
+    if (changeDuringHealth) running = false;
     return "ready" as const;
   });
   const execute = vi.fn<(prompt: string) => Promise<string>>(
@@ -525,14 +519,13 @@ it("rechecks persisted setup after Host health and never executes incomplete age
     expect(execute).not.toHaveBeenCalled();
     await bot.handleUpdate(message("/status"));
     expect(sent.at(-1)).toContain("cannot receive tasks");
-    registry.recordContainerOperation("test", "stop", "failed");
+    running = true;
     changeDuringHealth = false;
     await bot.handleUpdate(message("third"));
     await idle();
     expect(execute).toHaveBeenCalledOnce();
     expect(execute.mock.calls[0]?.[0]).toBe("third");
-    registry.beginResourceRemoval("test");
-    registry.finishProvisioning("test", "cancelled");
+    running = false;
     await bot.handleUpdate(message("/start"));
     expect(sent.at(-1)).toContain("does not allow running tasks yet");
     await bot.handleUpdate(message("fourth"));

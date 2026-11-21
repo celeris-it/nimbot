@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { expect, it } from "vitest";
 
-const image = process.env.NIMBOT_TEST_DOCKER_IMAGE;
+const image = process.env.NIMBOT_TEST_APPLICATION_IMAGE;
 const dockerTimeoutMs = 60_000;
 it.skipIf(!image)(
-  "keeps SQLite FTS5 available in the Agent Host image so memory search cannot disappear unnoticed",
+  "keeps SQLite FTS5 available in the application image so memory search cannot disappear unnoticed",
   () => {
     const output = execFileSync(
       "docker",

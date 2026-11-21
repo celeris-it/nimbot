@@ -25,22 +25,20 @@ async function fixture() {
   registry.bindBot("dev", 123, "dev_bot");
   registry.setCredentialRef("dev", "file:telegram-saved");
   const binding = openChatBinding(path, { id: "dev", ownerId: 42 });
-  const access = createAgentAccess(registry, "dev");
+  let running = false;
+  const access = createAgentAccess(registry, "dev", () => running);
+  vi.spyOn(registry, "getHostCredentialRef").mockReturnValue("file:host-saved");
   const ready = () => {
-    registry.beginProvisioning("dev");
-    registry.setHostCredentialRef("dev", "file:host-saved");
-    registry.recordProvisioningResources("dev", {
-      containerRef: "c".repeat(64),
-      volumeRef: "workspace",
-      networkRef: "network",
-    });
-    registry.finishProvisioning("dev", "ready");
+    running = true;
   };
   return {
     registry,
     binding,
     access,
     ready,
+    setRunning(value: boolean) {
+      running = value;
+    },
     path,
     close: async () => {
       binding.close();
@@ -73,31 +71,16 @@ it("requires the current bot, the agent owner and persisted private-chat activat
   }
 });
 
-it.each(["pending", "provisioning", "failed", "cancelled"] as const)(
-  "blocks tasks during %s setup even after owner activation",
-  async (status) => {
-    const f = await fixture();
-    try {
-      f.binding.save(123, 42);
-      if (status !== "pending") f.registry.beginProvisioning("dev");
-      if (status === "failed" || status === "cancelled")
-        f.registry.finishProvisioning("dev", status);
-      expect(f.access.canExecute(123, 42, 42)).toBe(false);
-    } finally {
-      await f.close();
-    }
-  },
-);
-
-it("blocks pending container actions and missing ready resources without exposing credentials", async () => {
+it("blocks a stopped or transitioning Host and missing credentials after owner activation", async () => {
   const f = await fixture();
   try {
-    f.ready();
     f.binding.save(123, 42);
-    f.registry.beginContainerAction("dev", "stop");
     expect(f.access.canExecute(123, 42, 42)).toBe(false);
-    f.registry.recordContainerOperation("dev", "stop", "failed");
+    f.ready();
     expect(f.access.canExecute(123, 42, 42)).toBe(true);
+    f.setRunning(false);
+    expect(f.access.canExecute(123, 42, 42)).toBe(false);
+    f.ready();
     vi.spyOn(f.registry, "getHostCredentialRef").mockReturnValue(undefined);
     expect(f.access.canExecute(123, 42, 42)).toBe(false);
     expect(JSON.stringify(f.access.getSetup())).not.toContain("file:");
@@ -112,7 +95,7 @@ it("fails closed when its storage is unavailable", () => {
   registry.bindBot("dev", 123, "dev_bot");
   registry.setCredentialRef("dev", "file:telegram-saved");
   vi.spyOn(registry, "getOwnerChat").mockReturnValue(42);
-  const access = createAgentAccess(registry, "dev");
+  const access = createAgentAccess(registry, "dev", () => false);
   expect(access.canActivate(123, 42)).toBe(true);
   // Setup is not ready, so an activated chat alone never runs tasks.
   expect(access.canExecute(123, 42, 42)).toBe(false);

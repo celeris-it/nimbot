@@ -136,6 +136,9 @@ it.skipIf(!image)(
       import { execFileSync } from 'node:child_process';
       if (process.getuid() !== 1000 || existsSync('/var/run/docker.sock')) throw new Error('Invalid runtime identity');
       writeFileSync('/data/agents/${agentId}/workspace/retained.txt', 'persistent workspace');
+      const { openMemoryStore } = await import('/app/apps/agent-host/dist/memory-store.js');
+      const memory = openMemoryStore('/data/agents/${agentId}/tasks/memory.sqlite');
+      try { memory.create({title:'Retained memory', content:'Persistent container memory'}, null); } finally { memory.close(); }
       console.log(execFileSync('opencode', ['--version'], {encoding:'utf8'}).trim());
       const { chromium } = await import('/app/apps/agent-host/node_modules/playwright/index.mjs');
       const browser = await chromium.launchPersistentContext('/data/agents/${agentId}/browser', {headless:true});
@@ -175,6 +178,12 @@ it.skipIf(!image)(
           `process.stdout.write(require('node:fs').readFileSync('/data/agents/${agentId}/workspace/retained.txt','utf8'))`,
         ),
       ).toBe("persistent workspace");
+      expect((await get(`/api/agents/${agentId}/memories`)).memories).toEqual([
+        expect.objectContaining({
+          title: "Retained memory",
+          preview: "Persistent container memory",
+        }),
+      ]);
       await post(`/api/agents/${agentId}/process`, {
         action: "stop",
         confirm: agentId,
@@ -182,6 +191,53 @@ it.skipIf(!image)(
       expect((await get(`/api/agents/${agentId}`)).process.state).toBe(
         "stopped",
       );
+      await post(`/api/agents/${agentId}/delete`, {
+        confirm: agentId,
+        deleteData: "false",
+      });
+      expect(
+        await docker(
+          "exec",
+          name,
+          "node",
+          "-e",
+          `process.stdout.write(String(require('node:fs').existsSync('/data/agents/${agentId}/tasks/memory.sqlite')))`,
+        ),
+      ).toBe("true");
+      const purged = await post("/api/agents", {
+        name: "Purge fixture",
+        ownerId: "42",
+        instructions: "",
+        token: "123:fixture-token",
+      });
+      await expect
+        .poll(
+          async () => (await get(`/api/agents/${purged.agentId}`)).hostState,
+          { timeout: 15000 },
+        )
+        .toBe("ready");
+      await post(`/api/agents/${purged.agentId}/delete`, {
+        confirm: purged.agentId,
+        deleteData: "true",
+      });
+      expect(
+        await docker(
+          "exec",
+          name,
+          "node",
+          "-e",
+          `process.stdout.write(String(require('node:fs').existsSync('/data/agents/${purged.agentId}')))`,
+        ),
+      ).toBe("false");
+      expect(
+        await docker(
+          "exec",
+          name,
+          "node",
+          "-e",
+          `process.stdout.write(require('node:fs').readFileSync('/data/agents/${agentId}/workspace/retained.txt','utf8'))`,
+        ),
+      ).toBe("persistent workspace");
       await stop();
     } finally {
       await docker("rm", "-f", name).catch(() => {});

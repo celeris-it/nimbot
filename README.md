@@ -316,7 +316,7 @@ Server state in `server.sqlite` includes agents, owners, instructions, verified 
 
 Provider credentials are stored only in each agent's private engine-state directory. The panel forwards authentication operations over that agent's authenticated internal API; OAuth tokens never return to the server or browser. OpenAI supports an API key or ChatGPT device login, Anthropic, Google, and OpenRouter support API keys, and OpenCode Console uses device login. The Host must be running and idle to change authentication. Tasks stay queued during device login and are eligible to start once the attempt ends. Other agents remain independent. OpenCode renews OAuth tokens locally. In **Model and usage**, choose an enabled model for the agent or use **Automatic** to follow the OpenCode default. The Agent Host validates API keys with the provider before saving. A rejected or unverified replacement leaves the previous credential active. Validation checks access to an authenticated provider endpoint. Balance and model access are outside this check. Disconnecting removes the local credential without revoking it at the provider.
 
-Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner chat linking, process status, and authenticated Host readiness separately; Host readiness checks workspace access and busy state. **AI provider status** shows separate checks for active credentials and when each result was recorded. Stopping an agent captures a task observation, and later refreshes confirm its persisted outcome when the Host is reachable.
+Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner chat linking, process status, and authenticated Host readiness separately; Host readiness checks workspace access and busy state. **AI provider status** shows separate checks for active credentials and when each result was recorded. Stopping or restarting an agent may interrupt active work. Interrupted tasks are not automatically replayed.
 
 **Owner alerts.** The Server sends a Telegram notice to the agent's linked owner
 when the provider rejects a saved credential, the same schedule fails three
@@ -395,7 +395,7 @@ because they may interrupt active work. The panel explains that all agents and
 the Server share one trust domain, including access to Server secrets. Both
 deployment modes use the authenticated process lifecycle API.
 The Docker image runs the same subprocess runtime. See [TODO.md](TODO.md) for
-remaining legacy-code removal, release scripts and operations documentation.
+remaining release-script and operations-documentation alignment.
 
 After building, run the native Server lifecycle gate with:
 
@@ -492,21 +492,19 @@ docker build -f infrastructure/docker/nimbot.Dockerfile -t nimbot:local .
 NIMBOT_TEST_APPLICATION_IMAGE=nimbot:local pnpm test tests/application-container.integration.test.ts
 ```
 
-Legacy per-agent Docker tests remain temporarily while their source modules and release scripts are removed in the next TODO item:
+The Docker suite also runs `tests/opencode-mcp.integration.test.ts` against the
+application image. It verifies the exact pinned OpenCode version, HTTP MCP
+registration on new and restored ACP sessions, structured tool calls, cancellation,
+model selection and usage, fresh delegated sessions, and memory retrieval after
+reopening SQLite. All model traffic is simulated locally; the fixture runs as
+non-root with external networking disabled. `tests/memory-fts5.integration.test.ts`
+checks FTS5 search support in the same image. Run both with:
 
 ```sh
-docker build -f infrastructure/docker/agent-host.Dockerfile -t nimbot-agent-host .
-NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.Id}}') pnpm test integration
+NIMBOT_TEST_APPLICATION_IMAGE=nimbot:local pnpm test tests/opencode-mcp.integration.test.ts tests/memory-fts5.integration.test.ts
 ```
 
-The replacement server recovery test restores the three agent volume archives
-and the saved Server state. It checks that Docker assigns new container and
-network IDs, that the owner binding and queued task survive, and that the queue
-stays held until an explicit **Start** and authenticated Host readiness.
-
-The Docker suite includes `tests/opencode-mcp.integration.test.ts`, a compatibility gate for the exact OpenCode version pinned in the Agent Host Dockerfile. It verifies the bundled adapter's HTTP MCP discovery, structured tool calls, registration on a new session and a session restored in a new ACP process, and cancellation during a pending tool call. It also runs the production engine without tool access and checks that the previous process's adapter is absent. It also starts a fresh isolated turn between two ordinary turns and verifies that their histories stay separate and the saved owner session remains unchanged. The same fixture creates a private memory note through the production engine, reopens its SQLite store, and retrieves the note in a distinct fresh session with only search access. The container lifecycle test verifies that memory survives container recreation with retained volumes and is absent after explicit volume purge. The fixture runs as the image's non-root user with external networking disabled, using a local simulated model, a fixture-only echo handler, and the production memory handlers. Run it separately with `NIMBOT_TEST_DOCKER_IMAGE=$(docker image inspect nimbot-agent-host --format '{{.Id}}') pnpm test tests/opencode-mcp.integration.test.ts`. This gate enables tools only inside its fixtures; direct chat tasks without a grant still pass no MCP servers.
-
-`NIMBOT_TEST_DOCKER_SOCKET` optionally selects a different Unix socket. Tests create uniquely named resources and clean them up. CI runs lint, type checking, build, tests, and panel browser tests.
+The MCP and FTS5 gates accept `NIMBOT_TEST_DOCKER_SOCKET` to select a different Unix socket. Tests create uniquely named resources and clean them up. CI runs lint, type checking, build, tests, and panel browser tests.
 
 ## Discord and outbound notifications
 

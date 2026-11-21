@@ -92,10 +92,12 @@ export function prepareStateSchema(path, kind, options = {}) {
     throw new Error("Unknown SQLite store.");
   let db;
   try {
-    const file = lstatSync(path, { throwIfNoEntry: false });
-    if (file && !file.isFile()) throw new Error("Expected a regular file.");
-    if (!file && options.existing) throw new Error("Database is missing.");
-    db = new DatabaseSync(path);
+    if (typeof path === "string") {
+      const file = lstatSync(path, { throwIfNoEntry: false });
+      if (file && !file.isFile()) throw new Error("Expected a regular file.");
+      if (!file && options.existing) throw new Error("Database is missing.");
+      db = new DatabaseSync(path);
+    } else db = path;
     db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON");
     const { application_id: applicationId } = db
       .prepare("PRAGMA application_id")
@@ -148,6 +150,6 @@ export function prepareStateSchema(path, kind, options = {}) {
   } catch (error) {
     throw new Error(`${kind}.sqlite: ${error.message}`, { cause: error });
   } finally {
-    db?.close();
+    if (typeof path === "string") db?.close();
   }
 }

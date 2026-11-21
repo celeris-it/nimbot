@@ -46,6 +46,8 @@ Object.assign(process.env, {
   XDG_CACHE_HOME: join(root, "cache"),
   XDG_STATE_HOME: join(root, "state"),
   OPENCODE_DISABLE_MODELS_FETCH: "true",
+  OPENCODE_CONFIG_CONTENT:
+    '{"permissions":[{"action":"execute","resource":"*","effect":"deny"}]}',
 });
 const calls = [];
 let mode = "echo";
@@ -400,6 +402,16 @@ try {
       () => () => {},
       () => false,
       models.changed,
+      {
+        fetch: async (url, init) => {
+          assert.equal(String(url), "https://api.openai.com/v1/models");
+          assert.equal(
+            new globalThis.Headers(init?.headers).get("Authorization"),
+            "Bearer fixture-only",
+          );
+          return globalThis.Response.json({ data: [] });
+        },
+      },
     );
     await auth.save("openai", "fixture-only");
     assert.equal(

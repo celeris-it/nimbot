@@ -3,15 +3,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
-const image = process.env.NIMBOT_TEST_DOCKER_IMAGE;
+const image = process.env.NIMBOT_TEST_APPLICATION_IMAGE;
 it.skipIf(!image)(
-  "verifies pinned OpenCode MCP over ACP inside the non-root Agent Host image",
+  "verifies pinned OpenCode MCP over ACP inside the non-root application image",
   () => {
     const dockerfile = readFileSync(
-      new URL(
-        "../infrastructure/docker/agent-host.Dockerfile",
-        import.meta.url,
-      ),
+      new URL("../infrastructure/docker/nimbot.Dockerfile", import.meta.url),
       "utf8",
     );
     const version = /@opencode\/cli@([\d.]+)/.exec(dockerfile)?.[1];

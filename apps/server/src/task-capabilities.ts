@@ -68,9 +68,11 @@ function isCall(value: unknown): value is CapabilityCallIdentity {
 }
 
 /**
- * Server-only authority for future application-tool dispatch. The container is
- * untrusted, including its Host credential and every claimed identity field.
- * Callbacks must read grants and owner/binding/readiness from Server state.
+ * Server-owned policy for ordinary application-tool dispatch. Treat relayed
+ * identity fields and Host credentials as untrusted inputs to this protocol.
+ * Callbacks read grants and owner/binding/readiness from Server state. Agents
+ * with shell access share the installation trust domain and can change that
+ * state; these checks are not a security boundary against such an agent.
  * No configured policy means no capabilities. Tokens are never persisted, so
  * a new Server process cannot accept a token from the previous process.
  */
@@ -181,7 +183,7 @@ export function createTaskCapabilities(config: {
         return undefined;
       }
     },
-    /** Returns only trusted Server task state, never the container's claimed origin. */
+    /** Returns only trusted Server task state, never the Host's claimed origin. */
     verify(input: unknown): RoutedTask | undefined {
       if (closed || !config.policy || !isCall(input)) return undefined;
       const lease = leases.get(input.serverTaskId);

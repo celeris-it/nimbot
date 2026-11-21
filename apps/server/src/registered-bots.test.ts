@@ -1,3 +1,4 @@
+import { openAgentProcessStore } from "./agent-process-store.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -14,6 +15,7 @@ async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-registered-bots-"));
   const statePath = join(dir, "state.sqlite");
   let registry = openAgentRegistry(statePath);
+  const processes = openAgentProcessStore(statePath);
   for (const [id, ownerId, botId] of [
     ["a", 42, 123],
     ["b", 73, 456],
@@ -26,14 +28,8 @@ async function fixture() {
     });
     registry.bindBot(id, botId, `${id}_bot`);
     registry.setCredentialRef(id, `file:${id}`);
-    registry.beginProvisioning(id);
-    registry.setHostCredentialRef(id, `file:host-${id}`);
-    registry.recordProvisioningResources(id, {
-      containerRef: id.repeat(64),
-      volumeRef: `${id}-workspace`,
-      networkRef: `${id}-network`,
-    });
-    registry.finishProvisioning(id, "ready");
+    processes.claimHostCredential(id, `file:host-${randomUUID()}`);
+    processes.setDesiredState(id, "running");
   }
   const pending = new Map<string, (updates: unknown[]) => void>();
   const failures = new Set<string>();
@@ -165,6 +161,7 @@ async function fixture() {
       registry,
       {
         statePath,
+        runtimeReady: (id) => processes.getDesiredState(id) === "running",
         taskStore,
         schedules: scheduleStore,
       },
@@ -218,6 +215,7 @@ async function fixture() {
       scheduleStore = openScheduleStore(statePath);
       manager = open();
     },
+    processes,
     secrets,
     hosts,
     pending,
@@ -234,6 +232,7 @@ async function fixture() {
       await manager.close();
       scheduleStore.close();
       taskStore.close();
+      processes.close();
       registry.close();
       await rm(dir, { recursive: true, force: true });
     },
@@ -356,8 +355,7 @@ it("runs real grammY polling loops with isolated identities, owner activation, H
         authorization: `Bearer ${"b".repeat(64)}`,
       },
     ]);
-    f.registry.beginResourceRemoval("a");
-    f.registry.finishProvisioning("a", "cancelled");
+    f.processes.setDesiredState("a", "stopped");
     const count = f.calls.filter((call) => call.prompt).length;
     await f.send("a", "Must not run", 42);
     expect(f.calls.filter((call) => call.prompt)).toHaveLength(count);
@@ -514,8 +512,7 @@ it("restores both bots after a server restart with their owners and chat binding
     await f.send("b", "/start", 73);
     await f.restart();
     expect(f.manager.getState("a").status).toBe("not_started");
-    for (const agent of f.registry.listResourceReferences())
-      f.manager.start(agent.id);
+    for (const id of f.registry.listIds()) f.manager.start(id);
     await vi.waitFor(() => {
       expect(f.manager.getState("a").status).toBe("polling");
       expect(f.manager.getState("b").status).toBe("polling");
@@ -534,7 +531,7 @@ it("restores both bots after a server restart with their owners and chat binding
     await f.send("a", "While stopped", 42);
     expect(f.sent.at(-1)).toMatchObject({ bot: "a", chat: 42 });
     expect(f.sent.at(-1)?.text).not.toContain("Result");
-    expect(f.registry.getProvisioning("a")?.status).toBe("ready");
+    expect(f.processes.getDesiredState("a")).toBe("running");
   } finally {
     await f.close();
   }

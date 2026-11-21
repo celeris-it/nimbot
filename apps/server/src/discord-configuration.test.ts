@@ -87,7 +87,7 @@ it("rejects stale edits and duplicate bot assignments without losing the origina
     expect(() => registry.removeDiscordConnection("a", "wrong")).toThrow();
     expect(registry.getDiscordConnection("a")).toEqual(connection);
     expect(() => registry.finishAgentDeletion("a")).toThrow(
-      "Remove the Discord connection",
+      "Agent resources must be removed",
     );
   } finally {
     registry.close();

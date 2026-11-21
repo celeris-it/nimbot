@@ -15,10 +15,9 @@ import { openScheduleStore } from "../apps/server/src/schedule-store.js";
 it("monitors native Host, provider and schedule failures without Docker state or duplicate delivery", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nimbot-native-alerts-"));
   const path = join(directory, "server.sqlite");
-  const registry = openAgentRegistry(path, "process");
+  const registry = openAgentRegistry(path);
   registry.createPending({ id: "dev", name: "Developer", ownerId: 42 });
-  const legacy = vi.spyOn(registry, "getProvisioning");
-  const store = openOperationalAlertStore(path, "process");
+  const store = openOperationalAlertStore(path);
   const outbox = openNotificationStore(path);
   const schedules = openScheduleStore(path);
   const sent: string[] = [];
@@ -52,9 +51,6 @@ it("monitors native Host, provider and schedule failures without Docker state or
       createNotifications({ telegram }),
     ),
     canNotify: () => true,
-    observeContainer: async () => {
-      throw new Error("Docker must not be used");
-    },
     checkProviders,
     process: { observe: () => snapshot },
   });
@@ -92,7 +88,6 @@ it("monitors native Host, provider and schedule failures without Docker state or
     });
     await monitor.tick();
     expect(store.incidents("dev", "provider:openai")).toEqual([]);
-    expect(legacy).not.toHaveBeenCalled();
     const db = new DatabaseSync(path);
     try {
       expect(

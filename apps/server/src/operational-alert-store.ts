@@ -7,16 +7,7 @@ interface Incident {
   text: string;
 }
 
-interface ContainerBaseline {
-  id: string;
-  restartCount: number | null;
-  stableChecks: number;
-}
-
-export function openOperationalAlertStore(
-  path: string,
-  runtime: "docker" | "process" = "docker",
-) {
+export function openOperationalAlertStore(path: string) {
   const db = new DatabaseSync(path);
   try {
     db.exec(`
@@ -28,14 +19,6 @@ export function openOperationalAlertStore(
         request_id TEXT NOT NULL,
         text TEXT NOT NULL,
         PRIMARY KEY (agent_id, subject)
-      );
-    `);
-    if (runtime === "docker")
-      db.exec(`CREATE TABLE IF NOT EXISTS operational_container_baselines (
-        agent_id TEXT PRIMARY KEY,
-        container_id TEXT NOT NULL,
-        restart_count INTEGER,
-        stable_checks INTEGER NOT NULL
       );
     `);
   } catch (error) {
@@ -101,33 +84,10 @@ export function openOperationalAlertStore(
         )
         .get(agentId, requestId);
     },
-    baseline(agentId: string): ContainerBaseline | undefined {
-      return db
-        .prepare(
-          `
-        SELECT container_id AS id, restart_count AS restartCount, stable_checks AS stableChecks
-        FROM operational_container_baselines WHERE agent_id = ?
-      `,
-        )
-        .get(agentId) as unknown as ContainerBaseline | undefined;
-    },
-    saveBaseline(agentId: string, baseline: ContainerBaseline) {
-      db.prepare(
-        `
-        INSERT INTO operational_container_baselines VALUES (?, ?, ?, ?)
-        ON CONFLICT (agent_id) DO UPDATE SET container_id = excluded.container_id,
-          restart_count = excluded.restart_count, stable_checks = excluded.stable_checks
-      `,
-      ).run(agentId, baseline.id, baseline.restartCount, baseline.stableChecks);
-    },
     removeAgent(agentId: string) {
       db.prepare("DELETE FROM operational_incidents WHERE agent_id = ?").run(
         agentId,
       );
-      if (runtime === "docker")
-        db.prepare(
-          "DELETE FROM operational_container_baselines WHERE agent_id = ?",
-        ).run(agentId);
     },
     close() {
       db.close();

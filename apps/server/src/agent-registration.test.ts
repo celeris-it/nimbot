@@ -25,13 +25,15 @@ async function fixture() {
     const agent = registry.get(id)!;
     expect(agent.botId).toBe(123);
     expect(await secrets.read(agent.credentialRef!)).toBe(input.token);
-    expect(registry.getProvisioning(id)?.status).toBe("pending");
+    expect(registry.get(id)).toBeDefined();
   });
+  let setupStatus: "pending" | "failed" = "pending";
   const register = createAgentRegistration(
     registry,
     secrets,
     provision,
     verify,
+    () => setupStatus,
   );
   return {
     registry,
@@ -39,6 +41,9 @@ async function fixture() {
     verify,
     provision,
     register,
+    failSetup() {
+      setupStatus = "failed";
+    },
     files: () => readdir(join(dir, "secrets")),
     close: async () => {
       registry.close();
@@ -47,7 +52,7 @@ async function fixture() {
   };
 }
 
-it("links verified bot and saved credentials atomically before provisioning", async () => {
+it("links verified bot and saved credentials atomically before Host startup", async () => {
   const f = await fixture();
   try {
     const result = await f.register(input);
@@ -70,7 +75,7 @@ it("links verified bot and saved credentials atomically before provisioning", as
   }
 });
 
-it("rejects invalid input and owner IDs before Telegram, storage, or Docker", async () => {
+it("rejects invalid input and owner IDs before Telegram, storage, or Host startup", async () => {
   const f = await fixture();
   try {
     for (const invalid of [
@@ -85,7 +90,7 @@ it("rejects invalid input and owner IDs before Telegram, storage, or Docker", as
     expect(f.verify).not.toHaveBeenCalled();
     expect(f.provision).not.toHaveBeenCalled();
     expect(await f.files()).toEqual([]);
-    expect(f.registry.listResourceReferences()).toEqual([]);
+    expect(f.registry.listIds()).toEqual([]);
   } finally {
     await f.close();
   }
@@ -101,27 +106,24 @@ it("cleans the rejected credential when two requests race to link the same bot",
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
     expect(await f.files()).toHaveLength(1);
-    expect(f.registry.listResourceReferences()).toHaveLength(1);
+    expect(f.registry.listIds()).toHaveLength(1);
     expect(f.provision).toHaveBeenCalledTimes(1);
   } finally {
     await f.close();
   }
 });
 
-it("keeps the linked agent and credential after a provisioning failure", async () => {
+it("keeps the linked agent and credential after a Host startup failure", async () => {
   const f = await fixture();
   f.provision.mockImplementation(async (id) => {
-    f.registry.beginProvisioning(id);
-    f.registry.recordProvisioningResources(id, {
-      volumeRef: `nimbot-${id}-workspace`,
-    });
-    f.registry.finishProvisioning(id, "failed");
-    throw new Error("Docker failed");
+    expect(f.registry.get(id)).toBeDefined();
+    f.failSetup();
+    throw new Error("Host startup failed");
   });
   try {
     const result = await f.register(input);
     expect(result.provisioning).toBe("failed");
-    expect(f.registry.getProvisioning(result.agentId)?.volumeRef).toBeTruthy();
+    expect(f.registry.get(result.agentId)).toBeDefined();
     expect(
       await f.secrets.read(f.registry.get(result.agentId)!.credentialRef!),
     ).toBe(input.token);
@@ -136,7 +138,7 @@ it("does not register or save credentials when Telegram verification fails", asy
   try {
     await expect(f.register(input)).rejects.toThrow();
     expect(await f.files()).toEqual([]);
-    expect(f.registry.listResourceReferences()).toEqual([]);
+    expect(f.registry.listIds()).toEqual([]);
     expect(f.provision).not.toHaveBeenCalled();
   } finally {
     await f.close();
@@ -150,7 +152,7 @@ it("rejects a bot already bound to another agent without touching the first agen
     await expect(
       f.register({ ...input, name: "Second", token: "123:other-token" }),
     ).rejects.toThrow();
-    expect(f.registry.listResourceReferences()).toHaveLength(1);
+    expect(f.registry.listIds()).toHaveLength(1);
     expect(f.registry.get(first.agentId)).toMatchObject({
       name: "Developer",
       botId: 123,

@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 export function prepareStateSchema(
-  path: string,
+  path: string | DatabaseSync,
   kind: "server" | "server-process" | "tasks" | "memory",
   options?: {
     existing?: boolean;

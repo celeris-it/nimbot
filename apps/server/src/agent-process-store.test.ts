@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it } from "vitest";
 import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
+import { openAgentRegistry } from "./agent-registry.js";
 import { openAgentProcessStore } from "./agent-process-store.js";
 import { openProcessHostCredentials } from "./process-host-credentials.js";
 
@@ -131,6 +132,10 @@ it.each(["unversioned", "versioned"])(
     }
     const before = await readFile(path);
     expect(() => openAgentProcessStore(path)).toThrow(
+      "fresh subprocess installation is required",
+    );
+    expect(await readFile(path)).toEqual(before);
+    expect(() => openAgentRegistry(path)).toThrow(
       "fresh subprocess installation is required",
     );
     expect(await readFile(path)).toEqual(before);

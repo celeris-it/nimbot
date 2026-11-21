@@ -25,7 +25,7 @@ export class ToolExecutionError extends Error {
 const MAX_ARGUMENT_BYTES = 16_384;
 const MAX_RESULT_BYTES = 16_384;
 
-/** A Server-registered operation. Validation and authority live here, never in the container. */
+/** A Server-registered operation. Normal tool-protocol validation lives on the Server. */
 export interface ServerToolHandler {
   operation: string;
   /** Writes record their intent first and return the saved outcome on replay. */
@@ -85,7 +85,7 @@ function bounded(value: unknown, maxBytes: number): string {
  * Guarded dispatch for tool calls the Host relays. Every call is authorized against
  * Server state, validated by the registered handler, bounded in time and size, and
  * (for writes) recorded before execution so a replay never repeats a side effect.
- * Errors never carry handler or storage details back to the container.
+ * Errors never carry handler or storage details back to the Host.
  */
 export function createToolDispatcher(config: {
   store: Pick<TaskStore, "beginToolInvocation" | "settleToolInvocation">;

@@ -76,18 +76,14 @@ path first, then the recommended Docker deployment in the next milestone.
       Docker socket mount.
 - [x] Expose only the panel. Keep Agent Host endpoints on container
       loopback.
-- [ ] Remove the per-agent Docker provisioning, reconciliation, and panel
+- [x] Remove the per-agent Docker provisioning, reconciliation, and panel
       controls once both paths use Agent Host subprocesses.
-      Progress: both runtime entry paths now use subprocesses. Removed the unused
-      Docker preflight, image resolution, per-agent provisioner, provisioning
-      cancellation control and resource-removal service with their obsolete tests.
-      The panel now exposes only process actions in both modes. Retired container,
-      provisioning, resource-removal and recovery endpoints and browser controls
-      have been removed; tests exercise both deployment modes and reject the old
-      routes. Removed the unused container action, volume-based recovery,
-      recovery work gate and container-stop observation services. The legacy
-      registry and Docker reconciliation/template helpers remain to be removed
-      in subsequent changes.
+      The runtime, registry, admission checks and operational alerts now use only
+      subprocess state. Retired Docker clients, provisioning, reconciliation,
+      recovery and container-control modules and routes are removed. API and
+      browser tests cover both deployment modes and reject retired routes. The
+      OpenCode MCP and FTS5 gates now use the single application image; native
+      lifecycle and application-container tests cover recovery and retained data.
 - [ ] Replace Compose-dependent install and operations steps with Docker CLI
       instructions. Review install, uninstall, and release scripts for
       assumptions about per-agent containers, volumes, and networks.

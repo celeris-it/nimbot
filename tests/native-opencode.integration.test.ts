@@ -114,7 +114,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
     if (!address || typeof address === "string")
       throw new Error("No test model port");
     const path = join(directory, "server.sqlite");
-    const registry = openAgentRegistry(path, "process");
+    const registry = openAgentRegistry(path);
     const store = openAgentProcessStore(path);
     const botSecrets = await openBotSecrets(join(directory, "bot-secrets"));
     const credentials = await openProcessHostCredentials(

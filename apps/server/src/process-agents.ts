@@ -1,12 +1,15 @@
 import { rm } from "node:fs/promises";
-import type { openAgentRegistry, ProvisioningState } from "./agent-registry.js";
+import type { openAgentRegistry } from "./agent-registry.js";
 import type { openAgentProcessStore } from "./agent-process-store.js";
 import type { openBotSecrets } from "./bot-secret.js";
 import type { openProcessHostCredentials } from "./process-host-credentials.js";
 import type { ScheduleStore } from "./schedule-store.js";
 import { createAgentProcessManager } from "./agent-process-manager.js";
 import { agentProcessDirectories } from "./agent-process-config.js";
-import { createAgentRegistration } from "./agent-registration.js";
+import {
+  createAgentRegistration,
+  type AgentSetupStatus,
+} from "./agent-registration.js";
 import { createAgentDeletion } from "./agent-deletion.js";
 
 /** Server-owned lifecycle service. Telegram credentials never enter Host configuration. */
@@ -73,7 +76,7 @@ export function createProcessAgents(options: {
       manager.status(agentId) === "running"
     );
   }
-  function setupStatus(agentId: string): ProvisioningState["status"] {
+  function setupStatus(agentId: string): AgentSetupStatus {
     switch (manager.status(agentId)) {
       case "running":
         return "ready";

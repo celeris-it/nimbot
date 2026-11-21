@@ -64,7 +64,7 @@ async function fixture() {
         undefined,
         binding,
         undefined,
-        createAgentAccess(registry, id),
+        createAgentAccess(registry, id, () => false),
       );
       bot.botInfo = {
         id: botId,

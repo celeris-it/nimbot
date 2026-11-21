@@ -39,7 +39,7 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "nimbot-process-agents-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "server.sqlite");
-  const registry = openAgentRegistry(path, "process");
+  const registry = openAgentRegistry(path);
   cleanup.push(() => registry.close());
   const store = openAgentProcessStore(path);
   cleanup.push(() => store.close());
@@ -117,7 +117,6 @@ it("registers identity and process intent atomically and starts a Host without T
     name: "First",
     ownerId: 42,
     botId: 123,
-    containerRef: null,
   });
   expect(f.store.getDesiredState(id)).toBe("running");
   expect(f.runtime.ready(id)).toBe(true);
@@ -143,7 +142,9 @@ it("registers identity and process intent atomically and starts a Host without T
         )
         .get(),
     ).toBeUndefined();
-    expect(() => openAgentRegistry(f.path)).toThrow("Subprocess Server state");
+    const reopened = openAgentRegistry(f.path);
+    expect(reopened.get(id)?.botId).toBe(123);
+    reopened.close();
   } finally {
     db.close();
   }
@@ -209,8 +210,6 @@ it("admits native schedules only with a current owner binding and rechecks readi
     f.registry,
     { read: f.runtime.readHost },
     undefined,
-    () => true,
-    undefined,
     f.runtime.ready,
   );
   expect(await admit(schedule)).toBeUndefined();
@@ -227,8 +226,6 @@ it("admits native schedules only with a current owner binding and rechecks readi
       await f.runtime.stop(id);
       return "ready";
     },
-    () => true,
-    undefined,
     f.runtime.ready,
   );
   expect(await interrupted(schedule)).toBeUndefined();

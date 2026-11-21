@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { openAgentProcessStore } from "./agent-process-store.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -16,6 +18,7 @@ async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-connections-"));
   const path = join(dir, "state.sqlite");
   const registry = openAgentRegistry(path);
+  const processes = openAgentProcessStore(path);
   for (const [id, botId] of [
     ["alpha", 123],
     ["beta", 456],
@@ -23,14 +26,8 @@ async function fixture() {
     registry.createPending({ id, name: id, ownerId: OWNERS[id]! });
     registry.bindBot(id, botId, `${id}_bot`);
     registry.setCredentialRef(id, `file:${id}`);
-    registry.beginProvisioning(id);
-    registry.setHostCredentialRef(id, `file:host-${id}`);
-    registry.recordProvisioningResources(id, {
-      containerRef: id.padEnd(64, "c"),
-      volumeRef: `${id}-workspace`,
-      networkRef: `${id}-network`,
-    });
-    registry.finishProvisioning(id, "ready");
+    processes.claimHostCredential(id, `file:host-${randomUUID()}`);
+    processes.setDesiredState(id, "running");
   }
   const polls = new Map<string, (updates: unknown[]) => void>();
   const hold = new Set<string>();
@@ -130,7 +127,11 @@ async function fixture() {
   const taskStore = openTaskStore(path);
   const bots = createRegisteredBots(
     registry,
-    { statePath: path, taskStore },
+    {
+      statePath: path,
+      taskStore,
+      runtimeReady: (id) => processes.getDesiredState(id) === "running",
+    },
     secrets,
     hosts,
     request,
@@ -187,6 +188,7 @@ async function fixture() {
         log.mockRestore();
         error.mockRestore();
         taskStore.close();
+        processes.close();
         registry.close();
         await rm(dir, { recursive: true, force: true });
       }

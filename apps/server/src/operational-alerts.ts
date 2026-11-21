@@ -1,5 +1,4 @@
 import type { openAgentRegistry } from "./agent-registry.js";
-import type { ContainerObservation } from "./container-control.js";
 import type { createDurableNotifications } from "./durable-notifications.js";
 import type { createHostProviders } from "./host-providers.js";
 import { log } from "./logger.js";
@@ -12,14 +11,7 @@ import type { TaskStore } from "./task-queue.js";
 const intervalMs = 30_000;
 
 interface Deps {
-  registry: Pick<
-    ReturnType<typeof openAgentRegistry>,
-    | "listIds"
-    | "get"
-    | "getProvisioning"
-    | "getContainerOperation"
-    | "getRecovery"
-  >;
+  registry: Pick<ReturnType<typeof openAgentRegistry>, "listIds" | "get">;
   tasks: Pick<TaskStore, "scheduleFailureIncident">;
   schedules: Pick<ScheduleStore, "get" | "listByAgent">;
   store: ReturnType<typeof openOperationalAlertStore>;
@@ -29,9 +21,8 @@ interface Deps {
   >;
   outbox: Pick<ReturnType<typeof openNotificationStore>, "get">;
   canNotify(id: string): boolean;
-  observeContainer?(id: string, ref: string): Promise<ContainerObservation>;
   checkProviders: ReturnType<typeof createHostProviders>["checks"];
-  process?: {
+  process: {
     observe(id: string): {
       status: string;
       desiredState?: "running" | "stopped";
@@ -47,91 +38,9 @@ export function createOperationalAlerts(deps: Deps) {
   let active: Promise<void> | undefined;
   let closed = false;
   function configured(id: string) {
-    return deps.process
-      ? !!registry.get(id) &&
-          deps.process.observe(id).desiredState !== undefined
-      : registry.getProvisioning(id)?.status === "ready";
-  }
-
-  async function inspectContainer(id: string, ref: string, name: string) {
-    const operation = registry.getContainerOperation(id);
-    const recovery = registry.getRecovery(id);
-    if (operation?.status === "pending") return;
-    if (recovery && recovery.status !== "activated") {
-      store.clear(id, "container");
-      return;
-    }
-    if (!deps.observeContainer) return;
-    const result = await deps.observeContainer(id, ref);
-    const currentOperation = registry.getContainerOperation(id);
-    if (
-      closed ||
-      registry.get(id)?.containerRef !== ref ||
-      registry.getProvisioning(id)?.status !== "ready" ||
-      currentOperation?.updatedAt !== operation?.updatedAt ||
-      currentOperation?.action !== operation?.action ||
-      currentOperation?.status !== operation?.status ||
-      registry.getRecovery(id)?.status !== recovery?.status
-    )
-      return;
-    if (result.state === "unavailable") return;
-
-    const previous = store.baseline(id);
-    const intentionalStop =
-      operation?.action === "stop" &&
-      ["completed", "interrupted"].includes(operation.status);
-    const startedAfterStop =
-      "id" in result &&
-      result.startedAt !== null &&
-      operation !== undefined &&
-      result.startedAt > operation.updatedAt;
-    if (intentionalStop && result.state !== "running" && !startedAfterStop) {
-      store.clear(id, "container");
-      if ("id" in result)
-        store.saveBaseline(id, {
-          id: result.id,
-          restartCount: result.restartCount,
-          stableChecks: 0,
-        });
-      return;
-    }
-    // Keep the original restart count when Docker omits it so a later
-    // observation can still reveal a restart.
-    const before = previous?.id === ref ? previous : undefined;
-    const restartCount =
-      "id" in result
-        ? (result.restartCount ?? before?.restartCount ?? null)
-        : (before?.restartCount ?? null);
-    const restarted =
-      restartCount !== null &&
-      before?.restartCount != null &&
-      restartCount > before.restartCount;
-    const failed = result.state !== "running" || restarted;
-    const stableChecks = failed
-      ? 0
-      : Math.min((before?.stableChecks ?? 0) + 1, 2);
-    if (failed) {
-      const detail =
-        result.state === "missing"
-          ? "is missing"
-          : restarted || result.state === "restarting"
-            ? "restarted unexpectedly"
-            : "stopped unexpectedly";
-      store.open(
-        id,
-        "container",
-        ref,
-        `The container for "${name}" ${detail}. Check the agent's status in the Nimbot panel.`,
-      );
-    } else if (stableChecks === 2) {
-      store.clear(id, "container");
-    }
-    if (
-      !before ||
-      before.restartCount !== restartCount ||
-      before.stableChecks !== stableChecks
-    )
-      store.saveBaseline(id, { id: ref, restartCount, stableChecks });
+    return (
+      !!registry.get(id) && deps.process.observe(id).desiredState !== undefined
+    );
   }
 
   async function inspectProviders(id: string, ref: string, name: string) {
@@ -139,11 +48,8 @@ export function createOperationalAlerts(deps: Deps) {
     if (
       !result ||
       closed ||
-      (deps.process
-        ? deps.process.observe(id).revision !== ref ||
-          deps.process.observe(id).status !== "running"
-        : registry.get(id)?.containerRef !== ref ||
-          registry.getProvisioning(id)?.status !== "ready")
+      deps.process.observe(id).revision !== ref ||
+      deps.process.observe(id).status !== "running"
     )
       return;
     checks.set(
@@ -191,18 +97,9 @@ export function createOperationalAlerts(deps: Deps) {
   async function deliver(id: string, subject?: string) {
     for (const incident of store.incidents(id, subject)) {
       if (closed || !configured(id) || !deps.canNotify(id)) return;
-      if (deps.process && incident.subject === "process") {
+      if (incident.subject === "process") {
         const current = deps.process.observe(id);
         if (current.desiredState !== "running" || current.status !== "failed")
-          continue;
-      }
-      if (!deps.process && incident.subject === "container") {
-        const operation = registry.getContainerOperation(id);
-        const recovery = registry.getRecovery(id);
-        if (
-          operation?.status === "pending" ||
-          (recovery && recovery.status !== "activated")
-        )
           continue;
       }
       const { requestId, text } = incident;
@@ -215,49 +112,25 @@ export function createOperationalAlerts(deps: Deps) {
 
   async function checkAgent(id: string) {
     const agent = registry.get(id);
-    if (deps.process) {
-      if (!agent || !configured(id)) return;
-      const snapshot = deps.process.observe(id);
-      if (snapshot.desiredState === "stopped" || snapshot.status === "running")
-        store.clear(id, "process");
-      else if (snapshot.status === "failed")
-        store.open(
-          id,
-          "process",
-          snapshot.revision,
-          `The Agent Host for "${agent.name}" stopped unexpectedly. Check the agent's status in the Nimbot panel.`,
-        );
-      store.clearDeletedSchedules(id);
-      for (const schedule of deps.schedules.listByAgent(id))
-        inspectSchedule(schedule, agent.name);
-      if (snapshot.status === "running")
-        await inspectProviders(id, snapshot.revision, agent.name);
-      if (!closed && deps.process.observe(id).revision === snapshot.revision)
-        await deliver(id);
-      return;
-    }
-    if (
-      !agent?.containerRef ||
-      registry.getProvisioning(id)?.status !== "ready"
-    )
-      return;
+    if (!agent || !configured(id)) return;
+    const snapshot = deps.process.observe(id);
+    if (snapshot.desiredState === "stopped" || snapshot.status === "running")
+      store.clear(id, "process");
+    else if (snapshot.status === "failed")
+      store.open(
+        id,
+        "process",
+        snapshot.revision,
+        `The Agent Host for "${agent.name}" stopped unexpectedly. Check the agent's status in the Nimbot panel.`,
+      );
     store.clearDeletedSchedules(id);
     for (const schedule of deps.schedules.listByAgent(id))
       inspectSchedule(schedule, agent.name);
-
-    const inspections = [
-      inspectContainer(id, agent.containerRef, agent.name),
-      inspectProviders(id, agent.containerRef, agent.name),
-    ];
-    await Promise.all(
-      inspections.map((inspection) =>
-        inspection.catch(() =>
-          log.warn("operational_alert.inspection_failed", { agentId: id }),
-        ),
-      ),
-    );
-    if (closed || registry.get(id)?.containerRef !== agent.containerRef) return;
-    await deliver(id);
+    if (snapshot.status === "running")
+      await inspectProviders(id, snapshot.revision, agent.name);
+    if (!closed && deps.process.observe(id).revision === snapshot.revision)
+      await deliver(id);
+    return;
   }
 
   async function run() {
