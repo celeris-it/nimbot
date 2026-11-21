@@ -4,7 +4,7 @@
 
 Nimbot is a self-hosted platform for running persistent AI agents through Telegram. Each agent has a persistent workspace.
 
-The Nimbot Server starts each agent as an Agent Host subprocess in both native development and Docker deployments. The recommended Docker deployment packages the entire application in one non-root container per installation, without a Docker socket. [TODO.md](TODO.md) records the subprocess architecture decisions and verification. New work must follow the constraints below.
+The Nimbot Server starts each agent as an Agent Host subprocess in both native development and Docker deployments. The recommended Docker deployment packages the entire application in one non-root container per installation, without a Docker socket. New work must follow the constraints below.
 
 The MVP is complete. The Agent Host lives in `apps/agent-host/`, the Nimbot Server in `apps/server/`, and the administration UI in `apps/panel/`.
 
@@ -16,7 +16,7 @@ The MVP is complete. The Agent Host lives in `apps/agent-host/`, the Nimbot Serv
 - Keep work within the current features documented in README.md. Future work is out of scope unless the user asks for it.
 - Prefer the simplest thing that satisfies the requested change. Do not add services, packages, or abstractions it does not need.
 - No PostgreSQL, Redis, Kubernetes, or message brokers. Storage is SQLite and Docker volumes.
-- Preserve persisted state when upgrading from a supported release or the documented unversioned baseline. The one exception is the subprocess architecture release in TODO.md, which starts from a fresh installation. Version SQLite schema changes, provide ordered transactional migrations, and update the current schema for fresh installations. Set the supported predecessor in `release.json` when preparing a release.
+- Preserve persisted state when upgrading from a supported release or the documented unversioned baseline. The one exception is the subprocess architecture release documented in README.md, which starts from a fresh installation without migration or import from previous releases. Version SQLite schema changes, provide ordered transactional migrations, and update the current schema for fresh installations. Set the supported predecessor in `release.json` when preparing a release.
 
 ## Stack
 
