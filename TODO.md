@@ -70,19 +70,24 @@ path first, then the recommended Docker deployment in the next milestone.
 
 ## Second milestone: Docker deployment
 
-- [ ] Package the same application for a documented Docker CLI
+- [x] Package the same application for a documented Docker CLI
       installation: one container per installation running the Server and
       its Agent Host subprocesses as non-root, with persistent data and no
       Docker socket mount.
-- [ ] Expose only the panel. Keep Agent Host endpoints on container
+- [x] Expose only the panel. Keep Agent Host endpoints on container
       loopback.
 - [ ] Remove the per-agent Docker provisioning, reconciliation, and panel
       controls once both paths use Agent Host subprocesses.
 - [ ] Replace Compose-dependent install and operations steps with Docker CLI
       instructions. Review install, uninstall, and release scripts for
       assumptions about per-agent containers, volumes, and networks.
-- [ ] Verify a clean Docker installation without Compose, panel lifecycle
+- [x] Verify a clean Docker installation without Compose, panel lifecycle
       operations, and data persistence across container recreation.
+      Verification: the opt-in application-container gate creates a fresh named
+      volume, runs the compiled Server and real Hosts as UID 1000 without a Docker
+      socket, checks panel API lifecycle actions, loopback-only Host listeners,
+      Chromium and pinned OpenCode, then recreates the container and confirms
+      recovery and retained workspace data. Telegram transport is simulated.
 
 ## Documentation
 

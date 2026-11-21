@@ -1,120 +1,130 @@
 # Installing Nimbot
 
-Nimbot runs on one Linux server or locally on macOS with Docker Desktop. Install Docker with the Compose plugin first, start it, and ensure your user can run `docker info`. Docker Engine API 1.47 or newer is required. No Node.js, pnpm, or Git installation is needed.
+Nimbot runs the Server, panel and Agent Host subprocesses in one non-root Docker
+container. Docker Compose and a Docker socket mount are not required. Native
+development is documented in [README.md](../README.md#development).
+
+## Fresh installation requirement
+
+This subprocess release requires a new data volume. It does not migrate or import
+previous per-agent container installations. Existing databases are rejected and
+old containers, volumes and files remain until you explicitly remove them.
+The legacy Compose installer and upgrade scripts are being replaced; use the
+Docker CLI procedure below for this release.
 
 ## Install
 
-Run this command in an interactive terminal:
+Use Docker Engine on Linux or Docker Desktop on macOS. Start from a checkout of
+the desired Nimbot revision. Node.js, pnpm, OpenCode and Chromium are installed
+inside the image; they are not prerequisites on the Docker host.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash
+docker build -f infrastructure/docker/nimbot.Dockerfile -t nimbot:local .
+docker run --rm -it --entrypoint node nimbot:local apps/server/dist/password.js
 ```
 
-The installer downloads the source into `~/.local/share/nimbot`, builds both Docker images, asks for the panel host port, panel URL, and password, generates private configuration, and starts Nimbot. It supports Linux and macOS and detects the local Docker socket and its group automatically. Remote Docker contexts are unsupported. Building the images requires internet access and can take several minutes.
+The second command prompts for the administrator password and prints a
+`PANEL_PASSWORD_HASH=...` line. Put that line in a private `.env` file beside the
+checkout, followed by:
 
-To choose another installation directory:
+```dotenv
+PANEL_URL=http://localhost:3000
+TASK_TIMEOUT_SECONDS=600
+```
+
+Run `chmod 600 .env`. Do not put a plaintext password in this file or commit it.
+Create a new named volume and start the application:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash -s -- --directory "$HOME/nimbot"
+docker volume create nimbot-data
+docker run -d --init --name nimbot --restart unless-stopped --stop-timeout 30 \
+  --env-file .env -p 127.0.0.1:3000:3000 \
+  --mount type=volume,source=nimbot-data,target=/data nimbot:local
 ```
 
-Add `--version vX.Y.Z` after `bash -s --` to install a specific release tag. Use a tag that supports versioned installation for a deployment you plan to upgrade. The default download tracks development on `main`.
+Open `http://localhost:3000`. The installation starts with zero agents. Only the
+panel is published. Agent Hosts and OpenCode APIs bind to container loopback;
+each Host has its own API token. The complete application runs as `node` (UID
+1000). All persistent state lives under `/data`, including Server SQLite, bot and
+MCP credentials, agent workspaces, task state, provider state and browser profiles.
+Docker initializes a new named volume from the image's writable data directory.
+If you choose a bind mount, ensure it is writable by UID 1000 before starting.
 
-You can download and inspect the script before running it. Only one Nimbot installation per Docker Engine is supported. Running the installer again reuses the saved source and configuration; it does not update Nimbot or reset the password. Failed installation resources are kept so you can fix the reported error and retry with the same directory.
-
-Press Enter at the **Panel host port** prompt to use port `3000`. Older release tags that use a fixed port skip this prompt. At the **Panel URL** prompt, pressing Enter uses `http://localhost` with the selected port. With both defaults, the panel URL is <http://localhost:3000>. On a remote server, open a tunnel from your computer:
-
-```sh
-ssh -L 3000:127.0.0.1:3000 YOUR_USER@YOUR_SERVER
-```
-
-Then open <http://localhost:3000> and sign in with your chosen password. If you chose a different port, use it on both sides of the tunnel and in the browser URL.
-
-If Docker reports that the port is already in use during setup, edit `PANEL_PUBLISH_PORT` in the saved `.env` and rerun the installer. For local access, update the port in the saved `PANEL_URL` too. For HTTPS access, update the reverse proxy upstream to use the new port.
+Use a different container name, volume name and published port for a separate
+installation. Never share the data volume between running installations.
+Do not override `SERVER_STATE_DIR` or `PANEL_HOST` with native development values
+in the container; the image defaults are `/data` and `0.0.0.0` respectively.
 
 ### Using your own HTTPS domain
 
-If you already have a reverse proxy, enter its browser-facing origin at the **Panel URL** prompt, for example `https://nimbot.example.com` or `https://nimbot.example.com:8443`. Configure the proxy to forward to `127.0.0.1` on the selected host port. With Caddy and the default host port:
+Keep the Docker port bound to host loopback. Configure an existing reverse proxy
+with TLS, point it at `http://127.0.0.1:3000`, and set `PANEL_URL` to the exact
+HTTPS origin (no path). Recreate the application container after changing `.env`.
+Remote access requires HTTPS. Proxy provisioning is outside Nimbot's scope.
 
-```text
-nimbot.example.com {
-    reverse_proxy 127.0.0.1:3000
-}
-```
+## Trust model
 
-The installer does not install a proxy or configure DNS. The port stays bound to loopback. Never expose the panel over plain HTTP. See the [security limitations](../README.md#security-limitations): the server's Docker access grants host-level control.
+One installation is a single trust domain under one OS account. Agents can read
+or modify each other's files, memory and provider credentials, and can access
+Server state including bot tokens, MCP credentials, Host secrets and
+`server.sqlite`. A prompt-injected agent could read Server secrets or change
+Server state. Approvals, grants and rules guide normal behavior; they are not a
+security boundary against an agent with shell access. Use separate installations
+when separation is required. Never mount the Docker socket into the application.
 
 ## Create your first agent
 
 1. In Telegram, open `@BotFather`, send `/newbot`, and copy the new bot's token.
 2. Sign in to the panel, choose **Create agent**, and enter its name, optional instructions, your numeric Telegram user ID, and the token. You can find your ID by messaging `@userinfobot`.
-3. Wait for setup to finish. Each agent gets its own container, volumes, and bot. Incomplete or failed setup cannot execute tasks; use **Retry setup** after fixing the reported problem.
-4. On the agent's setup page, choose **Configure AI providers**. Keep its container running and wait for any task to finish. Save an API key for OpenAI, Anthropic, Google, or OpenRouter. For OpenAI, you can instead choose **Sign in with ChatGPT**, open the displayed OpenAI link, and enter the device code there. Enable device code login in your ChatGPT account security settings or workspace permissions if required. To connect a Console workspace for Console budgets or the Go allowance, choose **Sign in to OpenCode Console** and complete authorization using the displayed link and code. Wait for the panel to confirm completion. Keys and tokens are never shown after saving, and each agent is configured independently.
+3. Wait for setup to finish. Each agent gets its own Agent Host process, persistent directories and bot. Use **Start agent** if its Host fails to start; do not create it again.
+4. On the agent's setup page, choose **Configure AI providers**. Keep its Agent Host running and wait for any task to finish. Save an API key for OpenAI, Anthropic, Google, or OpenRouter. For OpenAI, you can instead choose **Sign in with ChatGPT**, open the displayed OpenAI link, and enter the device code there. Enable device code login in your ChatGPT account security settings or workspace permissions if required. To connect a Console workspace for Console budgets or the Go allowance, choose **Sign in to OpenCode Console** and complete authorization using the displayed link and code. Wait for the panel to confirm completion. Keys and tokens are never shown after saving, and each agent is configured independently.
 5. In **Model and usage**, choose an enabled model or leave **Automatic** to use OpenCode's default.
 6. Open the bot link from the panel and send a task. Your first private message links the chat automatically.
 
-Every agent needs its own BotFather bot and its own provider authentication. Only its owner can use it; their first private message links the chat automatically. No Telegram or per-agent environment variables are needed. API keys and OAuth tokens stay in that agent's private engine-state volume. OpenCode renews OAuth tokens there automatically. Changing one agent's authentication never changes another's; starting a new agent does not copy any credentials.
+Every agent needs its own BotFather bot and its own provider authentication. Only its owner can use it; their first private message links the chat automatically. No Telegram or per-agent environment variables are needed. API keys and OAuth tokens stay in that agent's engine-state directory. OpenCode renews OAuth tokens there automatically. Changing one agent's authentication never changes another's; starting a new agent does not copy any credentials.
 
 During device login, tasks stay in that agent’s queue and are eligible to start once the attempt ends. You can cancel from the panel. Failed, cancelled, or timed-out attempts keep the previous credential. There is a ten-minute local time limit, and a Host restart interrupts pending login; start a new attempt afterwards. Refreshing the browser recovers a login still running in the Host. Saving credentials and Host readiness do not verify validity, balance, or model access.
 
-To replace a revoked token, open the agent's token form, enter a replacement for the same bot, and restart the server with `docker restart nimbot-server`.
+To replace a revoked token, open the agent's token form, enter a replacement for the same bot, and choose **Restart agent** in the panel.
 
 ## Upgrade
 
-Use this command on an installer-managed deployment:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/upgrade.sh | bash -s -- --version vX.Y.Z
-```
-
-Replace `vX.Y.Z` with a published Nimbot tag. Add `--directory "$HOME/nimbot"` if you used a custom installation directory. You can download and inspect the script before running it. The command uses the saved Docker socket and Compose project and requires the existing Server container, which can be stopped. Installations configured manually with Compose are outside the automated upgrade path.
-
-Each tag's `release.json` lists its supported predecessor. Upgrade through those tags in order. The first upgrade-capable release accepts an unversioned installer-managed deployment whose SQLite schemas match [the supported `main` commit](https://github.com/celeris-it/nimbot/commit/4e10035fab5be78edf5a16690115b87dbd3abd63). Older schemas and installations recorded as development are outside that path. A repeated upgrade to the installed tag exits successfully.
-
-The command builds the images before starting maintenance, then saves a verified backup, migrates state, and updates the Server and existing Agent Hosts. Previously running agents resume and stopped agents stay stopped. If recovery is pending, run the following from the installation directory or specify its path with `--directory`:
-
-```sh
-bash upgrade.sh --rollback
-```
-
-The recovery command restores the previous deployment if activation had yet to commit. If activation had committed, the command finishes activation and cleanup. See [upgrade and recovery operations](OPERATIONS.md#upgrade-and-recovery) for downtime, backups, and post-upgrade restoration.
+There is no upgrade or import path from the previous per-agent container release.
+For another revision of this subprocess installation, stop the application and
+back up its entire data volume first. Build the target image, remove only the
+stopped application container, and run the same Docker command with the retained
+volume and `.env`. Active tasks can be interrupted during the maintenance window.
+Release-script alignment and complete operations instructions are tracked in
+[TODO.md](../TODO.md); keep the previous image and a backup before replacing it.
 
 ## Uninstall
 
-By default, uninstall removes Nimbot's containers and networks while keeping all volumes, credentials, `.env`, images, and source files:
+To stop and remove the application while retaining all data:
 
 ```sh
-bash "$HOME/.local/share/nimbot/uninstall.sh"
+docker stop nimbot
+docker rm nimbot
 ```
 
-To permanently delete all agent files, conversations, provider credentials, server state, and `.env` as well:
+The `nimbot-data` named volume, source checkout, image and `.env` remain.
+Only when you explicitly want to erase all installation data, remove the volume:
 
 ```sh
-bash "$HOME/.local/share/nimbot/uninstall.sh" --purge-data
+docker volume rm nimbot-data
 ```
 
-The script asks for confirmation; purging also requires typing `DELETE NIMBOT DATA`. Upgrade backups, images, and source files remain. If you chose another directory, run its `uninstall.sh` or pass `--directory PATH`.
-
-Retaining volumes is useful for backups and recovery, but does not automatically recreate removed agent containers. Review [backup and restore](OPERATIONS.md) before uninstalling if you need to recover the installation later. The installer marker is kept so you can run `--purge-data` later or retry partial cleanup.
+This permanently deletes Server state, agents, files, histories, provider
+credentials and browser profiles. Back up what you need first. Removing an agent
+from the panel retains its own data unless you select the explicit purge option.
 
 ## Configuration and operations
 
-The installer writes `.env` with permissions `600`. See [`.env.example`](../.env.example) for deployment settings. For a manual deployment from a clone, build both images using the Dockerfiles, generate a password hash with `docker run --rm -it nimbot-server node apps/server/dist/password.js`, and configure `.env` before running `docker compose up -d`. Manual deployments are not managed by the uninstall script.
-
-Useful commands:
-
-```sh
-docker logs -f nimbot-server
-docker restart nimbot-server
-```
-
-With a non-default Docker context, use the context selected during installation. The installer prints a logs command with the explicit socket. For development deployments, recreating the server after rebuilding the Agent Host image lets it resolve the new immutable image ID for future agents. Use the upgrade command for released installations. In development, preserve the installation’s Compose project name:
-
-```sh
-docker compose --project-name "nimbot-$(head -n 1 .nimbot-installation)" up -d --force-recreate server
-```
-
-For backups, diagnostics, security limits, and everyday operations, see [OPERATIONS.md](OPERATIONS.md). For Telegram commands, see [README.md](../README.md#telegram-commands).
+`docker logs -f nimbot` shows application logs. `docker restart nimbot` stops the
+Server and its Hosts, then restores agents whose desired state was running.
+For panel lifecycle actions, use **Start agent**, **Stop agent** or **Restart
+agent**. `/stop` in a chat cancels only that agent's current task.
+The detailed operations guide is still being aligned with this release; old
+per-agent container and Compose recovery procedures do not apply.
 
 ### Optional Discord connection
 

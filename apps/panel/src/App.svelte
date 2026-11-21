@@ -858,7 +858,7 @@
     <div data-ui="header-actions">
       <span data-ui="installation"
         ><Icon name="shield" size={15} />
-        {native ? "Native development" : "Private installation"}</span
+        {native ? "Native development" : "Docker deployment"}</span
       ><button
         class="btn btn-ghost"
         disabled={busy}
@@ -879,10 +879,13 @@
       ? "dashboard"
       : "detail"}
 >
-  {#if native && path !== "/login"}
+  {#if session && path !== "/login"}
     <aside class="alert" aria-label="Shared installation trust">
       <div>
-        <strong>Native development · Shared installation trust</strong>
+        <strong
+          >{native ? "Native development" : "Docker deployment"} · Shared installation
+          trust</strong
+        >
         <p>
           The Server and all agents run under one OS account. Agents can read or
           modify each other’s files, memory and AI provider credentials, and
@@ -937,7 +940,7 @@
     <a class="btn" href="/">Back to panel</a>
   {:else if path === "/"}
     <Dashboard
-      {native}
+      processManaged={native || status.agents.some((item) => !!item.process)}
       agents={status.agents}
       canCreate={session?.capabilities.createAgent ?? false}
       refresh={() => load()}
@@ -978,7 +981,12 @@
       <button type="submit" class="btn" disabled={busy}>Save settings</button>
     </form>
   {:else if path === "/agents/new"}
-    {#key path}<AgentForm mode="new" {native} {busy} {submit} />{/key}
+    {#key path}<AgentForm
+        mode="new"
+        processManaged={true}
+        {busy}
+        {submit}
+      />{/key}
   {:else if path === "/mcp"}
     <h1 tabindex="-1">MCP catalog</h1>
     <a class="btn btn-primary" href="/mcp/new">Add integration</a>
@@ -1106,7 +1114,7 @@
     {:else if route[2] === "settings" || route[2] === "token"}
       {#key path}<AgentForm
           mode={route[2]}
-          {native}
+          processManaged={!!agent.process || native}
           {agent}
           {busy}
           {submit}

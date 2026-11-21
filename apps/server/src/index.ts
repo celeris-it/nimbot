@@ -5,8 +5,6 @@ import { openAgentProcessStore } from "./agent-process-store.js";
 import { openProcessHostCredentials } from "./process-host-credentials.js";
 import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
 import { waitForUpgradeActivation } from "./upgrade-activation.js";
-import { createAgentRecovery } from "./agent-recovery.js";
-import { createRecoveryWorkGate } from "./recovery-work-gate.js";
 import { createDiscordAttachments } from "./discord-attachments.js";
 import { formatScheduleList } from "./chat-schedules.js";
 import { taskOutcomeText } from "./bot.js";
@@ -50,10 +48,6 @@ import { createDiscordNotifications } from "./discord-notifications.js";
 import { log } from "./logger.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createAgentAccess } from "./agent-access.js";
-import { createProvisioningControl } from "./provisioning-control.js";
-import { createAgentRegistration } from "./agent-registration.js";
-import { createResourceReconciliation } from "./resource-reconciliation.js";
-import { createAgentContainerAction } from "./agent-container-action.js";
 import { openTaskStore } from "./task-queue.js";
 import { openScheduleStore } from "./schedule-store.js";
 import {
@@ -61,16 +55,6 @@ import {
   createScheduleSkipNotifier,
   createScheduler,
 } from "./scheduler.js";
-import { createAgentDeletion } from "./agent-deletion.js";
-import { createAgentResourceRemoval } from "./agent-resource-removal.js";
-import {
-  readProvisioningConfig,
-  resolveAgentHostImage,
-  createAgentProvisioning,
-} from "./agent-provisioning.js";
-import { checkDockerAccess } from "./docker-preflight.js";
-import { openHostCredentials } from "./host-credentials.js";
-import { createContainerControl } from "./container-control.js";
 import { openBotSecrets } from "./bot-secret.js";
 import { openDiscordSecrets } from "./discord-secret.js";
 import { openMcpCatalog } from "./mcp-catalog.js";
@@ -84,8 +68,6 @@ import { openAgentRegistry } from "./agent-registry.js";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getHostStatus } from "./agent-host.js";
-import { getCurrentHostTask } from "./host-current-task.js";
-import { createStopObservation } from "./stop-observation.js";
 import { serve } from "@hono/node-server";
 import { createPanel } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";
@@ -94,20 +76,14 @@ import { readTaskTimeoutSeconds, taskWaitMs } from "./task-timeout.js";
 async function main(): Promise<void> {
   let panelConfig;
   let serverMode: ReturnType<typeof readServerMode>;
-  let processAgents: ReturnType<typeof createProcessAgents> | undefined;
   let processStore: ReturnType<typeof openAgentProcessStore> | undefined;
   let processCredentials:
     Awaited<ReturnType<typeof openProcessHostCredentials>> | undefined;
-  let provisioningConfig: ReturnType<typeof readProvisioningConfig>;
   let taskTimeoutSeconds: number;
   try {
     taskTimeoutSeconds = readTaskTimeoutSeconds(process.env);
     panelConfig = readPanelConfig(process.env);
     serverMode = readServerMode(process.env, panelConfig);
-    provisioningConfig =
-      serverMode.mode === "docker"
-        ? readProvisioningConfig(process.env)
-        : undefined;
   } catch (error) {
     log.error("server.config_invalid", {
       message:
@@ -118,33 +94,6 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  if (provisioningConfig) {
-    const unavailable = await checkDockerAccess(provisioningConfig.socketPath);
-    if (unavailable) {
-      log.error("server.docker_unavailable", { message: unavailable });
-      process.exitCode = 1;
-      return;
-    }
-    try {
-      const requested = provisioningConfig.image;
-      provisioningConfig = await resolveAgentHostImage(provisioningConfig);
-      if (requested !== provisioningConfig.image)
-        log.info("server.agent_host_image_resolved", {
-          tag: requested,
-          id: provisioningConfig.image,
-        });
-    } catch (error) {
-      log.error("server.config_invalid", {
-        message:
-          error instanceof Error
-            ? error.message
-            : "Could not resolve the Agent Host image.",
-      });
-      process.exitCode = 1;
-      return;
-    }
-  }
-  const native = serverMode.mode === "native";
   const stateDir = serverMode.stateDirectory;
   let statePath;
   let taskStore;
@@ -162,14 +111,12 @@ async function main(): Promise<void> {
   let discordSecrets;
   let mcpCatalog;
   let mcpCredentials;
-  let hostCredentials:
-    Awaited<ReturnType<typeof openHostCredentials>> | undefined;
   try {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     statePath = resolve(stateDir, "server.sqlite");
-    prepareStateSchema(statePath, native ? "server-process" : "server");
-    registry = openAgentRegistry(statePath, native ? "process" : "docker");
-    if (native) {
+    prepareStateSchema(statePath, "server-process");
+    registry = openAgentRegistry(statePath, "process");
+    {
       processStore = openAgentProcessStore(statePath);
       processCredentials = await openProcessHostCredentials(
         resolve(stateDir, "host-secrets"),
@@ -187,17 +134,9 @@ async function main(): Promise<void> {
     discordSecrets = await openDiscordSecrets(
       resolve(stateDir, "discord-secrets"),
     );
-    if (provisioningConfig)
-      hostCredentials = await openHostCredentials(
-        resolve(stateDir, "host-secrets"),
-        registry,
-      );
     discordInbox = openDiscordInbox(statePath);
     notificationStore = openNotificationStore(statePath);
-    operationalAlertStore = openOperationalAlertStore(
-      statePath,
-      native ? "process" : "docker",
-    );
+    operationalAlertStore = openOperationalAlertStore(statePath, "process");
     taskStore = openTaskStore(statePath);
     usageStore = openAgentUsage(statePath);
     scheduleStore = openScheduleStore(statePath);
@@ -253,46 +192,17 @@ async function main(): Promise<void> {
     registry.close();
     processStore?.close();
   });
-  const hosts = native
-    ? { read: (id: string) => processAgents!.readHost(id) }
-    : hostCredentials;
-  const nativeReady = native
-    ? (id: string) => processAgents?.ready(id) ?? false
-    : undefined;
+  const hosts = { read: (id: string) => processAgents!.readHost(id) };
+  const runtimeReady = (id: string) => processAgents?.ready(id) ?? false;
   const agentAccess = (id: string) =>
-    createAgentAccess(
-      registry,
-      id,
-      nativeReady ? () => nativeReady(id) : undefined,
-    );
-  const allowsWork = (id: string) =>
-    native ? nativeReady!(id) : workGate.allowsWork(id);
-  async function inspectContainer(id: string) {
-    const target = registry.get(id)?.containerRef;
-    if (!target) return "missing" as const;
-    if (!provisioningConfig) return "unavailable" as const;
-    return createContainerControl({
-      socketPath: provisioningConfig.socketPath,
-      target,
-      agentId: id,
-    }).status();
-  }
+    createAgentAccess(registry, id, () => runtimeReady(id));
+  const allowsWork = runtimeReady;
   async function inspectHost(id: string) {
     try {
       return await getHostStatus(await hosts!.read(id));
     } catch {
       return "unavailable" as const;
     }
-  }
-  const workGate = createRecoveryWorkGate(
-    registry,
-    inspectContainer,
-    inspectHost,
-  );
-  if (provisioningConfig) {
-    const ids = registry.listIds();
-    for (let offset = 0; offset < ids.length; offset += 8)
-      await Promise.all(ids.slice(offset, offset + 8).map(workGate.check));
   }
   const discord = createDiscordConfiguration(registry, discordSecrets);
   const discordDelivery = createDiscordNotifications(discord.resolve);
@@ -316,23 +226,10 @@ async function main(): Promise<void> {
     );
   }
   function discordAdmit(task: DiscordDestination) {
-    if (native)
-      return (
-        nativeReady!(task.agentId) &&
-        matchesDiscord(task) &&
-        !!registry.getHostCredentialRef(task.agentId)
-      );
-    const setup = registry.getProvisioning(task.agentId);
     return (
-      allowsWork(task.agentId) &&
+      runtimeReady(task.agentId) &&
       matchesDiscord(task) &&
-      setup?.status === "ready" &&
-      !!registry.get(task.agentId)?.containerRef &&
-      !!setup.volumeRef &&
-      !!setup.networkRef &&
-      !!registry.getHostCredentialRef(task.agentId) &&
-      registry.getContainerOperation(task.agentId)?.status !== "pending" &&
-      registry.getProvisioningCancellation(task.agentId) === undefined
+      !!registry.getHostCredentialRef(task.agentId)
     );
   }
   async function sendDiscordTask(task: DiscordDestination, text: string) {
@@ -503,13 +400,7 @@ async function main(): Promise<void> {
       targetStatus: (id) => {
         if (!registry.get(id)) return "deleted";
         if (!allowsWork(id)) return "paused";
-        if (native) return "ready";
-        const operation = registry.getContainerOperation(id);
-        return operation?.status === "pending" ||
-          (operation?.action === "stop" &&
-            ["completed", "interrupted"].includes(operation.status))
-          ? "paused"
-          : "ready";
+        return "ready";
       },
     },
   );
@@ -523,86 +414,12 @@ async function main(): Promise<void> {
           tasks: (id) => taskServices.get(id),
           taskWaitMs: taskWaitMs(taskTimeoutSeconds),
           allowsWork,
-          runtimeReady: nativeReady,
+          runtimeReady,
         },
         botSecrets,
         hosts,
       )
     : undefined;
-  const provisioningShutdown = new AbortController();
-  const recovery =
-    provisioningConfig && hostCredentials
-      ? createAgentRecovery(
-          registry,
-          hostCredentials,
-          provisioningConfig,
-          undefined,
-          provisioningShutdown.signal,
-        )
-      : undefined;
-  const provisionTask =
-    provisioningConfig && hostCredentials
-      ? createAgentProvisioning(
-          registry,
-          hostCredentials,
-          provisioningConfig,
-          undefined,
-          undefined,
-          provisioningShutdown.signal,
-        )
-      : undefined;
-  const provisioning = provisionTask
-    ? createProvisioningControl(registry, async (id, signal) => {
-        const refs = await provisionTask(id, signal);
-        registeredBots!.start(id);
-        void registeredDiscord.start(id);
-        return refs;
-      })
-    : undefined;
-  const provision = provisioning?.run;
-  const removeResources = provisioningConfig
-    ? createAgentResourceRemoval(registry, provisioningConfig)
-    : undefined;
-  const deleteAgent =
-    removeResources && hostCredentials
-      ? createAgentDeletion({
-          registry,
-          schedules: scheduleStore,
-          stopBot: async (id) => {
-            await registeredBots!.stop(id);
-            taskServices.stop(id);
-          },
-          removeResources,
-          removeBotSecret: async (ref) => {
-            try {
-              await botSecrets.remove(ref);
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-                throw error;
-            }
-          },
-          removeHostSecret: (ref) => hostCredentials.remove(ref),
-          revokeMcpGrants: (id) => mcpCatalog.revokeAgent(id),
-        })
-      : undefined;
-  const containerAction = provisioningConfig
-    ? createAgentContainerAction(
-        registry,
-        provisioningConfig.socketPath,
-        undefined,
-        async (id) => {
-          try {
-            return await getCurrentHostTask(await hosts!.read(id));
-          } catch {
-            return { availability: "unavailable" };
-          }
-        },
-      )
-    : undefined;
-  const reconcile = provisioningConfig
-    ? createResourceReconciliation(registry, provisioningConfig.socketPath)
-    : undefined;
-  const observeStop = createStopObservation(registry, (id) => hosts!.read(id));
   const requireAgent = (id: string) => {
     if (!registry.get(id)) throw new Error("Agent not found");
   };
@@ -632,8 +449,8 @@ async function main(): Promise<void> {
         }
       : undefined,
   );
-  if (native)
-    processAgents = createProcessAgents({
+  const processAgents: ReturnType<typeof createProcessAgents> =
+    createProcessAgents({
       registry,
       store: processStore!,
       credentials: processCredentials!,
@@ -662,25 +479,6 @@ async function main(): Promise<void> {
       },
       revokeMcpGrants: (id) => mcpCatalog.revokeAgent(id),
     });
-  const pendingActivation = new Set<string>();
-  function resumeWhenHostReady(id: string) {
-    if (pendingActivation.has(id)) return;
-    pendingActivation.add(id);
-    void workGate
-      .waitForStartedHost(id, provisioningShutdown.signal)
-      .then(async (ready) => {
-        if (!ready || !allowsWork(id) || provisioningShutdown.signal.aborted)
-          return;
-        registeredBots?.start(id);
-        void registeredDiscord.start(id);
-        await taskServices.wake([id]);
-      })
-      .catch(() => {
-        if (!provisioningShutdown.signal.aborted)
-          log.warn("server.recovery_activation_failed", { agentId: id });
-      })
-      .finally(() => pendingActivation.delete(id));
-  }
   const notifications = createDurableNotifications(
     notificationStore,
     createNotifications({
@@ -692,7 +490,7 @@ async function main(): Promise<void> {
     ? createHostProviders((id) => hosts.read(id))
     : undefined;
   const operationalAlerts =
-    (native || provisioningConfig) && providers && registeredBots
+    providers && registeredBots
       ? createOperationalAlerts({
           registry,
           tasks: taskStore,
@@ -701,12 +499,6 @@ async function main(): Promise<void> {
           notifications,
           outbox: notificationStore,
           canNotify: registeredBots.canNotify,
-          observeContainer: (id, target) =>
-            createContainerControl({
-              socketPath: provisioningConfig!.socketPath,
-              agentId: id,
-              target,
-            }).observe(),
           checkProviders: providers.checks,
           process: processAgents,
         })
@@ -725,7 +517,7 @@ async function main(): Promise<void> {
               ? origin
               : undefined;
           },
-          nativeReady,
+          runtimeReady,
         )
       : async () => undefined,
     isOverlapping: taskStore.isScheduleOverlapping,
@@ -742,11 +534,9 @@ async function main(): Promise<void> {
   });
   const panel = createPanel(panelConfig, {
     deploymentMode: serverMode.mode,
-    processAction: native
-      ? async (id, action) => {
-          await processAgents![action](id);
-        }
-      : undefined,
+    processAction: async (id, action) => {
+      await processAgents![action](id);
+    },
     mcp: {
       catalog: mcpCatalog,
       credentials: mcpCredentials,
@@ -824,144 +614,50 @@ async function main(): Promise<void> {
           "Nimbot Discord notification test.",
         ),
     },
-    resources: reconcile,
-    recovery: recovery
-      ? {
-          inspect: recovery.inspect,
-          recover: (id) =>
-            recovery.recover(id, async () => {
-              registeredDiscord.stop(id);
-              await registeredBots?.stop(id);
-              taskServices.stop(id);
-            }),
-        }
-      : undefined,
-    provisionAgent: native
-      ? async (id) => {
-          await processAgents!.start(id);
-        }
-      : provision
-        ? async (id) => {
-            requireAgent(id);
-            await provision(id);
-          }
-        : undefined,
-    removeResources: removeResources
-      ? async (id, deleteData) => {
-          requireAgent(id);
-          await removeResources(id, deleteData);
-        }
-      : undefined,
-    containerAction: containerAction
-      ? async (id, action) => {
-          requireAgent(id);
-          const workWasHeld = !allowsWork(id);
-          await containerAction(id, action);
-          if (action === "start" && workWasHeld) {
-            if (registry.getRecovery(id)?.status === "restored") {
-              resumeWhenHostReady(id);
-              return;
-            }
-            await workGate.check(id);
-            if (allowsWork(id)) {
-              registeredBots?.start(id);
-              void registeredDiscord.start(id);
-            }
-          }
-          await taskServices.wake([id]);
-        }
-      : undefined,
-    registerAgent: native
-      ? processAgents!.register
-      : provision
-        ? createAgentRegistration(registry, botSecrets, async (id) => {
-            provisioning!.start(id);
-          })
-        : undefined,
-    getAgentSetup: native
-      ? (id) => {
-          const agent = registry.get(id);
-          return agent
-            ? {
-                name: agent.name,
-                botUsername: agent.botUsername,
-                provisioning: processAgents!.setupStatus(id),
-                botConnection: registeredBots?.getState(id),
-                setupAccess: agentAccess(id).getSetup(),
-                process: {
-                  state: processAgents!.status(id),
-                  desiredState: processStore!.getDesiredState(id),
-                },
-              }
-            : undefined;
-        }
-      : provision
-        ? (id) => {
-            const agent = registry.get(id);
-            const setup = registry.getProvisioning(id);
-            return agent && setup
-              ? {
-                  name: agent.name,
-                  botUsername: agent.botUsername,
-                  provisioning: setup.status,
-                  botConnection: registeredBots?.getState(id),
-                  setupAccess: agentAccess(id).getSetup(),
-                  cancellationRequested:
-                    registry.getProvisioningCancellation(id) !== undefined,
-                  canCancelProvisioning: provisioning!.canCancel(id),
-                  containerOperation: registry.getContainerOperation(id),
-                }
-              : undefined;
-          }
-        : undefined,
-    agentSettings:
-      native || provision
+    registerAgent: processAgents.register,
+    getAgentSetup: (id) => {
+      const agent = registry.get(id);
+      return agent
         ? {
-            get: (id) => {
-              const agent = registry.get(id);
-              return agent
-                ? { name: agent.name, instructions: agent.instructions }
-                : undefined;
-            },
-            containerStatus: native ? undefined : inspectContainer,
-            hostStatus: inspectHost,
-            providerChecks: operationalAlerts?.checks,
-            stopObservation: native
-              ? undefined
-              : async (id) => (registry.get(id) ? observeStop(id) : undefined),
-            cancelProvisioning: native
-              ? undefined
-              : (id) => {
-                  requireAgent(id);
-                  provisioning!.cancel(id);
-                },
-            saveToken: async (id, token) => {
-              requireAgent(id);
-              await createBotTokenUpdate(id, registry, botSecrets)(token);
-            },
-            save: (id, name, instructions) => {
-              requireAgent(id);
-              registry.updateSettings(id, name, instructions);
+            name: agent.name,
+            botUsername: agent.botUsername,
+            provisioning: processAgents!.setupStatus(id),
+            botConnection: registeredBots?.getState(id),
+            setupAccess: agentAccess(id).getSetup(),
+            process: {
+              state: processAgents!.status(id),
+              desiredState: processStore!.getDesiredState(id),
             },
           }
-        : undefined,
+        : undefined;
+    },
+    agentSettings: {
+      get: (id) => {
+        const agent = registry.get(id);
+        return agent
+          ? { name: agent.name, instructions: agent.instructions }
+          : undefined;
+      },
+      hostStatus: inspectHost,
+      providerChecks: operationalAlerts?.checks,
+      saveToken: async (id, token) => {
+        requireAgent(id);
+        await createBotTokenUpdate(id, registry, botSecrets)(token);
+      },
+      save: (id, name, instructions) => {
+        requireAgent(id);
+        registry.updateSettings(id, name, instructions);
+      },
+    },
     listAgentIds: () => registry.listIds(),
-    deleteAgent:
-      native || deleteAgent
-        ? async (id, deleteData) => {
-            requireAgent(id);
-            if (registry.getDiscordConnection(id))
-              throw new Error(
-                "Remove the Discord connection before deleting the agent",
-              );
-            if (native) await processAgents!.remove(id, deleteData);
-            else await deleteAgent!(id, deleteData);
-            operationalAlerts?.removeAgent(id);
-            if ((await mcpCredentials.cleanup()).cleanupPending)
-              log.warn("mcp.credential_cleanup_pending");
-            await taskServices.wake([id]);
-          }
-        : undefined,
+    deleteAgent: async (id, deleteData) => {
+      requireAgent(id);
+      await processAgents!.remove(id, deleteData);
+      operationalAlerts?.removeAgent(id);
+      if ((await mcpCredentials.cleanup()).cleanupPending)
+        log.warn("mcp.credential_cleanup_pending");
+      await taskServices.wake([id]);
+    },
   });
   const activation = waitForUpgradeActivation(
     stateDir,
@@ -1013,7 +709,6 @@ async function main(): Promise<void> {
     void scheduler.close();
     registeredDiscord.close();
     taskServices.close();
-    provisioningShutdown.abort();
     void registeredBots?.close().catch(() => {
       log.error("server.registered_bots_stop_failed");
       process.exitCode = 1;
@@ -1024,26 +719,11 @@ async function main(): Promise<void> {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   if (!(await activation.wait())) return;
-  if (native) {
-    const restored = await processAgents!.restore();
-    for (const result of restored)
-      if (result.status === "rejected")
-        log.warn("server.agent_host_restore_failed");
-  }
+  const restored = await processAgents.restore();
+  for (const result of restored)
+    if (result.status === "rejected")
+      log.warn("server.agent_host_restore_failed");
   if (stopping) return;
-  for (const id of native ? [] : registry.listIds()) {
-    if (!allowsWork(id)) {
-      // A registered owner can receive an outage notice while Docker identity
-      // is unresolved. The work gate still applies to Telegram admission.
-      const recoveryState = registry.getRecovery(id);
-      if (!recoveryState || recoveryState.status === "activated")
-        registeredBots?.start(id);
-      resumeWhenHostReady(id);
-      continue;
-    }
-    void registeredDiscord.start(id);
-    registeredBots?.start(id);
-  }
   void taskServices.resumeDelegations(taskStore).catch(() => {
     log.warn("server.delegation_resume_failed");
   });

@@ -29,7 +29,7 @@ interface Deps {
   >;
   outbox: Pick<ReturnType<typeof openNotificationStore>, "get">;
   canNotify(id: string): boolean;
-  observeContainer(id: string, ref: string): Promise<ContainerObservation>;
+  observeContainer?(id: string, ref: string): Promise<ContainerObservation>;
   checkProviders: ReturnType<typeof createHostProviders>["checks"];
   process?: {
     observe(id: string): {
@@ -61,6 +61,7 @@ export function createOperationalAlerts(deps: Deps) {
       store.clear(id, "container");
       return;
     }
+    if (!deps.observeContainer) return;
     const result = await deps.observeContainer(id, ref);
     const currentOperation = registry.getContainerOperation(id);
     if (

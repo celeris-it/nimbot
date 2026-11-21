@@ -4,35 +4,37 @@
 
 Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram and optional Discord direct messages. Each agent has a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
-> **Project status:** The MVP is complete. Installation through Docker Compose has been validated on macOS with Docker Desktop and on a clean Linux server.
+> **Project status:** The MVP is complete. Native development uses Server-managed Agent Host subprocesses; the Docker deployment packages the same application in one non-root container.
 
 The self-hosted software is free under [Apache 2.0](LICENSE); you pay separately for your infrastructure and AI provider. A separate paid plan where we host your bots is planned for later. Managed hosting is not available yet, and pricing and plan details are to be announced.
 
 ## Installation
 
-With Docker and its Compose plugin installed and running, open a terminal and run:
+Build the application image from a checkout with Docker Engine or Docker Desktop:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash
+docker build -f infrastructure/docker/nimbot.Dockerfile -t nimbot:local .
 ```
 
-The installer supports Linux and macOS, downloads the code, builds the images, generates configuration, and starts the panel. It asks for a password and offers localhost access or an existing HTTPS origin. No Node.js, pnpm, or Git is required on the host. Only one installation per Docker Engine is supported. Use the [versioned installer option](docs/INSTALL.md#install) to install a published tag on the supported upgrade path.
+Follow [docs/INSTALL.md](docs/INSTALL.md) to generate the panel password, create a
+private `.env` file and start the single application container with a new named
+data volume. Docker Compose, host Node.js and a Docker socket mount are not
+required. Only the panel is published; all agents run as non-root subprocesses
+inside the same container.
 
-## Upgrade
+This release requires a fresh installation. It does not import previous
+per-agent Docker state, and leaves existing data untouched. The legacy installer,
+upgrade and uninstall scripts are still being aligned with the subprocess
+architecture; use the documented Docker CLI procedure for now.
 
-For an installer-managed deployment, choose a supported release tag and run:
+## Upgrade and uninstall
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/upgrade.sh | bash -s -- --version vX.Y.Z
-```
-
-Replace `vX.Y.Z` with the target tag. The upgrade backs up the installation, updates the Server and existing Agent Hosts, and keeps agent data and configuration. The panel and bots are unavailable during the maintenance window, and active tasks can be interrupted. See [supported upgrade paths and recovery](docs/INSTALL.md#upgrade).
-
-## Uninstall
-
-To uninstall while retaining data, run `bash "$HOME/.local/share/nimbot/uninstall.sh"`. Add `--purge-data` to explicitly delete agent and server data after confirmation. Upgrade backups, images, and source files are kept.
-
-See [docs/INSTALL.md](docs/INSTALL.md) for a custom directory, HTTPS, BotFather linking, and AI provider authentication. [docs/OPERATIONS.md](docs/OPERATIONS.md) covers backup and restore, troubleshooting, and security limitations.
+Keep the full data volume and `.env` when recreating the application container.
+Stopping the Server interrupts active work and restores agents that were meant
+to be running on the next start. Removing the application container retains its
+named data volume; deleting that volume is a separate, explicit purge. See
+[installation and removal](docs/INSTALL.md) for commands. Detailed operations and
+release-script updates are tracked in [TODO.md](TODO.md).
 
 Fresh installations start with zero agents. Sign in to the panel and create each agent with a name, optional instructions, its owner's numeric Telegram user ID, and a token from a distinct bot created in BotFather. Nimbot verifies the bot, provisions the agent, and provides its Telegram link. Open **Configure AI providers** on that agent’s setup page. Save an API key for OpenAI, Anthropic, Google, or OpenRouter, sign in to OpenAI with a ChatGPT device code, or connect an OpenCode Console workspace. Each agent has its own credentials and login method; then send its bot a private message. The chat is linked automatically on first contact; no /start command is required.
 
@@ -50,7 +52,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Send documents up to 10 MiB to a Telegram agent and ask it to return generated files in the same chat.
 - Cancel a running task without affecting other agents or blocking later queued tasks.
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
-- Replace revoked bot tokens securely and retain persistent volumes by default when deleting an agent.
+- Replace revoked bot tokens securely and retain persistent data by default when deleting an agent.
 
 The panel uses one locally configured administrator account. Each agent has one Telegram owner; everyone else is ignored, including owners of other agents. There is no management bot, shared selected agent, or `/use` workflow. Tasks, progress, approvals, and results use their originating channel. Each optional Discord connection has its own configured owner and private DM binding.
 
@@ -73,11 +75,11 @@ workspace path in a later message. Ask the agent in the chat to return a file
 and it can attach one document of up to 10 MiB after the task succeeds.
 See [attachment handling and recovery](docs/OPERATIONS.md#telegram-documents).
 
-Agent creation, configuration, token replacement, container start/stop, and deletion are panel actions. Stopping a container safely interrupts active work; `/stop` cancels the task while leaving the container available.
+Agent creation, configuration, token replacement, agent start/stop/restart, and deletion are panel actions. Stopping or restarting an Agent Host can interrupt active work; `/stop` cancels the task while leaving the Host available.
 
 ## Architecture
 
-One Nimbot Server serves the administration panel, maintains a separate Telegram long-polling connection per agent, and manages agent runtime lifecycle on the same machine. Native development uses Server-managed Agent Host child processes. The current Docker deployment still provisions per-agent containers until the next milestone.
+One Nimbot Server serves the administration panel, maintains a separate Telegram long-polling connection per agent, and manages agent runtime lifecycle on the same machine. Native development uses Server-managed Agent Host child processes. Docker packages the same Server and Agent Host processes in one non-root container per installation.
 
 ```text
   Web panel (admin)      Telegram agent bots A, B
@@ -92,11 +94,11 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
               | Agent Registry   |
               | Task Router      |
               | Scheduler        |
-              | Container Manager|
+              | Process Manager  |
               | SQLite Database  |
               +--------+---------+
                        |
-                  Docker Engine
+               Child processes
                        |
           +------------+------------+
           |                         |
@@ -109,13 +111,13 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
    +------+------+           +------+------+
           |                         |
           v                         v
-   Persistent Volumes        Persistent Volumes
+   Persistent directories    Persistent directories
 ```
 
-- **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing and scheduling, container lifecycle, and diagnostics. Agent-generated commands run only in Agent Host processes, never in the Server process.
-- **Agent Host:** a separate child process per agent in native development, or currently a dedicated container in the Docker deployment, using OpenCode as its sole AI engine and running the tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
+- **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing and scheduling, process lifecycle, and diagnostics. Agent-generated commands run only in Agent Host processes, never in the Server process.
+- **Agent Host:** a separate child process per agent in both native and Docker deployments, using OpenCode as its sole AI engine and running the tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
 - **Panel:** Svelte 5, TypeScript, Vite, and daisyUI. Hono serves compiled assets and the same-origin API from one process. JavaScript is required; visible views refresh every five seconds and forms submit without document reloads.
-- **Storage:** SQLite and persistent directories in native development, or Docker named volumes in the current Docker deployment. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
+- **Storage:** SQLite and persistent directories, stored in one named volume for the Docker deployment. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
 
 The stack uses strict TypeScript on Node.js, pnpm workspaces, Hono, Zod, grammY, Drizzle for task persistence, Node's built-in SQLite API for the registry, Docker, Playwright, Vitest, ESLint, and Prettier.
 
@@ -123,13 +125,13 @@ The application-tool bridge follows the existing approval exchange: the Host now
 
 **Structured approvals (Server).** Service-validated actions go through an approval gate: per-agent rules (Ask each time, Deny, Always allow for verified read-only actions) matched on a trusted operation identifier and exact target, with deny taking precedence and asking as the default. Questions go to the task's own Telegram chat or Discord DM using single-use buttons, rechecked for the current owner and binding at click time. Rules, grants and the action fingerprint are checked again immediately before the side effect; expiry, failed delivery, cancellation or a restart deny, and an interrupted execution is recorded as uncertain and never replayed. The panel's **Approvals** page edits rules and shows decision history. Peer note sends, delegation handoffs and mutating external MCP tools use this gate. External reads honor exact Deny and Ask rules; their default is the administrator-granted access. Existing OpenCode permission approvals are unchanged.
 
-**Agent communication and delegation (Server).** Directed panel grants enable peer discovery, notes and delegation handoffs for chat tasks only; no grants means no peer tools. The Server returns only granted agent IDs and bounded display names. Sending a note asks the initiating owner for confirmation with a 30-second deadline and rechecks the exact target grant before storing it. Recipients read explicit, untrusted messages in their own tasks; receiving or reading a note never starts work. Notes live in `agent_notes` in Server SQLite, capped at 1,000 characters each and 100 retained entries per recipient. A full inbox preserves unread notes and rejects new sends; read entries can be reclaimed. Unread pages are atomic and bounded by count and UTF-8 bytes. Grant and saved source-conversation checks apply before reading and before replaying saved results. The `agent_delegate` tool asks the originating owner for approval with a 30-second deadline, then immediately returns a pending handoff ID. It stages bounded one-hop briefs and atomically admits a child when its parent completes and authorization still holds. The task service activates target workers only after that commit and reconciles committed queued handoffs on startup, preserving them if target loading fails. Accepted parent cancellation discards the handoff even if the Host returns a completed result. Child outcomes now commit with terminal state as immutable JSON capped at 8,192 UTF-8 bytes, with truncation flagged; recovery records interrupted work without repeating it. Ordinary chat results remain on the Host. Structured child approval routing now has a Server-only relay that validates the saved handoff, current grant and original owner conversation, uses the source agent bot and rejects stale or foreign callbacks. The `agent_delegation_status` tool now reads a source agent's own handoff state and bounded result, rechecking both the saved parent conversation and current chat grants on each call. A pending handoff stays pending for the rest of its parent turn; results are read from later turns as untrusted data. Native OpenCode child permission requests also have a bounded relay handler that checks the child's exact accepted Host task ID and forwards single-use owner decisions to that Host; these permissions keep their existing semantics and do not match structured rules. Ending the child turn or closing either service denies pending requests. Child outcome delivery now has a source-service relay that reads only committed bounded results, rechecks the saved initiating conversation and live grant before each message part, and persists notification intent before sending. Delivered, partial and uncertain sends are never automatically repeated; a later source task can retrieve the result through the status tool. This relay never starts a task. Delegated children now execute in the destination FIFO after rechecking the admitted handoff, original conversation, grant and destination readiness. The destination must pass the existing linked Telegram bot, owner chat and provisioning checks; failed checks record `not_ready` without invoking its Host. The Server selects a fresh OpenCode session outside the prompt, so the child receives only the explicit source brief plus its own configured agent instructions and cannot replace the saved owner conversation. Production children receive no application-tool capabilities, preventing further delegation. A queued or running child never holds the source agent turn open. Startup and source-bot attachment now recover terminal results that have no notification intent, with paginated source-scoped scans and fresh grant/origin checks. Existing intents are skipped, so interrupted delivery is never replayed. Missing source credentials or an unattached Telegram bot leave results pending for a later resume or attachment. Outcome recovery never starts an agent task. The task service now supports cancellation of a specific child: queued cancellation commits its outcome without stopping earlier target work, and running cancellation persists before aborting that child. Permission relays reject a cancellation-requested child; late success and restart recovery preserve cancellation. The requesting agent can see the cancellation request through its status tool. Queued children now pause during pending container actions and after recorded completed or interrupted stops; starting that target resumes its FIFO. Deleted-target reconciliation atomically fails only correlated queued children as `not_ready`, without loading target credentials or repeating running work. Prior results remain unchanged, and result delivery still requires a live grant and saved origin. Authenticated panel APIs now expose paginated delegation metadata and source-scoped cancellation, including queued children whose target cannot load. History omits parent prompts and child output; running cancellation uses the existing runner or the exact bound Host ID. Open **Delegations** from the source agent’s panel page to review handoffs and cancel a specific queued or running child.
+**Agent communication and delegation (Server).** Directed panel grants enable peer discovery, notes and delegation handoffs for chat tasks only; no grants means no peer tools. The Server returns only granted agent IDs and bounded display names. Sending a note asks the initiating owner for confirmation with a 30-second deadline and rechecks the exact target grant before storing it. Recipients read explicit, untrusted messages in their own tasks; receiving or reading a note never starts work. Notes live in `agent_notes` in Server SQLite, capped at 1,000 characters each and 100 retained entries per recipient. A full inbox preserves unread notes and rejects new sends; read entries can be reclaimed. Unread pages are atomic and bounded by count and UTF-8 bytes. Grant and saved source-conversation checks apply before reading and before replaying saved results. The `agent_delegate` tool asks the originating owner for approval with a 30-second deadline, then immediately returns a pending handoff ID. It stages bounded one-hop briefs and atomically admits a child when its parent completes and authorization still holds. The task service activates target workers only after that commit and reconciles committed queued handoffs on startup, preserving them if target loading fails. Accepted parent cancellation discards the handoff even if the Host returns a completed result. Child outcomes now commit with terminal state as immutable JSON capped at 8,192 UTF-8 bytes, with truncation flagged; recovery records interrupted work without repeating it. Ordinary chat results remain on the Host. Structured child approval routing now has a Server-only relay that validates the saved handoff, current grant and original owner conversation, uses the source agent bot and rejects stale or foreign callbacks. The `agent_delegation_status` tool now reads a source agent's own handoff state and bounded result, rechecking both the saved parent conversation and current chat grants on each call. A pending handoff stays pending for the rest of its parent turn; results are read from later turns as untrusted data. Native OpenCode child permission requests also have a bounded relay handler that checks the child's exact accepted Host task ID and forwards single-use owner decisions to that Host; these permissions keep their existing semantics and do not match structured rules. Ending the child turn or closing either service denies pending requests. Child outcome delivery now has a source-service relay that reads only committed bounded results, rechecks the saved initiating conversation and live grant before each message part, and persists notification intent before sending. Delivered, partial and uncertain sends are never automatically repeated; a later source task can retrieve the result through the status tool. This relay never starts a task. Delegated children now execute in the destination FIFO after rechecking the admitted handoff, original conversation, grant and destination readiness. The destination must pass the existing linked Telegram bot, owner chat and provisioning checks; failed checks record `not_ready` without invoking its Host. The Server selects a fresh OpenCode session outside the prompt, so the child receives only the explicit source brief plus its own configured agent instructions and cannot replace the saved owner conversation. Production children receive no application-tool capabilities, preventing further delegation. A queued or running child never holds the source agent turn open. Startup and source-bot attachment now recover terminal results that have no notification intent, with paginated source-scoped scans and fresh grant/origin checks. Existing intents are skipped, so interrupted delivery is never replayed. Missing source credentials or an unattached Telegram bot leave results pending for a later resume or attachment. Outcome recovery never starts an agent task. The task service now supports cancellation of a specific child: queued cancellation commits its outcome without stopping earlier target work, and running cancellation persists before aborting that child. Permission relays reject a cancellation-requested child; late success and restart recovery preserve cancellation. The requesting agent can see the cancellation request through its status tool. Queued children now pause during pending process actions and after recorded completed or interrupted stops; starting that target resumes its FIFO. Deleted-target reconciliation atomically fails only correlated queued children as `not_ready`, without loading target credentials or repeating running work. Prior results remain unchanged, and result delivery still requires a live grant and saved origin. Authenticated panel APIs now expose paginated delegation metadata and source-scoped cancellation, including queued children whose target cannot load. History omits parent prompts and child output; running cancellation uses the existing runner or the exact bound Host ID. Open **Delegations** from the source agent’s panel page to review handoffs and cancel a specific queued or running child.
 
 **External MCP tools (Server).** The panel’s **MCP catalog** stores administrator-selected HTTPS definitions, pinned tool schemas and read/write classifications in Server SQLite. Integrations start with no agent grants. Use **MCP access** on an agent’s page to grant access and manage its bearer credential. Credentials live in private Server files, and the panel shows only whether one is configured. Changing the endpoint revokes existing grants and retires their credentials. The catalog’s **Test connection** lists remote tools from the Server. Administrators review schemas and save the tools they want to approve. The Server rejects invalid or unsupported schemas before saving; argument validation uses the approved schema without type conversion or inserted defaults. Missing tools or changed input schemas detected by the execution service are disabled in the catalog until explicitly reviewed. The panel identifies affected tools; saving unrelated settings preserves their blocks. Review the schema and access, confirm the tool’s review checkbox, then save to approve it again. Granted catalog tools are now available to verified Telegram and Discord chat tasks through the bundled adapter. Scheduled, webhook and delegated tasks receive none. Each turn carries at most 23 catalog tools and 16 KiB of tool metadata, leaving room for memory and peer operations within the 32-operation limit.
 
 MCP connections originate on the Server and use the saved HTTPS endpoint and the selected agent’s optional bearer credential. The administrator is trusted to choose endpoints. Remote servers receive MCP negotiation/session traffic, the selected tool name and its validated argument object. Writes ask the initiating owner for approval with a 30-second decision budget; the Approvals page uses `mcp.write` or `mcp.read` and the exact target `<definition ID>:<remote tool name>`. External tools do not qualify for persistent Always allow rules. Calls have a 30-second remote lifetime, four listing pages, a 128 KiB aggregate response budget and a 12 KiB result limit. Results redact the endpoint and configured bearer value. Ending a task cancels pending calls where supported; it cannot undo a remote side effect. Invocation intents are saved before execution, and saved or uncertain outcomes prevent a retry from repeating the same invocation.
 
-**Agent memory (Agent Host).** Each Host keeps explicit notes in `memory.sqlite` in its task-state volume: title, bounded content (4,000 characters), up to 10 tags, source task, timestamps, and an optional expiry, capped at 500 notes. Search is local SQLite FTS5 keyword and tag retrieval ranked by match and recency, returning at most 10 notes and 8,000 characters. Notes are private to that agent and never copied from transcripts automatically; the agent reads them as untrusted context. The model can edit the file from its shell, so every read re-applies the limits, skips malformed rows, and rebuilds an inconsistent index. The panel's **Review memory** page lists notes (paginated) and deletes them, which also removes their search entry; earlier chat transcripts and backups may still hold copies. Memory is opt-in per agent: the panel's memory page has a switch, off by default, that lets the Server grant the memory tools to that agent's chat tasks only. Scheduled and webhook tasks never receive them, and turning the switch off revokes access for running tasks. `tests/memory-fts5.integration.test.ts` (part of the Docker suite) fails if the image loses FTS5.
+**Agent memory (Agent Host).** Each Host keeps explicit notes in `memory.sqlite` in its task-state directory: title, bounded content (4,000 characters), up to 10 tags, source task, timestamps, and an optional expiry, capped at 500 notes. Search is local SQLite FTS5 keyword and tag retrieval ranked by match and recency, returning at most 10 notes and 8,000 characters. Notes are private to that agent and never copied from transcripts automatically; the agent reads them as untrusted context. The model can edit the file from its shell, so every read re-applies the limits, skips malformed rows, and rebuilds an inconsistent index. The panel's **Review memory** page lists notes (paginated) and deletes them, which also removes their search entry; earlier chat transcripts and backups may still hold copies. Memory is opt-in per agent: the panel's memory page has a switch, off by default, that lets the Server grant the memory tools to that agent's chat tasks only. Scheduled and webhook tasks never receive them, and turning the switch off revokes access for running tasks. `tests/memory-fts5.integration.test.ts` (part of the Docker suite) fails if the image loses FTS5.
 
 ### Agent lifecycle
 
@@ -137,11 +139,15 @@ The server verifies BotFather tokens with Telegram and rejects bots already link
 
 Agent names and instructions persist across restarts. Instructions are snapshotted as context for each new task; edits do not modify running work or the Telegram bot's profile. Names allow up to 128 characters and instructions up to 4000 characters.
 
-Compose enables provisioning using a fixed Docker template. `AGENT_HOST_IMAGE` is resolved to an immutable image ID at server startup without pulling; recreate the server after rebuilding the image. Docker Engine API v1.47 is required. Each agent gets three labeled volumes (workspace, engine state, task state), a private bridge network shared with the server, and a separate generated Host API credential.
+The Server commits bot identity and desired process state before starting an Agent
+Host. Each agent gets distinct workspace, engine, task and browser directories
+under `agents/<agent ID>/`, plus its own Host API credential. Hosts bind to
+loopback and receive a minimal environment. Both deployment modes use the same
+process lifecycle operations; neither requires access to the Docker daemon.
 
-Installer-managed resources carry an installation label so uninstall only removes resources belonging to that installation. Provisioning records state, resource references, and creation intentions before Docker mutations. Failed, cancelled, or interrupted setup retains its resources for explicit retry or cleanup and cannot execute tasks. Resource inventory reports missing, untracked, and uncertain resources without silently adopting, recreating, or deleting them. A lost Docker response is treated as uncertainty, not proof that an operation failed.
-
-Deletion requires explicit confirmation and keeps volumes unless data deletion is separately selected. It stops polling and removes the local agent binding and credentials. Deleting the Telegram bot identity is a separate action in BotFather.
+Deletion requires explicit confirmation and keeps agent data unless purge is
+separately selected. It stops polling and removes the local agent binding and
+credentials. Deleting the Telegram bot identity is a separate action in BotFather.
 
 Explicitly deleting agent data removes its workspace, OpenCode state, and Host task state, including private memory and the tool outbox. Approval history, delegation records, peer notes, and the MCP catalog live in the separate Server database. Deleting an agent also revokes its MCP grants and retires its stored MCP credentials. Backups can still contain copies of deleted data.
 
@@ -149,19 +155,19 @@ Explicitly deleting agent data removes its workspace, OpenCode state, and Host t
 
 Incoming messages and task state are committed before execution. Each agent has a persistent FIFO queue and runs one turn at a time across its conversations; duplicate Telegram updates are deduplicated by bot ID and update ID. Commands remain responsive during execution. Progress, approval buttons, and results stay in the originating agent's chat, and long answers are split to fit Telegram limits. Approval callbacks check the owner, agent, and task; unanswered or undeliverable approvals are denied.
 
-`TASK_TIMEOUT_SECONDS` bounds execution (10–3600 seconds, default 600). Failed or cancelled tasks free the queue for the next message. Task submissions and uncertain Docker mutations are never retried automatically. Transient reads and engine startup failures use bounded retries; a failed bot connection does not stop other bots.
+`TASK_TIMEOUT_SECONDS` bounds execution (10–3600 seconds, default 600). Failed or cancelled tasks free the queue for the next message. Uncertain task submissions are never retried automatically. Transient reads and engine startup failures use bounded retries; a failed bot connection does not stop other bots.
 
-The Agent Host saves its ordinary OpenCode conversation session ID in its task-state volume and loads it for later turns. Server-selected `sessionMode: "fresh"` metadata starts a separate conversation without reading or replacing that saved session, so an ordinary turn afterward resumes its prior history; the mode is persisted with the Host task, stays outside the prompt and does not enable tools. If a session cannot be loaded, it starts a new one. Running tasks become interrupted after a Host restart rather than being replayed. On server restart, saved agents reconnect with their existing owners and chat bindings, and unfinished operations are recorded as interrupted. Missing or stopped containers are detected rather than silently recreated.
+The Agent Host saves its ordinary OpenCode conversation session ID in its task-state directory and loads it for later turns. Server-selected `sessionMode: "fresh"` metadata starts a separate conversation without reading or replacing that saved session, so an ordinary turn afterward resumes its prior history; the mode is persisted with the Host task, stays outside the prompt and does not enable tools. If a session cannot be loaded, it starts a new one. Running tasks become interrupted after a Host restart rather than being replayed. On server restart, saved agents reconnect with their existing owners and chat bindings, and unfinished operations are recorded as interrupted. The Server restores agents whose desired state was running; explicitly stopped agents remain stopped. Unexpected Host exits are reported and require an explicit start.
 
 The Server resolves the agent and task from its running SQLite record and sends an `execution` object with `agentId` and `serverTaskId`, saved atomically with the Host task before execution and passed to the engine separately from the prompt. The Server saves the accepted Host ID before processing events; if it cannot save that association, it requests cancellation and does not retry submission. Both stores retain the association after restart. A repeated agent/Server-task pair cannot execute again. Prompt-only Host submissions remain supported and carry no execution identity. These fields only correlate records and grant no application tools.
 
 The task service resolves tool operations from Server-owned policy. When a policy grants access, a short-lived capability travels separately in `tools`, and the Host passes a snapshot to the engine without persisting its token. The Server's internal dispatch guard binds each token to its agent, task, saved Host ID, original conversation, operations, and expiry, and rechecks current authorization. Cancellation, execution ending, service shutdown, and expiry revoke access; restarting cannot restore tokens. Scheduled tasks and webhooks never receive capabilities, even when a policy is configured.
 
-For tool-enabled turns, the engine starts a bundled HTTP MCP adapter on container loopback and registers it on new or restored ACP sessions. Only granted, Host-registered handlers are discoverable. Missing handlers, stale identity, or unsupported HTTP MCP fail before prompting. The adapter uses a separate per-turn credential, keeps task identity and capabilities out of model-visible tool arguments, bounds requests and responses to 64 KiB, and permits at most four concurrent calls and 100 calls per turn. Each call has a 60-second timeout capped by capability expiry. Ending the prompt or stopping the engine closes the endpoint and aborts pending calls; stopping also waits for adapter startup to settle before another turn can begin.
+For tool-enabled turns, the engine starts a bundled HTTP MCP adapter on loopback and registers it on new or restored ACP sessions. Only granted, Host-registered handlers are discoverable. Missing handlers, stale identity, or unsupported HTTP MCP fail before prompting. The adapter uses a separate per-turn credential, keeps task identity and capabilities out of model-visible tool arguments, bounds requests and responses to 64 KiB, and permits at most four concurrent calls and 100 calls per turn. Each call has a 60-second timeout capped by capability expiry. Ending the prompt or stopping the engine closes the endpoint and aborts pending calls; stopping also waits for adapter startup to settle before another turn can begin.
 
 Host-registered Server tools now use a durable outbox in the task database. Each invocation and its `tool_request` event are committed together before waiting for a result. Arguments and outcomes are limited to 16 KiB each, with four pending requests and 100 invocations per turn. Reusing an invocation ID with changed arguments is rejected; identical replays return the saved outcome without publishing another request. Authenticated Host endpoints report whether an invocation is still awaiting a result and accept a single immutable outcome. Cancellation and timeout emit `tool_cancel` events; a Host restart marks unresolved requests interrupted, and no old waiter is restored. Capability and Host API credentials are not included in these events. Server dispatch and write replay protection are implemented, and private memory handlers run locally in the Host; Host records are not trusted authorization or proof of a Server side effect. Server cancellation immediately aborts active tool calls without waiting for another Host poll and rejects later tool requests. The dispatcher stops waiting even if a handler ignores cancellation, aborts the handler scope on every exit, and never replaces a saved cancelled write outcome with a late result. It rechecks authorization immediately before entering a handler.
 
-Terminal and filesystem tools run through OpenCode inside the container. Browser automation uses headless Chromium through terminal execution with the bundled Playwright tooling; no external browser service is required. Client-side ACP filesystem and terminal capabilities remain disabled.
+Terminal and filesystem tools run through OpenCode in the Agent Host process environment. Browser automation uses headless Chromium through terminal execution with the bundled Playwright tooling; no external browser service is required. Client-side ACP filesystem and terminal capabilities remain disabled.
 
 ### Model selection and usage
 
@@ -191,7 +197,7 @@ snapshot of a possibly shared account.
 Open **Manage schedules** on an agent's page to create, edit, pause, resume, run,
 or delete saved prompts. The panel shows each schedule's next local run time,
 enabled state, delivery channel, and recent run outcomes. `/schedules` lists
-schedules in the owner's Telegram chat or Discord DM even if the container is
+schedules in the owner's Telegram chat or Discord DM even if the Host is
 stopped. Edit **Delivery channel** to route future runs to a different linked
 owner chat. Existing schedules and new panel schedules default to Telegram.
 
@@ -238,7 +244,7 @@ once; older occurrences are recorded as `missed`. The next run advances past the
 current server time, without replaying a backlog. A previous task from the same
 schedule still queued or running produces `skipped_overlap`. A stopped or
 unavailable Host, incomplete setup, or unlinked owner chat produces
-`skipped_not_ready`. Containers never start automatically. The server attempts a
+`skipped_not_ready`. Schedules never start stopped Hosts automatically. The server attempts a
 durable notification only for the first not-ready skip of a consecutive streak.
 
 Each executed run uses the agent's AI provider credits and shares its existing conversation
@@ -252,7 +258,7 @@ without changing the next timed occurrence. A paused schedule can still be run
 manually. Resume recomputes the first future occurrence; an expired once schedule
 needs a future date before it can resume. Deleting a schedule removes its run
 history and stops future runs; already queued or running tasks are kept.
-Deleting an agent removes its schedules and run history while preserving volumes
+Deleting an agent removes its schedules and run history while preserving agent data
 unless data deletion was explicitly requested.
 
 #### Webhook activation
@@ -296,7 +302,7 @@ restarts. Pausing blocks webhooks; **Run now** still works while paused.
 Admission rechecks the enabled state, settings, token, and backlog before
 persisting work. Webhook invocations do not have automatic retries or event
 deduplication: a repeated request creates another task. External callers
-should avoid blindly retrying uncertain deliveries. No container starts
+should avoid blindly retrying uncertain deliveries. Webhooks never start stopped Hosts
 automatically.
 
 The authenticated API exposes `GET /api/agents/:id/schedules/:scheduleId/webhook`
@@ -306,16 +312,15 @@ regenerate `{url, token}`. Create or edit with `cadence={"kind":"webhook"}` and
 
 ### Persistence and diagnostics
 
-Server state in `server.sqlite` includes agents, owners, instructions, verified bot identities, chat bindings, provisioning and container-operation metadata, the durable task queue, and schedules with their saved prompts, cadences, time zones, UTC next-run timestamps, and private webhook tokens. It retains the latest 20 run records per schedule and reads execution status from the associated task row. Private `bot-secrets`, `discord-secrets`, and `host-secrets` directories live alongside the server SQLite database in `SERVER_STATE_DIR` (default `.nimbot/` for native runs). Compose mounts a named server-state volume. Each agent separately persists workspace files, OpenCode sessions and provider credentials, and task records/results. Back up all of these and `.env`; backups contain secrets.
+Server state in `server.sqlite` includes agents, owners, instructions, verified bot identities, chat bindings, desired process state, the durable task queue, and schedules with their saved prompts, cadences, time zones, UTC next-run timestamps, and private webhook tokens. It retains the latest 20 run records per schedule and reads execution status from the associated task row. Private credential directories live alongside SQLite in `SERVER_STATE_DIR` (default `.nimbot-native/` for native development, `/data` in Docker). Each agent separately persists workspace files, OpenCode sessions and provider credentials, browser profiles, and task records/results under `agents/<agent ID>/`. Docker stores the entire tree in one named data volume. Back up the complete tree and `.env`; backups contain secrets.
 
-Provider credentials are stored only in each agent's private engine-state volume. The panel forwards authentication operations over that agent's authenticated internal API; OAuth tokens never return to the server or browser. OpenAI supports an API key or ChatGPT device login, Anthropic, Google, and OpenRouter support API keys, and OpenCode Console uses device login. The container must be running and idle to change authentication. Tasks stay queued during device login and are eligible to start once the attempt ends. Other agents remain independent. OpenCode renews OAuth tokens locally. In **Model and usage**, choose an enabled model for the agent or use **Automatic** to follow the OpenCode default. The Agent Host validates API keys with the provider before saving. A rejected or unverified replacement leaves the previous credential active. Validation checks access to an authenticated provider endpoint. Balance and model access are outside this check. Disconnecting removes the local credential without revoking it at the provider.
+Provider credentials are stored only in each agent's private engine-state directory. The panel forwards authentication operations over that agent's authenticated internal API; OAuth tokens never return to the server or browser. OpenAI supports an API key or ChatGPT device login, Anthropic, Google, and OpenRouter support API keys, and OpenCode Console uses device login. The Host must be running and idle to change authentication. Tasks stay queued during device login and are eligible to start once the attempt ends. Other agents remain independent. OpenCode renews OAuth tokens locally. In **Model and usage**, choose an enabled model for the agent or use **Automatic** to follow the OpenCode default. The Agent Host validates API keys with the provider before saving. A rejected or unverified replacement leaves the previous credential active. Validation checks access to an authenticated provider endpoint. Balance and model access are outside this check. Disconnecting removes the local credential without revoking it at the provider.
 
-Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner chat linking, container status, and authenticated Host readiness separately; Host readiness checks workspace access and busy state. **AI provider status** shows separate checks for active credentials and when each result was recorded. Stopping an agent captures a task observation, and later refreshes confirm its persisted outcome when the Host is reachable.
+Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner chat linking, process status, and authenticated Host readiness separately; Host readiness checks workspace access and busy state. **AI provider status** shows separate checks for active credentials and when each result was recorded. Stopping an agent captures a task observation, and later refreshes confirm its persisted outcome when the Host is reachable.
 
 **Owner alerts.** The Server sends a Telegram notice to the agent's linked owner
 when the provider rejects a saved credential, the same schedule fails three
-times in a row, or Docker reports an unexpected container stop, disappearance,
-or automatic restart. One notice is attempted per incident. Provider checks
+times in a row, or an Agent Host exits unexpectedly. One notice is attempted per incident. Provider checks
 run at startup, every five minutes, and after credential changes. They make
 no inference requests and leave task admission alone. For ChatGPT and OpenCode
 Console, OpenCode's reauthentication signal triggers the notice. A connection
@@ -325,17 +330,28 @@ without a conclusive signal appears as **Unverified**. See the
 
 ## Security limitations
 
-Nimbot is intended for trusted, single-server self-hosted deployments. Docker containers alone do not provide sufficient isolation for hostile multi-tenant workloads.
+Nimbot is intended for trusted, single-server self-hosted deployments. Each
+installation is one trust domain under one OS account, including the Server and
+all agents. Agents can read or modify each other's files, memory and provider
+credentials, and Server state including bot tokens, MCP credentials, Host secrets
+and `server.sqlite`. A prompt-injected agent could read Server secrets or change
+Server state. Approvals, grants and rules guide normal behavior and are not a
+security boundary against an agent with shell access. Use separate installations
+when separation is required.
 
-Native development runs the Server and all agents under one OS account. Agents can read or modify each other’s data and Server state, including bot tokens, MCP credentials, Host secrets, and `server.sqlite`. A prompt-injected agent could read Server secrets or change Server state. Minimal child environments avoid accidental inheritance; Server approvals, grants, and rules are not a security boundary against an agent with shell access. Use separate installations when separation is required. The following container hardening details apply to the current Docker deployment.
+The application image runs as non-root without the Docker socket. Only the panel
+is published; Host APIs bind to loopback and use distinct tokens. Hosts receive
+an explicit minimal environment without Server configuration or secrets. This
+hygiene does not prevent filesystem access to the installation's shared state.
+Resource-limit configuration is deferred. Outbound network access is unrestricted
+and disk usage is not capped. Telegram and Discord credentials stay in the Server
+process and do not enter model context, task events or normal logs; agents with
+shell access can still reach their files through the shared OS account.
 
-- The server's Docker Engine access is equivalent to root on the host. A compromised server or panel can compromise the host; the fixed provisioning template does not constrain an attacker controlling the server. Rootless Docker reduces this exposure where practical.
-- Agent containers run as non-root with all capabilities dropped, `no-new-privileges`, CPU/memory/process limits, no additional swap, no published ports, and no Docker socket or server credentials. Each agent has its own network, volumes, and internal API token.
-- Outbound network access is unrestricted, including reachable private addresses. Agent volume disk usage is not limited. Apply restrictions on the host if needed.
-- Panel passwords use scrypt hashes. Sessions expire after eight hours and end on server restart. Cookies use HttpOnly and SameSite restrictions, with Secure cookies for HTTPS. Panel state changes require same-origin checks; webhook activation uses a per-schedule Bearer token. Login is limited to five attempts per fifteen minutes. Remote access requires HTTPS.
-- Telegram and Discord tokens stay on the server and never enter agent containers, model context, logs, or task events. Telegram messages and AI provider requests leave the server.
-
-See the [replacement server recovery procedure](docs/OPERATIONS.md#prepare-a-replacement-docker-host) to restore agent data and recreate stopped containers from the panel.
+Panel passwords use scrypt. Sessions expire after eight hours and on Server
+restart; cookies use HttpOnly and SameSite protections, with Secure cookies for
+HTTPS. State changes require the configured same origin. Remote panel access
+requires HTTPS. Telegram messages and AI provider requests leave the installation.
 
 ## Development
 
@@ -376,11 +392,10 @@ each agent as a child process and keeps bot polling and credentials in the Serve
 The panel identifies native development, shows each Host process state, and
 provides start, stop, and restart controls. Stop and restart require confirmation
 because they may interrupt active work. The panel explains that all agents and
-the Server share one trust domain, including access to Server secrets. Native
-controls use the authenticated process lifecycle API; Docker controls remain
-available only for the existing Docker deployment.
-The default Docker deployment continues using per-agent containers during this
-transition. See [TODO.md](TODO.md) for remaining work.
+the Server share one trust domain, including access to Server secrets. Both
+deployment modes use the authenticated process lifecycle API.
+The Docker image runs the same subprocess runtime. See [TODO.md](TODO.md) for
+remaining legacy-code removal, release scripts and operations documentation.
 
 After building, run the native Server lifecycle gate with:
 
@@ -431,10 +446,7 @@ an explicitly configured `PLAYWRIGHT_BROWSERS_PATH`. The browser probe uses
 `AGENT_BROWSER_PROFILE_DIR`, assigned to each native agent’s `browser/` directory.
 Cookies and local storage persist across browser calls and Host restarts. Run one
 probe at a time per agent: Chromium locks a profile while it is in use. The
-current container runtime stores its profile under the persistent task-state
-directory when no explicit browser profile path is set. The Docker deployment
-still uses its existing internal endpoint;
-the subprocess manager now uses port zero so the OS assigns an available port.
+subprocess manager uses port zero so the OS assigns an available port.
 Hosts report their bound port to the Server over Node IPC and shut down if that
 connection is lost. The manager serializes lifecycle changes per agent, detects
 unexpected exits, terminates process groups during shutdown, and restores running
@@ -448,7 +460,7 @@ identity and initial process intent together. Removal stops the Host, retains it
 data unless purge is explicitly requested, removes schedules and credential
 references, and tombstones the agent. Telegram and schedule admission can use
 process readiness while preserving owner and chat checks. The panel shows this
-process state and the shared trust model in native mode.
+process state and the shared trust model in both deployment modes.
 
 The planned subprocess installation is a single trust domain under one OS
 account: agents can access each other’s data and Server state, including bot
@@ -462,8 +474,8 @@ leave previous data on disk until explicitly removed.
 
 | Path | Responsibility |
 |---|---|
-| `apps/server/` | Panel API, Telegram, registry, routing, and container management |
-| `apps/agent-host/` | AI engine, tasks, and persistent workspace inside each container |
+| `apps/server/` | Panel API, Telegram, registry, routing, and process management |
+| `apps/agent-host/` | AI engine, tasks, and persistent workspace per agent process |
 | `apps/panel/` | Administration UI |
 | `packages/` | Shared code when needed by multiple apps |
 | `infrastructure/docker/` | Application Dockerfiles |
@@ -473,7 +485,14 @@ leave previous data on disk until explicitly removed.
 Default Vitest tests need no Docker, Telegram, or AI provider connection. A
 multichannel integration test exercises simultaneous Telegram and Discord tasks
 through the real Host API with a simulated engine, including shared context,
-owner approvals, duplicate submissions, and server restart recovery. They cover authentication, CSRF, bot linking, owner authorization, routing, task persistence, cancellation, deduplication, and recovery. Panel browser tests use compiled assets and simulated services. Opt-in Docker tests verify lifecycle, isolation, response-loss recovery, and container hardening across recreation and restarts:
+owner approvals, duplicate submissions, and server restart recovery. They cover authentication, CSRF, bot linking, owner authorization, routing, task persistence, cancellation, deduplication, and recovery. Panel browser tests use compiled assets and simulated services. The application-container gate verifies a non-root clean installation without Compose or a Docker socket, private Host listeners, panel API lifecycle operations, Chromium and pinned OpenCode availability, and persistent workspace data after recreating the application container:
+
+```sh
+docker build -f infrastructure/docker/nimbot.Dockerfile -t nimbot:local .
+NIMBOT_TEST_APPLICATION_IMAGE=nimbot:local pnpm test tests/application-container.integration.test.ts
+```
+
+Legacy per-agent Docker tests remain temporarily while their source modules and release scripts are removed in the next TODO item:
 
 ```sh
 docker build -f infrastructure/docker/agent-host.Dockerfile -t nimbot-agent-host .

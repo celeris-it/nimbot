@@ -21,12 +21,12 @@
 
   let {
     agents,
-    native = false,
+    processManaged = false,
     canCreate,
     refresh,
   }: {
     agents: AgentSummary[];
-    native?: boolean;
+    processManaged?: boolean;
     canCreate: boolean;
     refresh: () => void;
   } = $props();
@@ -104,9 +104,9 @@
         description="Independent workspaces"
       />
       <Metric
-        label={native ? "Running" : "Configured"}
+        label={processManaged ? "Running" : "Configured"}
         value={configured.toString().padStart(2, "0")}
-        description={native ? "Agent Hosts running" : "Setup completed"}
+        description={processManaged ? "Agent Hosts running" : "Setup completed"}
       />
       <Metric
         label="Needs attention"
@@ -180,7 +180,7 @@
         { value: "all", label: "All agents", count: agents.length },
         {
           value: "ready",
-          label: native ? "Running" : "Configured",
+          label: processManaged ? "Running" : "Configured",
           count: configured,
         },
         { value: "attention", label: "Needs attention", count: needsAttention },

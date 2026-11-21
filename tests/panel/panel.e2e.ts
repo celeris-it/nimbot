@@ -197,25 +197,27 @@ test("keeps changed MCP tools disabled until an explicit schema review is saved"
       fullPage: true,
     });
   }
-  const colors = await page.locator(".alert").evaluate((element) => {
-    const style = getComputedStyle(element);
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 1;
-    const context = canvas.getContext("2d")!;
-    const hex = (color: string) => {
-      context.clearRect(0, 0, 1, 1);
-      context.fillStyle = color;
-      context.fillRect(0, 0, 1, 1);
-      return (
-        "#" +
-        Array.from(context.getImageData(0, 0, 1, 1).data)
-          .slice(0, 3)
-          .map((value) => value.toString(16).padStart(2, "0"))
-          .join("")
-      );
-    };
-    return { text: hex(style.color), background: hex(style.backgroundColor) };
-  });
+  const colors = await page
+    .locator(".alert[role=alert]")
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext("2d")!;
+      const hex = (color: string) => {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return (
+          "#" +
+          Array.from(context.getImageData(0, 0, 1, 1).data)
+            .slice(0, 3)
+            .map((value) => value.toString(16).padStart(2, "0"))
+            .join("")
+        );
+      };
+      return { text: hex(style.color), background: hex(style.backgroundColor) };
+    });
   await test.info().attach("mcp-review-colors", {
     body: JSON.stringify(colors),
     contentType: "application/json",
