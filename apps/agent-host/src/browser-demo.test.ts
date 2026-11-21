@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseBrowseUrl } from "./browser-demo.js";
-import { ENVIRONMENT_NOTES, withEnvironmentNotes } from "./engine-notes.js";
+import { browserProfileDirectory, parseBrowseUrl } from "./browser-demo.js";
+import { resolve } from "node:path";
+import {
+  browserCommand,
+  ENVIRONMENT_NOTES,
+  withEnvironmentNotes,
+} from "./engine-notes.js";
 
 describe("browser probe input", () => {
   it("accepts plain http and https pages", () => {
@@ -26,9 +31,25 @@ describe("browser probe input", () => {
 describe("environment notes", () => {
   it("tell the engine how to use the browser without altering the user's task", () => {
     const prompt = withEnvironmentNotes("Summarize example.org");
-    expect(ENVIRONMENT_NOTES).toContain(
-      "node /app/apps/agent-host/dist/browser-demo.js",
-    );
+    expect(ENVIRONMENT_NOTES).toContain(browserCommand());
     expect(prompt.endsWith("User task:\nSummarize example.org")).toBe(true);
   });
+});
+
+it("uses the assigned native profile or a persistent task-state profile in containers", () => {
+  expect(
+    browserProfileDirectory({
+      AGENT_BROWSER_PROFILE_DIR: "/data/agents/one/browser",
+      AGENT_STATE_DIR: "/tasks",
+    }),
+  ).toBe("/data/agents/one/browser");
+  expect(browserProfileDirectory({ AGENT_STATE_DIR: "/tasks" })).toBe(
+    "/tasks/browser",
+  );
+  expect(browserProfileDirectory({})).toBe(
+    "/home/node/.local/share/nimbot/browser",
+  );
+  expect(
+    browserProfileDirectory({ AGENT_BROWSER_PROFILE_DIR: "relative" }),
+  ).toBe(resolve("relative"));
 });

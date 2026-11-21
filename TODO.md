@@ -36,12 +36,9 @@ path first, then the recommended Docker deployment in the next milestone.
       Docker; the Server starts the Agent Hosts. Document the Node.js,
       OpenCode, and Chromium prerequisites. Bind the development panel and
       Agent Hosts to loopback.
-- [ ] Give each Agent Host a configurable listen address and port. Assign
+- [x] Give each Agent Host a configurable listen address and port. Assign
       each agent separate workspace, engine state, task state, and browser
       profile directories under the installation's data directory.
-      Progress: listener configuration and subprocess directory/environment
-      preparation are implemented, tested, and connected to Server lifecycle
-      operations. Browser profile wiring remains pending.
 - [x] Implement Server-side process lifecycle operations for creating,
       starting, stopping, restarting, and removing Agent Host processes.
       Persist desired state so a Server restart restores agents that were
@@ -63,8 +60,10 @@ path first, then the recommended Docker deployment in the next milestone.
       stopped-state retention and running-state recovery after Server restarts.
       Telegram transport is simulated. Chromium tests cover native panel lifecycle
       controls, confirmations, shared-trust guidance and narrow-screen layouts.
-      Clean-checkout setup, concurrent OpenCode sessions and browser profile
-      verification remain pending.
+      A real Chromium gate verifies concurrent agent profiles and retained cookies
+      and local storage across separate CLI invocations. Browser instructions now
+      use the native installation path instead of a fixed Docker path.
+      Clean-checkout setup and concurrent OpenCode sessions remain pending.
 
 ## Second milestone: Docker deployment
 

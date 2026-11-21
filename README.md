@@ -358,7 +358,7 @@ pnpm dev
 ```
 
 Install Node.js 22.13 or newer, the pinned pnpm version, OpenCode 2.2.7
-(`pnpm add --global @opencode/cli@2.2.7`), and Chromium with
+(`pnpm add --global --allow-build=@opencode/cli @opencode/cli@2.2.7`), and Chromium with
 `pnpm --filter @nimbot/agent-host exec playwright install --with-deps chromium`.
 Generate the panel password hash as described above and set it in `.env`.
 `pnpm dev` builds all workspaces, serves the compiled panel from the Server,
@@ -391,8 +391,18 @@ NIMBOT_TEST_NATIVE_BUILD=1 pnpm test tests/native-server.integration.test.ts
 This gate starts the compiled Server and real Hosts, simulates Telegram transport,
 and checks authenticated API creation, start/stop, recovery, concurrent Hosts and
 retained data after removal. It requires no Docker or AI provider credentials;
-OpenCode and browser session verification remains tracked in TODO.md. CI runs it
+OpenCode session verification remains tracked in TODO.md. CI runs it
 separately after the build and ordinary tests.
+
+After installing Chromium, run the browser profile gate:
+
+```sh
+NIMBOT_TEST_NATIVE_BROWSER=1 pnpm test tests/native-browser.integration.test.ts
+```
+
+It runs two real browser probes concurrently against a local web fixture. It verifies separate persistent cookies
+and local storage across later CLI invocations, including executable paths with
+spaces and shell metacharacters. CI runs this gate after installing Chromium.
 
 The Server-managed subprocess transition is tracked in [TODO.md](TODO.md). As its first
 prerequisite, the Agent Host listener accepts `AGENT_HOST_BIND_ADDRESS` (an IPv4
@@ -403,8 +413,13 @@ task state, home, engine data/configuration/cache/state, temporary files, and
 browser profile directory under `<data directory>/agents/<agent ID>/`. It builds
 an explicit child environment without inheriting Server secrets, provider keys,
 or Node/OpenCode overrides. Browser executable installation can be shared through
-an explicitly configured `PLAYWRIGHT_BROWSERS_PATH`; browser profile wiring is
-still pending. The Docker deployment still uses its existing internal endpoint;
+an explicitly configured `PLAYWRIGHT_BROWSERS_PATH`. The browser probe uses
+`AGENT_BROWSER_PROFILE_DIR`, assigned to each native agent’s `browser/` directory.
+Cookies and local storage persist across browser calls and Host restarts. Run one
+probe at a time per agent: Chromium locks a profile while it is in use. The
+current container runtime stores its profile under the persistent task-state
+directory when no explicit browser profile path is set. The Docker deployment
+still uses its existing internal endpoint;
 the subprocess manager now uses port zero so the OS assigns an available port.
 Hosts report their bound port to the Server over Node IPC and shut down if that
 connection is lost. The manager serializes lifecycle changes per agent, detects

@@ -49,6 +49,10 @@ describe("Agent Host subprocess configuration", () => {
     }
     expect(first.cwd).toBe(first.directories.workspace);
     expect(first.env.AGENT_STATE_DIR).toBe(first.directories.tasks);
+    expect(first.env.AGENT_BROWSER_PROFILE_DIR).toBe(first.directories.browser);
+    expect(first.env.AGENT_BROWSER_PROFILE_DIR).not.toBe(
+      second.env.AGENT_BROWSER_PROFILE_DIR,
+    );
     expect(first.env.XDG_DATA_HOME).toBe(first.directories.data);
     expect(first.env.AGENT_HOST_BIND_ADDRESS).toBe("127.0.0.1");
     expect(first.env.AGENT_HOST_PORT).toBe("41001");

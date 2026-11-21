@@ -70,6 +70,7 @@ export async function prepareAgentProcess(options: {
     TMPDIR: directories.temporary,
     WORKSPACE: directories.workspace,
     AGENT_STATE_DIR: directories.tasks,
+    AGENT_BROWSER_PROFILE_DIR: directories.browser,
     AGENT_HOST_BIND_ADDRESS: "127.0.0.1",
     AGENT_HOST_PORT: String(options.port),
     AGENT_HOST_TOKEN: options.token,

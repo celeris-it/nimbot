@@ -27,4 +27,7 @@ jobs:
         env:
           NIMBOT_TEST_NATIVE_BUILD: "1"
       - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test tests/native-browser.integration.test.ts
+        env:
+          NIMBOT_TEST_NATIVE_BROWSER: "1"
       - run: pnpm test:panel

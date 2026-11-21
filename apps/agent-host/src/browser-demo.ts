@@ -1,9 +1,21 @@
 /**
- * Browser probe. OpenCode runs it through its container terminal to read a
- * public web page: `node /app/apps/agent-host/dist/browser-demo.js <url>`.
+ * Browser probe. OpenCode runs this script through its Agent Host terminal.
  * Prints one JSON object with the final URL, title and visible text.
  */
 import { chromium } from "playwright";
+import { mkdir, realpath } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export function browserProfileDirectory(env: NodeJS.ProcessEnv): string {
+  return resolve(
+    env.AGENT_BROWSER_PROFILE_DIR ||
+      resolve(
+        env.AGENT_STATE_DIR || "/home/node/.local/share/nimbot",
+        "browser",
+      ),
+  );
+}
 
 /** Only plain web pages: no file:, chrome:, data: or other schemes. */
 export function parseBrowseUrl(input: string | undefined): URL {
@@ -24,7 +36,11 @@ export function parseBrowseUrl(input: string | undefined): URL {
 
 async function main() {
   const url = parseBrowseUrl(process.argv[2]);
-  const browser = await chromium.launch({ headless: true });
+  const profile = browserProfileDirectory(process.env);
+  await mkdir(profile, { recursive: true, mode: 0o700 });
+  const browser = await chromium.launchPersistentContext(profile, {
+    headless: true,
+  });
   try {
     const page = await browser.newPage();
     await page.goto(url.href, {
@@ -43,7 +59,11 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`)
+if (
+  process.argv[1] &&
+  (await realpath(process.argv[1]).catch(() => undefined)) ===
+    fileURLToPath(import.meta.url)
+)
   main().catch((error: unknown) => {
     // One readable line for the agent; no stack traces or local paths.
     console.error(
