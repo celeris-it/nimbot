@@ -368,8 +368,13 @@ intent from SQLite. A fresh subprocess Server schema omits Docker metadata and
 rejects previous Server databases without modifying them. Per-agent Host tokens
 remain in private files with references in SQLite; reopening state retains the
 same tokens, and damaged or missing saved files require repair instead of silent
-rotation. Connecting these components to agent registration, the Server entrypoint,
-the panel, and the Docker-free development entry point remains pending.
+rotation. The Server lifecycle service now connects these components to agent
+registration, start/stop/restart, removal, and recovery. Registration commits bot
+identity and initial process intent together. Removal stops the Host, retains its
+data unless purge is explicitly requested, removes schedules and credential
+references, and tombstones the agent. Telegram and schedule admission can use
+process readiness while preserving owner and chat checks. Wiring the service into
+the Server entrypoint, panel, and Docker-free development command remains pending.
 
 The planned subprocess installation is a single trust domain under one OS
 account: agents can access each other’s data and Server state, including bot

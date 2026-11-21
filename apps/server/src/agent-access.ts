@@ -13,6 +13,7 @@ export interface AgentSetupAccess {
 export function createAgentAccess(
   registry: ReturnType<typeof openAgentRegistry>,
   agentId: string,
+  runtimeReady?: () => boolean,
 ) {
   function linked() {
     const agent = registry.get(agentId);
@@ -42,6 +43,8 @@ export function createAgentAccess(
           registry.getOwnerChat(agentId) !== chatId
         )
           return false;
+        if (runtimeReady)
+          return runtimeReady() && !!registry.getHostCredentialRef(agentId);
         const setup = registry.getProvisioning(agentId);
         if (
           !setup ||

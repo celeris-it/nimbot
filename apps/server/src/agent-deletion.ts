@@ -2,8 +2,8 @@ import type { openAgentRegistry } from "./agent-registry.js";
 import type { ScheduleStore } from "./schedule-store.js";
 
 /**
- * Deletes an agent from the panel: stops its bot polling, removes its Docker
- * resources (the volume only when deleteData is true), then drops its local bot
+ * Deletes an agent from the panel: stops its bot polling, removes its runtime
+ * resources (persistent data only when deleteData is true), then drops its local bot
  * binding and credentials. Telegram's own bot identity is never touched.
  * Safe to retry after a partial failure.
  */

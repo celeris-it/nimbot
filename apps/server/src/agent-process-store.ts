@@ -43,6 +43,17 @@ export function openAgentProcessStore(path: string) {
   };
   return {
     ...store,
+    getDesiredState(
+      agentId: string,
+    ): AgentProcessState["desiredState"] | undefined {
+      return db
+        .prepare(
+          `SELECT p.desired_state FROM agent_processes p JOIN agents a ON a.id = p.agent_id
+        WHERE p.agent_id = ? AND a.deleted_at IS NULL`,
+        )
+        .get(agentId)?.desired_state as
+        AgentProcessState["desiredState"] | undefined;
+    },
     /** Registration commits the agent row before allocating process state. */
     create(agentId: string) {
       const result = db

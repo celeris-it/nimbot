@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Bot } from "grammy";
 import type { openAgentRegistry } from "./agent-registry.js";
+import type { ProvisioningState } from "./agent-registry.js";
 import type { openBotSecrets } from "./bot-secret.js";
 
 export interface AgentRegistrationInput {
@@ -18,6 +19,8 @@ export function createAgentRegistration(
     token: string,
   ) => Promise<{ id: number; username?: string; is_bot: boolean }> = (token) =>
     new Bot(token, { client: { timeoutSeconds: 5 } }).api.getMe(),
+  setupStatus: (id: string) => ProvisioningState["status"] = (id) =>
+    registry.getProvisioning(id)!.status,
 ) {
   return async (input: AgentRegistrationInput) => {
     const name = input.name.trim();
@@ -53,13 +56,13 @@ export function createAgentRegistration(
       await secrets.remove(ref);
       throw error;
     }
-    // Provisioning owns its failure state and resource references. Keep the linked
-    // agent and credential when Docker fails so setup remains recoverable.
+    // Keep the linked agent and credential when runtime startup fails so setup
+    // remains recoverable. The runtime owns its failure state.
     try {
       await provision(id);
     } catch {
-      /* Return saved setup state, never a Docker error or token. */
+      /* Return setup state, never a runtime error or token. */
     }
-    return { agentId: id, provisioning: registry.getProvisioning(id)!.status };
+    return { agentId: id, provisioning: setupStatus(id) };
   };
 }

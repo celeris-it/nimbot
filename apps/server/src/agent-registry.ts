@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { CHAT_BINDINGS_SCHEMA } from "./chat-binding.js";
 import { isDiscordId } from "./discord-identity.js";
 import { RECOVERY_SCHEMA, recoveryRegistry } from "./recovery-registry.js";
+import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
 
 export interface DiscordConnection {
   botId: string;
@@ -62,12 +63,25 @@ export interface ContainerOperation {
 }
 
 /** Metadata only; provider and Telegram tokens never enter the registry. */
-export function openAgentRegistry(path: string) {
+export function openAgentRegistry(
+  path: string,
+  runtime: "docker" | "process" = "docker",
+) {
+  if (runtime === "process")
+    prepareStateSchema(path, "server-process", { legacy: false });
   const db = new DatabaseSync(path);
   try {
+    if (
+      runtime === "docker" &&
+      db.prepare("PRAGMA application_id").get()?.application_id === 0x4e494d50
+    )
+      throw new Error(
+        "Subprocess Server state cannot be opened by the per-agent Docker runtime.",
+      );
     db.exec("BEGIN IMMEDIATE");
-    // Fresh installations use the current schema directly.
-    db.exec(`
+    if (runtime === "docker") {
+      // Fresh installations use the current schema directly.
+      db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -130,16 +144,17 @@ export function openAgentRegistry(path: string) {
       ${CHAT_BINDINGS_SCHEMA}
       ${RECOVERY_SCHEMA}
     `);
-    db.prepare(
-      "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
-    ).run(Date.now());
-    // A lost response cannot establish whether Docker completed the operation.
-    db.prepare(
-      "UPDATE container_operations SET status = 'interrupted', updated_at = ? WHERE status = 'pending'",
-    ).run(Date.now());
-    db.prepare(
-      "UPDATE agent_recovery SET status = 'interrupted', updated_at = ? WHERE status = 'recovering'",
-    ).run(Date.now());
+      db.prepare(
+        "UPDATE agent_provisioning SET status = 'interrupted', updated_at = ? WHERE status = 'provisioning'",
+      ).run(Date.now());
+      // A lost response cannot establish whether Docker completed the operation.
+      db.prepare(
+        "UPDATE container_operations SET status = 'interrupted', updated_at = ? WHERE status = 'pending'",
+      ).run(Date.now());
+      db.prepare(
+        "UPDATE agent_recovery SET status = 'interrupted', updated_at = ? WHERE status = 'recovering'",
+      ).run(Date.now());
+    }
     db.exec("COMMIT");
   } catch (error) {
     try {
@@ -151,7 +166,9 @@ export function openAgentRegistry(path: string) {
     throw error;
   }
   const columns =
-    "id, name, owner_id AS ownerId, instructions, bot_id AS botId, bot_username AS botUsername, credential_ref AS credentialRef, container_ref AS containerRef";
+    "id, name, owner_id AS ownerId, instructions, bot_id AS botId, bot_username AS botUsername, credential_ref AS credentialRef, " +
+    (runtime === "process" ? "NULL" : "container_ref") +
+    " AS containerRef";
   const provisioningColumns =
     "status, volume_ref AS volumeRef, network_ref AS networkRef, updated_at AS updatedAt";
   function assertBotAvailable(id: string, botId: number) {
@@ -489,9 +506,14 @@ export function openAgentRegistry(path: string) {
           bot.username,
           credentialRef,
         );
-        db.prepare(
-          "INSERT INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'pending', ?)",
-        ).run(agent.id, Date.now());
+        if (runtime === "process")
+          db.prepare(
+            "INSERT INTO agent_processes (agent_id, desired_state) VALUES (?, 'stopped')",
+          ).run(agent.id);
+        else
+          db.prepare(
+            "INSERT INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'pending', ?)",
+          ).run(agent.id, Date.now());
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -520,9 +542,14 @@ export function openAgentRegistry(path: string) {
         db.prepare(
           "INSERT INTO agents (id, name, owner_id, instructions) VALUES (?, ?, ?, ?)",
         ).run(agent.id, name, agent.ownerId, instructions);
-        db.prepare(
-          "INSERT INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'pending', ?)",
-        ).run(agent.id, Date.now());
+        if (runtime === "process")
+          db.prepare(
+            "INSERT INTO agent_processes (agent_id, desired_state) VALUES (?, 'stopped')",
+          ).run(agent.id);
+        else
+          db.prepare(
+            "INSERT INTO agent_provisioning (agent_id, status, updated_at) VALUES (?, 'pending', ?)",
+          ).run(agent.id, Date.now());
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -690,12 +717,23 @@ export function openAgentRegistry(path: string) {
             "SELECT credential_ref FROM agents WHERE id = ? AND deleted_at IS NULL",
           )
           .get(id);
-        const setup = db
-          .prepare(
-            "SELECT status, network_ref FROM agent_provisioning WHERE agent_id = ?",
-          )
-          .get(id);
-        if (!agent || setup?.status !== "pending" || setup.network_ref)
+        const setup =
+          runtime === "process"
+            ? undefined
+            : db
+                .prepare(
+                  "SELECT status, network_ref FROM agent_provisioning WHERE agent_id = ?",
+                )
+                .get(id);
+        const resourcesRemain =
+          runtime === "process"
+            ? !!db
+                .prepare(
+                  "SELECT agent_id FROM agent_processes WHERE agent_id = ?",
+                )
+                .get(id)
+            : setup?.status !== "pending" || !!setup.network_ref;
+        if (!agent || resourcesRemain)
           throw new Error("Agent resources must be removed before deletion");
         if (
           db
@@ -720,7 +758,9 @@ export function openAgentRegistry(path: string) {
           id,
         );
         db.prepare(
-          "UPDATE agents SET bot_id = NULL, bot_username = NULL, credential_ref = NULL, container_ref = NULL, deleted_at = ? WHERE id = ?",
+          "UPDATE agents SET bot_id = NULL, bot_username = NULL, credential_ref = NULL, " +
+            (runtime === "docker" ? "container_ref = NULL, " : "") +
+            "deleted_at = ? WHERE id = ?",
         ).run(Date.now(), id);
         db.exec("COMMIT");
         return {

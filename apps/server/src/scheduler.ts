@@ -63,6 +63,7 @@ export function createScheduleAdmission(
   discordOrigin?: (
     id: string,
   ) => Extract<ScheduleOrigin, { platform: "discord" }> | undefined,
+  runtimeReady?: (id: string) => boolean,
 ) {
   return async (schedule: Schedule): Promise<ScheduleOrigin | undefined> => {
     try {
@@ -86,7 +87,11 @@ export function createScheduleAdmission(
       const chatId = registry.getOwnerChat(schedule.agentId);
       if (!agent || agent.botId === null || chatId === undefined)
         return undefined;
-      const access = createAgentAccess(registry, agent.id);
+      const access = createAgentAccess(
+        registry,
+        agent.id,
+        runtimeReady ? () => runtimeReady(agent.id) : undefined,
+      );
       if (
         !allowsWork(agent.id) ||
         !access.canExecute(agent.botId, agent.ownerId, chatId)

@@ -43,6 +43,7 @@ export function createRegisteredBots(
     taskStore: TaskStore;
     schedules?: Pick<ScheduleStore, "listByAgent">;
     allowsWork?: (id: string) => boolean;
+    runtimeReady?: (id: string) => boolean;
     /** Upper bound for waiting on one task; omit for the default. */
     taskWaitMs?: number;
     /** Shared agent runner owned outside the Telegram polling lifecycle. */
@@ -61,16 +62,21 @@ export function createRegisteredBots(
     let credentialsLoaded = false;
     try {
       const agent = registry.get(id);
-      const setup = registry.getProvisioning(id);
+      const setup = config.runtimeReady
+        ? undefined
+        : registry.getProvisioning(id);
+      const runtimeReady = config.runtimeReady
+        ? config.runtimeReady(id)
+        : setup?.status === "ready" &&
+          !!agent?.containerRef &&
+          !!setup.volumeRef &&
+          !!setup.networkRef;
       if (
         !agent ||
         !agent.botId ||
         !agent.botUsername ||
         !agent.credentialRef ||
-        setup?.status !== "ready" ||
-        !agent.containerRef ||
-        !setup.volumeRef ||
-        !setup.networkRef
+        !runtimeReady
       ) {
         connection.state = { status: "blocked", failure: "setup_incomplete" };
         return;
@@ -82,7 +88,11 @@ export function createRegisteredBots(
       credentialsLoaded = true;
       if (connection.controller.signal.aborted) return;
       binding = openChatBinding(config.statePath, agent);
-      const access = createAgentAccess(registry, id);
+      const access = createAgentAccess(
+        registry,
+        id,
+        config.runtimeReady ? () => config.runtimeReady!(id) : undefined,
+      );
       const tasks = config.tasks
         ? await config.tasks(id)
         : createBotTasks({

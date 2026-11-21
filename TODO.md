@@ -50,8 +50,9 @@ path first, then the recommended Docker deployment in the next milestone.
       Progress: subprocess manager implements start/stop/restart/removal, OS-assigned
       loopback ports, exit detection, process-group cleanup, startup cancellation,
       and restoration through a SQLite desired-state store. Real-process tests
-      cover restoration after reopening the database. Server entrypoint and panel
-      integration remain pending.
+      cover restoration after reopening the database. The Server lifecycle service
+      now connects registration, process state, credentials, start/stop/restart,
+      removal and recovery. Entry point and panel integration remain pending.
 - [ ] Start each Agent Host with an explicit minimal environment and its own
       Host API token. Do not pass Server configuration or secrets through
       the environment or arguments.
@@ -59,7 +60,8 @@ path first, then the recommended Docker deployment in the next milestone.
       with per-agent state paths, a supplied Host token, and loopback binding.
       Private per-agent tokens now persist through a credential store with atomic
       reference claiming and no silent rotation of missing or damaged files.
-      Server lifecycle integration remains pending.
+      The Server lifecycle service now supplies these tokens directly to the process
+      manager; entry point integration remains pending.
 - [ ] Route panel lifecycle and status actions through the process manager.
       Explain the shared trust model in the panel, including agent access
       to Server secrets, and clearly identify native development mode.
@@ -68,7 +70,9 @@ path first, then the recommended Docker deployment in the next milestone.
       Progress: the new versioned subprocess Server schema omits Docker metadata
       and rejects previous Server databases without modifying them. The process
       manager retains agent directories unless purge is explicitly requested;
-      wiring registration and deletion into the Server remains pending.
+      registration now commits identity and process intent together, and deletion
+      tombstones agent identity after stopping the Host and retaining or explicitly
+      purging its directories. Entry point and panel wiring remain pending.
 - [ ] Verify native setup from a clean checkout, panel lifecycle operations,
       restart recovery, and concurrent OpenCode and browser sessions using
       distinct state directories.
