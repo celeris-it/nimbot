@@ -2,7 +2,9 @@
 
 ## Project
 
-Nimbot is a self-hosted platform for running persistent AI agents through Telegram. Each agent runs in its own Docker container with a persistent workspace.
+Nimbot is a self-hosted platform for running persistent AI agents through Telegram. Each agent has a persistent workspace.
+
+The architecture is moving from one Docker container per agent to Agent Host subprocesses started by the Nimbot Server, as planned in [TODO.md](TODO.md). The code still provisions per-agent containers until that work lands. New work must follow the target architecture and the constraints below.
 
 The MVP is complete. The Agent Host lives in `apps/agent-host/`, the Nimbot Server in `apps/server/`, and the administration UI in `apps/panel/`.
 
@@ -14,7 +16,7 @@ The MVP is complete. The Agent Host lives in `apps/agent-host/`, the Nimbot Serv
 - Keep work within the current features documented in README.md. Future work is out of scope unless the user asks for it.
 - Prefer the simplest thing that satisfies the requested change. Do not add services, packages, or abstractions it does not need.
 - No PostgreSQL, Redis, Kubernetes, or message brokers. Storage is SQLite and Docker volumes.
-- Preserve persisted state when upgrading from a supported release or the documented unversioned baseline. Version SQLite schema changes, provide ordered transactional migrations, and update the current schema for fresh installations. Set the supported predecessor in `release.json` when preparing a release.
+- Preserve persisted state when upgrading from a supported release or the documented unversioned baseline. The one exception is the subprocess architecture release in TODO.md, which starts from a fresh installation. Version SQLite schema changes, provide ordered transactional migrations, and update the current schema for fresh installations. Set the supported predecessor in `release.json` when preparing a release.
 
 ## Stack
 
@@ -26,8 +28,8 @@ Use pnpm, not npm or yarn.
 
 Monorepo layout:
 
-- `apps/server/` — Nimbot Server: authenticated administration panel, Telegram, agent registry, task routing, container management
-- `apps/agent-host/` — runs inside each agent container: AI engine, tasks, workspace
+- `apps/server/` — Nimbot Server: authenticated administration panel, Telegram, agent registry, task routing, agent process management
+- `apps/agent-host/` — runs as one process per agent: AI engine, tasks, workspace
 - `apps/panel/` — administration UI
 - `packages/` — shared code
 - `infrastructure/docker/` — Dockerfiles
@@ -46,14 +48,17 @@ Run lint, type-check, and tests before finishing any change.
 
 ## Architecture constraints
 
-- The Nimbot Server must never run agent-generated shell commands on the host OS; they run only inside the agent's container.
-- Agent containers run as non-root, with resource limits, and must not get the Docker socket or server credentials.
+- Nimbot runs as one application under one OS account. The Server starts each agent as a separate Agent Host child process. Do not add a separate runner service, separate OS accounts, or per-agent Unix users.
+- Agent-generated shell commands run only in Agent Host processes, never in the Server process.
+- An installation is a single trust domain that includes the Server and its agents. Agents can read each other's data and Server state, including secrets. Do not present Server-side approvals, grants, or rules as a security boundary against an agent with shell access, and keep this trust model accurate in the panel and documentation.
+- Start Agent Hosts with an explicit minimal environment. Do not pass Server configuration or secrets to them. Keep one Host API token per agent and bind Agent Hosts to loopback.
+- The Docker deployment runs the whole application as non-root in one container per installation, without the Docker socket.
 - Each agent must have its own distinct Telegram bot and owner-bound private chat; the authenticated web panel handles administration. Do not add a management bot. Do not introduce a shared selected-agent or `/use` workflow.
-- Keep Telegram bot tokens and all polling connections on the Nimbot Server, outside agent containers.
+- Keep Telegram bot tokens and all polling connections in the Server process. Never hand them to Agent Host processes, model context, task events, or logs.
 - Keep Telegram-specific code out of the agent runtime.
 - Keep OpenCode-specific code behind the engine interface.
 - Persist messages and tasks before executing them.
-- Deleting an agent must not silently delete its persistent volume.
+- Deleting an agent must not silently delete its persistent data.
 
 ## Conventions
 
