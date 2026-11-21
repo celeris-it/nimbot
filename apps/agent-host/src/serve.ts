@@ -18,9 +18,11 @@ import { openMemoryStore } from "./memory-store.js";
 import { createMemoryTools } from "./memory-tools.js";
 import { createPeerToolDefinitions } from "./peer-tools.js";
 import { createScheduleToolDefinitions } from "./schedule-tools.js";
+import { readListenConfig } from "./listen-config.js";
 
 try {
   const config = readHostConfig(process.env);
+  const listener = readListenConfig(process.env);
   const stateDir =
     process.env.AGENT_STATE_DIR || "/home/node/.local/share/nimbot";
   await mkdir(stateDir, { recursive: true });
@@ -64,7 +66,7 @@ try {
     models.changed,
   );
   const app = createHostApi(config, runner, auth, memory, attachments, models);
-  const server = serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 3001 });
+  const server = serve({ fetch: app.fetch, ...listener });
   server.on("error", () => {
     log.error("host.http_start_failed");
     process.exitCode = 1;
@@ -96,13 +98,13 @@ try {
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  log.info("host.listening", { port: 3001 });
+  log.info("host.listening", listener);
 } catch (error) {
   log.error("host.init_failed", {
     hint:
       error instanceof Error && /^(tasks|memory)\.sqlite:/.test(error.message)
         ? error.message
-        : "Check AGENT_HOST_TOKEN, TASK_TIMEOUT_SECONDS and writable state storage.",
+        : "Check AGENT_HOST_TOKEN, AGENT_HOST_BIND_ADDRESS, AGENT_HOST_PORT, TASK_TIMEOUT_SECONDS and writable state storage.",
   });
   process.exitCode = 1;
 }

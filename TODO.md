@@ -1,102 +1,68 @@
-# TODO: shared agent container and no-Docker development mode
+# TODO: shared agent runner and Docker deployment
 
-Goal: stop creating one Docker container per agent. All agents run as separate
-processes inside one shared runner container. A no-Docker mode runs the same
-processes directly on the host, for development only.
+Simplify development and deployment by replacing per-agent containers with
+one shared runner per Nimbot installation. Deliver the native development
+path first, then the recommended Docker deployment in the next milestone.
 
-## Open decisions
+## Decisions
 
-- [ ] Confirm the trust model: agents in one runner can read each other's
-      workspace, provider credentials, and memory. Decide whether per-agent
-      Unix users inside the runner are required for the first version.
-- [ ] Decide whether the current per-agent container mode is removed or kept.
-      Keeping it means maintaining all current provisioning code.
-- [ ] Decide how a user separates agents: extra runner services declared in
-      `compose.yaml` (the server needs no Docker socket) or runners created
-      from the panel (the server keeps the socket).
-- [ ] Decide whether resource limits apply per runner only or per agent.
+- Each agent runs in a separate Agent Host process. The panel manages agent
+  creation, start, stop, restart, and removal within the installation.
+- An installation is a single trust domain for its agents. Agents share an
+  OS account and can read or modify each other's workspaces, memory, and
+  provider credentials. Users who need separation deploy another Nimbot
+  installation with its own runner and data.
+- Defer per-agent Unix users and resource-limit configuration. Docker Compose
+  is optional.
+- This release starts with a fresh installation. No migration or import from
+  previous releases is in scope. Existing data stays on disk until an
+  administrator removes it explicitly.
 
-## Agent Host
+## First milestone: native development
 
-- [ ] Make the listen address and port configurable in
-      `apps/agent-host/src/serve.ts` (today `0.0.0.0:3001`).
-- [ ] Give each agent process its own workspace, state directory, and OpenCode
-      data directory under one root, for example `/agents/<id>/`.
-- [ ] Verify that two OpenCode instances run side by side without sharing
-      configuration, sessions, or credentials.
-- [ ] Verify that the browser tool works with several agents in one container
-      (separate profiles, no port conflicts).
+- [ ] Add a pnpm entry point that starts the Server, panel, and shared runner
+      without Docker. Document the Node.js, OpenCode, and Chromium
+      prerequisites. Bind the development panel and Agent Hosts to loopback.
+- [ ] Give each Agent Host a configurable listen address and port. Assign
+      each agent separate workspace, engine state, task state, and browser
+      profile directories under the installation's data directory.
+      Progress: listener address and port are configurable through
+      `AGENT_HOST_BIND_ADDRESS` and `AGENT_HOST_PORT`, with validated values.
+      Runner-assigned ports and per-agent directory allocation remain pending.
+- [ ] Implement runner lifecycle operations for creating, starting, stopping,
+      restarting, and removing Agent Host processes. Persist desired state
+      so a runner restart restores agents that were meant to be running.
+- [ ] Keep one Host API token per agent. Define the Server-to-runner control
+      channel and how deployment modes keep Server credentials and runner
+      control access out of agent processes. Agent-to-agent trust does not
+      extend to Server-side credentials or authorization.
+- [ ] Route panel lifecycle and status actions through the runner. Explain
+      the shared trust model in the panel and clearly identify native
+      development mode.
+- [ ] Keep agent data on removal unless the administrator explicitly purges
+      it. Use a fresh Server schema for runner-managed agents.
+- [ ] Verify native setup from a clean checkout, panel lifecycle operations,
+      restart recovery, and concurrent OpenCode and browser sessions using
+      distinct state directories.
 
-## Runner
+## Second milestone: Docker deployment
 
-- [ ] Add a runner entrypoint that starts, stops, and restarts one Agent Host
-      process per agent and reports their state.
-- [ ] Define the Server-to-runner control API (create, start, stop, remove
-      agent process) with its own credential.
-- [ ] Keep one Host API token per agent.
-- [ ] Persist the runner's agent list so processes come back after a restart.
-- [ ] Removing an agent must keep its data directory unless the user purges it.
-
-## Server
-
-- [ ] Put process lifecycle behind one interface with two implementations:
-      runner container and local process.
-- [ ] Replace per-agent container, network, and volume creation
-      (`container-resources.ts`, `agent-provisioning.ts`,
-      `container-control.ts`) with calls to that interface.
-- [ ] Derive each agent's Host URL from runner address and assigned port.
-- [ ] Remove or reduce code that only exists for per-agent Docker resources:
-      `docker-api.ts`, `docker-preflight.ts`, `resource-reconciliation.ts`,
-      `agent-resource-removal.ts`, and the container parts of agent recovery.
-- [ ] Update panel pages that show container status, restart, recreate, and
-      resource inventory.
-
-## Compose and installation
-
-- [ ] Add the runner service to `compose.yaml` with one data volume and the
-      current hardening (non-root, dropped capabilities, `no-new-privileges`,
-      CPU, memory, and process limits, no published ports).
-- [ ] Remove the Docker socket mount, `group_add`, `DOCKER_SOCKET_PATH`, and
-      `AGENT_HOST_IMAGE` from the server service if runners are static.
-- [ ] Update `install.sh`, `upgrade.sh`, `uninstall.sh`, and
-      `scripts/upgrade-docker.mjs` for the new resource set.
-- [ ] Publish prebuilt images so installation pulls instead of building.
-
-## Migration
-
-- [ ] Add a versioned server schema migration (`server-v3.sql`) for the new
-      agent location fields and the retired `container_ref`, `volume_ref`,
-      and `network_ref`.
-- [ ] Copy each agent's three volumes into the runner volume during upgrade,
-      and keep the old volumes until the user removes them.
-- [ ] Update `scripts/restore-agent-volumes.mjs` and the replacement-server
-      procedure for the new layout.
-- [ ] Set the supported predecessor in `release.json`.
-
-## No-Docker development mode
-
-- [ ] Add the local-process implementation: the Server spawns Agent Host
-      processes on the host, bound to `127.0.0.1`.
-- [ ] Enable it only through an explicit environment variable that the
-      installer and `compose.yaml` never set.
-- [ ] Refuse to start in this mode unless `PANEL_URL` is a localhost origin.
-- [ ] Log a startup warning and show a panel banner stating that agents run
-      without isolation.
-- [ ] Add a `pnpm` script that starts the Server in this mode and document
-      the host prerequisites (Node.js, OpenCode, Chromium).
-- [ ] Store agent data under `SERVER_STATE_DIR`, never in the user's home.
-
-## Tests
-
-- [ ] Unit tests for the lifecycle interface and both implementations.
-- [ ] Rewrite the Docker integration tests for the runner: lifecycle,
-      isolation between agents, restart recovery, hardening, upgrade.
-- [ ] Add a test that production configuration cannot enable no-Docker mode.
-- [ ] Add an upgrade test that moves data from per-agent volumes.
+- [ ] Package the same Server and runner for a documented Docker CLI
+      installation. Run all agents as processes in one runner container
+      per installation, with persistent data and no Docker socket mount.
+- [ ] Expose only the panel. Keep runner control and Agent Host endpoints
+      internal and run agents as non-root.
+- [ ] Remove the per-agent Docker provisioning, reconciliation, and panel
+      controls once both paths use the shared runner.
+- [ ] Replace Compose-dependent install and operations steps with Docker CLI
+      instructions. Review install, uninstall, and release scripts for
+      assumptions about per-agent containers, volumes, and networks.
+- [ ] Verify a clean Docker installation without Compose, panel lifecycle
+      operations, and data persistence across container recreation.
 
 ## Documentation
 
-- [ ] Update `README.md`: architecture, security model, provisioning, tests.
-- [ ] Update `AGENTS.md`: the per-agent container rule and the rule against
-      running agent commands on the host need a development-mode exception.
-- [ ] Update `docs/INSTALL.md` and `docs/OPERATIONS.md`.
+- [ ] Update README.md and AGENTS.md alongside implementation to describe
+      the new architecture, native development mode, and trust model.
+- [ ] Update docs/INSTALL.md and docs/OPERATIONS.md with setup, backups,
+      recovery, and the fresh-install requirement.

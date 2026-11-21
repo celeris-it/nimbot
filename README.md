@@ -349,6 +349,13 @@ pnpm test
 
 Start the compiled server with `pnpm start:server`. Generate its administrator password hash with `pnpm panel:password`; `.env.example` documents deployment settings. See [CONTRIBUTING.md](CONTRIBUTING.md) for panel development and browser tests.
 
+The shared runner transition is tracked in [TODO.md](TODO.md). As its first
+prerequisite, the Agent Host listener accepts `AGENT_HOST_BIND_ADDRESS` (an IPv4
+or IPv6 address, default `0.0.0.0`) and `AGENT_HOST_PORT` (1–65535, default
+3001). A native runner must set the address to `127.0.0.1` and assign a separate
+port to each agent. The Docker deployment still uses its existing internal
+endpoint; the shared runner and Docker-free development entry point are pending.
+
 | Path | Responsibility |
 |---|---|
 | `apps/server/` | Panel API, Telegram, registry, routing, and container management |
