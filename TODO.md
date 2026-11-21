@@ -47,6 +47,11 @@ path first, then the recommended Docker deployment in the next milestone.
       Persist desired state so a Server restart restores agents that were
       meant to be running. Detect unexpected process exits and stop child
       processes when the Server shuts down.
+      Progress: subprocess manager implements start/stop/restart/removal, OS-assigned
+      loopback ports, exit detection, process-group cleanup, startup cancellation,
+      and restoration through a desired-state store interface. Real-process tests
+      cover these paths. SQLite persistence and Server/panel integration remain
+      pending.
 - [ ] Start each Agent Host with an explicit minimal environment and its own
       Host API token. Do not pass Server configuration or secrets through
       the environment or arguments.

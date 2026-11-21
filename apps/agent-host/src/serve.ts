@@ -67,6 +67,16 @@ try {
   );
   const app = createHostApi(config, runner, auth, memory, attachments, models);
   const server = serve({ fetch: app.fetch, ...listener });
+  server.once("listening", () => {
+    const address = server.address();
+    if (address && typeof address !== "string") {
+      log.info("host.listening", {
+        hostname: listener.hostname,
+        port: address.port,
+      });
+      process.send?.({ type: "host.ready", port: address.port }, () => {});
+    }
+  });
   server.on("error", () => {
     log.error("host.http_start_failed");
     process.exitCode = 1;
@@ -94,11 +104,16 @@ try {
       process.exitCode = 1;
     } finally {
       store.close();
+      if (process.connected) process.disconnect?.();
     }
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  log.info("host.listening", listener);
+  // The IPC channel belongs to the Server, not to engine or model code.
+  if (process.send) {
+    process.once("disconnect", () => void stop());
+    if (!process.connected) void stop();
+  }
 } catch (error) {
   log.error("host.init_failed", {
     hint:

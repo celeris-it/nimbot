@@ -1,6 +1,6 @@
 import { isIP } from "node:net";
 
-/** Runner processes can bind separate loopback ports; containers keep the legacy defaults. */
+/** Port zero lets the OS assign a free subprocess endpoint without reservation races. */
 export function readListenConfig(env: NodeJS.ProcessEnv): {
   hostname: string;
   port: number;
@@ -10,7 +10,7 @@ export function readListenConfig(env: NodeJS.ProcessEnv): {
     throw new Error("AGENT_HOST_BIND_ADDRESS must be an IPv4 or IPv6 address.");
   const value = env.AGENT_HOST_PORT ?? "3001";
   const port = Number(value);
-  if (!/^\d+$/.test(value) || port < 1 || port > 65535)
-    throw new Error("AGENT_HOST_PORT must be between 1 and 65535.");
+  if (!/^\d+$/.test(value) || port < 0 || port > 65535)
+    throw new Error("AGENT_HOST_PORT must be between 0 and 65535.");
   return { hostname, port };
 }

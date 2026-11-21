@@ -41,7 +41,7 @@ export async function prepareAgentProcess(options: {
     throw new Error("Invalid Host credential");
   if (
     !Number.isInteger(options.port) ||
-    options.port < 1 ||
+    options.port < 0 ||
     options.port > 65535
   )
     throw new Error("Invalid Agent Host port");

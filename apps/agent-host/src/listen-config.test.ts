@@ -18,13 +18,12 @@ describe("Agent Host listener configuration", () => {
     },
   );
 
-  it.each(["1", "65535"])("accepts boundary port %s", (port) => {
+  it.each(["0", "1", "65535"])("accepts boundary port %s", (port) => {
     expect(readListenConfig({ AGENT_HOST_PORT: port }).port).toBe(Number(port));
   });
 
   it.each([
     "",
-    "0",
     "65536",
     "-1",
     "1.5",

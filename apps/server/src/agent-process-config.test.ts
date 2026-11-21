@@ -109,7 +109,7 @@ describe("Agent Host subprocess configuration", () => {
     const settings = await options();
     for (const invalid of [
       { token: "secret" },
-      { port: 0 },
+      { port: -1 },
       { port: 65536 },
       { port: 1.5 },
       { taskTimeoutSeconds: 9 },
