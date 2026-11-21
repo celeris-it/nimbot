@@ -52,10 +52,10 @@ path first, then the recommended Docker deployment in the next milestone.
       to Server secrets, and clearly identify native development mode.
 - [x] Keep agent data on removal unless the administrator explicitly purges
       it. Use a fresh Server schema for process-managed agents.
-- [ ] Verify native setup from a clean checkout, panel lifecycle operations,
+- [x] Verify native setup from a clean checkout, panel lifecycle operations,
       restart recovery, and concurrent OpenCode and browser sessions using
       distinct state directories.
-      Progress: CI and an opt-in test run the compiled Server with real Hosts,
+      Verification: CI and an opt-in test run the compiled Server with real Hosts,
       authenticated API creation/start/stop/removal, retained workspace data,
       stopped-state retention and running-state recovery after Server restarts.
       Telegram transport is simulated. Chromium tests cover native panel lifecycle
@@ -63,7 +63,10 @@ path first, then the recommended Docker deployment in the next milestone.
       A real Chromium gate verifies concurrent agent profiles and retained cookies
       and local storage across separate CLI invocations. Browser instructions now
       use the native installation path instead of a fixed Docker path.
-      Clean-checkout setup and concurrent OpenCode sessions remain pending.
+      The pinned OpenCode gate runs two real engines concurrently, checks distinct
+      data directories and session IDs, and verifies separate histories after Host
+      restarts. A clean temporary checkout passed frozen dependency installation,
+      build, and all three native gates (Server, OpenCode and Chromium).
 
 ## Second milestone: Docker deployment
 

@@ -391,8 +391,22 @@ NIMBOT_TEST_NATIVE_BUILD=1 pnpm test tests/native-server.integration.test.ts
 This gate starts the compiled Server and real Hosts, simulates Telegram transport,
 and checks authenticated API creation, start/stop, recovery, concurrent Hosts and
 retained data after removal. It requires no Docker or AI provider credentials;
-OpenCode session verification remains tracked in TODO.md. CI runs it
-separately after the build and ordinary tests.
+CI runs it separately after the build and ordinary tests.
+
+With OpenCode 2.2.7 on PATH, run the native engine gate:
+
+```sh
+NIMBOT_TEST_NATIVE_OPENCODE=1 pnpm test tests/native-opencode.integration.test.ts
+```
+
+It starts two real Hosts and OpenCode engines against a simulated local model.
+Both engines must reach the model concurrently before either receives a response.
+The gate verifies separate engine data and session IDs, then restarts both Hosts
+and checks that each conversation resumes without the other agent’s history.
+No AI provider credentials or paid model calls are used. CI installs the pinned
+CLI into a temporary directory and runs this gate after the build. The native
+setup was also verified in a clean temporary checkout with a frozen dependency
+installation, a full build, and all three native gates.
 
 After installing Chromium, run the browser profile gate:
 

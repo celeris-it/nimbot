@@ -26,6 +26,14 @@ jobs:
       - run: pnpm test tests/native-server.integration.test.ts
         env:
           NIMBOT_TEST_NATIVE_BUILD: "1"
+      - name: Install pinned OpenCode for native verification
+        run: |
+          mkdir -p "$RUNNER_TEMP/nimbot-opencode"
+          pnpm --dir "$RUNNER_TEMP/nimbot-opencode" add --allow-build=@opencode/cli @opencode/cli@2.2.7
+          echo "$RUNNER_TEMP/nimbot-opencode/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: pnpm test tests/native-opencode.integration.test.ts
+        env:
+          NIMBOT_TEST_NATIVE_OPENCODE: "1"
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test tests/native-browser.integration.test.ts
         env:
