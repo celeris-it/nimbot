@@ -149,7 +149,15 @@ export function createProcessAgents(options: {
         await remove(id, purge);
       }),
     ready,
+    setupStatus,
     status: manager.status,
+    observe(id: string) {
+      return {
+        status: manager.status(id),
+        desiredState: options.store.getDesiredState(id),
+        revision: manager.generation(id) ?? "not_started",
+      };
+    },
     /** Resolve current port on each request; restarting a Host invalidates old URLs. */
     async readHost(id: string) {
       requireAgent(id);

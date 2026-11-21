@@ -23,5 +23,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+      - run: pnpm test tests/native-server.integration.test.ts
+        env:
+          NIMBOT_TEST_NATIVE_BUILD: "1"
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:panel

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   agentProcessDirectories,
   prepareAgentProcess,
@@ -28,6 +29,7 @@ interface ManagedProcess {
   exited: Promise<void>;
   status: ProcessStatus;
   ended: boolean;
+  generation: string;
   host?: AgentHostConfig;
 }
 
@@ -126,6 +128,7 @@ export function createAgentProcessManager(options: {
       child,
       status: "starting",
       ended: false,
+      generation: randomUUID(),
       exited: new Promise<void>((done) => {
         resolveExit = done;
       }),
@@ -222,6 +225,7 @@ export function createAgentProcessManager(options: {
     status(agentId: string): ProcessStatus {
       return processes.get(agentId)?.status ?? "stopped";
     },
+    generation: (agentId: string) => processes.get(agentId)?.generation,
     host(agentId: string): AgentHostConfig | undefined {
       return processes.get(agentId)?.host;
     },

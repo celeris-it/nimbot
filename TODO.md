@@ -32,7 +32,7 @@ path first, then the recommended Docker deployment in the next milestone.
 
 ## First milestone: native development
 
-- [ ] Add a pnpm entry point that starts the Server and panel without
+- [x] Add a pnpm entry point that starts the Server and panel without
       Docker; the Server starts the Agent Hosts. Document the Node.js,
       OpenCode, and Chromium prerequisites. Bind the development panel and
       Agent Hosts to loopback.
@@ -40,42 +40,29 @@ path first, then the recommended Docker deployment in the next milestone.
       each agent separate workspace, engine state, task state, and browser
       profile directories under the installation's data directory.
       Progress: listener configuration and subprocess directory/environment
-      preparation are implemented and tested. Connecting directory allocation
-      to Server lifecycle operations and browser profiles remains pending.
-- [ ] Implement Server-side process lifecycle operations for creating,
+      preparation are implemented, tested, and connected to Server lifecycle
+      operations. Browser profile wiring remains pending.
+- [x] Implement Server-side process lifecycle operations for creating,
       starting, stopping, restarting, and removing Agent Host processes.
       Persist desired state so a Server restart restores agents that were
       meant to be running. Detect unexpected process exits and stop child
       processes when the Server shuts down.
-      Progress: subprocess manager implements start/stop/restart/removal, OS-assigned
-      loopback ports, exit detection, process-group cleanup, startup cancellation,
-      and restoration through a SQLite desired-state store. Real-process tests
-      cover restoration after reopening the database. The Server lifecycle service
-      now connects registration, process state, credentials, start/stop/restart,
-      removal and recovery. Entry point and panel integration remain pending.
-- [ ] Start each Agent Host with an explicit minimal environment and its own
+- [x] Start each Agent Host with an explicit minimal environment and its own
       Host API token. Do not pass Server configuration or secrets through
       the environment or arguments.
-      Progress: subprocess configuration builds an explicit minimal environment
-      with per-agent state paths, a supplied Host token, and loopback binding.
-      Private per-agent tokens now persist through a credential store with atomic
-      reference claiming and no silent rotation of missing or damaged files.
-      The Server lifecycle service now supplies these tokens directly to the process
-      manager; entry point integration remains pending.
 - [ ] Route panel lifecycle and status actions through the process manager.
       Explain the shared trust model in the panel, including agent access
       to Server secrets, and clearly identify native development mode.
-- [ ] Keep agent data on removal unless the administrator explicitly purges
+- [x] Keep agent data on removal unless the administrator explicitly purges
       it. Use a fresh Server schema for process-managed agents.
-      Progress: the new versioned subprocess Server schema omits Docker metadata
-      and rejects previous Server databases without modifying them. The process
-      manager retains agent directories unless purge is explicitly requested;
-      registration now commits identity and process intent together, and deletion
-      tombstones agent identity after stopping the Host and retaining or explicitly
-      purging its directories. Entry point and panel wiring remain pending.
 - [ ] Verify native setup from a clean checkout, panel lifecycle operations,
       restart recovery, and concurrent OpenCode and browser sessions using
       distinct state directories.
+      Progress: CI and an opt-in test run the compiled Server with real Hosts,
+      authenticated API creation/start/stop/removal, retained workspace data,
+      stopped-state retention and running-state recovery after Server restarts.
+      Telegram transport is simulated. Clean-checkout setup, native panel UI,
+      concurrent OpenCode sessions and browser profile verification remain pending.
 
 ## Second milestone: Docker deployment
 

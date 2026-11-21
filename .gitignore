@@ -115,6 +115,7 @@ dist
 
 # Local server state
 .nimbot/
+.nimbot-native/
 
 # Browser test artifacts
 playwright-report/

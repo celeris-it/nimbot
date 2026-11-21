@@ -13,7 +13,10 @@ interface ContainerBaseline {
   stableChecks: number;
 }
 
-export function openOperationalAlertStore(path: string) {
+export function openOperationalAlertStore(
+  path: string,
+  runtime: "docker" | "process" = "docker",
+) {
   const db = new DatabaseSync(path);
   try {
     db.exec(`
@@ -26,7 +29,9 @@ export function openOperationalAlertStore(path: string) {
         text TEXT NOT NULL,
         PRIMARY KEY (agent_id, subject)
       );
-      CREATE TABLE IF NOT EXISTS operational_container_baselines (
+    `);
+    if (runtime === "docker")
+      db.exec(`CREATE TABLE IF NOT EXISTS operational_container_baselines (
         agent_id TEXT PRIMARY KEY,
         container_id TEXT NOT NULL,
         restart_count INTEGER,
@@ -119,9 +124,10 @@ export function openOperationalAlertStore(path: string) {
       db.prepare("DELETE FROM operational_incidents WHERE agent_id = ?").run(
         agentId,
       );
-      db.prepare(
-        "DELETE FROM operational_container_baselines WHERE agent_id = ?",
-      ).run(agentId);
+      if (runtime === "docker")
+        db.prepare(
+          "DELETE FROM operational_container_baselines WHERE agent_id = ?",
+        ).run(agentId);
     },
     close() {
       db.close();

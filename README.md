@@ -349,6 +349,45 @@ pnpm test
 
 Start the compiled server with `pnpm start:server`. Generate its administrator password hash with `pnpm panel:password`; `.env.example` documents deployment settings. See [CONTRIBUTING.md](CONTRIBUTING.md) for panel development and browser tests.
 
+The native development path now starts the compiled Server and panel without Docker:
+
+```sh
+pnpm dev
+```
+
+Install Node.js 22.13 or newer, the pinned pnpm version, OpenCode 2.2.7
+(`pnpm add --global @opencode/cli@2.2.7`), and Chromium with
+`pnpm --filter @nimbot/agent-host exec playwright install --with-deps chromium`.
+Generate the panel password hash as described above and set it in `.env`.
+`pnpm dev` builds all workspaces, serves the compiled panel from the Server,
+selects `NIMBOT_MODE=native`, and detects the usual shared Chromium installation
+cache. Set `PLAYWRIGHT_BROWSERS_PATH` when using another installation path.
+Re-run the command after source changes. The existing `pnpm dev:panel` command
+remains available for panel hot reload during UI development.
+
+Native mode requires a loopback panel address and stores data in
+`.nimbot-native/` by default. Set `SERVER_STATE_DIR` to a fresh directory to use
+another location; previous Server databases are rejected without modification.
+`NIMBOT_MODE=native pnpm start:server` starts already compiled code; configure
+`PLAYWRIGHT_BROWSERS_PATH` explicitly in that case. The Server starts and restores
+each agent as a child process and keeps bot polling and credentials in the Server.
+Panel labels, lifecycle controls, and the displayed trust model are still being
+adapted to this mode; its backend currently uses the existing lifecycle API paths.
+The default Docker deployment continues using per-agent containers during this
+transition. See [TODO.md](TODO.md) for remaining work.
+
+After building, run the native Server lifecycle gate with:
+
+```sh
+NIMBOT_TEST_NATIVE_BUILD=1 pnpm test tests/native-server.integration.test.ts
+```
+
+This gate starts the compiled Server and real Hosts, simulates Telegram transport,
+and checks authenticated API creation, start/stop, recovery, concurrent Hosts and
+retained data after removal. It requires no Docker or AI provider credentials;
+OpenCode and browser session verification remains tracked in TODO.md. CI runs it
+separately after the build and ordinary tests.
+
 The Server-managed subprocess transition is tracked in [TODO.md](TODO.md). As its first
 prerequisite, the Agent Host listener accepts `AGENT_HOST_BIND_ADDRESS` (an IPv4
 or IPv6 address, default `0.0.0.0`) and `AGENT_HOST_PORT` (0–65535, default
@@ -373,8 +412,8 @@ registration, start/stop/restart, removal, and recovery. Registration commits bo
 identity and initial process intent together. Removal stops the Host, retains its
 data unless purge is explicitly requested, removes schedules and credential
 references, and tombstones the agent. Telegram and schedule admission can use
-process readiness while preserving owner and chat checks. Wiring the service into
-the Server entrypoint, panel, and Docker-free development command remains pending.
+process readiness while preserving owner and chat checks. Adapting
+the native panel labels, controls, and trust model remains pending.
 
 The planned subprocess installation is a single trust domain under one OS
 account: agents can access each other’s data and Server state, including bot

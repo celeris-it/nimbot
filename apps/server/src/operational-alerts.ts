@@ -31,6 +31,13 @@ interface Deps {
   canNotify(id: string): boolean;
   observeContainer(id: string, ref: string): Promise<ContainerObservation>;
   checkProviders: ReturnType<typeof createHostProviders>["checks"];
+  process?: {
+    observe(id: string): {
+      status: string;
+      desiredState?: "running" | "stopped";
+      revision: string;
+    };
+  };
 }
 
 export function createOperationalAlerts(deps: Deps) {
@@ -39,6 +46,12 @@ export function createOperationalAlerts(deps: Deps) {
   let timer: ReturnType<typeof setInterval> | undefined;
   let active: Promise<void> | undefined;
   let closed = false;
+  function configured(id: string) {
+    return deps.process
+      ? !!registry.get(id) &&
+          deps.process.observe(id).desiredState !== undefined
+      : registry.getProvisioning(id)?.status === "ready";
+  }
 
   async function inspectContainer(id: string, ref: string, name: string) {
     const operation = registry.getContainerOperation(id);
@@ -125,8 +138,11 @@ export function createOperationalAlerts(deps: Deps) {
     if (
       !result ||
       closed ||
-      registry.get(id)?.containerRef !== ref ||
-      registry.getProvisioning(id)?.status !== "ready"
+      (deps.process
+        ? deps.process.observe(id).revision !== ref ||
+          deps.process.observe(id).status !== "running"
+        : registry.get(id)?.containerRef !== ref ||
+          registry.getProvisioning(id)?.status !== "ready")
     )
       return;
     checks.set(
@@ -173,13 +189,13 @@ export function createOperationalAlerts(deps: Deps) {
 
   async function deliver(id: string, subject?: string) {
     for (const incident of store.incidents(id, subject)) {
-      if (
-        closed ||
-        registry.getProvisioning(id)?.status !== "ready" ||
-        !deps.canNotify(id)
-      )
-        return;
-      if (incident.subject === "container") {
+      if (closed || !configured(id) || !deps.canNotify(id)) return;
+      if (deps.process && incident.subject === "process") {
+        const current = deps.process.observe(id);
+        if (current.desiredState !== "running" || current.status !== "failed")
+          continue;
+      }
+      if (!deps.process && incident.subject === "container") {
         const operation = registry.getContainerOperation(id);
         const recovery = registry.getRecovery(id);
         if (
@@ -198,6 +214,27 @@ export function createOperationalAlerts(deps: Deps) {
 
   async function checkAgent(id: string) {
     const agent = registry.get(id);
+    if (deps.process) {
+      if (!agent || !configured(id)) return;
+      const snapshot = deps.process.observe(id);
+      if (snapshot.desiredState === "stopped" || snapshot.status === "running")
+        store.clear(id, "process");
+      else if (snapshot.status === "failed")
+        store.open(
+          id,
+          "process",
+          snapshot.revision,
+          `The Agent Host for "${agent.name}" stopped unexpectedly. Check the agent's status in the Nimbot panel.`,
+        );
+      store.clearDeletedSchedules(id);
+      for (const schedule of deps.schedules.listByAgent(id))
+        inspectSchedule(schedule, agent.name);
+      if (snapshot.status === "running")
+        await inspectProviders(id, snapshot.revision, agent.name);
+      if (!closed && deps.process.observe(id).revision === snapshot.revision)
+        await deliver(id);
+      return;
+    }
     if (
       !agent?.containerRef ||
       registry.getProvisioning(id)?.status !== "ready"
@@ -249,8 +286,7 @@ export function createOperationalAlerts(deps: Deps) {
     checks: (id: string) => checks.get(id) ?? [],
     tick,
     async scheduleOutcome(agentId: string, scheduleId: string) {
-      if (closed || registry.getProvisioning(agentId)?.status !== "ready")
-        return;
+      if (closed || !configured(agentId)) return;
       const agent = registry.get(agentId);
       const schedule = deps.schedules.get(scheduleId);
       if (!agent || schedule?.agentId !== agentId) return;
