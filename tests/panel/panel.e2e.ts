@@ -50,6 +50,37 @@ test("selects an agent model and shows its published quota in the panel", async 
   await expect(model).toHaveValue("automatic");
 });
 
+test("explains why queued tasks are waiting after an OpenCode startup failure", async ({
+  page,
+}) => {
+  await login(page);
+  await page.route("**/api/agents/dev/usage", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        queued: 2,
+        quota: {
+          model: null,
+          state: "checking",
+          checkedAt: Date.now(),
+          failure: "opencode_start_failed",
+          windows: [],
+        },
+      },
+    });
+  });
+  await page.goto("/agents/dev/usage");
+  await expect(page.getByText("Model or quota check failed")).toBeVisible();
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "OpenCode exited before it could serve models" }),
+  ).toBeVisible();
+  await expect(page.getByText("2 queued", { exact: true })).toBeVisible();
+});
+
 test("edits the MCP catalog and manages an agent's grant and write-only credential", async ({
   page,
 }) => {

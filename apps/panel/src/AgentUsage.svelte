@@ -3,6 +3,7 @@
     AgentModels,
     AgentUsage,
     ModelReference,
+    QuotaStatus,
   } from "../../server/src/usage-contracts.js";
 
   let {
@@ -52,6 +53,20 @@
     exhausted: "Queue paused for quota",
     checking: "Waiting for a quota check",
     model_unavailable: "Queue paused because the model is unavailable",
+  };
+  const failureText: Record<NonNullable<QuotaStatus["failure"]>, string> = {
+    host_unavailable:
+      "The Agent Host could not return its model status. Check the Host on the agent setup page.",
+    opencode_missing:
+      "OpenCode was not found on the Agent Host’s PATH. Install the version required by Nimbot and restart Nimbot.",
+    opencode_start_failed:
+      "OpenCode exited before it could serve models. Check that Nimbot is using OpenCode 2.2.7, then restart Nimbot.",
+    opencode_start_timeout:
+      "OpenCode did not become ready in time. Check the OpenCode installation and restart the agent.",
+    opencode_check_failed:
+      "OpenCode could not check the model or quota. Check the AI provider connection and model settings.",
+    quota_check_failed:
+      "OpenCode did not return quota data for the connected account. Check the OpenCode Console connection.",
   };
   const origins: Record<string, string> = {
     telegram: "Telegram",
@@ -108,10 +123,7 @@
       <button class="btn" type="submit" disabled={busy}>Save model</button>
     </form>
     {#if !catalog.catalogAvailable}
-      <p role="status">
-        Model catalog unavailable. Start the agent and refresh to load its
-        models.
-      </p>
+      <p role="status">Model catalog unavailable.</p>
     {/if}
   {:else}
     <p role="status">Model settings unavailable.</p>
@@ -123,10 +135,17 @@
   {#if data?.quota}
     {@const quota = data.quota}
     <p>
-      <strong>{quotaText[quota.state]}</strong>
+      <strong
+        >{quota.failure
+          ? "Model or quota check failed"
+          : quotaText[quota.state]}</strong
+      >
       {#if quota.model}
         · {quota.model.providerId}/{quota.model.modelId}{/if}
     </p>
+    {#if quota.failure}
+      <p role="status">{failureText[quota.failure]}</p>
+    {/if}
     {#if data.queued}<p>{number.format(data.queued)} queued</p>{/if}
     <p>Last checked {time(quota.checkedAt)}</p>
     {#if quota.windows.length}

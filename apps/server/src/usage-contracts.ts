@@ -48,6 +48,16 @@ export const quotaStatus = z.object({
     "model_unavailable",
   ]),
   checkedAt: z.int().nonnegative(),
+  failure: z
+    .enum([
+      "host_unavailable",
+      "opencode_missing",
+      "opencode_start_failed",
+      "opencode_start_timeout",
+      "opencode_check_failed",
+      "quota_check_failed",
+    ])
+    .optional(),
   windows: z
     .array(
       z.object({

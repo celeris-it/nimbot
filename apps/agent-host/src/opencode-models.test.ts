@@ -1,9 +1,28 @@
 import { expect, it, vi } from "vitest";
 import { createOpenCodeModels, quotaWindows } from "./opencode-models.js";
-import type { OpenCodeRequest } from "./opencode-api.js";
+import { OpenCodeStartupError, type OpenCodeRequest } from "./opencode-api.js";
 
 const consoleModel = { providerId: "opencode", modelId: "vendor/model" };
 const goModel = { providerId: "opencode-go", modelId: "model" };
+
+it.each([
+  "opencode_missing",
+  "opencode_start_failed",
+  "opencode_start_timeout",
+] as const)("reports %s without issuing a model admission", async (reason) => {
+  const request: OpenCodeRequest = async () => {
+    throw new OpenCodeStartupError(reason);
+  };
+  await expect(
+    createOpenCodeModels(request, () => false).check(null, true),
+  ).resolves.toEqual({
+    model: null,
+    state: "checking",
+    failure: reason,
+    checkedAt: expect.any(Number),
+    windows: [],
+  });
+});
 const resetsAt = 2_000_000_000_000;
 const budget = {
   id: "rule",
@@ -94,9 +113,13 @@ it("waits for a valid response on a covered provider and invalidates permits on 
   expect(await models.check(null, true)).toMatchObject({
     state: "checking",
     model: consoleModel,
+    failure: "opencode_check_failed",
   });
   mode = "empty";
-  expect((await models.check(null, true)).state).toBe("checking");
+  expect(await models.check(null, true)).toMatchObject({
+    state: "checking",
+    failure: "quota_check_failed",
+  });
   mode = "limited";
   expect((await models.check(consoleModel, true)).state).toBe("exhausted");
   mode = "ready";

@@ -50,6 +50,12 @@ export interface ModelCheck {
     | "checking"
     | "model_unavailable";
   checkedAt: number;
+  failure?:
+    | "opencode_missing"
+    | "opencode_start_failed"
+    | "opencode_start_timeout"
+    | "opencode_check_failed"
+    | "quota_check_failed";
   windows: {
     name: string;
     usedPercent: number;

@@ -7,7 +7,7 @@ import type {
   ModelReference,
 } from "./engine-usage.js";
 import { readOpenCodeCredentials } from "./opencode-auth.js";
-import type { OpenCodeRequest } from "./opencode-api.js";
+import { OpenCodeStartupError, type OpenCodeRequest } from "./opencode-api.js";
 
 const apiModelRef = z.object({
   providerID: z.string().min(1).max(256),
@@ -228,7 +228,8 @@ export function createOpenCodeModels(
             const rawLimits = await request("/api/experimental/usage/limits", {
               timeout: 17_000,
             });
-            if (limits.parse(rawLimits).data === null) return result;
+            if (limits.parse(rawLimits).data === null)
+              return { ...result, failure: "quota_check_failed" };
             result.windows = quotaWindows(rawLimits, model, source === "go");
           }
         }
@@ -246,8 +247,14 @@ export function createOpenCodeModels(
           };
         }
         return result;
-      } catch {
-        return result;
+      } catch (error) {
+        return {
+          ...result,
+          failure:
+            error instanceof OpenCodeStartupError
+              ? error.reason
+              : "opencode_check_failed",
+        };
       }
     },
     accept(admission: ModelAdmission) {

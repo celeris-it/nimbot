@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import type { AgentHostConfig } from "./agent-host.js";
+import { log } from "./logger.js";
 import {
   modelCatalog,
   modelCheck,
@@ -254,6 +255,7 @@ export function createAgentUsage(
       model: selected,
       state: "checking" as const,
       checkedAt,
+      failure: "host_unavailable" as const,
       windows: [],
       admission: undefined,
     }));
@@ -265,11 +267,14 @@ export function createAgentUsage(
       quota.model = previous.model;
       quota.windows = previous.windows;
     }
-    if (
-      !store.saveQuota(id, revision, quota) &&
-      store.settings(id).revision !== revision
-    )
-      return undefined;
+    const latest = store.settings(id);
+    if (store.saveQuota(id, revision, quota)) {
+      if (quota.failure && quota.failure !== latest.quota?.failure)
+        log.warn("agent.model_check_failed", {
+          agentId: id,
+          reason: quota.failure,
+        });
+    } else if (latest.revision !== revision) return undefined;
     return quota.state === "available" || quota.state === "unavailable"
       ? response.admission
       : undefined;

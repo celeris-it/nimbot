@@ -22,6 +22,59 @@ const tokens = {
   cacheWrite: 1,
 };
 
+it("preserves model check failure reasons and clears them on recovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "nimbot-usage-failure-"));
+  const path = join(root, "server.sqlite");
+  const tasks = openTaskStore(path);
+  const store = openAgentUsage(path);
+  const admission = { model, revision: randomUUID() };
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      Response.json({
+        model: null,
+        state: "checking",
+        failure: "opencode_start_failed",
+        checkedAt: 1,
+        windows: [],
+      }),
+    )
+    .mockResolvedValueOnce(
+      new Response("private engine details", { status: 503 }),
+    )
+    .mockImplementation(async () =>
+      Response.json({
+        model,
+        state: "unavailable",
+        checkedAt: Date.now(),
+        windows: [],
+        admission,
+      }),
+    );
+  const usage = createAgentUsage(
+    store,
+    createHostUsage(
+      async () => ({ url: "http://host.test", token: "test" }),
+      request,
+    ),
+  );
+  try {
+    expect(await usage.prepare("a")).toBeUndefined();
+    expect(usage.report("a").quota?.failure).toBe("opencode_start_failed");
+    expect(await usage.prepare("a")).toBeUndefined();
+    expect(usage.report("a").quota?.failure).toBe("host_unavailable");
+    expect(JSON.stringify(usage.report("a"))).not.toContain(
+      "private engine details",
+    );
+    expect(await usage.prepare("a")).toEqual(admission);
+    expect(usage.report("a").quota?.failure).toBeUndefined();
+  } finally {
+    store.close();
+    tasks.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("leaves chats, schedules and webhooks in one FIFO until the provider check succeeds", async () => {
   const root = await mkdtemp(join(tmpdir(), "nimbot-usage-"));
   const file = join(root, "server.sqlite");

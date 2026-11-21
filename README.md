@@ -379,6 +379,10 @@ Install Node.js 22.13 or newer, the pinned pnpm version, OpenCode 2.2.7
 (`pnpm add --global --allow-build=@opencode/cli @opencode/cli@2.2.7`), and Chromium with
 `pnpm --filter @nimbot/agent-host exec playwright install --with-deps chromium`.
 Generate the panel password hash as described above and set it in `.env`.
+Run `pnpm exec opencode --version` to check which CLI native development uses. An older
+binary earlier on PATH can prevent the model catalog from loading and leave
+tasks queued. The agent’s **Model and usage** page shows the check failure, and
+the Server logs an `agent.model_check_failed` event when the reason changes.
 `pnpm dev` builds all workspaces, serves the compiled panel from the Server,
 selects `NIMBOT_MODE=native`, and detects the usual shared Chromium installation
 cache. Set `PLAYWRIGHT_BROWSERS_PATH` when using another installation path.

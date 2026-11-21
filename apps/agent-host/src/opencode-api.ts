@@ -17,6 +17,15 @@ export class OpenCodeApiError extends Error {
   }
 }
 
+export class OpenCodeStartupError extends Error {
+  constructor(
+    readonly reason:
+      "opencode_missing" | "opencode_start_failed" | "opencode_start_timeout",
+  ) {
+    super("OpenCode API could not start");
+  }
+}
+
 export type OpenCodeRequest = (
   path: string,
   options?: { method?: string; body?: object; timeout?: number },
@@ -50,16 +59,24 @@ export function createOpenCodeApi(workspace: string) {
     const attempt = new Promise<{ url: URL; password: string }>(
       (resolve, reject) => {
         const timer = setTimeout(() => {
-          reject(new Error("OpenCode API startup timed out"));
+          reject(new OpenCodeStartupError("opencode_start_timeout"));
           void stopEngine(child);
         }, 8_000);
-        const unavailable = () => {
+        const unavailable = (
+          reason: "opencode_missing" | "opencode_start_failed",
+        ) => {
           clearTimeout(timer);
-          reject(new Error("OpenCode API process exited"));
+          reject(new OpenCodeStartupError(reason));
           if (pending === attempt) pending = undefined;
         };
-        child.once("error", unavailable);
-        child.once("exit", unavailable);
+        child.once("error", (error: NodeJS.ErrnoException) =>
+          unavailable(
+            error.code === "ENOENT"
+              ? "opencode_missing"
+              : "opencode_start_failed",
+          ),
+        );
+        child.once("exit", () => unavailable("opencode_start_failed"));
         lines.on("line", (line) => {
           try {
             const value = JSON.parse(line) as { url?: string };
