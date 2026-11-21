@@ -384,8 +384,9 @@ Re-run the command after source changes. The existing `pnpm dev:panel` command
 remains available for panel hot reload during UI development.
 
 Native mode requires a loopback panel address and stores data in
-`.nimbot-native/` by default. Set `SERVER_STATE_DIR` to a fresh directory to use
-another location; previous Server databases are rejected without modification.
+`.nimbot-native/` by default. Set `SERVER_STATE_DIR` to use another location.
+See [native startup troubleshooting](#native-startup-troubleshooting) if the
+Server rejects the existing database or the panel port is already in use.
 `NIMBOT_MODE=native pnpm start:server` starts already compiled code; configure
 `PLAYWRIGHT_BROWSERS_PATH` explicitly in that case. The Server starts and restores
 each agent as a child process and keeps bot polling and credentials in the Server.
@@ -432,6 +433,27 @@ NIMBOT_TEST_NATIVE_BROWSER=1 pnpm test tests/native-browser.integration.test.ts
 It runs two real browser probes concurrently against a local web fixture. It verifies separate persistent cookies
 and local storage across later CLI invocations, including executable paths with
 spaces and shell metacharacters. CI runs this gate after installing Chromium.
+
+### Native startup troubleshooting
+
+If `pnpm dev` reports `A fresh subprocess installation is required`, check
+`SERVER_STATE_DIR` in `.env`. If it points to data from a previous installation,
+such as `.nimbot`, change it to an unused directory. For example, use the native
+default if you have yet to initialize it.
+
+```dotenv
+SERVER_STATE_DIR=.nimbot-native
+```
+
+Run `pnpm dev` again. Keep the old data directory. The subprocess release starts
+with zero agents and has no migration or import path for the previous layout.
+
+If port 3000 is already in use, set both `PANEL_PORT` and `PANEL_URL` to an
+available port and open the matching URL in your browser.
+
+```sh
+PANEL_PORT=3001 PANEL_URL=http://localhost:3001 pnpm dev
+```
 
 ### Runtime configuration
 
