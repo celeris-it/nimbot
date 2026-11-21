@@ -72,11 +72,11 @@
 
 <h1 tabindex="-1">AI providers for {agent.name}</h1>
 <p>
-  Credentials belong only to this agent and stay in its private container
-  volume.
+  Credentials are saved in this agent's engine-state directory. All agents and
+  the Server share access under one OS account.
 </p>
 <p id="provider-help">
-  The container must be running and idle to change authentication. Saving a key
+  The Agent Host must be running and idle to change authentication. Saving a key
   does not verify its validity, balance, or model access. OpenCode chooses the
   model automatically until you choose one for this agent.
 </p>

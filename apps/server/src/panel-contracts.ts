@@ -72,23 +72,12 @@ export interface AgentDetail extends AgentSummary {
   settings?: { name: string; instructions: string };
   /** Present when the memory tools can be switched for this agent. */
   memoryEnabled?: boolean;
-  recovery?: import("./agent-recovery-inspection.js").RecoveryInspection;
-  containerState?: "running" | "stopped" | "missing" | "unavailable";
   providerChecks?: import("./provider-contracts.js").ProviderCheck[];
   hostState?: "ready" | "busy" | "unavailable";
-  stopObservation?: {
-    availability: "available" | "unavailable";
-    hadTask: boolean;
-    observedAt: number;
-    finalStatus: "completed" | "failed" | "interrupted" | null;
-  };
   capabilities: {
     edit: boolean;
     replaceToken: boolean;
-    container: boolean;
     process?: { start: boolean; stop: boolean; restart: boolean };
-    cancel: boolean;
-    retry: boolean;
     delete: boolean;
   };
 }

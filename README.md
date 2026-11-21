@@ -135,7 +135,7 @@ MCP connections originate on the Server and use the saved HTTPS endpoint and the
 
 ### Agent lifecycle
 
-The server verifies BotFather tokens with Telegram and rejects bots already linked to another agent. Tokens remain in private server-side files; SQLite holds credential references. Replacing a token must preserve the bot's identity and takes effect after a server restart. Switching an existing agent to a different bot is outside the current scope.
+The server verifies BotFather tokens with Telegram and rejects bots already linked to another agent. Tokens remain in private server-side files; SQLite holds credential references. Replacing a token must preserve the bot's identity and takes effect after restarting that agent. Switching an existing agent to a different bot is outside the current scope.
 
 Agent names and instructions persist across restarts. Instructions are snapshotted as context for each new task; edits do not modify running work or the Telegram bot's profile. Names allow up to 128 characters and instructions up to 4000 characters.
 

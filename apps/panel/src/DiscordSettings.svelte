@@ -62,7 +62,7 @@
       </p>
       <p>
         A channel connection does not confirm that the agent is ready to run
-        tasks. Check its container and Agent Host status above.
+        tasks. Check its process and Agent Host status above.
       </p>
     {/if}
     <dl>

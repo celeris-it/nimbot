@@ -328,7 +328,7 @@ test("pages through delegation history and cancels only the selected child", asy
 async function openProviders(page: Page) {
   await login(page);
   await page.goto("/agents/dev/setup");
-  await page.getByRole("button", { name: "Start container" }).click();
+  await page.getByRole("button", { name: "Start agent" }).click();
   await page.getByRole("link", { name: "Configure AI providers" }).click();
   await expect(
     page.getByRole("heading", { name: "AI providers for Developer" }),
@@ -338,9 +338,7 @@ async function openProviders(page: Page) {
 async function openSchedules(page: Page) {
   await login(page);
   await page.getByRole("link", { name: "Manage", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Start container", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Start agent", exact: true }).click();
   await page.getByRole("link", { name: "Manage schedules" }).click();
   await expect(
     page.getByRole("heading", { name: "Schedules for Developer" }),
@@ -802,7 +800,7 @@ test("logs in, follows deep links and browser history, and signs out", async ({
   expect(violations).toEqual([]);
 });
 
-test("preserves nonsecret creation fields on failure, clears the token and cancels setup", async ({
+test("preserves nonsecret creation fields on failure, clears the token and starts the Host", async ({
   page,
 }) => {
   await login(page);
@@ -821,9 +819,8 @@ test("preserves nonsecret creation fields on failure, clears the token and cance
   await page.getByLabel("Telegram bot token").fill("valid-token");
   await page.getByRole("button", { name: "Create agent" }).click();
   await expect(page).toHaveURL(/\/agents\/created\/setup$/);
-  await page.getByRole("button", { name: "Cancel setup" }).click();
   await expect(
-    page.getByText("Cancellation requested; waiting", { exact: false }),
+    page.getByRole("heading", { name: "Agent Host running." }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel setup" })).toHaveCount(
     0,
@@ -853,35 +850,34 @@ test("saves edits without document navigation and does not overwrite a draft", a
   ).toBeVisible();
 });
 
-test("replaces a token, starts and confirms stopping a container", async ({
+test("replaces a token, starts and confirms stopping an agent process", async ({
   page,
 }) => {
   await login(page);
   await page.goto("/agents/dev/token");
   await page.getByLabel("New Telegram token").fill("valid-token");
   await page.getByRole("button", { name: "Save token" }).click();
-  await expect(page.getByRole("status")).toContainText("restart the server");
+  await expect(page.getByRole("status")).toContainText("Restart this agent");
   await expect(page.getByLabel("New Telegram token")).toHaveValue("");
   await page.getByRole("link", { name: "Back to agent" }).click();
   await expect(
-    page.getByRole("heading", { name: "Container stopped." }),
+    page.getByRole("heading", { name: "Agent Host stopped." }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Start container" }).click();
+  await page.getByRole("button", { name: "Start agent" }).click();
   await expect(
-    page.getByRole("heading", { name: "Container available." }),
+    page.getByRole("heading", { name: "Agent Host running." }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Stop container…" }).click();
+  await page.getByRole("link", { name: "Stop agent…" }).click();
   await expect(
     page.getByRole("heading", { name: "Stop Developer?" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Confirm stop" }).click();
   await expect(
-    page.getByRole("heading", { name: "Container stopped." }),
+    page.getByRole("heading", { name: "Agent Host stopped." }),
   ).toBeVisible();
-  await expect(
-    page.getByText("Task interrupted.", { exact: true }),
-  ).toBeVisible();
-  await expect(page.locator("body")).not.toContainText("private-task-id");
+  await expect(page.getByRole("status")).toContainText(
+    "Agent stopped. Files and history were kept.",
+  );
 });
 
 for (const deleteData of [false, true])
@@ -1140,6 +1136,7 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
       name: "Developer",
       botUsername: "developer_bot",
       provisioning: "ready",
+      process: { state: "running", desiredState: "running" },
       botConnection: { status: "polling" },
       setupAccess: { bot: "linked", owner: "verified" },
     },
@@ -1148,6 +1145,7 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
       name: "Writer",
       botUsername: "writer_bot",
       provisioning: "pending",
+      process: { state: "stopped", desiredState: "stopped" },
       botConnection: { status: "not_started" },
       setupAccess: { bot: "linked", owner: "pending" },
     },
@@ -1156,6 +1154,7 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
       name: "Research",
       botUsername: "research_bot",
       provisioning: "failed",
+      process: { state: "failed", desiredState: "running" },
       botConnection: { status: "blocked" },
       setupAccess: { bot: "linked", owner: "pending" },
     },
@@ -1169,7 +1168,7 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
     overview.locator(".stat").filter({ hasText: "Total agents" }),
   ).toContainText("03");
   await expect(
-    overview.locator(".stat").filter({ hasText: "Configured" }),
+    overview.locator(".stat").filter({ hasText: "Running" }),
   ).toContainText("01");
   await expect(
     overview.locator(".stat").filter({ hasText: "Needs attention" }),
@@ -1244,6 +1243,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
             name: "Developer",
             botUsername: "nimbot_developer_bot",
             provisioning: "ready",
+            process: { state: "running", desiredState: "running" },
             botConnection: { status: "polling" },
             setupAccess: { bot: "linked", owner: "verified" },
           },
@@ -1252,6 +1252,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
             name: "Research assistant",
             botUsername: "nimbot_research_bot",
             provisioning: "ready",
+            process: { state: "running", desiredState: "running" },
             botConnection: { status: "polling" },
             setupAccess: { bot: "linked", owner: "pending" },
           },
@@ -1260,6 +1261,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
             name: "Content studio",
             botUsername: "nimbot_content_bot",
             provisioning: "provisioning",
+            process: { state: "starting", desiredState: "running" },
             botConnection: { status: "connecting" },
             setupAccess: { bot: "linked", owner: "pending" },
           },
@@ -1268,6 +1270,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
             name: "Operations",
             botUsername: "nimbot_ops_bot",
             provisioning: "failed",
+            process: { state: "failed", desiredState: "running" },
             botConnection: { status: "blocked" },
             setupAccess: { bot: "linked", owner: "pending" },
           },
@@ -1276,6 +1279,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
             name: "Personal assistant",
             botUsername: "nimbot_personal_bot",
             provisioning: "ready",
+            process: { state: "running", desiredState: "running" },
             botConnection: { status: "polling" },
             setupAccess: { bot: "linked", owner: "verified" },
           },
@@ -1310,16 +1314,20 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   expect(external).toEqual([]);
 });
 
-test("retries a failed setup from the agent page", async ({
+test("starts a failed Host from the saved agent page", async ({
   page,
   request,
 }) => {
   await login(page);
   await request.post("/__test/fail/dev");
   await page.goto("/agents/dev/setup");
-  await expect(page.getByText("Setup did not finish.")).toBeVisible();
-  await page.getByRole("button", { name: "Retry setup" }).click();
-  await expect(page.getByText("Setup restarted.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Agent Host failed." }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Start agent" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Agent Host running." }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry setup" })).toHaveCount(
     0,
   );
@@ -1539,145 +1547,112 @@ test("creates a webhook schedule, shows credentials, triggers it, and revokes it
   await expect(page.getByLabel("Time zone", { exact: true })).not.toBeVisible();
 });
 
-test("recovers a missing container and displays Start only after recovery", async ({
-  page,
-}) => {
-  await login(page);
-  let recovered = false;
-  await page.route("**/api/agents/dev", async (route) => {
-    const response = await route.fetch();
-    const agent = await response.json();
-    await route.fulfill({
-      response,
-      json: {
-        ...agent,
-        containerState: recovered ? "stopped" : "missing",
-        recovery: recovered ? undefined : { status: "available" },
-        capabilities: { ...agent.capabilities, container: recovered },
-      },
-    });
-  });
-  await page.route("**/api/agents/dev/recover", async (route) => {
-    expect(route.request().method()).toBe("POST");
-    expect(route.request().postData() ?? "").toBe("");
-    recovered = true;
-    await route.fulfill({ json: { agentId: "dev", recovery: "restored" } });
-  });
-  await page.goto("/agents/dev/setup");
-  const start = page.getByRole("button", { name: "Start container" });
-  await expect(start).toHaveCount(0);
-  await page.getByRole("button", { name: "Recover on this server" }).click();
-  await expect(
-    page.getByText("Recovery complete. Select Start container to resume work."),
-  ).toBeVisible();
-  await expect(start).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Recover on this server" }),
-  ).toHaveCount(0);
-});
-
-test("manages native processes with shared-trust guidance and interruption confirmations", async ({
-  page,
-  request,
-}) => {
-  await request.post("/__test/native");
-  await login(page);
-  await expect(page.getByLabel("Shared installation trust")).toContainText(
-    "Native development",
-  );
-  await expect(page.getByLabel("Shared installation trust")).toContainText(
-    "bot tokens, MCP credentials, Host secrets and server.sqlite",
-  );
-  await expect(page.getByLabel("Shared installation trust")).toContainText(
-    "not a security boundary",
-  );
-  await page.goto("/agents/dev/setup");
-  await expect(
-    page.getByRole("heading", { name: "Agent Host stopped." }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Start container" }),
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: "Start agent", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Agent Host running." }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Start agent", exact: true }),
-  ).toHaveCount(0);
-  await page.getByRole("link", { name: "Restart agent…" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Restart Developer?" }),
-  ).toBeFocused();
-  await expect(
-    page.getByText("Active work may be interrupted.", { exact: false }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Cancel", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Agent Host running." }),
-  ).toBeVisible();
-  await page.screenshot({
-    path: "/tmp/nimbot-native-running.png",
-    fullPage: true,
-  });
-  await page.getByRole("link", { name: "Restart agent…" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Restart Developer?" }),
-  ).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(
-    page.getByRole("button", { name: "Confirm restart" }),
-  ).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(
-    page.getByRole("heading", { name: "Agent Host running." }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Stop agent…" }).click();
-  await page.getByRole("button", { name: "Confirm stop" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Agent Host stopped." }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Start agent", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Delete agent…" }).click();
-  const purge = page.getByRole("checkbox", { name: /agent data directory/ });
-  await expect(purge).not.toBeChecked();
-  await expect(
-    page.getByText(/AI provider state and browser profile/),
-  ).toBeVisible();
-});
-
-test("shows native mode on narrow screens and uses process language during creation", async ({
-  page,
-  request,
-}) => {
-  await request.post("/__test/native");
-  await page.setViewportSize({ width: 320, height: 900 });
-  await login(page);
-  await expect(page.getByLabel("Shared installation trust")).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await page.goto("/agents/new");
-  await expect(page.getByText(/its Agent Host process starts/)).toBeVisible();
-  await expect(page.getByText(/its container is prepared/)).toHaveCount(0);
-  await page.screenshot({
-    path: "/tmp/nimbot-native-create-mobile.png",
-    fullPage: true,
-  });
-  for (const width of [320, 375]) {
-    await page.setViewportSize({ width, height: 900 });
+for (const deploymentMode of ["native", "docker"] as const)
+  test(`manages ${deploymentMode} processes with shared-trust guidance and interruption confirmations`, async ({
+    page,
+    request,
+  }) => {
+    if (deploymentMode === "native") await request.post("/__test/native");
+    await login(page);
+    await expect(page.getByLabel("Shared installation trust")).toContainText(
+      deploymentMode === "native" ? "Native development" : "Docker deployment",
+    );
+    await expect(page.getByLabel("Shared installation trust")).toContainText(
+      "bot tokens, MCP credentials, Host secrets and server.sqlite",
+    );
+    await expect(page.getByLabel("Shared installation trust")).toContainText(
+      "not a security boundary",
+    );
     await page.goto("/agents/dev/setup");
     await expect(
       page.getByRole("heading", { name: "Agent Host stopped." }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Start container" }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Start agent", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Agent Host running." }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Start agent", exact: true }),
+    ).toHaveCount(0);
+    await page.getByRole("link", { name: "Restart agent…" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Restart Developer?" }),
+    ).toBeFocused();
+    await expect(
+      page.getByText("Active work may be interrupted.", { exact: false }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Cancel", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Agent Host running." }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: `/tmp/nimbot-${deploymentMode}-running.png`,
+      fullPage: true,
+    });
+    await page.getByRole("link", { name: "Restart agent…" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Restart Developer?" }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+      page.getByRole("button", { name: "Confirm restart" }),
+    ).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("heading", { name: "Agent Host running." }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Stop agent…" }).click();
+    await page.getByRole("button", { name: "Confirm stop" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Agent Host stopped." }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Start agent", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Delete agent…" }).click();
+    const purge = page.getByRole("checkbox", { name: /agent data directory/ });
+    await expect(purge).not.toBeChecked();
+    await expect(purge).toHaveAccessibleName(
+      /AI provider state and browser profile/,
+    );
+  });
+
+for (const deploymentMode of ["native", "docker"] as const)
+  test(`shows ${deploymentMode} mode on narrow screens and uses process language during creation`, async ({
+    page,
+    request,
+  }) => {
+    if (deploymentMode === "native") await request.post("/__test/native");
+    await page.setViewportSize({ width: 320, height: 900 });
+    await login(page);
+    await expect(page.getByLabel("Shared installation trust")).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-  }
-});
+    await page.goto("/agents/new");
+    await expect(page.getByText(/its Agent Host process starts/)).toBeVisible();
+    await expect(page.getByText(/its container is prepared/)).toHaveCount(0);
+    await page.screenshot({
+      path: `/tmp/nimbot-${deploymentMode}-create-mobile.png`,
+      fullPage: true,
+    });
+    for (const width of [320, 375]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/agents/dev/setup");
+      await expect(
+        page.getByRole("heading", { name: "Agent Host stopped." }),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+    }
+  });

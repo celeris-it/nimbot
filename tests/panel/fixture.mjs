@@ -90,9 +90,7 @@ const scheduler = createScheduler({
   store: schedules,
   admit: async (schedule) => {
     const agent = agents.get(schedule.agentId);
-    return agent?.ownerLinked &&
-      agent.container === "running" &&
-      agent.provisioning === "ready"
+    return agent?.ownerLinked && agent.processState === "running"
       ? { platform: "telegram", botId: 123, chatId: 42 }
       : undefined;
   },
@@ -107,7 +105,8 @@ const pendingLogin = (id) =>
   ["starting", "awaiting_authorization"].includes(logins.get(id)?.state);
 function requireHost(id, mutate = false) {
   const agent = agents.get(id);
-  if (!agent || agent.container !== "running") throw new HostProviderError(503);
+  if (!agent || agent.processState !== "running")
+    throw new HostProviderError(503);
   if (mutate && (agent.authBusy || pendingLogin(id)))
     throw new HostProviderError(409);
 }
@@ -127,9 +126,7 @@ function reset() {
   agents.set("dev", {
     name: "Developer",
     instructions: "Be brief",
-    provisioning: "ready",
-    container: "stopped",
-    cancelled: false,
+    processState: "stopped",
   });
 }
 reset();
@@ -146,7 +143,7 @@ const panel = createPanel(
     },
     processAction: async (id, action) => {
       const agent = agents.get(id);
-      agent.container = action === "stop" ? "stopped" : "running";
+      agent.processState = action === "stop" ? "stopped" : "running";
     },
     peers: {
       grants,
@@ -268,27 +265,20 @@ const panel = createPanel(
         ? {
             name: agent.name,
             botUsername: "developer_bot",
-            provisioning: nativeMode
-              ? agent.container === "running"
-                ? "ready"
-                : "pending"
-              : agent.provisioning,
-            cancellationRequested: agent.cancelled,
-            canCancelProvisioning:
-              !nativeMode && agent.provisioning === "provisioning",
+            provisioning:
+              agent.processState === "running" ? "ready" : "pending",
             botConnection: { status: "polling" },
             setupAccess: {
               bot: "linked",
               owner: agent.ownerLinked ? "verified" : "pending",
             },
-            ...(nativeMode
-              ? {
-                  process: {
-                    state: agent.container,
-                    desiredState: agent.container,
-                  },
-                }
-              : { containerOperation: agent.operation }),
+            process: {
+              state: agent.processState,
+              desiredState:
+                agent.processState === "failed"
+                  ? "running"
+                  : agent.processState,
+            },
           }
         : undefined;
     },
@@ -298,11 +288,9 @@ const panel = createPanel(
       agents.set(id, {
         name: input.name,
         instructions: input.instructions,
-        provisioning: "provisioning",
-        container: "running",
-        cancelled: false,
+        processState: "running",
       });
-      return { agentId: id, provisioning: "provisioning" };
+      return { agentId: id, provisioning: "ready" };
     },
     agentSettings: {
       get: (id) => {
@@ -316,37 +304,8 @@ const panel = createPanel(
       saveToken: async (_id, token) => {
         if (token !== "valid-token") throw new Error("private-token-error");
       },
-      cancelProvisioning: (id) => {
-        agents.get(id).cancelled = true;
-      },
-      containerStatus: async (id) =>
-        nativeMode ? undefined : agents.get(id).container,
       hostStatus: async (id) =>
-        agents.get(id).container === "running" ? "ready" : "unavailable",
-      stopObservation: async (id) =>
-        !nativeMode && agents.get(id).operation?.action === "stop"
-          ? {
-              availability: "available",
-              task: { id: "private-task-id", status: "running" },
-              observedAt: 1234,
-              observationId: "private-id",
-              finalStatus: "interrupted",
-            }
-          : undefined,
-    },
-    containerAction: async (id, action) => {
-      const agent = agents.get(id);
-      agent.container = action === "start" ? "running" : "stopped";
-      agent.operation = { action, status: "completed", updatedAt: Date.now() };
-    },
-    provisionAgent: async (id) => {
-      const agent = agents.get(id);
-      if (
-        !agent ||
-        !["failed", "interrupted", "cancelled"].includes(agent.provisioning)
-      )
-        throw new Error("private-provisioning-error");
-      agent.provisioning = "ready";
+        agents.get(id).processState === "running" ? "ready" : "unavailable",
     },
     deleteAgent: async (id) => {
       schedules.removeByAgent(id);
@@ -371,7 +330,7 @@ app.post("/__test/capabilities/:id", (c) => {
     ...agents.get("dev"),
     name: "Researcher",
     ownerId,
-    container: "running",
+    processState: "running",
   });
   const memory = openMemoryStore(":memory:");
   memoryStores.set(id, memory);
@@ -422,14 +381,14 @@ app.post("/__test/mcp/:id/block/:tool", (c) => {
   });
 });
 app.post("/__test/fail/:id", (c) => {
-  agents.get(c.req.param("id")).provisioning = "failed";
+  agents.get(c.req.param("id")).processState = "failed";
   return c.json({ ok: true });
 });
 app.post("/__test/agent/:id", (c) => {
   agents.set(c.req.param("id"), {
     ...agents.get("dev"),
     name: "Researcher",
-    container: "running",
+    processState: "running",
     authBusy: false,
   });
   return c.json({ ok: true });
@@ -472,11 +431,11 @@ app.post("/__test/owner/:id", (c) => {
 app.post("/__test/providers/:id/:state", (c) => {
   const id = c.req.param("id"),
     state = c.req.param("state");
-  if (state === "offline") agents.get(id).container = "stopped";
+  if (state === "offline") agents.get(id).processState = "stopped";
   else if (state === "busy") agents.get(id).authBusy = true;
   else if (state === "idle") {
     agents.get(id).authBusy = false;
-    agents.get(id).container = "running";
+    agents.get(id).processState = "running";
   } else if (state === "restart") logins.delete(id);
   else {
     const login = logins.get(id);

@@ -5,11 +5,9 @@
   import {
     processLabels,
     botLabel,
-    setupLabels,
     failureLabels,
     botAccessLabels,
     ownerLabels,
-    stopMessage,
     scheduleText,
   } from "./labels.js";
   let {
@@ -23,7 +21,7 @@
     agent: AgentDetail;
     busy: boolean;
     mcpAvailable: boolean;
-    action: (kind: "start" | "cancel" | "retry" | "recover") => Promise<void>;
+    action: (kind: "start") => Promise<void>;
     refresh: () => void;
     discordAction: (
       kind: "save" | "remove" | "test",
@@ -39,17 +37,11 @@
     unverified: "Unverified",
     not_configured: "Not configured",
   };
-  const operationLabels = {
-    pending: "In progress",
-    completed: "Completed",
-    failed: "Failed",
-    interrupted: "Interrupted by a server restart",
-  };
   let base = $derived(`/agents/${encodeURIComponent(agent.id)}`);
   let available = $derived(
     agent.hostState
       ? agent.hostState === "ready" || agent.hostState === "busy"
-      : agent.provisioning === "ready",
+      : false,
   );
   let processMessage = $derived(
     agent.process?.state === "starting"
@@ -83,19 +75,9 @@
   <h2>
     {agent.process
       ? `Agent Host ${processLabels[agent.process.state].toLowerCase()}.`
-      : agent.containerState === "stopped"
-        ? "Container stopped."
-        : available
-          ? "Container available."
-          : "Agent offline."}
+      : "Agent Host unavailable."}
   </h2>
-  <p>
-    {agent.process
-      ? processMessage
-      : available
-        ? "The agent and its bot were saved and the container is available."
-        : "The agent and its bot were saved, but the container is not available yet. Do not create the same agent again."}
-  </p>
+  <p>{processMessage}</p>
   {#if agent.process}
     <p>Process: {processLabels[agent.process.state]}.</p>
     <p>
@@ -117,40 +99,7 @@
         class="btn"
         href={`${base}/process/restart`}>Restart agent…</a
       >{/if}
-  {:else}
-    <p>
-      Setup: {agent.provisioning === "provisioning" &&
-      agent.cancellationRequested
-        ? "Cancellation requested; waiting for the current operation to finish"
-        : (setupLabels[agent.provisioning] ?? "Unknown state")}.
-    </p>
   {/if}
-  {#if agent.capabilities.cancel}
-    <p>
-      Cancelling stops the remaining setup steps. Created resources are kept; a
-      container that already started may keep running.
-    </p>
-    <button class="btn" disabled={busy} onclick={() => action("cancel")}
-      >Cancel setup</button
-    >
-  {/if}
-  {#if agent.capabilities.retry}
-    <p>
-      Setup did not finish. Retrying keeps every resource already created and
-      does not duplicate the agent.
-    </p>
-    <button class="btn" disabled={busy} onclick={() => action("retry")}
-      >Retry setup</button
-    >
-  {/if}
-  {#if agent.containerState}<p>
-      Container: {{
-        running: "Running",
-        stopped: "Stopped",
-        missing: "Not found",
-        unavailable: "Unavailable",
-      }[agent.containerState]}
-    </p>{/if}
   {#if agent.hostState}<p>
       Agent Host: {{ ready: "Available", busy: "Busy", unavailable: "Offline" }[
         agent.hostState
@@ -183,18 +132,6 @@
       {/if}
     </section>
   {/if}
-  {#if agent.containerOperation}
-    <p>
-      Last operation: {agent.containerOperation.action === "start"
-        ? "Start"
-        : "Stop"} — {operationLabels[agent.containerOperation.status]}.
-    </p>
-    {#if agent.containerOperation.action === "stop" && !agent.stopObservation}<p
-      >
-        An active task may be interrupted. Its result will be confirmed when the
-        agent is available again.
-      </p>{/if}
-  {/if}
   {#if agent.setupAccess}
     <dl>
       <dt>Bot link</dt>
@@ -202,31 +139,6 @@
       <dt>Owner verification</dt>
       <dd>{ownerLabels[agent.setupAccess.owner]}</dd>
     </dl>
-  {/if}
-  {#if agent.stopObservation}
-    <section aria-label="Task at the last stop">
-      <h2>Task at the last stop</h2>
-      <p>{stopMessage(agent.stopObservation)}</p>
-      <p>
-        Pre-stop check: {new Date(
-          agent.stopObservation.observedAt,
-        ).toISOString()}.
-      </p>
-    </section>
-  {/if}
-  {#if agent.recovery?.status === "available"}
-    <p>Recovery uses the restored volumes and leaves the container stopped.</p>
-    <button class="btn" disabled={busy} onclick={() => action("recover")}>
-      Recover on this server
-    </button>
-  {:else if agent.recovery?.status === "blocked"}
-    <p>{agent.recovery.message}</p>
-  {/if}
-  {#if agent.capabilities.container}
-    <button class="btn" disabled={busy} onclick={() => action("start")}
-      >Start container</button
-    >
-    <a class="btn" href={`${base}/container/stop`}>Stop container…</a>
   {/if}
   <dl>
     <dt>Identifier</dt>

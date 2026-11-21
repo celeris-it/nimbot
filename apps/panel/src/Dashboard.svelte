@@ -21,12 +21,10 @@
 
   let {
     agents,
-    processManaged = false,
     canCreate,
     refresh,
   }: {
     agents: AgentSummary[];
-    processManaged?: boolean;
     canCreate: boolean;
     refresh: () => void;
   } = $props();
@@ -34,11 +32,11 @@
   let filter = $state("all");
   let selectedId = $state("");
   const attention = (item: AgentSummary) =>
-    ["failed", "interrupted", "cancelled"].includes(item.provisioning) ||
+    item.process?.state === "failed" ||
     item.botConnection?.status === "failed" ||
     item.botConnection?.status === "blocked";
   let configured = $derived(
-    agents.filter((item) => item.provisioning === "ready").length,
+    agents.filter((item) => item.process?.state === "running").length,
   );
   let connected = $derived(
     agents.filter((item) => item.botConnection?.status === "polling").length,
@@ -53,7 +51,7 @@
         matches &&
         (filter === "all" ||
           (filter === "ready"
-            ? item.provisioning === "ready"
+            ? item.process?.state === "running"
             : attention(item)))
       );
     }),
@@ -63,14 +61,7 @@
     filtered.find((item) => item.id === selectedId) ?? filtered[0],
   );
   const setupLabel = (item: AgentSummary) =>
-    item.process
-      ? processLabels[item.process.state]
-      : item.provisioning === "ready"
-        ? "Configured"
-        : item.provisioning === "provisioning"
-          ? "Setting up"
-          : item.provisioning.charAt(0).toUpperCase() +
-            item.provisioning.slice(1);
+    item.process ? processLabels[item.process.state] : "Unavailable";
 </script>
 
 <div data-ui="page-heading">
@@ -104,9 +95,9 @@
         description="Independent workspaces"
       />
       <Metric
-        label={processManaged ? "Running" : "Configured"}
+        label="Running"
         value={configured.toString().padStart(2, "0")}
-        description={processManaged ? "Agent Hosts running" : "Setup completed"}
+        description="Agent Hosts running"
       />
       <Metric
         label="Needs attention"
@@ -180,7 +171,7 @@
         { value: "all", label: "All agents", count: agents.length },
         {
           value: "ready",
-          label: processManaged ? "Running" : "Configured",
+          label: "Running",
           count: configured,
         },
         { value: "attention", label: "Needs attention", count: needsAttention },
@@ -192,7 +183,7 @@
       title="A workspace for your next idea."
       description={canCreate
         ? "No agents yet. Create your first agent."
-        : "No agents yet. Configure server provisioning to create agents from the panel."}
+        : "No agents yet. Agent creation is unavailable."}
     />
   {:else if !selected}
     <EmptyState
@@ -242,7 +233,7 @@
             label={setupLabel(selected)}
             tone={attention(selected)
               ? "warning"
-              : selected.provisioning === "ready"
+              : selected.process?.state === "running"
                 ? "good"
                 : "neutral"}
           />

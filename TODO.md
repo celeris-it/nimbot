@@ -81,8 +81,13 @@ path first, then the recommended Docker deployment in the next milestone.
       Progress: both runtime entry paths now use subprocesses. Removed the unused
       Docker preflight, image resolution, per-agent provisioner, provisioning
       cancellation control and resource-removal service with their obsolete tests.
-      The legacy registry, recovery/reconciliation code and panel controls remain
-      to be removed in subsequent changes.
+      The panel now exposes only process actions in both modes. Retired container,
+      provisioning, resource-removal and recovery endpoints and browser controls
+      have been removed; tests exercise both deployment modes and reject the old
+      routes. Removed the unused container action, volume-based recovery,
+      recovery work gate and container-stop observation services. The legacy
+      registry and Docker reconciliation/template helpers remain to be removed
+      in subsequent changes.
 - [ ] Replace Compose-dependent install and operations steps with Docker CLI
       instructions. Review install, uninstall, and release scripts for
       assumptions about per-agent containers, volumes, and networks.

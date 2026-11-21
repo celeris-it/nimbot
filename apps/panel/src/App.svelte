@@ -82,7 +82,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|usage|memory|approvals|peers|delegations|mcp|schedules|token|delete|container\/stop|process\/(?:stop|restart))$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|usage|memory|approvals|peers|delegations|mcp|schedules|token|delete|process\/(?:stop|restart))$/,
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
@@ -119,8 +119,7 @@
                                   ? "Delete agent"
                                   : route?.[2] === "process/restart"
                                     ? "Restart agent"
-                                    : route?.[2] === "process/stop" ||
-                                        route?.[2] === "container/stop"
+                                    : route?.[2] === "process/stop"
                                       ? "Stop agent"
                                       : "Agent setup",
   );
@@ -336,7 +335,6 @@
           (view === "settings" && !agent.capabilities.edit) ||
           (view === "token" && !agent.capabilities.replaceToken) ||
           (view === "delete" && !agent.capabilities.delete) ||
-          (view === "container/stop" && !agent.capabilities.container) ||
           (view === "process/stop" && !agent.capabilities.process?.stop) ||
           (view === "process/restart" && !agent.capabilities.process?.restart);
       } else
@@ -422,7 +420,7 @@
         () => {
           notice =
             mode === "token"
-              ? "Token saved. If the bot is already connected, restart the server to apply the change."
+              ? "Token saved. Restart this agent to reconnect its bot."
               : "Changes saved.";
         },
       );
@@ -471,48 +469,23 @@
       },
     );
   }
-  async function action(
-    kind:
-      "start" | "restart" | "cancel" | "retry" | "stop" | "delete" | "recover",
-  ) {
+  async function action(kind: "start" | "restart" | "stop" | "delete") {
     if (!agent) return;
     const id = encodeURIComponent(agent.id);
-    const processManaged = !!agent.process;
-    const target =
-      kind === "cancel"
-        ? "provision/cancel"
-        : kind === "retry"
-          ? "provision"
-          : kind === "delete"
-            ? "delete"
-            : kind === "recover"
-              ? "recover"
-              : processManaged
-                ? "process"
-                : "container";
+    const target = kind === "delete" ? "delete" : "process";
     await mutate(
       `/api/agents/${id}/${target}`,
-      kind === "recover"
-        ? {}
-        : { action: kind, confirm: agent.id, deleteData: String(deleteData) },
+      { action: kind, confirm: agent.id, deleteData: String(deleteData) },
       () => {
         if (kind === "delete") navigate("/");
         else if (kind === "stop" || kind === "restart") {
+          navigate(`/agents/${id}/setup`);
           notice =
             kind === "restart"
               ? "Agent restarted. Active work may have been interrupted."
               : "Agent stopped. Files and history were kept.";
-          navigate(`/agents/${id}/setup`);
         } else {
-          notice = processManaged
-            ? "Agent started."
-            : kind === "cancel"
-              ? "Cancellation requested."
-              : kind === "retry"
-                ? "Setup restarted."
-                : kind === "recover"
-                  ? "Recovery complete. Select Start container to resume work."
-                  : "Operation sent to Docker. The Agent Host may take a few seconds to become available.";
+          notice = "Agent started.";
           controller?.abort();
           controller = undefined;
           inFlight = false;
@@ -940,7 +913,6 @@
     <a class="btn" href="/">Back to panel</a>
   {:else if path === "/"}
     <Dashboard
-      processManaged={native || status.agents.some((item) => !!item.process)}
       agents={status.agents}
       canCreate={session?.capabilities.createAgent ?? false}
       refresh={() => load()}
@@ -981,12 +953,7 @@
       <button type="submit" class="btn" disabled={busy}>Save settings</button>
     </form>
   {:else if path === "/agents/new"}
-    {#key path}<AgentForm
-        mode="new"
-        processManaged={true}
-        {busy}
-        {submit}
-      />{/key}
+    {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
   {:else if path === "/mcp"}
     <h1 tabindex="-1">MCP catalog</h1>
     <a class="btn btn-primary" href="/mcp/new">Add integration</a>
@@ -1112,13 +1079,7 @@
         refresh={() => load()}
       />
     {:else if route[2] === "settings" || route[2] === "token"}
-      {#key path}<AgentForm
-          mode={route[2]}
-          processManaged={!!agent.process || native}
-          {agent}
-          {busy}
-          {submit}
-        />{/key}
+      {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
     {:else if route[2] === "process/stop" || route[2] === "process/restart"}
       <h1 tabindex="-1">
         {route[2] === "process/restart" ? "Restart" : "Stop"}
@@ -1144,24 +1105,12 @@
       <a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
         >Cancel</a
       >
-    {:else if route[2] === "container/stop"}
-      <h1 tabindex="-1">Stop {agent.name}?</h1>
-      <p>
-        Its container will be stopped. An active task may be interrupted; its
-        status will be confirmed when the agent is available again. Files and
-        history are kept.
-      </p>
-      <button class="btn" disabled={busy} onclick={() => action("stop")}
-        >Confirm stop</button
-      ><a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-        >Cancel</a
-      >
     {:else if route[2] === "delete"}
       <h1 tabindex="-1">Delete {agent.name}?</h1>
       <p>
-        {agent.process
-          ? "Its Agent Host and Telegram polling will be stopped, and its local bot binding and connection credentials erased. Agent data is kept unless you explicitly delete it below."
-          : "Its container will be stopped and removed, its Telegram polling stopped, and its local bot binding and saved credentials erased."}
+        Its Agent Host and Telegram polling will be stopped, and its local bot
+        binding and connection credentials erased. Agent data is kept unless you
+        explicitly delete it below.
       </p>
       <p>
         This does not delete the bot in Telegram. Remove or revoke it separately
@@ -1177,10 +1126,8 @@
       >
         <label
           ><input class="checkbox" type="checkbox" bind:checked={deleteData} />
-          Also permanently delete {agent.process
-            ? "the agent data directory (workspace, history, AI provider state and browser profile)"
-            : "the persistent volume (workspace files and history)"}. Leave
-          unchecked to keep it.</label
+          Also permanently delete the agent data directory (workspace, history, AI
+          provider state and browser profile). Leave unchecked to keep it.</label
         >
         <button class="btn" type="submit" disabled={busy}
           >Confirm deletion</button

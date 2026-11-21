@@ -1,4 +1,3 @@
-import { RecoveryError, type createAgentRecovery } from "./agent-recovery.js";
 import type { ProviderCheck } from "./provider-contracts.js";
 import { HostProviderError } from "./host-providers.js";
 import type { createAgentUsage } from "./agent-usage.js";
@@ -36,7 +35,6 @@ import { parseForm, validated } from "./validate.js";
 import {
   approvalRuleForm,
   confirmForm,
-  containerForm,
   processForm,
   deleteAgentForm,
   delegationParams,
@@ -48,25 +46,17 @@ import {
   scheduleForm,
   providerKeyForm,
   registerAgentForm,
-  removeResourcesForm,
   settingsForm,
   tokenForm,
 } from "./panel-schemas.js";
 import { createMcpPanel, type McpPanelDeps } from "./mcp-panel.js";
 
 export interface RegisteredAgentSettings {
-  cancelProvisioning?(id: string): void;
   get(id: string): { name: string; instructions: string } | undefined;
   save(id: string, name: string, instructions: string): void;
   saveToken?(id: string, token: string): Promise<void>;
-  containerStatus?(
-    id: string,
-  ): Promise<"running" | "stopped" | "missing" | "unavailable">;
   providerChecks?(id: string): ProviderCheck[];
   hostStatus?(id: string): Promise<HostStatus>;
-  stopObservation?(
-    id: string,
-  ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
 export interface PanelDeps {
   deploymentMode?: "native" | "docker";
@@ -151,20 +141,6 @@ export interface PanelDeps {
       requestId: string,
     ): Promise<import("./notification-store.js").NotificationRecord>;
   };
-  /** Docker inventory shown in the status API; omitted when provisioning is off. */
-  resources?: () =>
-    | import("./resource-reconciliation.js").ResourceInventory
-    | Promise<import("./resource-reconciliation.js").ResourceInventory>;
-  recovery?: Pick<
-    ReturnType<typeof createAgentRecovery>,
-    "inspect" | "recover"
-  >;
-  provisionAgent?: (agentId: string) => Promise<void>;
-  removeResources?: (agentId: string, deleteData: boolean) => Promise<void>;
-  containerAction?: (
-    agentId: string,
-    action: "start" | "stop",
-  ) => Promise<void>;
   registerAgent?: (
     input: import("./agent-registration.js").AgentRegistrationInput,
   ) => Promise<{ agentId: string; provisioning: string }>;
@@ -175,9 +151,6 @@ export interface PanelDeps {
         provisioning: string;
         botConnection?: import("./registered-bots.js").RegisteredBotState;
         setupAccess?: import("./agent-access.js").AgentSetupAccess;
-        cancellationRequested?: boolean;
-        canCancelProvisioning?: boolean;
-        containerOperation?: import("./agent-registry.js").ContainerOperation;
         process?: {
           state: import("./agent-process-manager.js").ProcessStatus;
           desiredState?: "running" | "stopped";
@@ -199,10 +172,6 @@ export function createPanel(
   now = Date.now,
 ) {
   const {
-    resources,
-    provisionAgent,
-    removeResources,
-    containerAction,
     registerAgent,
     getAgentSetup,
     agentSettings,
@@ -939,16 +908,7 @@ export function createPanel(
     const id = c.req.param("id");
     const setup = getAgentSetup?.(id);
     if (!setup) return c.json({ error: "Agent not found." }, 404);
-    const [containerState, hostState, observation] = await Promise.all([
-      setup.process ? undefined : agentSettings?.containerStatus?.(id),
-      agentSettings?.hostStatus?.(id),
-      setup.process ? undefined : agentSettings?.stopObservation?.(id),
-    ]);
-    const recovery =
-      setup.provisioning === "ready" &&
-      (containerState === "missing" || containerState === "unavailable")
-        ? await deps.recovery?.inspect(id)
-        : undefined;
+    const hostState = await agentSettings?.hostStatus?.(id);
     const settings = agentSettings?.get(id);
     const discordConnection = deps.discord?.get(id);
     return c.json({
@@ -970,27 +930,11 @@ export function createPanel(
               : null,
           }
         : undefined,
-      containerState,
-      recovery,
       hostState,
       providerChecks: agentSettings?.providerChecks?.(id),
-      stopObservation: observation
-        ? {
-            availability: observation.availability,
-            hadTask:
-              observation.availability === "available" && !!observation.task,
-            observedAt: observation.observedAt,
-            finalStatus: observation.finalStatus,
-          }
-        : undefined,
       capabilities: {
         edit: !!settings,
         replaceToken: !!settings && !!agentSettings?.saveToken,
-        container:
-          !setup.process &&
-          setup.provisioning === "ready" &&
-          containerState !== "missing" &&
-          !!containerAction,
         process:
           setup.process && deps.processAction
             ? {
@@ -1004,15 +948,6 @@ export function createPanel(
                 restart: setup.process.state === "running",
               }
             : undefined,
-        cancel:
-          !setup.process &&
-          !!setup.canCancelProvisioning &&
-          !setup.cancellationRequested &&
-          !!agentSettings?.cancelProvisioning,
-        retry:
-          !setup.process &&
-          !!provisionAgent &&
-          ["failed", "interrupted", "cancelled"].includes(setup.provisioning),
         delete: !!deleteAgent,
       },
     } satisfies AgentDetail);
@@ -1162,86 +1097,6 @@ export function createPanel(
       );
     }
   });
-  app.post("/api/agents/:id/provision/cancel", async (c) => {
-    const id = c.req.param("id");
-    if (!getAgentSetup?.(id) || !agentSettings?.cancelProvisioning)
-      return c.json({ error: "Agent not found." }, 404);
-    const form = await parseForm(
-      c,
-      confirmForm(id),
-      "Confirm the agent to cancel its setup.",
-    );
-    if (form.response) return form.response;
-    try {
-      agentSettings.cancelProvisioning(id);
-      return c.json({ agentId: id, cancellation: "requested" }, 202);
-    } catch {
-      return c.json({ error: "No cancellable provisioning attempt" }, 409);
-    }
-  });
-  app.post("/api/agents/:id/recover", async (c) => {
-    if (!deps.recovery) return c.notFound();
-    const id = c.req.param("id");
-    if (!getAgentSetup?.(id)) return c.json({ error: "Agent not found." }, 404);
-    try {
-      await deps.recovery.recover(id);
-      return c.json({ agentId: id, recovery: "restored" });
-    } catch (error) {
-      return c.json(
-        {
-          error:
-            error instanceof RecoveryError
-              ? error.message
-              : "Recovery failed. Refresh the agent status before retrying.",
-        },
-        409,
-      );
-    }
-  });
-  app.post("/api/agents/:id/provision", async (c) => {
-    if (!provisionAgent) return c.notFound();
-    const id = c.req.param("id");
-    if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id))
-      return c.json({ error: "Invalid agent ID" }, 400);
-    try {
-      await provisionAgent(id);
-      return c.json({ agentId: id, provisioning: "ready" });
-    } catch {
-      return c.json(
-        {
-          error: "Provisioning failed; inspect the agent state before retrying",
-        },
-        409,
-      );
-    }
-  });
-  app.post("/api/agents/:id/resources/remove", async (c) => {
-    if (!removeResources) return c.notFound();
-    const id = c.req.param("id");
-    const form = await parseForm(
-      c,
-      removeResourcesForm(id),
-      "Confirm the agent ID and explicitly select whether to delete data",
-    );
-    if (form.response) return form.response;
-    const deleteData = form.data.deleteData === "true";
-    try {
-      await removeResources(id, deleteData);
-      return c.json({
-        agentId: id,
-        provisioning: "pending",
-        dataDeleted: deleteData,
-      });
-    } catch {
-      return c.json(
-        {
-          error:
-            "Resource removal failed; inspect the agent state before retrying",
-        },
-        409,
-      );
-    }
-  });
   app.post("/api/agents/:id/delete", async (c) => {
     if (!deleteAgent) return c.notFound();
     const id = c.req.param("id");
@@ -1258,30 +1113,6 @@ export function createPanel(
     } catch {
       return c.json(
         { error: "Deletion failed; retry after checking the agent" },
-        409,
-      );
-    }
-  });
-  app.post("/api/agents/:id/container", async (c) => {
-    if (!containerAction || deps.deploymentMode === "native")
-      return c.notFound();
-    const id = c.req.param("id");
-    const form = await parseForm(
-      c,
-      containerForm(id),
-      "Select start or stop; stopping requires confirmation of the agent ID",
-    );
-    if (form.response) return form.response;
-    const { action } = form.data;
-    try {
-      await containerAction(id, action);
-      return c.json({ agentId: id, action, status: "completed" });
-    } catch {
-      return c.json(
-        {
-          error:
-            "Container action failed; inspect the agent state before retrying",
-        },
         409,
       );
     }
@@ -1320,7 +1151,6 @@ export function createPanel(
         const setup = getAgentSetup?.(id);
         return setup ? [{ id, ...setup }] : [];
       }),
-      ...(resources ? { resources: await resources() } : {}),
     }),
   );
   const adapters: Array<
@@ -1336,16 +1166,6 @@ export function createPanel(
       "/agents/:id/token",
       (id) => `/api/agents/${id}/token`,
       (id) => `/agents/${id}/token?saved=1`,
-    ],
-    [
-      "/agents/:id/container",
-      (id) => `/api/agents/${id}/container`,
-      (id) => `/agents/${id}/setup`,
-    ],
-    [
-      "/agents/:id/setup/cancel",
-      (id) => `/api/agents/${id}/provision/cancel`,
-      (id) => `/agents/${id}/setup`,
     ],
     ["/agents/:id/delete", (id) => `/api/agents/${id}/delete`, () => "/"],
   ];
@@ -1389,7 +1209,6 @@ export function createPanel(
     "schedules",
     "settings",
     "token",
-    "container/stop",
     "process/stop",
     "process/restart",
     "delete",
@@ -1409,10 +1228,6 @@ export function createPanel(
         (suffix === "token" &&
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||
         (suffix === "delete" && !deleteAgent) ||
-        (suffix === "container/stop" &&
-          (!containerAction ||
-            getAgentSetup(id)?.process ||
-            getAgentSetup(id)?.provisioning !== "ready")) ||
         (suffix.startsWith("process/") &&
           (!deps.processAction || !getAgentSetup(id)?.process))
       )

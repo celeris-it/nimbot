@@ -60,30 +60,10 @@ export const registerAgentForm = z.object({
 /** The agent being confirmed is the one in the path. */
 export const confirmForm = (id: string) => z.object({ confirm: z.literal(id) });
 
-/** Removal, deletion and container actions also require the path to be a valid agent ID. */
-export const removeResourcesForm = (id: string) =>
-  z
-    .object({
-      confirm: z.literal(id),
-      deleteData: z.enum(["true", "false"]).optional(),
-    })
-    .refine(() => AGENT_ID.test(id));
-
 export const deleteAgentForm = (id: string) =>
   z
     .object({ confirm: z.literal(id), deleteData: z.enum(["true", "false"]) })
     .refine(() => AGENT_ID.test(id));
-
-export const containerForm = (id: string) =>
-  z
-    .object({
-      action: z.enum(["start", "stop"]),
-      confirm: z.unknown().optional(),
-    })
-    .refine(
-      (form) =>
-        AGENT_ID.test(id) && (form.action !== "stop" || form.confirm === id),
-    );
 
 export const processForm = (id: string) =>
   z

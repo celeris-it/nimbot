@@ -13,9 +13,9 @@ function createPanelPositional(
   _settings?: unknown,
   _saveBotToken?: unknown,
   _container?: unknown,
-  provisionAgent?: PanelDeps["provisionAgent"],
-  removeResources?: PanelDeps["removeResources"],
-  containerAction?: PanelDeps["containerAction"],
+  _provisionAgent?: unknown,
+  _removeResources?: unknown,
+  _containerAction?: unknown,
   registerAgent?: PanelDeps["registerAgent"],
   getAgentSetup?: PanelDeps["getAgentSetup"],
   agentSettings?: PanelDeps["agentSettings"],
@@ -25,9 +25,6 @@ function createPanelPositional(
   return createPanel(
     config,
     {
-      provisionAgent,
-      removeResources,
-      containerAction,
       registerAgent,
       getAgentSetup,
       agentSettings,
@@ -238,198 +235,6 @@ describe("panel access", () => {
   });
 });
 
-it("protects agent provisioning with sessions and same-origin checks", async () => {
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const calls: string[] = [];
-  const app = createPanelPositional(
-    config,
-    () => ({ telegram: "connected" }),
-    Date.now,
-    undefined,
-    undefined,
-    undefined,
-    async (id) => {
-      calls.push(id);
-      if (id === "failed") throw new Error("secret-docker-response");
-    },
-  );
-  const post = (path: string, cookie = "", origin = config.origin, body = "") =>
-    app.request(path, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-  expect((await post("/api/agents/dev/provision")).status).toBe(401);
-  const login = await post(
-    "/login",
-    "",
-    config.origin,
-    new URLSearchParams({ password }).toString(),
-  );
-  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-  expect(
-    (await post("/api/agents/dev/provision", cookie, "https://other.example"))
-      .status,
-  ).toBe(403);
-  expect((await post("/api/agents/INVALID/provision", cookie)).status).toBe(
-    400,
-  );
-  expect(calls).toEqual([]);
-  const response = await post("/api/agents/dev/provision", cookie);
-  expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({
-    agentId: "dev",
-    provisioning: "ready",
-  });
-  const failed = await post("/api/agents/failed/provision", cookie);
-  expect(failed.status).toBe(409);
-  expect(await failed.text()).not.toContain("secret-docker-response");
-  expect(calls).toEqual(["dev", "failed"]);
-  const disabled = createPanelPositional(config, () => ({
-    telegram: "connected",
-  }));
-  const disabledLogin = await disabled.request("/login", {
-    method: "POST",
-    headers: {
-      Origin: config.origin,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ password }).toString(),
-  });
-  expect(
-    (
-      await disabled.request("/api/agents/dev/provision", {
-        method: "POST",
-        headers: {
-          Origin: config.origin,
-          Cookie: disabledLogin.headers.get("set-cookie")!.split(";")[0]!,
-        },
-      })
-    ).status,
-  ).toBe(404);
-});
-
-it("requires authentication, origin, and explicit confirmation for resource removal", async () => {
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const calls: unknown[] = [];
-  const app = createPanelPositional(
-    config,
-    () => ({ telegram: "connected" }),
-    Date.now,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    async (id, deleteData) => {
-      calls.push({ id, deleteData });
-    },
-  );
-  const path = "/api/agents/dev/resources/remove";
-  const post = (
-    url: string,
-    body: string,
-    cookie = "",
-    origin = config.origin,
-  ) =>
-    app.request(url, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-  expect((await post(path, "confirm=dev")).status).toBe(401);
-  const login = await post(
-    "/login",
-    new URLSearchParams({ password }).toString(),
-  );
-  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-  expect(
-    (await post(path, "confirm=dev", cookie, "https://other.example")).status,
-  ).toBe(403);
-  for (const body of [
-    "",
-    "confirm=other",
-    "confirm=dev&deleteData=yes",
-    "confirm=dev&deleteData=true&deleteData=false",
-  ])
-    expect((await post(path, body, cookie)).status).toBe(400);
-  expect(calls).toEqual([]);
-  expect((await post(path, "confirm=dev", cookie)).status).toBe(200);
-  expect((await post(path, "confirm=dev&deleteData=true", cookie)).status).toBe(
-    200,
-  );
-  expect(calls).toEqual([
-    { id: "dev", deleteData: false },
-    { id: "dev", deleteData: true },
-  ]);
-});
-
-it("protects per-agent container actions and requires confirmation before stopping", async () => {
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const calls: unknown[] = [];
-  const app = createPanelPositional(
-    config,
-    () => ({ telegram: "connected" }),
-    Date.now,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    async (id, action) => {
-      calls.push({ id, action });
-    },
-  );
-  const path = "/api/agents/dev/container";
-  const post = (
-    url: string,
-    body: string,
-    cookie = "",
-    origin = config.origin,
-  ) =>
-    app.request(url, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookie,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-  expect((await post(path, "action=start")).status).toBe(401);
-  const login = await post(
-    "/login",
-    new URLSearchParams({ password }).toString(),
-  );
-  const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-  expect(
-    (await post(path, "action=start", cookie, "https://other.example")).status,
-  ).toBe(403);
-  for (const body of [
-    "action=stop",
-    "action=stop&confirm=other",
-    "action=delete",
-    "action=start&action=stop",
-  ])
-    expect((await post(path, body, cookie)).status).toBe(400);
-  expect(calls).toEqual([]);
-  expect((await post(path, "action=start", cookie)).status).toBe(200);
-  expect((await post(path, "action=stop&confirm=dev", cookie)).status).toBe(
-    200,
-  );
-  expect(calls).toEqual([
-    { id: "dev", action: "start" },
-    { id: "dev", action: "stop" },
-  ]);
-});
-
 it("authenticates agent registration and validates owner fields without echoing tokens", async () => {
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
   const calls: unknown[] = [];
@@ -515,18 +320,7 @@ function apiSetup(overrides: PanelDeps = {}) {
       if (token !== "valid-secret") throw new Error("private-token-details");
       calls.push([id, token]);
     },
-    cancelProvisioning: (id) => {
-      calls.push(["cancel", id]);
-    },
-    containerStatus: async () => "stopped",
     hostStatus: async () => "unavailable",
-    stopObservation: async () => ({
-      availability: "available",
-      task: { id: "private-task-id", status: "running" },
-      observedAt: 1234,
-      observationId: "private-observation-id",
-      finalStatus: null,
-    }),
   };
   const app = createPanel(
     readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash }),
@@ -537,12 +331,13 @@ function apiSetup(overrides: PanelDeps = {}) {
           ? {
               name: records.get(id)!.name,
               botUsername: "developer_bot",
-              provisioning: "ready",
+              provisioning: "pending",
+              process: { state: "stopped", desiredState: "stopped" },
               setupAccess: { bot: "linked", owner: "pending" },
             }
           : undefined,
       agentSettings: settings,
-      containerAction: async (id, action) => {
+      processAction: async (id, action) => {
         calls.push([id, action]);
       },
       deleteAgent: async (id, deleteData) => {
@@ -595,102 +390,109 @@ it("authenticates JSON session endpoints with the same cookie and invalidates lo
   expect((await get("/api/session", cookie)).status).toBe(401);
 });
 
-it("routes confirmed native lifecycle actions without exposing legacy container controls or raw errors", async () => {
-  const actions: string[] = [];
-  const f = apiSetup({
-    deploymentMode: "native",
-    getAgentSetup: (id) =>
-      id === "dev"
-        ? {
-            name: "Developer",
-            botUsername: "developer_bot",
-            provisioning: "ready",
-            process: { state: "running", desiredState: "running" },
-          }
-        : undefined,
-    processAction: async (_id, action) => {
-      if (action === "start") throw new Error("private-secret-details");
-      actions.push(action);
-    },
-  });
-  expect(
-    (
-      await f.post("/api/agents/dev/process", {
-        action: "stop",
-        confirm: "dev",
-      })
-    ).status,
-  ).toBe(401);
-  const cookie = await f.login();
-  expect(
-    (await (await f.get("/api/session", cookie)).json()).deploymentMode,
-  ).toBe("native");
-  const details = await (await f.get("/api/agents/dev", cookie)).json();
-  expect(details.capabilities.process).toEqual({
-    start: false,
-    stop: true,
-    restart: true,
-  });
-  expect(details.capabilities.container).toBe(false);
-  expect(details.containerState).toBeUndefined();
-  expect(details.stopObservation).toBeUndefined();
-  expect(
-    (
-      await f.post(
-        "/api/agents/dev/container",
-        { action: "stop", confirm: "dev" },
-        cookie,
-      )
-    ).status,
-  ).toBe(404);
-  for (const action of ["stop", "restart"]) {
+it.each(["native", "docker"] as const)(
+  "routes confirmed %s process actions without exposing legacy container controls or raw errors",
+  async (deploymentMode) => {
+    const actions: string[] = [];
+    const f = apiSetup({
+      deploymentMode,
+      getAgentSetup: (id) =>
+        id === "dev"
+          ? {
+              name: "Developer",
+              botUsername: "developer_bot",
+              provisioning: "ready",
+              process: { state: "running", desiredState: "running" },
+            }
+          : undefined,
+      processAction: async (_id, action) => {
+        if (action === "start") throw new Error("private-secret-details");
+        actions.push(action);
+      },
+    });
     expect(
-      (await f.post("/api/agents/dev/process", { action }, cookie)).status,
-    ).toBe(400);
+      (
+        await f.post("/api/agents/dev/process", {
+          action: "stop",
+          confirm: "dev",
+        })
+      ).status,
+    ).toBe(401);
+    const cookie = await f.login();
+    expect(
+      (await (await f.get("/api/session", cookie)).json()).deploymentMode,
+    ).toBe(deploymentMode);
+    const details = await (await f.get("/api/agents/dev", cookie)).json();
+    expect(details.capabilities.process).toEqual({
+      start: false,
+      stop: true,
+      restart: true,
+    });
+    expect(details.capabilities).not.toHaveProperty("container");
+    expect(details.containerState).toBeUndefined();
+    expect(details.stopObservation).toBeUndefined();
     expect(
       (
         await f.post(
-          "/api/agents/dev/process",
-          { action, confirm: "other" },
+          "/api/agents/dev/container",
+          { action: "stop", confirm: "dev" },
           cookie,
         )
       ).status,
-    ).toBe(400);
+    ).toBe(404);
+    for (const action of ["stop", "restart"]) {
+      expect(
+        (await f.post("/api/agents/dev/process", { action }, cookie)).status,
+      ).toBe(400);
+      expect(
+        (
+          await f.post(
+            "/api/agents/dev/process",
+            { action, confirm: "other" },
+            cookie,
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await f.post(
+            "/api/agents/dev/process",
+            { action, confirm: "dev" },
+            cookie,
+            "http://attacker.example",
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await f.post(
+            "/api/agents/dev/process",
+            { action, confirm: "dev" },
+            cookie,
+          )
+        ).status,
+      ).toBe(200);
+    }
+    expect(actions).toEqual(["stop", "restart"]);
+    const failed = await f.post(
+      "/api/agents/dev/process",
+      { action: "start" },
+      cookie,
+    );
+    expect(failed.status).toBe(409);
+    expect(await failed.text()).not.toContain("private-secret-details");
     expect(
-      (
-        await f.post(
-          "/api/agents/dev/process",
-          { action, confirm: "dev" },
-          cookie,
-          "http://attacker.example",
-        )
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await f.post(
-          "/api/agents/dev/process",
-          { action, confirm: "dev" },
-          cookie,
-        )
-      ).status,
-    ).toBe(200);
-  }
-  expect(actions).toEqual(["stop", "restart"]);
-  const failed = await f.post(
-    "/api/agents/dev/process",
-    { action: "start" },
-    cookie,
-  );
-  expect(failed.status).toBe(409);
-  expect(await failed.text()).not.toContain("private-secret-details");
-  expect(
-    (await f.post("/api/agents/other/process", { action: "start" }, cookie))
-      .status,
-  ).toBe(404);
-  expect((await f.get("/agents/dev/process/restart", cookie)).status).toBe(200);
-  expect((await f.get("/agents/dev/container/stop", cookie)).status).toBe(404);
-});
+      (await f.post("/api/agents/other/process", { action: "start" }, cookie))
+        .status,
+    ).toBe(404);
+    expect((await f.get("/agents/dev/process/restart", cookie)).status).toBe(
+      200,
+    );
+    expect((await f.get("/agents/dev/container/stop", cookie)).status).toBe(
+      404,
+    );
+  },
+);
 
 it.each(["starting", "stopping", "stopped", "failed"] as const)(
   "reports native %s lifecycle capabilities",
@@ -723,17 +525,14 @@ it("returns browser-safe detail and capabilities without task identifiers or cre
   expect(body).toMatchObject({
     id: "dev",
     settings: { name: "Developer", instructions: "Be brief" },
-    containerState: "stopped",
     hostState: "unavailable",
     setupAccess: { bot: "linked", owner: "pending" },
     capabilities: {
       edit: true,
       replaceToken: true,
-      container: true,
-      cancel: false,
+      process: { start: true, stop: false, restart: false },
       delete: true,
     },
-    stopObservation: { hadTask: true, observedAt: 1234, finalStatus: null },
   });
   expect(JSON.stringify(body)).not.toMatch(
     /private-|credential|"token":|password/i,
@@ -849,7 +648,7 @@ it("serves known deep links with a strict production CSP and returns 404 for unk
     "/agents/dev/setup",
     "/agents/dev/settings",
     "/agents/dev/token",
-    "/agents/dev/container/stop",
+    "/agents/dev/process/stop",
     "/agents/dev/delete",
   ]) {
     const response = await get(path, cookie);
@@ -884,26 +683,11 @@ it("retains traditional POST adapters, defaults deletion to retention and requir
       )
     ).headers.get("location"),
   ).toBe("/agents/dev/settings?saved=1");
-  expect(
-    (await post("/agents/dev/container", { action: "stop" }, cookie)).status,
-  ).toBe(400);
-  expect(
-    (
-      await post(
-        "/agents/dev/container",
-        { action: "stop", confirm: "dev" },
-        cookie,
-      )
-    ).status,
-  ).toBe(303);
   expect((await post("/agents/dev/delete", {}, cookie)).status).toBe(400);
   expect(
     (await post("/agents/dev/delete", { confirm: "dev" }, cookie)).status,
   ).toBe(303);
-  expect(calls).toEqual([
-    ["dev", "stop"],
-    ["dev", false],
-  ]);
+  expect(calls).toEqual([["dev", false]]);
   expect(
     (
       await post(
@@ -914,57 +698,6 @@ it("retains traditional POST adapters, defaults deletion to retention and requir
     ).status,
   ).toBe(200);
   expect(calls.at(-1)).toEqual(["other", true]);
-});
-
-it("reports cancellation, unavailable capabilities and generic conflict errors", async () => {
-  let cancellationRequested = false;
-  const { get, post, login } = apiSetup({
-    getAgentSetup: (id) =>
-      id === "dev"
-        ? {
-            name: "Dev",
-            botUsername: null,
-            provisioning: "provisioning",
-            canCancelProvisioning: true,
-            cancellationRequested,
-          }
-        : undefined,
-    agentSettings: {
-      get: () => undefined,
-      save: () => {},
-      cancelProvisioning: () => {
-        if (cancellationRequested) throw new Error("private-error");
-        cancellationRequested = true;
-      },
-    },
-  });
-  const cookie = await login();
-  expect(await (await get("/api/agents/dev", cookie)).json()).toMatchObject({
-    capabilities: {
-      edit: false,
-      replaceToken: false,
-      container: false,
-      cancel: true,
-    },
-  });
-  expect(
-    (await post("/api/agents/dev/provision/cancel", {}, cookie)).status,
-  ).toBe(400);
-  expect(
-    (await post("/api/agents/dev/provision/cancel", { confirm: "dev" }, cookie))
-      .status,
-  ).toBe(202);
-  expect(await (await get("/api/agents/dev", cookie)).json()).toMatchObject({
-    cancellationRequested: true,
-    capabilities: { cancel: false },
-  });
-  const failed = await post(
-    "/api/agents/dev/provision/cancel",
-    { confirm: "dev" },
-    cookie,
-  );
-  expect(failed.status).toBe(409);
-  expect(await failed.text()).not.toContain("private-error");
 });
 
 it("serves the bundled variable font with its MIME type and same-origin font policy", async () => {
@@ -985,115 +718,45 @@ it("serves the bundled variable font with its MIME type and same-origin font pol
   expect((await app.request("/assets/missing.woff2")).status).toBe(404);
 });
 
-it("offers a setup retry only for an unfinished setup when provisioning is enabled", async () => {
-  const states = new Map<string, string>();
-  const deps = (provisionAgent?: PanelDeps["provisionAgent"]): PanelDeps => ({
-    provisionAgent,
-    getAgentSetup: (id) =>
-      states.has(id)
-        ? {
-            name: "Dev",
-            botUsername: null,
-            provisioning: states.get(id)!,
-          }
-        : undefined,
-  });
-  const retry = async (state: string, enabled = true) => {
-    states.set("dev", state);
-    const { get, login } = apiSetup(deps(enabled ? async () => {} : undefined));
-    const cookie = await login();
-    const body = (await (await get("/api/agents/dev", cookie)).json()) as {
-      capabilities: { retry: boolean };
-    };
-    return body.capabilities.retry;
-  };
-  for (const state of ["failed", "interrupted", "cancelled"])
-    expect(await retry(state), state).toBe(true);
-  for (const state of ["pending", "provisioning", "ready"])
-    expect(await retry(state), state).toBe(false);
-  expect(await retry("failed", false)).toBe(false);
-});
-
-it("shows recovery only for eligible agents and authenticates the same-origin action", async () => {
-  const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const { RecoveryError } = await import("./agent-recovery.js");
-  let container: "missing" | "stopped" = "missing";
-  let calls = 0;
-  let failure: Error | undefined;
-  const app = createPanel(config, {
-    getAgentSetup: (id) =>
-      id === "dev"
-        ? { name: "Dev", botUsername: "dev_bot", provisioning: "ready" }
-        : undefined,
-    containerAction: async () => {},
-    agentSettings: {
-      get: () => ({ name: "Dev", instructions: "" }),
-      save: () => {},
-      containerStatus: async () => container,
-    },
-    recovery: {
-      inspect: async () => ({ status: "available" }),
-      recover: async (id) => {
-        expect(id).toBe("dev");
-        calls++;
-        if (failure) throw failure;
-        container = "stopped";
-      },
-    },
-  });
-  const login = await app.request("/login", {
-    method: "POST",
-    headers: {
-      Origin: config.origin,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ password }),
-  });
-  const cookie = login.headers.get("Set-Cookie")!.split(";")[0]!;
-  const recover = (id: string, session = cookie, origin = config.origin) =>
-    app.request(`/api/agents/${id}/recover`, {
-      method: "POST",
-      headers: {
-        Cookie: session,
-        Origin: origin,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ id: "other", containerRef: "foreign" }),
-    });
-  expect((await recover("dev", "")).status).toBe(401);
-  expect((await recover("dev", cookie, "https://foreign.test")).status).toBe(
-    403,
-  );
-  expect((await recover("other")).status).toBe(404);
-  expect(calls).toBe(0);
-
-  const detail = async () =>
-    (
-      await app.request("/api/agents/dev", { headers: { Cookie: cookie } })
-    ).json();
-  expect(await detail()).toMatchObject({
-    recovery: { status: "available" },
-    capabilities: { container: false },
-  });
-  failure = new RecoveryError("Restore the workspace volume.");
-  let response = await recover("dev");
-  expect(response.status).toBe(409);
-  expect(await response.json()).toEqual({
-    error: "Restore the workspace volume.",
-  });
-  failure = new Error("private Docker response");
-  response = await recover("dev");
-  expect(response.status).toBe(409);
-  expect(await response.text()).not.toContain(failure.message);
-  failure = undefined;
-  expect(await (await recover("dev")).json()).toEqual({
-    agentId: "dev",
-    recovery: "restored",
-  });
-  const restored = await detail();
-  expect(restored).not.toHaveProperty("recovery");
-  expect(restored).toMatchObject({
-    containerState: "stopped",
-    capabilities: { container: true },
-  });
+it("removes legacy container, provisioning, resource and recovery routes in both deployment modes", async () => {
+  for (const deploymentMode of ["native", "docker"] as const) {
+    const f = apiSetup({ deploymentMode });
+    const cookie = await f.login();
+    for (const suffix of [
+      "container",
+      "provision",
+      "provision/cancel",
+      "resources/remove",
+      "recover",
+    ]) {
+      expect(
+        (
+          await f.post(
+            `/api/agents/dev/${suffix}`,
+            { action: "start", confirm: "dev" },
+            cookie,
+          )
+        ).status,
+        suffix,
+      ).toBe(404);
+    }
+    for (const path of ["/agents/dev/container", "/agents/dev/setup/cancel"]) {
+      expect(
+        (await f.post(path, { confirm: "dev" }, cookie)).status,
+        path,
+      ).toBe(404);
+    }
+    expect((await f.get("/agents/dev/container/stop", cookie)).status).toBe(
+      404,
+    );
+    const detail = await (await f.get("/api/agents/dev", cookie)).json();
+    expect(detail).not.toHaveProperty("recovery");
+    expect(detail).not.toHaveProperty("containerState");
+    expect(detail).not.toHaveProperty("stopObservation");
+    expect(detail.capabilities).not.toHaveProperty("cancel");
+    expect(detail.capabilities).not.toHaveProperty("retry");
+    expect(
+      await (await f.get("/api/status", cookie)).json(),
+    ).not.toHaveProperty("resources");
+  }
 });
