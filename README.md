@@ -349,12 +349,29 @@ pnpm test
 
 Start the compiled server with `pnpm start:server`. Generate its administrator password hash with `pnpm panel:password`; `.env.example` documents deployment settings. See [CONTRIBUTING.md](CONTRIBUTING.md) for panel development and browser tests.
 
-The shared runner transition is tracked in [TODO.md](TODO.md). As its first
+The Server-managed subprocess transition is tracked in [TODO.md](TODO.md). As its first
 prerequisite, the Agent Host listener accepts `AGENT_HOST_BIND_ADDRESS` (an IPv4
 or IPv6 address, default `0.0.0.0`) and `AGENT_HOST_PORT` (1–65535, default
-3001). A native runner must set the address to `127.0.0.1` and assign a separate
-port to each agent. The Docker deployment still uses its existing internal
-endpoint; the shared runner and Docker-free development entry point are pending.
+3001). The subprocess launch configuration binds Hosts to `127.0.0.1`, accepts
+a separately assigned port and Host token, and prepares each agent’s workspace,
+task state, home, engine data/configuration/cache/state, temporary files, and
+browser profile directory under `<data directory>/agents/<agent ID>/`. It builds
+an explicit child environment without inheriting Server secrets, provider keys,
+or Node/OpenCode overrides. Browser executable installation can be shared through
+an explicitly configured `PLAYWRIGHT_BROWSERS_PATH`; browser profile wiring is
+still pending. The Docker deployment still uses its existing internal endpoint;
+connecting this configuration to Server lifecycle operations and the Docker-free
+development entry point remains pending.
+
+The planned subprocess installation is a single trust domain under one OS
+account: agents can access each other’s data and Server state, including bot
+tokens, MCP credentials, Host secrets, and `server.sqlite`. Minimal child
+environments prevent accidental inheritance; they do not prevent filesystem
+access. Server approvals, grants, and rules govern ordinary behavior and do not
+provide a security boundary against an agent with shell access. A prompt-injected
+agent could read secrets or modify Server state. Use separate installations when
+separation is required. This release will require a fresh installation and will
+leave previous data on disk until explicitly removed.
 
 | Path | Responsibility |
 |---|---|
