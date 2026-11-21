@@ -3,11 +3,13 @@
   import type { AgentDetail } from "../../server/src/panel-contracts.js";
   let {
     mode,
+    native = false,
     agent,
     busy,
     submit,
   }: {
     mode: "new" | "settings" | "token";
+    native?: boolean;
     agent?: AgentDetail;
     busy: boolean;
     submit: (fields: Record<string, string>) => Promise<void>;
@@ -47,8 +49,9 @@
   <h1 tabindex="-1">Bot token.</h1>
   <p>Agent: {agent?.name}</p>
   <p>
-    Only a new token for the same bot, created in BotFather, is accepted. If the
-    bot is already connected, restart the server to apply the change.
+    {native
+      ? "Only a new token for the same bot, created in BotFather, is accepted. Restart this agent after saving to reconnect its bot."
+      : "Only a new token for the same bot, created in BotFather, is accepted. If the bot is already connected, restart the server to apply the change."}
   </p>
 {/if}
 <section
@@ -117,9 +120,9 @@
       </p>
     {/if}
     {#if mode === "new"}<p>
-        On creation, the bot is verified and its container is prepared. This can
-        take a few seconds. The server connects the bot after provisioning
-        completes; the owner can then send a message to begin.
+        {native
+          ? "On creation, the bot is verified and its Agent Host process starts with its own persistent data directories. This can take a few seconds. The Server then connects the bot; the owner can send a private message to begin."
+          : "On creation, the bot is verified and its container is prepared. This can take a few seconds. The server connects the bot after provisioning completes; the owner can then send a message to begin."}
       </p>{/if}
     <button class="btn" type="submit" disabled={busy}
       >{busy

@@ -50,7 +50,7 @@ path first, then the recommended Docker deployment in the next milestone.
 - [x] Start each Agent Host with an explicit minimal environment and its own
       Host API token. Do not pass Server configuration or secrets through
       the environment or arguments.
-- [ ] Route panel lifecycle and status actions through the process manager.
+- [x] Route panel lifecycle and status actions through the process manager.
       Explain the shared trust model in the panel, including agent access
       to Server secrets, and clearly identify native development mode.
 - [x] Keep agent data on removal unless the administrator explicitly purges
@@ -61,8 +61,10 @@ path first, then the recommended Docker deployment in the next milestone.
       Progress: CI and an opt-in test run the compiled Server with real Hosts,
       authenticated API creation/start/stop/removal, retained workspace data,
       stopped-state retention and running-state recovery after Server restarts.
-      Telegram transport is simulated. Clean-checkout setup, native panel UI,
-      concurrent OpenCode sessions and browser profile verification remain pending.
+      Telegram transport is simulated. Chromium tests cover native panel lifecycle
+      controls, confirmations, shared-trust guidance and narrow-screen layouts.
+      Clean-checkout setup, concurrent OpenCode sessions and browser profile
+      verification remain pending.
 
 ## Second milestone: Docker deployment
 

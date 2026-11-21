@@ -1,6 +1,11 @@
 <script lang="ts">
   import type { AgentSummary } from "../../server/src/panel-contracts.js";
-  import { botLabel, botAccessLabels, ownerLabels } from "./labels.js";
+  import {
+    botLabel,
+    botAccessLabels,
+    ownerLabels,
+    processLabels,
+  } from "./labels.js";
   import {
     ActionButton,
     AgentAvatar,
@@ -16,10 +21,15 @@
 
   let {
     agents,
+    native = false,
     canCreate,
     refresh,
-  }: { agents: AgentSummary[]; canCreate: boolean; refresh: () => void } =
-    $props();
+  }: {
+    agents: AgentSummary[];
+    native?: boolean;
+    canCreate: boolean;
+    refresh: () => void;
+  } = $props();
   let query = $state("");
   let filter = $state("all");
   let selectedId = $state("");
@@ -53,12 +63,14 @@
     filtered.find((item) => item.id === selectedId) ?? filtered[0],
   );
   const setupLabel = (item: AgentSummary) =>
-    item.provisioning === "ready"
-      ? "Configured"
-      : item.provisioning === "provisioning"
-        ? "Setting up"
-        : item.provisioning.charAt(0).toUpperCase() +
-          item.provisioning.slice(1);
+    item.process
+      ? processLabels[item.process.state]
+      : item.provisioning === "ready"
+        ? "Configured"
+        : item.provisioning === "provisioning"
+          ? "Setting up"
+          : item.provisioning.charAt(0).toUpperCase() +
+            item.provisioning.slice(1);
 </script>
 
 <div data-ui="page-heading">
@@ -92,9 +104,9 @@
         description="Independent workspaces"
       />
       <Metric
-        label="Configured"
+        label={native ? "Running" : "Configured"}
         value={configured.toString().padStart(2, "0")}
-        description="Setup completed"
+        description={native ? "Agent Hosts running" : "Setup completed"}
       />
       <Metric
         label="Needs attention"
@@ -166,7 +178,11 @@
       bind:value={filter}
       options={[
         { value: "all", label: "All agents", count: agents.length },
-        { value: "ready", label: "Configured", count: configured },
+        {
+          value: "ready",
+          label: native ? "Running" : "Configured",
+          count: configured,
+        },
         { value: "attention", label: "Needs attention", count: needsAttention },
       ]}
     />

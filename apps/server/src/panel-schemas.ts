@@ -85,6 +85,17 @@ export const containerForm = (id: string) =>
         AGENT_ID.test(id) && (form.action !== "stop" || form.confirm === id),
     );
 
+export const processForm = (id: string) =>
+  z
+    .object({
+      action: z.enum(["start", "stop", "restart"]),
+      confirm: z.unknown().optional(),
+    })
+    .refine(
+      (form) =>
+        AGENT_ID.test(id) && (form.action === "start" || form.confirm === id),
+    );
+
 export const loginAttemptParams = z.object({
   attempt: z.string().regex(/^[a-f0-9-]{36}$/),
 });

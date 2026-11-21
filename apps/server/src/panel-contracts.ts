@@ -53,6 +53,7 @@ export type AgentSummary = NonNullable<
 > & { id: string };
 export interface PanelSession {
   authenticated: true;
+  deploymentMode: "native" | "docker";
   capabilities: {
     createAgent: boolean;
     mcp?: boolean;
@@ -85,6 +86,7 @@ export interface AgentDetail extends AgentSummary {
     edit: boolean;
     replaceToken: boolean;
     container: boolean;
+    process?: { start: boolean; stop: boolean; restart: boolean };
     cancel: boolean;
     retry: boolean;
     delete: boolean;

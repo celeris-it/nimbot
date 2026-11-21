@@ -1573,3 +1573,109 @@ test("recovers a missing container and displays Start only after recovery", asyn
     page.getByRole("button", { name: "Recover on this server" }),
   ).toHaveCount(0);
 });
+
+test("manages native processes with shared-trust guidance and interruption confirmations", async ({
+  page,
+  request,
+}) => {
+  await request.post("/__test/native");
+  await login(page);
+  await expect(page.getByLabel("Shared installation trust")).toContainText(
+    "Native development",
+  );
+  await expect(page.getByLabel("Shared installation trust")).toContainText(
+    "bot tokens, MCP credentials, Host secrets and server.sqlite",
+  );
+  await expect(page.getByLabel("Shared installation trust")).toContainText(
+    "not a security boundary",
+  );
+  await page.goto("/agents/dev/setup");
+  await expect(
+    page.getByRole("heading", { name: "Agent Host stopped." }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start container" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Start agent", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Agent Host running." }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start agent", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("link", { name: "Restart agent…" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Restart Developer?" }),
+  ).toBeFocused();
+  await expect(
+    page.getByText("Active work may be interrupted.", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Cancel", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Agent Host running." }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/nimbot-native-running.png",
+    fullPage: true,
+  });
+  await page.getByRole("link", { name: "Restart agent…" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Restart Developer?" }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("button", { name: "Confirm restart" }),
+  ).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Agent Host running." }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Stop agent…" }).click();
+  await page.getByRole("button", { name: "Confirm stop" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Agent Host stopped." }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start agent", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Delete agent…" }).click();
+  const purge = page.getByRole("checkbox", { name: /agent data directory/ });
+  await expect(purge).not.toBeChecked();
+  await expect(
+    page.getByText(/AI provider state and browser profile/),
+  ).toBeVisible();
+});
+
+test("shows native mode on narrow screens and uses process language during creation", async ({
+  page,
+  request,
+}) => {
+  await request.post("/__test/native");
+  await page.setViewportSize({ width: 320, height: 900 });
+  await login(page);
+  await expect(page.getByLabel("Shared installation trust")).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.goto("/agents/new");
+  await expect(page.getByText(/its Agent Host process starts/)).toBeVisible();
+  await expect(page.getByText(/its container is prepared/)).toHaveCount(0);
+  await page.screenshot({
+    path: "/tmp/nimbot-native-create-mobile.png",
+    fullPage: true,
+  });
+  for (const width of [320, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/agents/dev/setup");
+    await expect(
+      page.getByRole("heading", { name: "Agent Host stopped." }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+});

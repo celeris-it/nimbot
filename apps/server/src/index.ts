@@ -741,6 +741,12 @@ async function main(): Promise<void> {
     }),
   });
   const panel = createPanel(panelConfig, {
+    deploymentMode: serverMode.mode,
+    processAction: native
+      ? async (id, action) => {
+          await processAgents![action](id);
+        }
+      : undefined,
     mcp: {
       catalog: mcpCatalog,
       credentials: mcpCredentials,
@@ -846,29 +852,25 @@ async function main(): Promise<void> {
           await removeResources(id, deleteData);
         }
       : undefined,
-    containerAction: native
+    containerAction: containerAction
       ? async (id, action) => {
-          await processAgents![action](id);
-        }
-      : containerAction
-        ? async (id, action) => {
-            requireAgent(id);
-            const workWasHeld = !allowsWork(id);
-            await containerAction(id, action);
-            if (action === "start" && workWasHeld) {
-              if (registry.getRecovery(id)?.status === "restored") {
-                resumeWhenHostReady(id);
-                return;
-              }
-              await workGate.check(id);
-              if (allowsWork(id)) {
-                registeredBots?.start(id);
-                void registeredDiscord.start(id);
-              }
+          requireAgent(id);
+          const workWasHeld = !allowsWork(id);
+          await containerAction(id, action);
+          if (action === "start" && workWasHeld) {
+            if (registry.getRecovery(id)?.status === "restored") {
+              resumeWhenHostReady(id);
+              return;
             }
-            await taskServices.wake([id]);
+            await workGate.check(id);
+            if (allowsWork(id)) {
+              registeredBots?.start(id);
+              void registeredDiscord.start(id);
+            }
           }
-        : undefined,
+          await taskServices.wake([id]);
+        }
+      : undefined,
     registerAgent: native
       ? processAgents!.register
       : provision
@@ -886,6 +888,10 @@ async function main(): Promise<void> {
                 provisioning: processAgents!.setupStatus(id),
                 botConnection: registeredBots?.getState(id),
                 setupAccess: agentAccess(id).getSetup(),
+                process: {
+                  state: processAgents!.status(id),
+                  desiredState: processStore!.getDesiredState(id),
+                },
               }
             : undefined;
         }

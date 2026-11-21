@@ -45,7 +45,7 @@ export const scheduleText = {
   costs:
     "Every run uses this agent's AI provider credits. Results arrive in the owner's private chat on the selected channel.",
   rules:
-    "Stopped or unavailable agents are skipped; containers never start automatically. Runs more than 10 minutes late are missed, and overlapping timed or manual runs are skipped. Webhook requests queue instead.",
+    "Stopped or unavailable agents are skipped; schedules never start agents automatically. Runs more than 10 minutes late are missed, and overlapping timed or manual runs are skipped. Webhook requests queue instead.",
   promptHelp:
     "Describe what the agent should do. Scheduled runs share its existing conversation context.",
   zoneHelp:
@@ -205,3 +205,11 @@ export function stopMessage(observation: AgentDetail["stopObservation"]) {
     failed: "The task finished with an error.",
   }[observation.finalStatus];
 }
+
+export const processLabels = {
+  starting: "Starting",
+  running: "Running",
+  stopping: "Stopping",
+  stopped: "Stopped",
+  failed: "Failed",
+};

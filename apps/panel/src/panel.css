@@ -955,9 +955,13 @@ main:focus {
   }
   header nav {
     order: 3;
+    flex-wrap: wrap;
     flex-basis: 100%;
     width: fit-content;
     justify-content: center;
+  }
+  header nav a {
+    white-space: nowrap;
   }
   [data-ui="header-actions"] {
     margin-left: auto;

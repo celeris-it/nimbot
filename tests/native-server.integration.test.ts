@@ -131,7 +131,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
         .toBe("ready");
       const file = join(directory, "agents", id, "workspace", "retained.txt");
       await writeFile(file, "persistent workspace");
-      await post(`/api/agents/${id}/container`, {
+      await post(`/api/agents/${id}/process`, {
         action: "stop",
         confirm: id,
       });
@@ -139,7 +139,12 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
       await stop();
       await start();
       expect((await get(`/api/agents/${id}`)).provisioning).toBe("pending");
-      await post(`/api/agents/${id}/container`, { action: "start" });
+      await post(`/api/agents/${id}/process`, { action: "start" });
+      await post(`/api/agents/${id}/process`, {
+        action: "restart",
+        confirm: id,
+      });
+      expect((await get(`/api/agents/${id}`)).process.state).toBe("running");
       await stop();
       await start();
       await expect

@@ -28,6 +28,7 @@ import { hashPassword } from "../../apps/server/dist/panel-auth.js";
 import { providers } from "../../apps/server/dist/provider-contracts.js";
 
 const agents = new Map();
+let nativeMode = false;
 const keys = new Map();
 const logins = new Map();
 const stateDir = mkdtempSync(join(tmpdir(), "nimbot-panel-fixture-"));
@@ -112,6 +113,7 @@ function requireHost(id, mutate = false) {
 }
 
 function reset() {
+  nativeMode = false;
   for (const id of agents.keys()) schedules.removeByAgent(id);
   schedules.setDefaultTimeZone("UTC");
   keys.clear();
@@ -139,6 +141,13 @@ const panel = createPanel(
     port: 3199,
   },
   {
+    get deploymentMode() {
+      return nativeMode ? "native" : "docker";
+    },
+    processAction: async (id, action) => {
+      const agent = agents.get(id);
+      agent.container = action === "stop" ? "stopped" : "running";
+    },
     peers: {
       grants,
       candidates: (id) => {
@@ -259,15 +268,27 @@ const panel = createPanel(
         ? {
             name: agent.name,
             botUsername: "developer_bot",
-            provisioning: agent.provisioning,
+            provisioning: nativeMode
+              ? agent.container === "running"
+                ? "ready"
+                : "pending"
+              : agent.provisioning,
             cancellationRequested: agent.cancelled,
-            canCancelProvisioning: agent.provisioning === "provisioning",
+            canCancelProvisioning:
+              !nativeMode && agent.provisioning === "provisioning",
             botConnection: { status: "polling" },
             setupAccess: {
               bot: "linked",
               owner: agent.ownerLinked ? "verified" : "pending",
             },
-            containerOperation: agent.operation,
+            ...(nativeMode
+              ? {
+                  process: {
+                    state: agent.container,
+                    desiredState: agent.container,
+                  },
+                }
+              : { containerOperation: agent.operation }),
           }
         : undefined;
     },
@@ -298,11 +319,12 @@ const panel = createPanel(
       cancelProvisioning: (id) => {
         agents.get(id).cancelled = true;
       },
-      containerStatus: async (id) => agents.get(id).container,
+      containerStatus: async (id) =>
+        nativeMode ? undefined : agents.get(id).container,
       hostStatus: async (id) =>
         agents.get(id).container === "running" ? "ready" : "unavailable",
       stopObservation: async (id) =>
-        agents.get(id).operation?.action === "stop"
+        !nativeMode && agents.get(id).operation?.action === "stop"
           ? {
               availability: "available",
               task: { id: "private-task-id", status: "running" },
@@ -333,6 +355,10 @@ const panel = createPanel(
   },
 );
 const app = new Hono();
+app.post("/__test/native", (c) => {
+  nativeMode = true;
+  return c.json({ ok: true });
+});
 app.post("/__test/reset", (c) => {
   reset();
   return c.json({ ok: true });

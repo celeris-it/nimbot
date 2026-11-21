@@ -2,7 +2,7 @@
 
 **Your AI agents, on your own server.**
 
-Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram and optional Discord direct messages. Each agent runs in its own Docker container with a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
+Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram and optional Discord direct messages. Each agent has a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
 > **Project status:** The MVP is complete. Installation through Docker Compose has been validated on macOS with Docker Desktop and on a clean Linux server.
 
@@ -41,7 +41,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 ## Features
 
 - Create, list, configure, start, stop, and delete agents through an authenticated web panel.
-- Give each agent a distinct Telegram bot, owner-bound private chat, Docker container, and persistent workspace.
+- Give each agent a distinct Telegram bot, owner-bound private chat, dedicated Agent Host, and persistent workspace.
 - Optionally connect a Discord bot and owner DM to the same agent, workspace, AI context, and durable task queue. Configure, replace, test, and remove the connection from the panel.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
@@ -77,7 +77,7 @@ Agent creation, configuration, token replacement, container start/stop, and dele
 
 ## Architecture
 
-One Nimbot Server serves the administration panel, maintains a separate Telegram long-polling connection per agent, and manages agent containers on the same machine.
+One Nimbot Server serves the administration panel, maintains a separate Telegram long-polling connection per agent, and manages agent runtime lifecycle on the same machine. Native development uses Server-managed Agent Host child processes. The current Docker deployment still provisions per-agent containers until the next milestone.
 
 ```text
   Web panel (admin)      Telegram agent bots A, B
@@ -112,10 +112,10 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
    Persistent Volumes        Persistent Volumes
 ```
 
-- **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing and scheduling, container lifecycle, and diagnostics. Agent-generated commands never run on the host OS.
-- **Agent Host:** one container per agent, using OpenCode as its sole AI engine and running the tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
+- **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing and scheduling, container lifecycle, and diagnostics. Agent-generated commands run only in Agent Host processes, never in the Server process.
+- **Agent Host:** a separate child process per agent in native development, or currently a dedicated container in the Docker deployment, using OpenCode as its sole AI engine and running the tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
 - **Panel:** Svelte 5, TypeScript, Vite, and daisyUI. Hono serves compiled assets and the same-origin API from one process. JavaScript is required; visible views refresh every five seconds and forms submit without document reloads.
-- **Storage:** SQLite and Docker named volumes. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
+- **Storage:** SQLite and persistent directories in native development, or Docker named volumes in the current Docker deployment. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
 
 The stack uses strict TypeScript on Node.js, pnpm workspaces, Hono, Zod, grammY, Drizzle for task persistence, Node's built-in SQLite API for the registry, Docker, Playwright, Vitest, ESLint, and Prettier.
 
@@ -327,6 +327,8 @@ without a conclusive signal appears as **Unverified**. See the
 
 Nimbot is intended for trusted, single-server self-hosted deployments. Docker containers alone do not provide sufficient isolation for hostile multi-tenant workloads.
 
+Native development runs the Server and all agents under one OS account. Agents can read or modify each other’s data and Server state, including bot tokens, MCP credentials, Host secrets, and `server.sqlite`. A prompt-injected agent could read Server secrets or change Server state. Minimal child environments avoid accidental inheritance; Server approvals, grants, and rules are not a security boundary against an agent with shell access. Use separate installations when separation is required. The following container hardening details apply to the current Docker deployment.
+
 - The server's Docker Engine access is equivalent to root on the host. A compromised server or panel can compromise the host; the fixed provisioning template does not constrain an attacker controlling the server. Rootless Docker reduces this exposure where practical.
 - Agent containers run as non-root with all capabilities dropped, `no-new-privileges`, CPU/memory/process limits, no additional swap, no published ports, and no Docker socket or server credentials. Each agent has its own network, volumes, and internal API token.
 - Outbound network access is unrestricted, including reachable private addresses. Agent volume disk usage is not limited. Apply restrictions on the host if needed.
@@ -371,8 +373,12 @@ another location; previous Server databases are rejected without modification.
 `NIMBOT_MODE=native pnpm start:server` starts already compiled code; configure
 `PLAYWRIGHT_BROWSERS_PATH` explicitly in that case. The Server starts and restores
 each agent as a child process and keeps bot polling and credentials in the Server.
-Panel labels, lifecycle controls, and the displayed trust model are still being
-adapted to this mode; its backend currently uses the existing lifecycle API paths.
+The panel identifies native development, shows each Host process state, and
+provides start, stop, and restart controls. Stop and restart require confirmation
+because they may interrupt active work. The panel explains that all agents and
+the Server share one trust domain, including access to Server secrets. Native
+controls use the authenticated process lifecycle API; Docker controls remain
+available only for the existing Docker deployment.
 The default Docker deployment continues using per-agent containers during this
 transition. See [TODO.md](TODO.md) for remaining work.
 
@@ -412,8 +418,8 @@ registration, start/stop/restart, removal, and recovery. Registration commits bo
 identity and initial process intent together. Removal stops the Host, retains its
 data unless purge is explicitly requested, removes schedules and credential
 references, and tombstones the agent. Telegram and schedule admission can use
-process readiness while preserving owner and chat checks. Adapting
-the native panel labels, controls, and trust model remains pending.
+process readiness while preserving owner and chat checks. The panel shows this
+process state and the shared trust model in native mode.
 
 The planned subprocess installation is a single trust domain under one OS
 account: agents can access each other’s data and Server state, including bot

@@ -583,6 +583,7 @@ it("authenticates JSON session endpoints with the same cookie and invalidates lo
   const cookie = await login();
   expect(await (await get("/api/session", cookie)).json()).toEqual({
     authenticated: true,
+    deploymentMode: "docker",
     capabilities: { createAgent: false },
   });
   expect(
@@ -593,6 +594,125 @@ it("authenticates JSON session endpoints with the same cookie and invalidates lo
   });
   expect((await get("/api/session", cookie)).status).toBe(401);
 });
+
+it("routes confirmed native lifecycle actions without exposing legacy container controls or raw errors", async () => {
+  const actions: string[] = [];
+  const f = apiSetup({
+    deploymentMode: "native",
+    getAgentSetup: (id) =>
+      id === "dev"
+        ? {
+            name: "Developer",
+            botUsername: "developer_bot",
+            provisioning: "ready",
+            process: { state: "running", desiredState: "running" },
+          }
+        : undefined,
+    processAction: async (_id, action) => {
+      if (action === "start") throw new Error("private-secret-details");
+      actions.push(action);
+    },
+  });
+  expect(
+    (
+      await f.post("/api/agents/dev/process", {
+        action: "stop",
+        confirm: "dev",
+      })
+    ).status,
+  ).toBe(401);
+  const cookie = await f.login();
+  expect(
+    (await (await f.get("/api/session", cookie)).json()).deploymentMode,
+  ).toBe("native");
+  const details = await (await f.get("/api/agents/dev", cookie)).json();
+  expect(details.capabilities.process).toEqual({
+    start: false,
+    stop: true,
+    restart: true,
+  });
+  expect(details.capabilities.container).toBe(false);
+  expect(details.containerState).toBeUndefined();
+  expect(details.stopObservation).toBeUndefined();
+  expect(
+    (
+      await f.post(
+        "/api/agents/dev/container",
+        { action: "stop", confirm: "dev" },
+        cookie,
+      )
+    ).status,
+  ).toBe(404);
+  for (const action of ["stop", "restart"]) {
+    expect(
+      (await f.post("/api/agents/dev/process", { action }, cookie)).status,
+    ).toBe(400);
+    expect(
+      (
+        await f.post(
+          "/api/agents/dev/process",
+          { action, confirm: "other" },
+          cookie,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await f.post(
+          "/api/agents/dev/process",
+          { action, confirm: "dev" },
+          cookie,
+          "http://attacker.example",
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await f.post(
+          "/api/agents/dev/process",
+          { action, confirm: "dev" },
+          cookie,
+        )
+      ).status,
+    ).toBe(200);
+  }
+  expect(actions).toEqual(["stop", "restart"]);
+  const failed = await f.post(
+    "/api/agents/dev/process",
+    { action: "start" },
+    cookie,
+  );
+  expect(failed.status).toBe(409);
+  expect(await failed.text()).not.toContain("private-secret-details");
+  expect(
+    (await f.post("/api/agents/other/process", { action: "start" }, cookie))
+      .status,
+  ).toBe(404);
+  expect((await f.get("/agents/dev/process/restart", cookie)).status).toBe(200);
+  expect((await f.get("/agents/dev/container/stop", cookie)).status).toBe(404);
+});
+
+it.each(["starting", "stopping", "stopped", "failed"] as const)(
+  "reports native %s lifecycle capabilities",
+  async (state) => {
+    const f = apiSetup({
+      deploymentMode: "native",
+      processAction: async () => {},
+      getAgentSetup: () => ({
+        name: "Developer",
+        botUsername: "developer_bot",
+        provisioning: "pending",
+        process: { state, desiredState: "stopped" },
+      }),
+    });
+    const data = await (await f.get("/api/agents/dev", await f.login())).json();
+    expect(data.capabilities.process).toEqual({
+      start: ["stopped", "failed"].includes(state),
+      stop: false,
+      restart: false,
+    });
+  },
+);
 
 it("returns browser-safe detail and capabilities without task identifiers or credentials", async () => {
   const { get, login } = apiSetup();

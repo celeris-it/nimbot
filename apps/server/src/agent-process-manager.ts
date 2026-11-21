@@ -23,7 +23,8 @@ export interface AgentProcessStore {
   remove(agentId: string): void;
 }
 
-type ProcessStatus = "starting" | "running" | "stopping" | "stopped" | "failed";
+export type ProcessStatus =
+  "starting" | "running" | "stopping" | "stopped" | "failed";
 interface ManagedProcess {
   child: ChildProcess;
   exited: Promise<void>;

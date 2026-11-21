@@ -37,6 +37,7 @@ import {
   approvalRuleForm,
   confirmForm,
   containerForm,
+  processForm,
   deleteAgentForm,
   delegationParams,
   discordConfigureForm,
@@ -68,6 +69,11 @@ export interface RegisteredAgentSettings {
   ): Promise<import("./agent-registry.js").StopObservation | undefined>;
 }
 export interface PanelDeps {
+  deploymentMode?: "native" | "docker";
+  processAction?: (
+    id: string,
+    action: "start" | "stop" | "restart",
+  ) => Promise<void>;
   mcp?: McpPanelDeps;
   schedules?: {
     store: Pick<
@@ -172,6 +178,10 @@ export interface PanelDeps {
         cancellationRequested?: boolean;
         canCancelProvisioning?: boolean;
         containerOperation?: import("./agent-registry.js").ContainerOperation;
+        process?: {
+          state: import("./agent-process-manager.js").ProcessStatus;
+          desiredState?: "running" | "stopped";
+        };
       }
     | undefined;
   agentSettings?: RegisteredAgentSettings;
@@ -402,6 +412,7 @@ export function createPanel(
   app.get("/api/session", (c) =>
     c.json({
       authenticated: true,
+      deploymentMode: deps.deploymentMode ?? "docker",
       capabilities: {
         createAgent: !!registerAgent,
         ...(deps.mcp ? { mcp: true } : {}),
@@ -929,9 +940,9 @@ export function createPanel(
     const setup = getAgentSetup?.(id);
     if (!setup) return c.json({ error: "Agent not found." }, 404);
     const [containerState, hostState, observation] = await Promise.all([
-      agentSettings?.containerStatus?.(id),
+      setup.process ? undefined : agentSettings?.containerStatus?.(id),
       agentSettings?.hostStatus?.(id),
-      agentSettings?.stopObservation?.(id),
+      setup.process ? undefined : agentSettings?.stopObservation?.(id),
     ]);
     const recovery =
       setup.provisioning === "ready" &&
@@ -976,14 +987,30 @@ export function createPanel(
         edit: !!settings,
         replaceToken: !!settings && !!agentSettings?.saveToken,
         container:
+          !setup.process &&
           setup.provisioning === "ready" &&
           containerState !== "missing" &&
           !!containerAction,
+        process:
+          setup.process && deps.processAction
+            ? {
+                start:
+                  setup.process.desiredState !== undefined &&
+                  ["stopped", "failed"].includes(setup.process.state),
+                stop:
+                  setup.process.state === "running" ||
+                  (setup.process.state === "failed" &&
+                    setup.process.desiredState === "running"),
+                restart: setup.process.state === "running",
+              }
+            : undefined,
         cancel:
+          !setup.process &&
           !!setup.canCancelProvisioning &&
           !setup.cancellationRequested &&
           !!agentSettings?.cancelProvisioning,
         retry:
+          !setup.process &&
           !!provisionAgent &&
           ["failed", "interrupted", "cancelled"].includes(setup.provisioning),
         delete: !!deleteAgent,
@@ -1236,7 +1263,8 @@ export function createPanel(
     }
   });
   app.post("/api/agents/:id/container", async (c) => {
-    if (!containerAction) return c.notFound();
+    if (!containerAction || deps.deploymentMode === "native")
+      return c.notFound();
     const id = c.req.param("id");
     const form = await parseForm(
       c,
@@ -1253,6 +1281,34 @@ export function createPanel(
         {
           error:
             "Container action failed; inspect the agent state before retrying",
+        },
+        409,
+      );
+    }
+  });
+  app.post("/api/agents/:id/process", async (c) => {
+    if (!deps.processAction) return c.notFound();
+    const id = c.req.param("id");
+    if (!getAgentSetup?.(id)?.process)
+      return c.json({ error: "Agent not found." }, 404);
+    const form = await parseForm(
+      c,
+      processForm(id),
+      "Select start, stop or restart; stopping and restarting require confirmation of the agent ID",
+    );
+    if (form.response) return form.response;
+    try {
+      await deps.processAction(id, form.data.action);
+      return c.json({
+        agentId: id,
+        action: form.data.action,
+        status: "completed",
+      });
+    } catch {
+      return c.json(
+        {
+          error:
+            "Agent Host action failed. Refresh its status before trying again.",
         },
         409,
       );
@@ -1334,6 +1390,8 @@ export function createPanel(
     "settings",
     "token",
     "container/stop",
+    "process/stop",
+    "process/restart",
     "delete",
   ]) {
     app.get(`/agents/:id/${suffix}`, (c) => {
@@ -1352,7 +1410,11 @@ export function createPanel(
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||
         (suffix === "delete" && !deleteAgent) ||
         (suffix === "container/stop" &&
-          (!containerAction || getAgentSetup(id)?.provisioning !== "ready"))
+          (!containerAction ||
+            getAgentSetup(id)?.process ||
+            getAgentSetup(id)?.provisioning !== "ready")) ||
+        (suffix.startsWith("process/") &&
+          (!deps.processAction || !getAgentSetup(id)?.process))
       )
         return c.notFound();
       return entry(c);

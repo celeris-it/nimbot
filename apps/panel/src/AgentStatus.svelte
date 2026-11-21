@@ -3,6 +3,7 @@
   import { providers } from "../../server/src/provider-contracts.js";
   import DiscordSettings from "./DiscordSettings.svelte";
   import {
+    processLabels,
     botLabel,
     setupLabels,
     failureLabels,
@@ -50,6 +51,17 @@
       ? agent.hostState === "ready" || agent.hostState === "busy"
       : agent.provisioning === "ready",
   );
+  let processMessage = $derived(
+    agent.process?.state === "starting"
+      ? "The Agent Host is starting. Wait for the operation to finish."
+      : agent.process?.state === "stopping"
+        ? "The Agent Host is stopping. Wait for the operation to finish."
+        : available
+          ? "The agent and its bot were saved and its Agent Host is available."
+          : agent.process?.state === "running"
+            ? "The process is running, but its Host API is unavailable. Refresh status or restart the agent."
+            : "The agent and its bot were saved. Start the Agent Host to make it available; do not create the same agent again.",
+  );
 </script>
 
 <h1 tabindex="-1">{agent.name}</h1>
@@ -69,22 +81,50 @@
   >{/if}
 <section class="card" aria-label="Creation result">
   <h2>
-    {agent.containerState === "stopped"
-      ? "Container stopped."
-      : available
-        ? "Container available."
-        : "Agent offline."}
+    {agent.process
+      ? `Agent Host ${processLabels[agent.process.state].toLowerCase()}.`
+      : agent.containerState === "stopped"
+        ? "Container stopped."
+        : available
+          ? "Container available."
+          : "Agent offline."}
   </h2>
   <p>
-    {available
-      ? "The agent and its bot were saved and the container is available."
-      : "The agent and its bot were saved, but the container is not available yet. Do not create the same agent again."}
+    {agent.process
+      ? processMessage
+      : available
+        ? "The agent and its bot were saved and the container is available."
+        : "The agent and its bot were saved, but the container is not available yet. Do not create the same agent again."}
   </p>
-  <p>
-    Setup: {agent.provisioning === "provisioning" && agent.cancellationRequested
-      ? "Cancellation requested; waiting for the current operation to finish"
-      : (setupLabels[agent.provisioning] ?? "Unknown state")}.
-  </p>
+  {#if agent.process}
+    <p>Process: {processLabels[agent.process.state]}.</p>
+    <p>
+      After a Server restart: {agent.process.desiredState === "running"
+        ? "restore this agent’s Host"
+        : "leave this agent stopped"}.
+    </p>
+    {#if agent.capabilities.process?.start}<button
+        class="btn"
+        disabled={busy}
+        onclick={() => action("start")}
+        >{busy ? "Starting…" : "Start agent"}</button
+      >{/if}
+    {#if agent.capabilities.process?.stop}<a
+        class="btn"
+        href={`${base}/process/stop`}>Stop agent…</a
+      >{/if}
+    {#if agent.capabilities.process?.restart}<a
+        class="btn"
+        href={`${base}/process/restart`}>Restart agent…</a
+      >{/if}
+  {:else}
+    <p>
+      Setup: {agent.provisioning === "provisioning" &&
+      agent.cancellationRequested
+        ? "Cancellation requested; waiting for the current operation to finish"
+        : (setupLabels[agent.provisioning] ?? "Unknown state")}.
+    </p>
+  {/if}
   {#if agent.capabilities.cancel}
     <p>
       Cancelling stops the remaining setup steps. Created resources are kept; a

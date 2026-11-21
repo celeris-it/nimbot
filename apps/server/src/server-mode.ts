@@ -1,7 +1,10 @@
 import { resolve } from "node:path";
 import type { PanelConfig } from "./panel-config.js";
 
-export function readServerMode(env: NodeJS.ProcessEnv, panel: PanelConfig) {
+export function readServerMode(
+  env: NodeJS.ProcessEnv,
+  panel: PanelConfig,
+): { mode: "native" | "docker"; stateDirectory: string } {
   const mode = env.NIMBOT_MODE?.trim() || "docker";
   if (mode !== "native" && mode !== "docker")
     throw new Error("NIMBOT_MODE must be native or docker.");

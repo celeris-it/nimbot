@@ -43,6 +43,7 @@
 
   let path = $state(location.pathname);
   let session = $state<PanelSession>();
+  let native = $derived(session?.deploymentMode === "native");
   let status = $state<PanelStatus>({ agents: [] });
   let agent = $state<AgentDetail>();
   let providerSettings = $state<ProviderSettingsState>();
@@ -81,7 +82,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|usage|memory|approvals|peers|delegations|mcp|schedules|token|delete|container\/stop)$/,
+      /^\/agents\/([^/]+)\/(setup|settings|providers|usage|memory|approvals|peers|delegations|mcp|schedules|token|delete|container\/stop|process\/(?:stop|restart))$/,
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
@@ -116,9 +117,12 @@
                                 ? "Bot token"
                                 : route?.[2] === "delete"
                                   ? "Delete agent"
-                                  : route?.[2] === "container/stop"
-                                    ? "Stop agent"
-                                    : "Agent setup",
+                                  : route?.[2] === "process/restart"
+                                    ? "Restart agent"
+                                    : route?.[2] === "process/stop" ||
+                                        route?.[2] === "container/stop"
+                                      ? "Stop agent"
+                                      : "Agent setup",
   );
 
   async function focusHeading() {
@@ -332,7 +336,9 @@
           (view === "settings" && !agent.capabilities.edit) ||
           (view === "token" && !agent.capabilities.replaceToken) ||
           (view === "delete" && !agent.capabilities.delete) ||
-          (view === "container/stop" && !agent.capabilities.container);
+          (view === "container/stop" && !agent.capabilities.container) ||
+          (view === "process/stop" && !agent.capabilities.process?.stop) ||
+          (view === "process/restart" && !agent.capabilities.process?.restart);
       } else
         missing = path !== "/agents/new" || !session.capabilities.createAgent;
       updateError = "";
@@ -466,10 +472,12 @@
     );
   }
   async function action(
-    kind: "start" | "cancel" | "retry" | "stop" | "delete" | "recover",
+    kind:
+      "start" | "restart" | "cancel" | "retry" | "stop" | "delete" | "recover",
   ) {
     if (!agent) return;
     const id = encodeURIComponent(agent.id);
+    const processManaged = !!agent.process;
     const target =
       kind === "cancel"
         ? "provision/cancel"
@@ -479,7 +487,9 @@
             ? "delete"
             : kind === "recover"
               ? "recover"
-              : "container";
+              : processManaged
+                ? "process"
+                : "container";
     await mutate(
       `/api/agents/${id}/${target}`,
       kind === "recover"
@@ -487,10 +497,16 @@
         : { action: kind, confirm: agent.id, deleteData: String(deleteData) },
       () => {
         if (kind === "delete") navigate("/");
-        else if (kind === "stop") navigate(`/agents/${id}/setup`);
-        else {
+        else if (kind === "stop" || kind === "restart") {
           notice =
-            kind === "cancel"
+            kind === "restart"
+              ? "Agent restarted. Active work may have been interrupted."
+              : "Agent stopped. Files and history were kept.";
+          navigate(`/agents/${id}/setup`);
+        } else {
+          notice = processManaged
+            ? "Agent started."
+            : kind === "cancel"
               ? "Cancellation requested."
               : kind === "retry"
                 ? "Setup restarted."
@@ -841,7 +857,8 @@
     </nav>
     <div data-ui="header-actions">
       <span data-ui="installation"
-        ><Icon name="shield" size={15} /> Private installation</span
+        ><Icon name="shield" size={15} />
+        {native ? "Native development" : "Private installation"}</span
       ><button
         class="btn btn-ghost"
         disabled={busy}
@@ -862,6 +879,25 @@
       ? "dashboard"
       : "detail"}
 >
+  {#if native && path !== "/login"}
+    <aside class="alert" aria-label="Shared installation trust">
+      <div>
+        <strong>Native development · Shared installation trust</strong>
+        <p>
+          The Server and all agents run under one OS account. Agents can read or
+          modify each other’s files, memory and AI provider credentials, and
+          Server state including bot tokens, MCP credentials, Host secrets and
+          server.sqlite.
+        </p>
+        <p>
+          Approvals, grants and rules guide normal behavior. They are not a
+          security boundary against an agent with shell access. A
+          prompt-injected agent could read Server secrets or change Server
+          state. Use separate installations when separation is required.
+        </p>
+      </div>
+    </aside>
+  {/if}
   <p id="form-error" role="alert" tabindex="-1">{error}</p>
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if updateError}<p role="status">{updateError}</p>
@@ -901,6 +937,7 @@
     <a class="btn" href="/">Back to panel</a>
   {:else if path === "/"}
     <Dashboard
+      {native}
       agents={status.agents}
       canCreate={session?.capabilities.createAgent ?? false}
       refresh={() => load()}
@@ -941,7 +978,7 @@
       <button type="submit" class="btn" disabled={busy}>Save settings</button>
     </form>
   {:else if path === "/agents/new"}
-    {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
+    {#key path}<AgentForm mode="new" {native} {busy} {submit} />{/key}
   {:else if path === "/mcp"}
     <h1 tabindex="-1">MCP catalog</h1>
     <a class="btn btn-primary" href="/mcp/new">Add integration</a>
@@ -1067,7 +1104,38 @@
         refresh={() => load()}
       />
     {:else if route[2] === "settings" || route[2] === "token"}
-      {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
+      {#key path}<AgentForm
+          mode={route[2]}
+          {native}
+          {agent}
+          {busy}
+          {submit}
+        />{/key}
+    {:else if route[2] === "process/stop" || route[2] === "process/restart"}
+      <h1 tabindex="-1">
+        {route[2] === "process/restart" ? "Restart" : "Stop"}
+        {agent.name}?
+      </h1>
+      <p>
+        The Agent Host process will be {route[2] === "process/restart"
+          ? "stopped and started again"
+          : "stopped"}. Active work may be interrupted. Files, history and AI
+        provider state are kept.
+      </p>
+      <button
+        class="btn"
+        disabled={busy}
+        onclick={() =>
+          action(route?.[2] === "process/restart" ? "restart" : "stop")}
+        >{busy
+          ? "Working…"
+          : route[2] === "process/restart"
+            ? "Confirm restart"
+            : "Confirm stop"}</button
+      >
+      <a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+        >Cancel</a
+      >
     {:else if route[2] === "container/stop"}
       <h1 tabindex="-1">Stop {agent.name}?</h1>
       <p>
@@ -1083,8 +1151,9 @@
     {:else if route[2] === "delete"}
       <h1 tabindex="-1">Delete {agent.name}?</h1>
       <p>
-        Its container will be stopped and removed, its Telegram polling stopped,
-        and its local bot binding and saved credentials erased.
+        {agent.process
+          ? "Its Agent Host and Telegram polling will be stopped, and its local bot binding and connection credentials erased. Agent data is kept unless you explicitly delete it below."
+          : "Its container will be stopped and removed, its Telegram polling stopped, and its local bot binding and saved credentials erased."}
       </p>
       <p>
         This does not delete the bot in Telegram. Remove or revoke it separately
@@ -1099,9 +1168,11 @@
         aria-busy={busy}
       >
         <label
-          ><input class="checkbox" type="checkbox" bind:checked={deleteData} /> Also
-          permanently delete the persistent volume (workspace files and history).
-          Leave unchecked to keep it.</label
+          ><input class="checkbox" type="checkbox" bind:checked={deleteData} />
+          Also permanently delete {agent.process
+            ? "the agent data directory (workspace, history, AI provider state and browser profile)"
+            : "the persistent volume (workspace files and history)"}. Leave
+          unchecked to keep it.</label
         >
         <button class="btn" type="submit" disabled={busy}
           >Confirm deletion</button
