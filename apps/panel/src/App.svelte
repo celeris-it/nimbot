@@ -21,6 +21,7 @@
   import { Icon } from "./components/index.js";
   import AgentForm from "./AgentForm.svelte";
   import AgentStatus from "./AgentStatus.svelte";
+  import AgentNavigation from "./AgentNavigation.svelte";
   import ProviderSettings from "./ProviderSettings.svelte";
   import AgentUsageView from "./AgentUsage.svelte";
   import type {
@@ -78,6 +79,7 @@
   let notice = $state("");
   let password = $state("");
   let deleteData = $state(false);
+  let navigationExpanded = $state(false);
   let controller: AbortController | undefined;
   let inFlight = false;
   let route = $derived(
@@ -86,6 +88,49 @@
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
+  let mainLinks = $derived(
+    (
+      [
+        { href: "/", label: "Agents", icon: "grid", available: true },
+        {
+          href: "/mcp",
+          label: "MCP catalog",
+          icon: "plug",
+          available: session?.capabilities.mcp,
+        },
+        {
+          href: "/agents/new",
+          label: "New agent",
+          icon: "plus",
+          available: session?.capabilities.createAgent,
+        },
+        {
+          href: "/settings",
+          label: "Settings",
+          icon: "settings",
+          available: session?.capabilities.scheduleSettings,
+        },
+      ] as const
+    ).filter((link) => link.available),
+  );
+  let agentLinks = $derived(
+    [
+      { view: "setup", label: "Overview" },
+      { view: "providers", label: "Configure AI providers" },
+      { view: "usage", label: "Model and usage" },
+      { view: "memory", label: "Review memory" },
+      { view: "approvals", label: "Approvals" },
+      { view: "peers", label: "Agent access" },
+      { view: "delegations", label: "Delegations" },
+      { view: "mcp", label: "MCP access", hidden: !session?.capabilities.mcp },
+      { view: "schedules", label: scheduleText.link },
+      {
+        view: "settings",
+        label: "Edit agent",
+        hidden: !agent?.capabilities.edit,
+      },
+    ].filter((link) => !link.hidden),
+  );
   let title = $derived(
     path === "/login"
       ? "Sign in"
@@ -820,25 +865,13 @@
     >nimbot<span data-ui="wordmark-dot">.</span></a
   >
   {#if session && path !== "/login"}
-    <nav aria-label="Main navigation">
-      <a href="/" aria-current={path === "/" ? "page" : undefined}
-        ><Icon name="grid" size={15} /> Agents</a
-      >{#if session.capabilities.mcp}<a
-          href="/mcp"
-          aria-current={mcpRoute ? "page" : undefined}>MCP catalog</a
-        >{/if}
-      {#if session.capabilities.createAgent}<a
-          href="/agents/new"
-          aria-current={path === "/agents/new" ? "page" : undefined}
-          ><Icon name="plus" size={15} /> New agent</a
-        >{/if}
-      {#if session.capabilities.scheduleSettings}
-        <a
-          href="/settings"
-          aria-current={path === "/settings" ? "page" : undefined}>Settings</a
-        >
-      {/if}
-    </nav>
+    {#if loaded && contentAvailable && !missing && agent && route}
+      <AgentNavigation
+        links={agentLinks}
+        agentId={agent.id}
+        currentView={route[2]}
+      />
+    {/if}
     <div data-ui="header-actions">
       <span data-ui="installation"
         ><Icon name="shield" size={15} />
@@ -854,6 +887,46 @@
       ><Icon name="shield" size={15} /> SELF-HOSTED & PRIVATE</span
     >{/if}
 </header>
+{#if session && path !== "/login"}
+  <nav
+    aria-label="Main navigation"
+    data-ui="main-navigation"
+    data-expanded={navigationExpanded}
+  >
+    <button
+      class="btn btn-ghost"
+      type="button"
+      aria-label={navigationExpanded ? "Hide labels" : "Show labels"}
+      aria-expanded={navigationExpanded}
+      aria-controls="main-navigation-links"
+      onclick={() => (navigationExpanded = !navigationExpanded)}
+    >
+      <Icon name={navigationExpanded ? "collapsePanel" : "expandPanel"} />
+      {#if navigationExpanded}<span>Hide labels</span>{/if}
+    </button>
+    <ul class="menu" id="main-navigation-links">
+      {#each mainLinks as link (link.href)}
+        <li>
+          <a
+            href={link.href}
+            aria-label={link.label}
+            aria-current={path === link.href
+              ? "page"
+              : (link.href === "/" && route) ||
+                  (link.href === "/mcp" && mcpRoute)
+                ? "location"
+                : undefined}
+          >
+            <Icon name={link.icon} />
+            <span aria-hidden="true" data-ui="navigation-label"
+              >{link.label}</span
+            >
+          </a>
+        </li>
+      {/each}
+    </ul>
+  </nav>
+{/if}
 <main
   id="main"
   tabindex="-1"
@@ -863,28 +936,6 @@
       ? "dashboard"
       : "detail"}
 >
-  {#if session && path !== "/login"}
-    <aside class="alert" aria-label="Shared installation trust">
-      <div>
-        <strong
-          >{native ? "Native development" : "Docker deployment"} · Shared installation
-          trust</strong
-        >
-        <p>
-          The Server and all agents run under one OS account. Agents can read or
-          modify each other’s files, memory and AI provider credentials, and
-          Server state including bot tokens, MCP credentials, Host secrets and
-          server.sqlite.
-        </p>
-        <p>
-          Approvals, grants and rules guide normal behavior. They are not a
-          security boundary against an agent with shell access. A
-          prompt-injected agent could read Server secrets or change Server
-          state. Use separate installations when separation is required.
-        </p>
-      </div>
-    </aside>
-  {/if}
   <p id="form-error" role="alert" tabindex="-1">{error}</p>
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if updateError}<p role="status">{updateError}</p>
@@ -1085,7 +1136,6 @@
       {#key agent.id}<AgentStatus
           {agent}
           {busy}
-          mcpAvailable={session?.capabilities.mcp ?? false}
           {action}
           {discordAction}
           {connectTelegram}

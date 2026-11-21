@@ -399,9 +399,9 @@ Server rejects the existing database or the panel port is already in use.
 each agent as a child process and keeps bot polling and credentials in the Server.
 The panel identifies native development, shows each Host process state, and
 provides start, stop, and restart controls. Stop and restart require confirmation
-because they may interrupt active work. The panel explains that all agents and
-the Server share one trust domain, including access to Server secrets. Both
-deployment modes use the authenticated process lifecycle API.
+because they may interrupt active work. The panel's AI providers page describes
+shared credential access under one OS account. Both deployment modes use the
+authenticated process lifecycle API.
 The Docker image runs the same subprocess runtime. See the [installation guide](docs/INSTALL.md)
 and [operations guide](docs/OPERATIONS.md) for Docker CLI management and complete-volume backups.
 

@@ -8,12 +8,10 @@
     failureLabels,
     botAccessLabels,
     ownerLabels,
-    scheduleText,
   } from "./labels.js";
   let {
     agent,
     busy,
-    mcpAvailable,
     action,
     refresh,
     discordAction,
@@ -21,7 +19,6 @@
   }: {
     agent: AgentDetail;
     busy: boolean;
-    mcpAvailable: boolean;
     action: (kind: "start") => Promise<void>;
     refresh: () => void;
     connectTelegram: (fields: Record<string, string>) => Promise<void>;
@@ -68,17 +65,6 @@
 </script>
 
 <h1 tabindex="-1">{agent.name}</h1>
-<a class="btn" href={`${base}/providers`}>Configure AI providers</a>
-<a class="btn" href={`${base}/usage`}>Model and usage</a>
-<a class="btn" href={`${base}/memory`}>Review memory</a>
-<a class="btn" href={`${base}/approvals`}>Approvals</a>
-<a class="btn" href={`${base}/peers`}>Agent access</a>
-<a class="btn" href={`${base}/delegations`}>Delegations</a>
-{#if mcpAvailable}<a class="btn" href={`${base}/mcp`}>MCP access</a>{/if}
-<a class="btn" href={`${base}/schedules`}>{scheduleText.link}</a>
-{#if agent.capabilities.edit}<a class="btn" href={`${base}/settings`}
-    >Edit agent</a
-  >{/if}
 <section class="card" aria-label="Creation result">
   <h2>
     {agent.process

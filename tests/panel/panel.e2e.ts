@@ -11,6 +11,15 @@ async function login(page: Page) {
   ).toBeVisible();
 }
 
+async function openAgentSection(page: Page, name: string) {
+  const nav = page.getByRole("navigation", { name: "Agent navigation" });
+  const link = nav.locator("a").and(nav.getByText(name, { exact: true }));
+  await expect(link).toBeAttached();
+  if (!(await link.isVisible()))
+    await nav.getByLabel("More agent options").click();
+  await link.click();
+}
+
 test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
@@ -20,7 +29,7 @@ test("selects an agent model and shows its published quota in the panel", async 
 }) => {
   await login(page);
   await page.goto("/agents/dev/setup");
-  await page.getByRole("link", { name: "Model and usage" }).click();
+  await openAgentSection(page, "Model and usage");
   await expect(
     page.getByRole("heading", { name: "Model and usage for Developer" }),
   ).toBeFocused();
@@ -126,7 +135,7 @@ test("edits the MCP catalog and manages an agent's grant and write-only credenti
   await expect(page.getByLabel("Tool name")).toHaveCount(1);
 
   await page.goto("/agents/dev/setup");
-  await page.getByRole("link", { name: "MCP access" }).click();
+  await openAgentSection(page, "MCP access");
   await expect(
     page.getByRole("heading", { name: "MCP access for Developer" }),
   ).toBeFocused();
@@ -273,7 +282,7 @@ test("manages peer grants, reads approval history and deletes private memory", a
   );
   await login(page);
   await page.goto("/agents/dev/setup");
-  await page.getByRole("link", { name: "Agent access" }).click();
+  await openAgentSection(page, "Agent access");
   await expect(page.getByText("No grants.", { exact: false })).toBeVisible();
   await page.getByLabel("Target agent").selectOption({ label: "Researcher" });
   await page.getByLabel("Permission").selectOption({ label: "Delegate tasks" });
@@ -287,7 +296,7 @@ test("manages peer grants, reads approval history and deletes private memory", a
   await expect(page.getByText("No grants.", { exact: false })).toBeVisible();
 
   await page.goto(`/agents/${researcher}/setup`);
-  await page.getByRole("link", { name: "Approvals", exact: true }).click();
+  await openAgentSection(page, "Approvals");
   await expect(
     page.getByRole("heading", { name: "Decision history" }),
   ).toBeVisible();
@@ -298,7 +307,7 @@ test("manages peer grants, reads approval history and deletes private memory", a
   await expect(decision).toContainText("decided by telegram:42");
   await expect(decision).toContainText("execution: completed");
   await page.getByRole("link", { name: "Back to agent" }).click();
-  await page.getByRole("link", { name: "Review memory" }).click();
+  await openAgentSection(page, "Review memory");
   await expect(
     page.getByRole("heading", { name: "Research notes" }),
   ).toBeVisible();
@@ -327,7 +336,7 @@ test("pages through delegation history and cancels only the selected child", asy
   expect((await request.post(`/__test/delegations/${source}`)).ok()).toBe(true);
   await login(page);
   await page.goto(`/agents/${source}/setup`);
-  await page.getByRole("link", { name: "Delegations" }).click();
+  await openAgentSection(page, "Delegations");
   await expect(
     page.getByRole("heading", { name: "Delegations from Researcher" }),
   ).toBeFocused();
@@ -360,7 +369,7 @@ async function openProviders(page: Page) {
   await login(page);
   await page.goto("/agents/dev/setup");
   await page.getByRole("button", { name: "Start agent" }).click();
-  await page.getByRole("link", { name: "Configure AI providers" }).click();
+  await openAgentSection(page, "Configure AI providers");
   await expect(
     page.getByRole("heading", { name: "AI providers for Developer" }),
   ).toBeVisible();
@@ -370,7 +379,7 @@ async function openSchedules(page: Page) {
   await login(page);
   await page.getByRole("link", { name: "Manage", exact: true }).click();
   await page.getByRole("button", { name: "Start agent", exact: true }).click();
-  await page.getByRole("link", { name: "Manage schedules" }).click();
+  await openAgentSection(page, "Manage schedules");
   await expect(
     page.getByRole("heading", { name: "Schedules for Developer" }),
   ).toBeVisible();
@@ -814,7 +823,7 @@ test("logs in, follows deep links and browser history, and signs out", async ({
   await expect(
     page.getByRole("heading", { name: "Developer", exact: true }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Edit agent", exact: true }).click();
+  await openAgentSection(page, "Edit agent");
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
     "Developer",
   );
@@ -875,7 +884,7 @@ test("creates an agent using only Discord and defaults new schedules to Discord"
     page.getByRole("link", { name: "Replace bot token" }),
   ).toHaveCount(0);
   await request.post("/__test/discord-owner/created");
-  await page.getByRole("link", { name: "Manage schedules" }).click();
+  await openAgentSection(page, "Manage schedules");
   await page.getByRole("button", { name: "New schedule" }).click();
   await expect(page.getByLabel("Delivery channel")).toHaveValue("discord");
 });
@@ -1083,6 +1092,213 @@ test("supports keyboard navigation and narrow screens", async ({ page }) => {
   });
 });
 
+test("moves between agent pages with an expandable main navigation", async ({
+  page,
+  request,
+}, info) => {
+  await request.post("/__test/agent/research");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await login(page);
+  const mainNav = page.getByRole("navigation", { name: "Main navigation" });
+  const agents = mainNav.getByRole("link", { name: "Agents", exact: true });
+  const label = agents.getByText("Agents", { exact: true });
+  const showLabels = mainNav.getByRole("button", { name: "Show labels" });
+  const hideLabels = mainNav.getByRole("button", { name: "Hide labels" });
+  await expect(agents).toHaveAttribute("aria-current", "page");
+  await expect(label).toBeHidden();
+  await showLabels.focus();
+  await page.keyboard.press("Tab");
+  await expect(agents).toBeFocused();
+  await expect(label).toBeVisible();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Space");
+  await expect(hideLabels).toHaveAttribute("aria-expanded", "true");
+  await expect(label).toBeVisible();
+
+  const agentNav = page.getByRole("navigation", { name: "Agent navigation" });
+  await expect(agentNav).toHaveCount(0);
+  await page.getByRole("button", { name: "Select Developer" }).click();
+  await page.getByRole("link", { name: "Manage", exact: true }).click();
+  await expect(agents).toHaveAttribute("aria-current", "location");
+  await expect(hideLabels).toBeVisible();
+  await expect(
+    agentNav.getByRole("link", { name: "Overview" }),
+  ).toHaveAttribute("aria-current", "page");
+  const memory = agentNav.getByRole("link", { name: "Review memory" });
+  await openAgentSection(page, "Review memory");
+  await expect(memory).toHaveAttribute("aria-current", "page");
+  await openAgentSection(page, "Manage schedules");
+  await expect(agentNav.locator('a[aria-current="page"]')).toHaveText(
+    "Manage schedules",
+  );
+  await page.goBack();
+  await expect(memory).toHaveAttribute("aria-current", "page");
+
+  await agents.click();
+  await page.getByRole("button", { name: "Select Researcher" }).click();
+  await page.getByRole("link", { name: "Manage", exact: true }).click();
+  await expect(memory).toHaveAttribute("href", "/agents/research/memory");
+  await expect(agentNav.locator('a[href^="/agents/dev/"]')).toHaveCount(0);
+
+  for (const width of [320, 375, 1051, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const expanded of [true, false]) {
+      await expect(expanded ? hideLabels : showLabels).toHaveAttribute(
+        "aria-expanded",
+        String(expanded),
+      );
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      const bounds = await agents.boundingBox();
+      expect(bounds?.width).toBeGreaterThanOrEqual(44);
+      expect(bounds?.height).toBeGreaterThanOrEqual(44);
+      if (width === 375 || width === 1280)
+        await page.screenshot({
+          path: info.outputPath(`navigation-${width}-${expanded}.png`),
+        });
+      await (expanded ? hideLabels : showLabels).click();
+    }
+  }
+});
+
+test("keeps capability-gated links out of both navigation bars", async ({
+  page,
+}) => {
+  await login(page);
+  await page.route("**/api/session", async (route) => {
+    const response = await route.fetch();
+    const session = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...session,
+        capabilities: {
+          createAgent: false,
+          mcp: false,
+          scheduleSettings: false,
+        },
+      },
+    });
+  });
+  await page.route("**/api/agents/dev", async (route) => {
+    const response = await route.fetch();
+    const agent = await response.json();
+    await route.fulfill({
+      response,
+      json: { ...agent, capabilities: { ...agent.capabilities, edit: false } },
+    });
+  });
+  await page.goto("/agents/dev/setup");
+  const mainNav = page.getByRole("navigation", { name: "Main navigation" });
+  await expect(mainNav.getByRole("link")).toHaveText(["Agents"]);
+  const agentNav = page.getByRole("navigation", { name: "Agent navigation" });
+  await expect(agentNav.getByRole("link", { name: "Overview" })).toBeVisible();
+  await expect(agentNav.getByText("Edit agent", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(agentNav.getByText("MCP access", { exact: true })).toHaveCount(
+    0,
+  );
+});
+
+test("keeps the agent top bar on one line and exposes overflow by keyboard", async ({
+  page,
+}, info) => {
+  await login(page);
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/agents/dev/settings");
+  const nav = page.getByRole("navigation", { name: "Agent navigation" });
+  const overview = nav.getByRole("link", { name: "Overview" });
+  const more = nav.getByLabel("More agent options");
+  const edit = nav.getByRole("link", { name: "Edit agent" });
+  await expect(overview).toBeVisible();
+  await expect(more).toHaveAttribute("data-current", "true");
+  expect((await overview.boundingBox())?.y).toBe((await more.boundingBox())?.y);
+  await expect(edit).toBeHidden();
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await expect(edit).toHaveAttribute("aria-current", "page");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("agent-navigation-overflow.png"),
+    animations: "disabled",
+  });
+  await page.keyboard.press("Tab");
+  await expect(nav.locator(".dropdown-content a").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(edit).toBeHidden();
+  await expect(more).toBeFocused();
+  await more.click();
+  await expect(edit).toBeVisible();
+  await page
+    .getByRole("heading", { name: "Edit agent." })
+    .click({ position: { x: 5, y: 5 } });
+  await expect(edit).toBeHidden();
+  await openAgentSection(page, "Manage schedules");
+  await expect(page).toHaveURL(/\/agents\/dev\/schedules$/);
+  await expect(
+    nav.getByRole("link", { name: "Manage schedules" }),
+  ).toBeHidden();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(
+    nav.getByRole("link", { name: "Model and usage" }),
+  ).toBeVisible();
+});
+
+test("aligns the agent top bar with the logo and uses the wide viewport", async ({
+  page,
+}, info) => {
+  await login(page);
+  await page.goto("/agents/dev/setup");
+  const header = page.getByRole("banner");
+  const logo = header.getByRole("link", { name: "Nimbot home" });
+  const agentNav = header.getByRole("navigation", { name: "Agent navigation" });
+  const signOut = header.getByRole("button", { name: "Sign out" });
+  const main = page.getByRole("main");
+  for (const width of [601, 1280, 1920]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(agentNav).toBeVisible();
+    const [logoBox, navBox, signOutBox, headerBox, mainBox] = await Promise.all(
+      [
+        logo.boundingBox(),
+        agentNav.boundingBox(),
+        signOut.boundingBox(),
+        header.boundingBox(),
+        main.boundingBox(),
+      ],
+    );
+    if (!(logoBox && navBox && signOutBox && headerBox && mainBox))
+      throw new Error("Expected visible header and page content");
+    const navCenter = navBox.y + navBox.height / 2;
+    expect(navCenter).toBeCloseTo(logoBox.y + logoBox.height / 2, 0);
+    expect(navCenter).toBeCloseTo(signOutBox.y + signOutBox.height / 2, 0);
+    expect(logoBox.x + logoBox.width).toBeLessThan(navBox.x);
+    expect(navBox.x + navBox.width).toBeLessThan(signOutBox.x);
+    const viewportWidth = await page.evaluate(
+      () => document.documentElement.clientWidth,
+    );
+    expect(viewportWidth - headerBox.x - headerBox.width).toBeLessThanOrEqual(
+      56,
+    );
+    expect(mainBox.x + mainBox.width).toBeCloseTo(
+      headerBox.x + headerBox.width,
+      0,
+    );
+  }
+  await expect(
+    agentNav.getByRole("link", { name: "Edit agent" }),
+  ).toBeVisible();
+  await expect(agentNav.getByLabel("More agent options")).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("wide-agent-header.png") });
+});
+
 test("does not overlap polls, pauses while hidden and cancels obsolete requests", async ({
   page,
 }) => {
@@ -1124,7 +1340,7 @@ test("does not overlap polls, pauses while hidden and cancels obsolete requests"
     document.dispatchEvent(new Event("visibilitychange"));
   });
   await expect.poll(() => calls).toBe(2);
-  await page.getByRole("link", { name: "Edit agent", exact: true }).click();
+  await openAgentSection(page, "Edit agent");
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
     "Developer",
   );
@@ -1634,21 +1850,22 @@ test("creates a webhook schedule, shows credentials, triggers it, and revokes it
 });
 
 for (const deploymentMode of ["native", "docker"] as const)
-  test(`manages ${deploymentMode} processes with shared-trust guidance and interruption confirmations`, async ({
+  test(`manages ${deploymentMode} processes with interruption confirmations`, async ({
     page,
     request,
   }) => {
     if (deploymentMode === "native") await request.post("/__test/native");
     await login(page);
-    await expect(page.getByLabel("Shared installation trust")).toContainText(
-      deploymentMode === "native" ? "Native development" : "Docker deployment",
-    );
-    await expect(page.getByLabel("Shared installation trust")).toContainText(
-      "bot tokens, MCP credentials, Host secrets and server.sqlite",
-    );
-    await expect(page.getByLabel("Shared installation trust")).toContainText(
-      "not a security boundary",
-    );
+    await expect(
+      page
+        .getByRole("banner")
+        .getByText(
+          deploymentMode === "native"
+            ? "Native development"
+            : "Docker deployment",
+          { exact: true },
+        ),
+    ).toBeVisible();
     await page.goto("/agents/dev/setup");
     await expect(
       page.getByRole("heading", { name: "Agent Host stopped." }),
@@ -1709,14 +1926,14 @@ for (const deploymentMode of ["native", "docker"] as const)
   });
 
 for (const deploymentMode of ["native", "docker"] as const)
-  test(`shows ${deploymentMode} mode on narrow screens and uses process language during creation`, async ({
+  test(`uses process language on narrow screens in ${deploymentMode} mode`, async ({
     page,
     request,
   }) => {
     if (deploymentMode === "native") await request.post("/__test/native");
     await page.setViewportSize({ width: 320, height: 900 });
     await login(page);
-    await expect(page.getByLabel("Shared installation trust")).toBeVisible();
+    await expect(page.getByLabel("Shared installation trust")).toHaveCount(0);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,

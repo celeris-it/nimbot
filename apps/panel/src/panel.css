@@ -84,7 +84,7 @@ svg {
 }
 header,
 main {
-  width: min(100%, 1380px);
+  width: 100%;
   margin: auto;
   padding-inline: clamp(1.25rem, 4vw, 3.5rem);
 }
@@ -103,40 +103,178 @@ header {
   font-weight: 750;
   text-decoration: none;
   gap: 0.65rem;
+  flex-shrink: 0;
 }
 [data-ui="wordmark-dot"] {
   color: var(--color-primary);
   margin-left: -0.6rem;
 }
-header nav {
-  display: flex;
-  align-items: center;
+#app:has(> [data-ui="main-navigation"]) {
+  display: grid;
+  grid-template:
+    "header header"
+    "primary content" / auto minmax(0, 1fr);
+  column-gap: clamp(1rem, 2vw, 1.75rem);
+  padding-inline: clamp(1.25rem, 4vw, 3.5rem);
+}
+#app:has(> [data-ui="main-navigation"]) > :is(header, main) {
+  padding-inline: 0;
+}
+#app > header {
+  grid-area: header;
+}
+#app > main {
+  grid-area: content;
+}
+[data-ui="main-navigation"] {
+  grid-area: primary;
+  align-self: start;
+  position: sticky;
+  top: 1rem;
+  z-index: 2;
+  display: grid;
+  justify-self: start;
   gap: 0.25rem;
   padding: 0.3rem;
-  border-radius: 4rem;
+  border-radius: 1.2rem;
   background: var(--color-base-100);
   color: var(--color-base-content);
   border: 1px solid var(--color-base-300);
 }
-header nav a {
-  min-height: 40px;
-  padding: 0.625rem 1.2rem;
+[data-ui="main-navigation"] .menu {
+  width: auto;
+  gap: 0.25rem;
+  padding: 0;
+}
+[data-ui="main-navigation"] :is(a, .btn) {
+  position: relative;
+  min-width: 44px;
+  min-height: 44px;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  border-radius: 4rem;
+  gap: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.85rem;
   text-decoration: none;
   font-size: 0.75rem;
   font-weight: 700;
 }
-header nav a[aria-current="page"] {
+[data-ui="main-navigation"][data-expanded="false"] :is(a, .btn) {
+  justify-content: center;
+  padding-inline: 0;
+}
+[data-ui="main-navigation"] a[aria-current],
+[data-ui="agent-nav-link"][aria-current],
+[data-ui="agent-nav-more"][data-current="true"] {
   background: var(--color-primary);
+  border-color: var(--color-primary);
   color: var(--color-primary-content);
+}
+[data-expanded="false"] [data-ui="navigation-label"] {
+  position: absolute;
+  inset-inline-start: calc(100% + 0.5rem);
+  top: 50%;
+  transform: translateY(-50%);
+  visibility: hidden;
+  pointer-events: none;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--field-border);
+  border-radius: 0.5rem;
+  background: var(--color-base-200);
+  color: var(--color-base-content);
+  white-space: nowrap;
+}
+[data-expanded="false"]
+  a:is(:hover, :focus-visible)
+  [data-ui="navigation-label"] {
+  visibility: visible;
+}
+[data-ui="agent-navigation"] {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+}
+[data-ui="agent-nav-bar"] {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.3rem;
+  border: 1px solid var(--color-base-300);
+  border-radius: 4rem;
+  background: var(--color-base-100);
+}
+[data-ui="agent-nav-bar"][data-overflow="true"] {
+  width: 100%;
+}
+[data-ui="agent-nav-bar"] .dropdown {
+  margin-inline-start: auto;
+}
+:is([data-ui="agent-nav-link"], [data-ui="agent-nav-more"]) {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.5rem 1.1rem;
+  border-radius: 4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+:is([data-ui="agent-nav-link"], [data-ui="agent-nav-more"]):not(
+    [aria-current],
+    [data-current="true"]
+  ):hover {
+  background: var(--color-neutral);
+}
+[data-ui="agent-nav-more"] {
+  justify-content: center;
+  width: 44px;
+  padding: 0;
+  cursor: pointer;
+}
+[data-ui="agent-nav-more"]::-webkit-details-marker {
+  display: none;
+}
+[data-ui="agent-navigation"] .dropdown-content {
+  z-index: 3;
+  width: min(15rem, calc(100vw - 2rem));
+  margin-block-start: 0.5rem;
+  max-height: min(60vh, 26rem);
+  overflow-y: auto;
+  flex-wrap: nowrap;
+  padding: 0.35rem;
+  border: 1px solid var(--color-base-300);
+  border-radius: 1.15rem;
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 25%);
+}
+[data-ui="agent-navigation"] .dropdown-content a {
+  padding-inline: 0.85rem;
+  white-space: normal;
+}
+[data-ui="agent-navigation"] .dropdown-content a:focus-visible {
+  outline-offset: -2px;
+}
+[data-ui="agent-nav-measure"] {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+[data-ui="agent-nav-measure"] > div {
+  display: flex;
+  width: max-content;
 }
 [data-ui="header-actions"] {
   display: flex;
   align-items: center;
   gap: 1.5rem;
+  flex-shrink: 0;
 }
 [data-ui="installation"] {
   display: flex;
@@ -795,7 +933,6 @@ small,
   font-size: 0.75rem;
 }
 [data-page="detail"] {
-  max-width: 1000px;
   padding-top: 2rem;
 }
 [data-page="detail"] > h1 {
@@ -935,6 +1072,32 @@ main:focus {
   top: 1rem;
 }
 @media (max-width: 1050px) {
+  #app:has(> [data-ui="main-navigation"]) {
+    grid-template:
+      "header"
+      "primary"
+      "content" / minmax(0, 1fr);
+  }
+  [data-ui="main-navigation"] {
+    position: relative;
+    top: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.25rem;
+    margin-block-end: 1rem;
+  }
+  [data-ui="main-navigation"][data-expanded="true"] {
+    flex-wrap: wrap;
+  }
+  [data-ui="main-navigation"] .menu {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  [data-expanded="false"] [data-ui="navigation-label"] {
+    inset-inline-start: 0;
+    top: calc(100% + 0.5rem);
+    transform: none;
+  }
   [data-ui="installation"] {
     display: none;
   }
@@ -952,16 +1115,6 @@ main:focus {
     flex-wrap: wrap;
     gap: 0.8rem;
     padding-block: 1rem;
-  }
-  header nav {
-    order: 3;
-    flex-wrap: wrap;
-    flex-basis: 100%;
-    width: fit-content;
-    justify-content: center;
-  }
-  header nav a {
-    white-space: nowrap;
   }
   [data-ui="header-actions"] {
     margin-left: auto;
@@ -1009,9 +1162,16 @@ main:focus {
     font-size: 1.4rem;
   }
 }
+@media (max-width: 600px) {
+  [data-ui="agent-navigation"] {
+    order: 1;
+    flex-basis: 100%;
+  }
+}
 @media (max-width: 420px) {
   header,
-  main {
+  main,
+  #app:has(> [data-ui="main-navigation"]) {
     padding-inline: 1rem;
   }
   h1 {

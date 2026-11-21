@@ -1,6 +1,11 @@
 export const icons = {
   grid: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
+  plug: "M9 3v5m6-5v5M7 8h10v4a5 5 0 0 1-10 0z M12 17v4",
+  settings: "M4 6h16 M4 12h16 M4 18h16 M8 4v4 M16 10v4 M10 16v4",
+  expandPanel: "M3 4h18v16H3z M8 4v16 m4-11 3 3-3 3",
+  collapsePanel: "M3 4h18v16H3z M8 4v16 m7-11-3 3 3 3",
   plus: "M12 5v14 M5 12h14",
+  ellipsis: "M5 12h.5 M11.75 12h.5 M18.5 12h.5",
   arrow: "M6 18 18 6 M6 6h12v12",
   chevron: "m9 5 7 7-7 7",
   search: "M21 21 16.5 16.5 M19 10.5a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0",
