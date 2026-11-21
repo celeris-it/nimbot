@@ -41,6 +41,8 @@ export function createAgentProcessManager(options: {
   executablePath: string;
   taskTimeoutSeconds: number;
   playwrightBrowsersPath?: string;
+  sharedEngineDirectory?: string;
+  onProviderChange?: () => void;
   store: AgentProcessStore;
   token: (agentId: string) => Promise<string>;
   onUnexpectedExit?: (agentId: string) => void;
@@ -135,6 +137,18 @@ export function createAgentProcessManager(options: {
       }),
     };
     processes.set(agentId, managed);
+    if (options.onProviderChange)
+      child.on("message", (message: unknown) => {
+        if (
+          processes.get(agentId) === managed &&
+          !managed.ended &&
+          message &&
+          typeof message === "object" &&
+          "type" in message &&
+          message.type === "providers.changed"
+        )
+          options.onProviderChange?.();
+      });
     const finish = () => {
       if (managed.ended) return;
       managed.ended = true;

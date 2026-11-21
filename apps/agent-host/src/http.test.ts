@@ -276,7 +276,7 @@ describe("Agent Host request validation order", () => {
       ['{"prompt":"  "}', "prompt must contain 1–16000 characters"],
       [
         '{"prompt":"hi","credentials":null,"execution":1}',
-        "Configure providers through this agent's provider settings",
+        "Configure providers from AI providers in the Nimbot panel",
       ],
       ['{"prompt":"hi","execution":1,"tools":1}', "Invalid execution identity"],
       [

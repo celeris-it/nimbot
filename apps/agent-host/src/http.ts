@@ -50,7 +50,7 @@ const taskRequest = z
         }),
       credentials: z
         .never({
-          error: "Configure providers through this agent's provider settings",
+          error: "Configure providers from AI providers in the Nimbot panel",
         })
         .optional(),
       execution: z
@@ -400,51 +400,49 @@ export function createHostApi(
       return c.json(await models.check(parsed.data.model, parsed.data.issue));
     },
   );
-  app.get("/providers/checks", async (c) => {
-    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
-    return c.json(await auth.checkProviders());
-  });
-  app.get("/providers", async (c) => {
-    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
-    return c.json(await auth.status());
-  });
-  app.post("/providers/:provider/device-login", (c) => {
-    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
-    const provider = c.req.param("provider");
-    if (provider !== "openai" && provider !== "opencode") return c.notFound();
-    return c.json(
-      provider === "openai" ? auth.startLogin() : auth.startLogin(provider),
-      202,
-    );
-  });
-  app.post("/providers/:provider/device-login/:attempt/cancel", async (c) => {
-    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
-    const { provider, attempt } = c.req.param();
-    if (provider !== "openai" && provider !== "opencode") return c.notFound();
-    return c.json(
-      await (provider === "openai"
-        ? auth.cancelLogin(attempt)
-        : auth.cancelLogin(attempt, provider)),
-    );
-  });
-  app.post("/providers/:provider", async (c) => {
-    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
-    const id = c.req.param("provider");
-    if (!isProviderId(id)) throw new EngineAuthError("invalid");
-    const body: unknown = await c.req.json().catch(() => null);
-    const key =
-      body && typeof body === "object" && "key" in body ? body.key : undefined;
-    if (!isApiKey(key)) throw new EngineAuthError("invalid");
-    await auth.save(id, key);
-    return c.json({ saved: true });
-  });
-  app.post("/providers/:provider/remove", async (c) => {
-    if (!auth) return c.json({ error: "Provider settings unavailable" }, 503);
-    const id = c.req.param("provider");
-    if (!isProviderId(id)) throw new EngineAuthError("invalid");
-    await auth.remove(id);
-    return c.json({ removed: true });
-  });
+  if (auth) {
+    app.get("/providers/checks", async (c) => {
+      return c.json(await auth.checkProviders());
+    });
+    app.get("/providers", async (c) => {
+      return c.json(await auth.status());
+    });
+    app.post("/providers/:provider/device-login", (c) => {
+      const provider = c.req.param("provider");
+      if (provider !== "openai" && provider !== "opencode") return c.notFound();
+      return c.json(
+        provider === "openai" ? auth.startLogin() : auth.startLogin(provider),
+        202,
+      );
+    });
+    app.post("/providers/:provider/device-login/:attempt/cancel", async (c) => {
+      const { provider, attempt } = c.req.param();
+      if (provider !== "openai" && provider !== "opencode") return c.notFound();
+      return c.json(
+        await (provider === "openai"
+          ? auth.cancelLogin(attempt)
+          : auth.cancelLogin(attempt, provider)),
+      );
+    });
+    app.post("/providers/:provider", async (c) => {
+      const id = c.req.param("provider");
+      if (!isProviderId(id)) throw new EngineAuthError("invalid");
+      const body: unknown = await c.req.json().catch(() => null);
+      const key =
+        body && typeof body === "object" && "key" in body
+          ? body.key
+          : undefined;
+      if (!isApiKey(key)) throw new EngineAuthError("invalid");
+      await auth.save(id, key);
+      return c.json({ saved: true });
+    });
+    app.post("/providers/:provider/remove", async (c) => {
+      const id = c.req.param("provider");
+      if (!isProviderId(id)) throw new EngineAuthError("invalid");
+      await auth.remove(id);
+      return c.json({ removed: true });
+    });
+  }
   app.onError((error, c) =>
     error instanceof EngineAuthError
       ? c.json(

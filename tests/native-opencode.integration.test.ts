@@ -11,6 +11,7 @@ import {
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it } from "vitest";
@@ -20,11 +21,18 @@ import { openProcessHostCredentials } from "../apps/server/src/process-host-cred
 import { openBotSecrets } from "../apps/server/src/bot-secret.js";
 import { createProcessAgents } from "../apps/server/src/process-agents.js";
 import { agentProcessDirectories } from "../apps/server/src/agent-process-config.js";
+import { prepareSharedEngine } from "../apps/server/src/shared-engine-state.js";
+import { createSharedProviders } from "../apps/server/src/shared-providers.js";
 import { createHostTasks } from "../apps/server/src/host-tasks.js";
+
+function openDatabase(path: string, readOnly = false) {
+  const db = new DatabaseSync(path, { readOnly });
+  return { db, [Symbol.dispose]: () => db.close() };
+}
 
 /** Built Hosts + pinned OpenCode, with model traffic served by this local fixture. */
 it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
-  "runs concurrent native OpenCode sessions and restores each conversation after Host restart",
+  "migrates OpenCode conversations and resumes them concurrently with shared credentials",
   async () => {
     const executablePath =
       process.env.NIMBOT_TEST_OPENCODE_PATH || process.env.PATH!;
@@ -40,6 +48,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
     const pending = new Map<string, ServerResponse>();
     const histories: { agent: string; text: string; resumed: boolean }[] = [];
     const failures: string[] = [];
+    let expectedKey = "fixture-only";
     function send(response: ServerResponse, text: string) {
       response.writeHead(200, { "content-type": "text/event-stream" });
       for (const [delta, finish_reason] of [
@@ -54,7 +63,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
     const server = createServer(async (request, response) => {
       try {
         const agent = request.url?.split("/")[1];
-        if (!["first", "second"].includes(agent!)) {
+        if (!["first", "second", "third"].includes(agent!)) {
           response.writeHead(404).end();
           return;
         }
@@ -83,6 +92,8 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
           );
           return;
         }
+        if (request.headers.authorization !== `Bearer ${expectedKey}`)
+          failures.push("Model request was missing the expected credential");
         const text = JSON.stringify(body.messages);
         const resumed = text.includes("RESUME_AFTER_RESTART");
         histories.push({ agent: agent!, text, resumed });
@@ -94,6 +105,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
         )
           failures.push("Foreign agent history entered a model request");
         if (resumed) send(response, `${agent!.toUpperCase()}_RESUMED`);
+        else if (agent === "third") send(response, "THIRD_REPLY_SENTINEL");
         else {
           pending.set(agent!, response);
           // Both engines must reach the model before either receives a response.
@@ -121,7 +133,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
       join(directory, "host-secrets"),
       store,
     );
-    const runtime = createProcessAgents({
+    const runtimeOptions: Parameters<typeof createProcessAgents>[0] = {
       registry,
       store,
       botSecrets,
@@ -135,7 +147,34 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
       taskTimeoutSeconds: 60,
       beforeStop: async () => {},
       afterStart: async () => {},
-    });
+    };
+    let runtime = createProcessAgents(runtimeOptions);
+    let providers: ReturnType<typeof createSharedProviders> | undefined;
+    async function configure(id: string, apiKey?: string) {
+      await writeFile(
+        join(agentProcessDirectories(directory, id).workspace, "opencode.json"),
+        JSON.stringify({
+          model: "openrouter/fixture",
+          small_model: "openrouter/fixture",
+          enabled_providers: ["openrouter"],
+          provider: {
+            openrouter: {
+              npm: "@ai-sdk/openai-compatible",
+              options: {
+                baseURL: `http://127.0.0.1:${address.port}/${id}/v1`,
+                ...(apiKey ? { apiKey } : {}),
+              },
+              models: {
+                fixture: {
+                  name: "fixture",
+                  limit: { context: 16000, output: 1000 },
+                },
+              },
+            },
+          },
+        }),
+      );
+    }
     try {
       for (const [id, botId] of [
         ["first", 123],
@@ -148,29 +187,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
         );
         const directories = agentProcessDirectories(directory, id);
         await mkdir(directories.workspace, { recursive: true });
-        await writeFile(
-          join(directories.workspace, "opencode.json"),
-          JSON.stringify({
-            model: "fixture/fixture",
-            small_model: "fixture/fixture",
-            enabled_providers: ["fixture"],
-            provider: {
-              fixture: {
-                npm: "@ai-sdk/openai-compatible",
-                options: {
-                  baseURL: `http://127.0.0.1:${address.port}/${id}/v1`,
-                  apiKey: "fixture-only",
-                },
-                models: {
-                  fixture: {
-                    name: "fixture",
-                    limit: { context: 16000, output: 1000 },
-                  },
-                },
-              },
-            },
-          }),
-        );
+        await configure(id, expectedKey);
       }
       await Promise.all([runtime.start("first"), runtime.start("second")]);
       async function run(id: string, prompt: string) {
@@ -208,7 +225,93 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
         expect(
           (await readdir(agentProcessDirectories(directory, id).data)).length,
         ).toBeGreaterThan(0);
-      await Promise.all([runtime.restart("first"), runtime.restart("second")]);
+      await runtime.close();
+      for (const id of ["first", "second"]) {
+        const localData = agentProcessDirectories(directory, id).data;
+        const dbPath = join(localData, "opencode", "opencode.db");
+        using fixtureDatabase = openDatabase(dbPath);
+        const { db } = fixtureDatabase;
+        const insert = db.prepare(`
+          INSERT INTO credential (id, integration_id, label, value, active,
+            time_created, time_updated) VALUES (?, ?, ?, ?, 1, 1, 1)
+        `);
+        insert.run(
+          `openai-${id}`,
+          "openai",
+          "fixture",
+          JSON.stringify({ type: "key", key: `legacy-${id}` }),
+        );
+        insert.run(
+          `anthropic-${id}`,
+          "anthropic",
+          "fixture",
+          JSON.stringify({ type: "key", key: "identical" }),
+        );
+      }
+      {
+        using fixtureDatabase = openDatabase(
+          join(
+            agentProcessDirectories(directory, "first").data,
+            "opencode",
+            "opencode.db",
+          ),
+        );
+        const { db } = fixtureDatabase;
+        db.prepare(
+          `INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated)
+          VALUES ('openrouter-first', 'openrouter', 'fixture', ?, 1, 1, 1)`,
+        ).run(JSON.stringify({ type: "key", key: "shared-fixture" }));
+      }
+      const secondDb = join(
+        agentProcessDirectories(directory, "second").data,
+        "opencode",
+        "opencode.db",
+      );
+      {
+        using fixtureDatabase = openDatabase(secondDb);
+        const { db } = fixtureDatabase;
+        db.exec(
+          "UPDATE credential SET value = 'invalid-json' WHERE integration_id = 'openai'",
+        );
+      }
+      await expect(
+        prepareSharedEngine(directory, registry.listIds()),
+      ).rejects.toThrow();
+      expect(await readdir(directory)).not.toContain("ai-providers");
+      {
+        using fixtureDatabase = openDatabase(secondDb);
+        const { db } = fixtureDatabase;
+        db.prepare(
+          "UPDATE credential SET value = ? WHERE integration_id = 'openai'",
+        ).run(JSON.stringify({ type: "key", key: "legacy-second" }));
+      }
+      const shared = await prepareSharedEngine(directory, registry.listIds());
+      expect([...shared.conflicts()]).toEqual(["openai"]);
+      providers = createSharedProviders({
+        directory: shared.directory,
+        executablePath,
+        conflicts: shared.conflicts,
+        changed() {},
+      });
+      expect(await providers.status()).toMatchObject({
+        providers: expect.arrayContaining([
+          {
+            id: "openai",
+            name: "OpenAI",
+            method: null,
+            reconnectRequired: true,
+          },
+          { id: "anthropic", name: "Anthropic", method: "api_key" },
+        ]),
+      });
+      expectedKey = "shared-fixture";
+      await Promise.all([configure("first"), configure("second")]);
+      runtime = createProcessAgents({
+        ...runtimeOptions,
+        sharedEngineDirectory: shared.directory,
+        purgeEngineSessions: shared.purge,
+      });
+      await Promise.all([runtime.start("first"), runtime.start("second")]);
       expect(
         await Promise.all([
           run("first", "RESUME_AFTER_RESTART"),
@@ -231,6 +334,51 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
           ).sessionId,
         ).toBe(sessions[index]);
       }
+      await runtime.remove("first", true);
+      {
+        using sharedDatabase = openDatabase(
+          join(shared.directory, "opencode.db"),
+          true,
+        );
+        const { db } = sharedDatabase;
+        expect(
+          db
+            .prepare("SELECT id FROM session_v2 ORDER BY id")
+            .all()
+            .map(({ id }) => id),
+        ).toEqual([sessions[1]]);
+        expect(
+          db
+            .prepare(
+              "SELECT integration_id FROM credential ORDER BY integration_id",
+            )
+            .all(),
+        ).toEqual([
+          { integration_id: "anthropic" },
+          { integration_id: "openrouter" },
+        ]);
+      }
+      registry.registerLinkedAgent(
+        { id: "third", name: "third", ownerId: 42, instructions: "" },
+        { id: 789, username: "third_bot" },
+        await botSecrets.save("789:fixture-token"),
+      );
+      await mkdir(agentProcessDirectories(directory, "third").workspace, {
+        recursive: true,
+      });
+      await configure("third");
+      await runtime.start("third");
+      expect(await run("third", "THIRD_AGENT_SENTINEL")).toBe(
+        "THIRD_REPLY_SENTINEL",
+      );
+      await providers.remove("anthropic");
+      expect(
+        (await providers.status()).providers.find(
+          ({ id }) => id === "anthropic",
+        )?.method,
+      ).toBeNull();
+      const reloaded = await prepareSharedEngine(directory, registry.listIds());
+      expect([...reloaded.conflicts()]).toEqual(["openai"]);
       expect(failures).toEqual([]);
     } catch (error) {
       throw new Error(
@@ -239,6 +387,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_OPENCODE !== "1")(
       );
     } finally {
       await runtime.close();
+      await providers?.close();
       store.close();
       registry.close();
       server.closeAllConnections();

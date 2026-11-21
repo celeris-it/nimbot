@@ -10,8 +10,10 @@ import { serve } from "@hono/node-server";
 import { createHostApi, readHostConfig } from "./http.js";
 import { log } from "./logger.js";
 import { readTaskTimeoutMs } from "./task-timeout.js";
-import { createOpenCodeAuth } from "./opencode-auth.js";
-import { createOpenCodeApi } from "./opencode-api.js";
+import {
+  createOpenCodeReadApi,
+  openCodeCredentialRevision,
+} from "./opencode-api.js";
 import { createOpenCodeModels } from "./opencode-models.js";
 import { createOpenCodeUsage } from "./opencode-usage.js";
 import { openMemoryStore } from "./memory-store.js";
@@ -33,12 +35,16 @@ try {
   const store = await openTaskStore(pathToFileURL(tasksPath).href);
   const memory = openMemoryStore(memoryPath);
   const attachments = createAttachments(config.workspace);
-  const openCode = createOpenCodeApi(config.workspace);
+  const openCode = createOpenCodeReadApi(config.workspace);
   const usage = createOpenCodeUsage(openCode.request);
   for (const { id, baseline } of await store.unfinishedUsage())
     await store.recordUsage(id, await usage.finish(baseline, true));
   let isBusy = () => false;
-  const models = createOpenCodeModels(openCode.request, () => isBusy());
+  const models = createOpenCodeModels(
+    openCode.request,
+    () => isBusy(),
+    openCodeCredentialRevision,
+  );
   const runner = createTaskRunner(
     store,
     createOpenCodeEngine(
@@ -59,13 +65,14 @@ try {
     attachments.discard,
   );
   isBusy = runner.isBusy;
-  const auth = createOpenCodeAuth(
-    openCode.request,
-    runner.reserve,
-    runner.isBusy,
-    models.changed,
+  const app = createHostApi(
+    config,
+    runner,
+    undefined,
+    memory,
+    attachments,
+    models,
   );
-  const app = createHostApi(config, runner, auth, memory, attachments, models);
   const server = serve({ fetch: app.fetch, ...listener });
   server.once("listening", () => {
     const address = server.address();
@@ -90,14 +97,10 @@ try {
     if ("closeIdleConnections" in server) server.closeIdleConnections();
     try {
       try {
-        await auth.close();
+        await runner.close();
       } finally {
-        try {
-          await runner.close();
-        } finally {
-          await openCode.close();
-          memory.close();
-        }
+        await openCode.close();
+        memory.close();
       }
     } catch {
       log.error("host.shutdown_finalize_failed");

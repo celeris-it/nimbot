@@ -91,8 +91,8 @@ export interface PanelDeps {
     discordOwnerLinked?(agentId: string): boolean;
   };
   providers?: Omit<
-    ReturnType<typeof import("./host-providers.js").createHostProviders>,
-    "checks"
+    ReturnType<typeof import("./shared-providers.js").createSharedProviders>,
+    "checks" | "close"
   >;
   usage?: ReturnType<typeof createAgentUsage> & {
     wake(id: string): Promise<void>;
@@ -390,6 +390,7 @@ export function createPanel(
       deploymentMode: deps.deploymentMode ?? "docker",
       capabilities: {
         createAgent: !!registerAgent,
+        ...(deps.providers ? { providers: true } : {}),
         ...(deps.mcp ? { mcp: true } : {}),
         ...(deps.schedules ? { scheduleSettings: true } : {}),
       },
@@ -600,61 +601,37 @@ export function createPanel(
       });
     });
   }
-  app.use("/api/agents/:id/providers", async (c, next) => {
-    if (!getAgentSetup?.(c.req.param("id")!))
-      return c.json({ error: "Agent not found." }, 404);
-    if (!deps.providers)
-      return c.json({ error: "Provider settings unavailable." }, 503);
-    await next();
-  });
-  app.use("/api/agents/:id/providers/*", async (c, next) => {
-    if (!getAgentSetup?.(c.req.param("id")!))
-      return c.json({ error: "Agent not found." }, 404);
-    if (!deps.providers)
-      return c.json({ error: "Provider settings unavailable." }, 503);
-    await next();
-  });
-  const deviceLogins = new Map<string, string>();
-  function providersChanged(id: string) {
-    deps.usage?.invalidate(id);
-    void deps.usage?.wake(id).catch(() => {});
-  }
-  app.get("/api/agents/:id/providers", async (c) => {
-    const id = c.req.param("id");
-    const settings = await deps.providers!.status(id);
-    if (
-      settings.login?.state === "completed" &&
-      deviceLogins.get(id) !== settings.login.id
-    ) {
-      deviceLogins.set(id, settings.login.id);
-      providersChanged(id);
-    }
-    return c.json(settings);
-  });
-  app.post("/api/agents/:id/providers/:provider/device-login", async (c) => {
-    const { id, provider } = c.req.param();
+  for (const path of ["/api/providers", "/api/providers/*"])
+    app.use(path, async (c, next) => {
+      if (!deps.providers) return c.notFound();
+      await next();
+    });
+  app.get("/api/providers", async (c) =>
+    c.json(await deps.providers!.status()),
+  );
+  app.post("/api/providers/:provider/device-login", async (c) => {
+    const { provider } = c.req.param();
     if (provider !== "openai" && provider !== "opencode") return c.notFound();
     return c.json(
       await (provider === "openai"
-        ? deps.providers!.startLogin(id)
-        : deps.providers!.startLogin(id, provider)),
+        ? deps.providers!.startLogin()
+        : deps.providers!.startLogin(provider)),
       202,
     );
   });
   app.post(
-    "/api/agents/:id/providers/:provider/device-login/:attempt/cancel",
+    "/api/providers/:provider/device-login/:attempt/cancel",
     validated("param", loginAttemptParams.loose(), "Invalid login attempt."),
     async (c) => {
-      const { id, provider, attempt } = c.req.param();
+      const { provider, attempt } = c.req.param();
       if (provider !== "openai" && provider !== "opencode") return c.notFound();
       const result = await (provider === "openai"
-        ? deps.providers!.cancelLogin(id, attempt)
-        : deps.providers!.cancelLogin(id, attempt, provider));
-      providersChanged(id);
+        ? deps.providers!.cancelLogin(attempt)
+        : deps.providers!.cancelLogin(attempt, provider));
       return c.json(result);
     },
   );
-  app.post("/api/agents/:id/providers/:provider", async (c) => {
+  app.post("/api/providers/:provider", async (c) => {
     const provider = c.req.param("provider");
     if (!isProviderId(provider))
       return c.json({ error: "Unknown provider." }, 400);
@@ -664,16 +641,14 @@ export function createPanel(
       "Enter an API key of 1–4096 characters without whitespace.",
     );
     if (form.response) return form.response;
-    await deps.providers!.save(c.req.param("id"), provider, form.data.key);
-    providersChanged(c.req.param("id"));
+    await deps.providers!.save(provider, form.data.key);
     return c.json({ saved: true });
   });
-  app.post("/api/agents/:id/providers/:provider/remove", async (c) => {
+  app.post("/api/providers/:provider/remove", async (c) => {
     const provider = c.req.param("provider");
     if (!isProviderId(provider))
       return c.json({ error: "Unknown provider." }, 400);
-    await deps.providers!.remove(c.req.param("id"), provider);
-    providersChanged(c.req.param("id"));
+    await deps.providers!.remove(provider);
     return c.json({ removed: true });
   });
   for (const suffix of ["models", "model", "usage"])
@@ -1223,6 +1198,10 @@ export function createPanel(
       return c.redirect(back(id), 303);
     });
   app.get("/", entry);
+  if (deps.providers) {
+    app.get("/providers", entry);
+    app.get("/agents/:id/providers", (c) => c.redirect("/providers", 303));
+  }
   if (deps.schedules) app.get("/settings", entry);
   if (deps.mcp) {
     app.get("/mcp", entry);
@@ -1231,7 +1210,6 @@ export function createPanel(
   app.get("/agents/new", (c) => (registerAgent ? entry(c) : c.notFound()));
   for (const suffix of [
     "setup",
-    "providers",
     "usage",
     "memory",
     "approvals",
@@ -1291,8 +1269,8 @@ export function createPanel(
                   429: "The provider rate limited the API key check. Try again shortly.",
                   502: "Could not validate the API key. Try again when the provider is available.",
                   404: "Login attempt not found. Start a new login.",
-                  409: "Agent is busy. Try again after the task or login finishes.",
-                  503: "Provider settings unavailable. Start the agent and refresh to try again.",
+                  409: "An authentication change is in progress. Try again when it finishes.",
+                  503: "Provider settings unavailable. Refresh to try again.",
                 }[error.status],
               },
               error.status,

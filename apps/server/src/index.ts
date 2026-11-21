@@ -15,7 +15,8 @@ import {
   createHostCancellation,
 } from "./host-tasks.js";
 import { withAgentInstructions } from "./agent-instructions.js";
-import { createHostProviders } from "./host-providers.js";
+import { createSharedProviders } from "./shared-providers.js";
+import { prepareSharedEngine } from "./shared-engine-state.js";
 import {
   createAgentUsage,
   createHostUsage,
@@ -111,11 +112,13 @@ async function main(): Promise<void> {
   let discordSecrets;
   let mcpCatalog;
   let mcpCredentials;
+  let sharedEngine: Awaited<ReturnType<typeof prepareSharedEngine>>;
   try {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
     statePath = resolve(stateDir, "server.sqlite");
     prepareStateSchema(statePath, "server-process");
     registry = openAgentRegistry(statePath);
+    sharedEngine = await prepareSharedEngine(stateDir, registry.listIds());
     {
       processStore = openAgentProcessStore(statePath);
       processCredentials = await openProcessHostCredentials(
@@ -172,7 +175,7 @@ async function main(): Promise<void> {
         error instanceof Error &&
         /^server(?:-process)?\.sqlite:/.test(error.message)
           ? error.message
-          : "Check SERVER_STATE_DIR and writable storage.",
+          : "Check SERVER_STATE_DIR, writable storage and compatibility with the pinned OpenCode version.",
     });
     process.exitCode = 1;
     return;
@@ -451,6 +454,7 @@ async function main(): Promise<void> {
         }
       : undefined,
   );
+  const executablePath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
   const processAgents: ReturnType<typeof createProcessAgents> =
     createProcessAgents({
       registry,
@@ -462,7 +466,9 @@ async function main(): Promise<void> {
       hostEntrypoint: fileURLToPath(
         new URL("../../agent-host/dist/serve.js", import.meta.url),
       ),
-      executablePath: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+      executablePath,
+      sharedEngineDirectory: sharedEngine.directory,
+      purgeEngineSessions: sharedEngine.purge,
       taskTimeoutSeconds,
       playwrightBrowsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH,
       beforeStop: async (id) => {
@@ -489,23 +495,30 @@ async function main(): Promise<void> {
       ...(registeredBots ? { telegram: registeredBots.notifications } : {}),
     }),
   );
-  const providers = hosts
-    ? createHostProviders((id) => hosts.read(id))
+  const providers = createSharedProviders({
+    directory: sharedEngine.directory,
+    executablePath,
+    conflicts: sharedEngine.conflicts,
+    changed() {
+      const ids = registry.listIds();
+      for (const id of ids) usage.invalidate(id);
+      void taskServices.wake(ids).catch(() => {});
+      void operationalAlerts?.tick().catch(() => {});
+    },
+  });
+  const operationalAlerts = registeredBots
+    ? createOperationalAlerts({
+        registry,
+        tasks: taskStore,
+        schedules: scheduleStore,
+        store: operationalAlertStore,
+        notifications,
+        outbox: notificationStore,
+        canNotify: registeredBots.canNotify,
+        checkProviders: providers.checks,
+        process: processAgents,
+      })
     : undefined;
-  const operationalAlerts =
-    providers && registeredBots
-      ? createOperationalAlerts({
-          registry,
-          tasks: taskStore,
-          schedules: scheduleStore,
-          store: operationalAlertStore,
-          notifications,
-          outbox: notificationStore,
-          canNotify: registeredBots.canNotify,
-          checkProviders: providers.checks,
-          process: processAgents,
-        })
-      : undefined;
   const scheduler = createScheduler({
     store: scheduleStore,
     admit: hosts
@@ -701,6 +714,10 @@ async function main(): Promise<void> {
     stopping = true;
     void processAgents?.close().catch(() => {
       log.error("server.agent_hosts_stop_failed");
+      process.exitCode = 1;
+    });
+    void providers.close().catch(() => {
+      log.error("server.provider_process_stop_failed");
       process.exitCode = 1;
     });
     clearInterval(usageTimer);

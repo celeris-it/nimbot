@@ -32,6 +32,7 @@ export async function prepareAgentProcess(options: {
   taskTimeoutSeconds: number;
   executablePath: string;
   playwrightBrowsersPath?: string;
+  sharedEngineDirectory?: string;
 }) {
   const directories = agentProcessDirectories(
     options.dataDirectory,
@@ -79,6 +80,9 @@ export async function prepareAgentProcess(options: {
     OPENCODE_CONFIG_CONTENT: JSON.stringify({
       permissions: [{ action: "execute", resource: "*", effect: "deny" }],
     }),
+    ...(options.sharedEngineDirectory
+      ? { NIMBOT_SHARED_ENGINE_DIR: resolve(options.sharedEngineDirectory) }
+      : {}),
     ...(options.playwrightBrowsersPath
       ? { PLAYWRIGHT_BROWSERS_PATH: resolve(options.playwrightBrowsersPath) }
       : {}),

@@ -43,7 +43,7 @@ The health check tests the panel's local login endpoint. It does not verify
 Telegram, AI credentials, model access or every agent. Use the panel to inspect
 Host process state, Host API readiness, bot polling and owner linking separately.
 **Stop agent** and **Restart agent** require confirmation because active work may
-be interrupted. Files and provider state are kept. A failed Host needs an
+be interrupted. Files and conversation history are kept. A failed Host needs an
 explicit **Start agent**; a Server restart restores only agents whose saved
 intent was running. `/stop` in a chat cancels its current task and leaves the Host
 running. Deleting an agent retains its directory unless purge is selected.
@@ -58,7 +58,8 @@ All Docker state lives in the single `/data` volume:
 | `bot-secrets/`, `discord-secrets/`, `host-secrets/`, `mcp-secrets/` | Private connection credentials; SQLite stores references |
 | `agents/<agent ID>/workspace/` | Files, imports and exports |
 | `agents/<agent ID>/tasks/` | Host task records/results, memory and ordinary-session reference |
-| `agents/<agent ID>/engine/` | OpenCode data, configuration, cache and state, including provider credentials and sessions |
+| `ai-providers/` | Shared provider credentials, workspace-scoped OpenCode sessions, and OAuth refresh state |
+| `agents/<agent ID>/engine/` | Agent-specific OpenCode configuration and cache, plus any retained pre-upgrade engine database |
 | `agents/<agent ID>/browser/` | Persistent Chromium profile |
 | `agents/<agent ID>/home/`, `tmp/` | Per-agent home and temporary files |
 
@@ -194,9 +195,11 @@ If execution detects a missing tool, changed input schema or malformed tool list
 
 ## Owner alerts and provider status
 
+When upgrading an existing subprocess installation, Nimbot moves OpenCode conversations into the shared database. A provider with one saved credential or matching credentials is carried forward. If active credentials differ, **AI providers** shows **Reconnect required**. Connect that provider once for the installation. Original engine databases are retained in agent directories for recovery and may still contain old credentials. Include the entire state tree in backups.
+
 The agent's page shows **AI provider status** and the time of the last check.
 When a saved API key is rejected or OpenCode reports that a ChatGPT or Console
-connection needs reauthentication, open **Configure AI providers** to replace
+connection needs reauthentication, open **AI providers** to replace
 the key or sign in again. Saving a key requires a successful provider check.
 If the provider is unavailable, denies access, or rate limits the check, the
 previous credential stays active. An OAuth connection without a conclusive
@@ -232,10 +235,10 @@ replayed. Telegram delivery requires the Nimbot Server to be running.
   agent. Check that another installation is not polling the same bot.
 - **Owner chat pending:** the configured owner must send a private message to the
   agent's own bot. Telegram group chats and other owners cannot activate it.
-- **Provider unavailable:** keep the Host running and idle while updating its
-  authentication. Device login pauses its queue. Failed or cancelled attempts
-  retain the previous credential. Inspect **AI provider status** separately from
-  Host readiness and **Model and usage** separately from authentication.
+- **Provider unavailable:** open **AI providers** in the sidebar to update the
+  shared connection. Failed or cancelled attempts keep the previous credential.
+  Check **AI provider status** for credential health and **Model and usage**
+  for model availability and quota.
 - **Maintenance lock exists:** installer commands serialize through the
   `.nimbot-maintenance` symlink. Confirm that the maintenance process has exited
   before removing a stale lock. Do not remove a live command's lock.
@@ -278,7 +281,7 @@ before asking again if delivery is uncertain.
 
 ### Model and usage
 
-Use **Configure AI providers** on the agent's setup page and choose **Sign in to
+Use **AI providers** in the sidebar and choose **Sign in to
 OpenCode Console** to connect a workspace with Console budgets or a Go
 subscription. This is per agent. Set spending policies in OpenCode Console.
 Nimbot reads applicable monthly budgets and Go allowances from OpenCode.

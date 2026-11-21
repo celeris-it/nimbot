@@ -84,7 +84,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|providers|usage|memory|approvals|peers|delegations|mcp|schedules|token|delete|process\/(?:stop|restart))$/,
+      /^\/agents\/([^/]+)\/(setup|settings|usage|memory|approvals|peers|delegations|mcp|schedules|token|delete|process\/(?:stop|restart))$/,
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
@@ -92,6 +92,12 @@
     (
       [
         { href: "/", label: "Agents", icon: "grid", available: true },
+        {
+          href: "/providers",
+          label: "AI providers",
+          icon: "shield",
+          available: session?.capabilities.providers,
+        },
         {
           href: "/mcp",
           label: "MCP catalog",
@@ -116,7 +122,6 @@
   let agentLinks = $derived(
     [
       { view: "setup", label: "Overview" },
-      { view: "providers", label: "Configure AI providers" },
       { view: "usage", label: "Model and usage" },
       { view: "memory", label: "Review memory" },
       { view: "approvals", label: "Approvals" },
@@ -136,24 +141,24 @@
       ? "Sign in"
       : path === "/"
         ? "Agents"
-        : mcpRoute
-          ? "MCP catalog"
-          : route?.[2] === "mcp"
-            ? "MCP access"
-            : route?.[2] === "usage"
-              ? "Model and usage"
-              : route?.[2] === "schedules"
-                ? scheduleText.pageTitle
-                : route?.[2] === "delegations"
-                  ? "Delegations"
-                  : route?.[2] === "peers"
-                    ? "Agent access"
-                    : route?.[2] === "approvals"
-                      ? "Approvals"
-                      : route?.[2] === "memory"
-                        ? "Memory"
-                        : route?.[2] === "providers"
-                          ? "AI providers"
+        : path === "/providers"
+          ? "AI providers"
+          : mcpRoute
+            ? "MCP catalog"
+            : route?.[2] === "mcp"
+              ? "MCP access"
+              : route?.[2] === "usage"
+                ? "Model and usage"
+                : route?.[2] === "schedules"
+                  ? scheduleText.pageTitle
+                  : route?.[2] === "delegations"
+                    ? "Delegations"
+                    : route?.[2] === "peers"
+                      ? "Agent access"
+                      : route?.[2] === "approvals"
+                        ? "Approvals"
+                        : route?.[2] === "memory"
+                          ? "Memory"
                           : path === "/agents/new"
                             ? "Create agent"
                             : route?.[2] === "settings"
@@ -246,6 +251,20 @@
           );
           if (!current.signal.aborted) scheduleTimeZone = defaults.timeZone;
         }
+      } else if (path === "/providers") {
+        try {
+          providerSettings = await request<ProviderSettingsState>(
+            "/api/providers",
+            { signal: current.signal },
+          );
+        } catch (cause) {
+          if (
+            current.signal.aborted ||
+            (cause instanceof ApiError && cause.status === 401)
+          )
+            throw cause;
+          providerSettings = undefined;
+        }
       } else if (mcpRoute) {
         const id = mcpRoute[1];
         if (!session.capabilities.mcp) missing = true;
@@ -280,21 +299,6 @@
               { signal: current.signal },
             ),
           ]);
-        }
-        if (route[2] === "providers") {
-          try {
-            providerSettings = await request<ProviderSettingsState>(
-              `/api/agents/${route[1]}/providers`,
-              { signal: current.signal },
-            );
-          } catch (cause) {
-            if (
-              current.signal.aborted ||
-              (cause instanceof ApiError && cause.status === 401)
-            )
-              throw cause;
-            providerSettings = undefined;
-          }
         }
         if (route[2] === "peers") {
           try {
@@ -568,7 +572,6 @@
     kind: "save" | "remove" | "login" | "cancel",
     value = "",
   ) {
-    if (!agent) return;
     const suffix =
       kind === "login"
         ? "/device-login"
@@ -578,14 +581,14 @@
             ? "/remove"
             : "";
     await mutate(
-      `/api/agents/${encodeURIComponent(agent.id)}/providers/${encodeURIComponent(id)}${suffix}`,
+      `/api/providers/${encodeURIComponent(id)}${suffix}`,
       kind === "save" ? { key: value } : {},
       () => {
         notice =
           kind === "save"
-            ? "API key saved for this agent."
+            ? "API key saved for all agents."
             : kind === "remove"
-              ? "Provider disconnected from this agent."
+              ? "Provider disconnected for all agents."
               : kind === "cancel"
                 ? "Login status updated."
                 : "Device login started. Complete authorization using the link below.";
@@ -1014,6 +1017,13 @@
       </p>
       <button type="submit" class="btn" disabled={busy}>Save settings</button>
     </form>
+  {:else if path === "/providers"}
+    <ProviderSettings
+      settings={providerSettings}
+      {busy}
+      action={providerAction}
+      refresh={() => load()}
+    />
   {:else if path === "/agents/new"}
     {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
   {:else if path === "/mcp"}
@@ -1114,14 +1124,6 @@
             void load();
           }}
         />{/key}
-    {:else if route[2] === "providers"}
-      {#key agent.id}<ProviderSettings
-          {agent}
-          settings={providerSettings}
-          {busy}
-          action={providerAction}
-          refresh={() => load()}
-        />{/key}
     {:else if route[2] === "usage"}
       {#key agent.id}<AgentUsageView
           {agent}
@@ -1151,8 +1153,8 @@
       <p>
         The Agent Host process will be {route[2] === "process/restart"
           ? "stopped and started again"
-          : "stopped"}. Active work may be interrupted. Files, history and AI
-        provider state are kept.
+          : "stopped"}. Active work may be interrupted. Files and conversation
+        history are kept.
       </p>
       <button
         class="btn"
@@ -1190,8 +1192,8 @@
       >
         <label
           ><input class="checkbox" type="checkbox" bind:checked={deleteData} />
-          Also permanently delete the agent data directory (workspace, history, AI
-          provider state and browser profile). Leave unchecked to keep it.</label
+          Also permanently delete the agent data directory and AI conversation history,
+          including its workspace, task history and browser profile.</label
         >
         <button class="btn" type="submit" disabled={busy}
           >Confirm deletion</button

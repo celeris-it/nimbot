@@ -43,7 +43,7 @@ export function createOperationalAlerts(deps: Deps) {
     );
   }
 
-  async function inspectProviders(id: string, ref: string, name: string) {
+  async function inspectProviders(id: string, ref: string) {
     const result = await deps.checkProviders(id).catch(() => undefined);
     if (
       !result ||
@@ -68,7 +68,7 @@ export function createOperationalAlerts(deps: Deps) {
             id,
             subject,
             check.revision,
-            `The ${provider.name} credential for "${name}" was rejected. Open Configure AI providers in the Nimbot panel to reconnect or replace the key.`,
+            `The ${provider.name} credential shared by all agents was rejected. Open AI providers in the Nimbot panel to reconnect or replace the key.`,
           );
         }
       }
@@ -127,7 +127,7 @@ export function createOperationalAlerts(deps: Deps) {
     for (const schedule of deps.schedules.listByAgent(id))
       inspectSchedule(schedule, agent.name);
     if (snapshot.status === "running")
-      await inspectProviders(id, snapshot.revision, agent.name);
+      await inspectProviders(id, snapshot.revision);
     if (!closed && deps.process.observe(id).revision === snapshot.revision)
       await deliver(id);
     return;

@@ -92,7 +92,7 @@
 <h1 tabindex="-1">Model and usage for {agent.name}</h1>
 <nav class="actions" aria-label="Agent actions">
   <a class="btn" href={`${base}/setup`}>Back to agent</a>
-  <a class="btn" href={`${base}/providers`}>AI providers</a>
+  <a class="btn" href="/providers">AI providers</a>
   <button class="btn" onclick={refresh} disabled={busy}>Refresh</button>
 </nav>
 

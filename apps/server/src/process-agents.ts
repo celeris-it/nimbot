@@ -24,6 +24,8 @@ export function createProcessAgents(options: {
   executablePath: string;
   taskTimeoutSeconds: number;
   playwrightBrowsersPath?: string;
+  sharedEngineDirectory?: string;
+  purgeEngineSessions?: (agentId: string) => Promise<void>;
   beforeStop: (agentId: string) => Promise<void>;
   afterStart: (agentId: string) => Promise<void>;
   onUnexpectedExit?: (agentId: string) => void;
@@ -104,6 +106,11 @@ export function createProcessAgents(options: {
     stopBot: options.beforeStop,
     async removeResources(agentId, purge, beforeRemoval) {
       await beforeRemoval();
+      if (purge && options.purgeEngineSessions) {
+        if (options.store.getDesiredState(agentId) !== undefined)
+          await manager.stop(agentId);
+        await options.purgeEngineSessions(agentId);
+      }
       if (options.store.getDesiredState(agentId) !== undefined)
         await manager.remove(agentId, purge);
       else if (purge)

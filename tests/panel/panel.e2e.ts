@@ -367,12 +367,14 @@ test("pages through delegation history and cancels only the selected child", asy
 
 async function openProviders(page: Page) {
   await login(page);
-  await page.goto("/agents/dev/setup");
-  await page.getByRole("button", { name: "Start agent" }).click();
-  await openAgentSection(page, "Configure AI providers");
+  await page
+    .getByRole("navigation")
+    .getByRole("link", { name: "AI providers" })
+    .click();
   await expect(
-    page.getByRole("heading", { name: "AI providers for Developer" }),
+    page.getByRole("heading", { name: "AI providers" }),
   ).toBeVisible();
+  await expect(page).toHaveURL(/\/providers$/);
 }
 
 async function openSchedules(page: Page) {
@@ -657,7 +659,7 @@ test("reflows the schedule list and form at desktop and narrow mobile widths", a
   }
 });
 
-test("manages per-agent API keys with keyboard navigation and blank secret fields", async ({
+test("manages global API keys with keyboard navigation and blank secret fields", async ({
   page,
   request,
 }) => {
@@ -680,7 +682,7 @@ test("manages per-agent API keys with keyboard navigation and blank secret field
   await key.fill("private-replacement");
   await openai.getByRole("button", { name: "Replace with API key" }).click();
   await expect(page.getByRole("status")).toContainText(
-    "API key saved for this agent.",
+    "API key saved for all agents.",
   );
   await page.reload();
   await expect(key).toHaveValue("");
@@ -691,25 +693,15 @@ test("manages per-agent API keys with keyboard navigation and blank secret field
   await expect(key).toHaveValue("");
   await request.post("/__test/agent/research");
   await page.goto("/agents/research/providers");
-  await expect(
-    page.getByRole("heading", { name: "AI providers for Researcher" }),
-  ).toBeVisible();
-  await expect(
-    openai.getByText("Not configured", { exact: true }),
-  ).toBeVisible();
-  await key.fill("private-research");
-  await openai.getByRole("button", { name: "Save API key" }).click();
-  await page.goto("/agents/dev/providers");
-  await expect(
-    openai.getByText("Configured — API key", { exact: true }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/providers$/);
+  await expect(openai.getByText("Configured — API key")).toBeVisible();
   await openai.getByRole("button", { name: "Disconnect provider" }).click();
   await expect(
     openai.getByText("Not configured", { exact: true }),
   ).toBeVisible();
-  await page.goto("/agents/research/providers");
+  await page.goto("/agents/dev/providers");
   await expect(
-    openai.getByText("Configured — API key", { exact: true }),
+    openai.getByText("Not configured", { exact: true }),
   ).toBeVisible();
   await expect(page.locator("main")).not.toContainText("private-");
 });
@@ -727,9 +719,9 @@ test("completes device login and recovers its pending state after reload", async
   await expect(page.getByLabel("OpenAI API key")).toBeDisabled();
   await page.reload();
   await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
-  await request.post("/__test/providers/dev/completed");
+  await request.post("/__test/providers/completed");
   await expect(
-    page.getByText("ChatGPT login completed for this agent."),
+    page.getByText("ChatGPT login completed for all agents."),
   ).toBeVisible();
   await expect(
     page.getByText("Configured — ChatGPT device login"),
@@ -758,7 +750,7 @@ for (const state of ["failed", "expired", "restart"])
     await openProviders(page);
     await page.getByRole("button", { name: "Sign in with ChatGPT" }).click();
     await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
-    await request.post(`/__test/providers/dev/${state}`);
+    await request.post(`/__test/providers/${state}`);
     await expect(
       page.getByText(
         state === "failed"
@@ -774,33 +766,27 @@ for (const state of ["failed", "expired", "restart"])
     ).toBeEnabled();
   });
 
-test("shows busy and offline provider states without affecting other agents", async ({
+test("shows global provider busy and unavailable states", async ({
   page,
   request,
 }) => {
   await openProviders(page);
-  await request.post("/__test/providers/dev/busy");
+  await request.post("/__test/providers/busy");
   await expect(
-    page.getByText(
-      "Agent is busy. Wait for its task or authentication change to finish.",
-    ),
+    page.getByText("An authentication change is in progress."),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Sign in with ChatGPT" }),
   ).toBeDisabled();
-  await request.post("/__test/agent/research");
-  await page.goto("/agents/research/providers");
-  await expect(
-    page.getByRole("button", { name: "Sign in with ChatGPT" }),
-  ).toBeEnabled();
-  await request.post("/__test/providers/dev/offline");
+  await request.post("/__test/providers/idle");
+  await request.post("/__test/providers/offline");
   await page.goto("/agents/dev/providers");
   await expect(
     page.getByText("Provider settings unavailable.", { exact: false }),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Open agent setup" }),
-  ).toHaveAttribute("href", "/agents/dev/setup");
+    page.getByRole("button", { name: "Refresh provider settings" }),
+  ).toBeVisible();
 });
 
 test("logs in, follows deep links and browser history, and signs out", async ({
@@ -1921,7 +1907,7 @@ for (const deploymentMode of ["native", "docker"] as const)
     const purge = page.getByRole("checkbox", { name: /agent data directory/ });
     await expect(purge).not.toBeChecked();
     await expect(purge).toHaveAccessibleName(
-      /AI provider state and browser profile/,
+      /AI conversation history.*browser profile/,
     );
   });
 

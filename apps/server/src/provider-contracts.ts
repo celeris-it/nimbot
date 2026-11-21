@@ -39,6 +39,7 @@ export interface ProviderSettings {
     id: ProviderId;
     name: string;
     method: "api_key" | "device" | null;
+    reconnectRequired?: boolean;
   }[];
   busy: boolean;
   login: DeviceLogin | null;

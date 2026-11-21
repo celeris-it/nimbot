@@ -30,7 +30,9 @@ import { providers } from "../../apps/server/dist/provider-contracts.js";
 const agents = new Map();
 let nativeMode = false;
 const keys = new Map();
-const logins = new Map();
+let providerLogin;
+let providerBusy;
+let providersOffline;
 const stateDir = mkdtempSync(join(tmpdir(), "nimbot-panel-fixture-"));
 const statePath = join(stateDir, "server.sqlite");
 const tasks = openTaskStore(statePath);
@@ -101,22 +103,21 @@ const scheduler = createScheduler({
   },
   notifySkip: async () => {},
 });
-const pendingLogin = (id) =>
-  ["starting", "awaiting_authorization"].includes(logins.get(id)?.state);
-function requireHost(id, mutate = false) {
-  const agent = agents.get(id);
-  if (!agent || agent.processState !== "running")
-    throw new HostProviderError(503);
-  if (mutate && (agent.authBusy || pendingLogin(id)))
+const pendingLogin = () =>
+  ["starting", "awaiting_authorization"].includes(providerLogin?.state);
+function requireProviders(mutate = false) {
+  if (providersOffline) throw new HostProviderError(503);
+  if (mutate && (providerBusy || pendingLogin()))
     throw new HostProviderError(409);
 }
-
 function reset() {
   nativeMode = false;
   for (const id of agents.keys()) schedules.removeByAgent(id);
   schedules.setDefaultTimeZone("UTC");
   keys.clear();
-  logins.clear();
+  providerLogin = undefined;
+  providerBusy = false;
+  providersOffline = false;
   agents.clear();
   grants.prune();
   for (const memory of memoryStores.values()) memory.close();
@@ -198,42 +199,42 @@ const panel = createPanel(
     },
     usage: { ...usage, wake: async () => {} },
     providers: {
-      status: async (id) => {
-        requireHost(id);
+      status: async () => {
+        requireProviders();
         return {
           providers: providers.map((provider) => ({
             ...provider,
-            method: keys.get(`${id}:${provider.id}`)?.method ?? null,
+            method: keys.get(provider.id)?.method ?? null,
           })),
-          busy: !!agents.get(id)?.authBusy || pendingLogin(id),
-          login: logins.get(id) ?? null,
+          busy: providerBusy || pendingLogin(),
+          login: providerLogin ?? null,
         };
       },
-      save: async (id, provider, key) => {
-        requireHost(id, true);
-        keys.set(`${id}:${provider}`, { method: "api_key", key });
+      save: async (provider, key) => {
+        requireProviders(true);
+        keys.set(provider, { method: "api_key", key });
       },
-      remove: async (id, provider) => {
-        requireHost(id, true);
-        keys.delete(`${id}:${provider}`);
+      remove: async (provider) => {
+        requireProviders(true);
+        keys.delete(provider);
       },
-      startLogin: async (id) => {
-        requireHost(id, true);
+      startLogin: async () => {
+        requireProviders(true);
         const login = {
           id: randomUUID(),
           state: "awaiting_authorization",
           url: "https://auth.openai.com/codex/device",
           code: "ABCD-EFGH",
         };
-        logins.set(id, login);
+        providerLogin = login;
         return login;
       },
-      cancelLogin: async (id, attempt) => {
-        requireHost(id);
-        const login = logins.get(id);
+      cancelLogin: async (attempt) => {
+        requireProviders();
+        const login = providerLogin;
         if (!login || login.id !== attempt) throw new HostProviderError(404);
         const result = { id: attempt, state: "cancelled" };
-        logins.set(id, result);
+        providerLogin = result;
         return result;
       },
     },
@@ -441,19 +442,17 @@ app.post("/__test/discord-owner/:id", (c) => {
   agents.get(c.req.param("id")).discordOwnerLinked = true;
   return c.json({ ok: true });
 });
-app.post("/__test/providers/:id/:state", (c) => {
-  const id = c.req.param("id"),
-    state = c.req.param("state");
-  if (state === "offline") agents.get(id).processState = "stopped";
-  else if (state === "busy") agents.get(id).authBusy = true;
+app.post("/__test/providers/:state", (c) => {
+  const state = c.req.param("state");
+  if (state === "offline") providersOffline = true;
+  else if (state === "busy") providerBusy = true;
   else if (state === "idle") {
-    agents.get(id).authBusy = false;
-    agents.get(id).processState = "running";
-  } else if (state === "restart") logins.delete(id);
+    providerBusy = false;
+    providersOffline = false;
+  } else if (state === "restart") providerLogin = undefined;
   else {
-    const login = logins.get(id);
-    logins.set(id, { id: login.id, state });
-    if (state === "completed") keys.set(`${id}:openai`, { method: "device" });
+    providerLogin = { id: providerLogin.id, state };
+    if (state === "completed") keys.set("openai", { method: "device" });
   }
   return c.json({ ok: true });
 });

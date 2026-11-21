@@ -37,7 +37,7 @@ named data volume; deleting that volume is a separate, explicit purge. See
 [installation and removal](docs/INSTALL.md) for commands. See [operations](docs/OPERATIONS.md) for complete-volume backups, recovery and
 manual revision updates. This release has no automated upgrade or import path.
 
-Fresh installations start with zero agents. Sign in to the panel and create an agent with a name and optional instructions. Nimbot starts its Agent Host and opens the setup page, where you can connect a Telegram or Discord bot. Open **Configure AI providers** to save an API key for OpenAI, Anthropic, Google, or OpenRouter, sign in to OpenAI with a ChatGPT device code, or connect an OpenCode Console workspace. Each agent has its own provider credentials. Send the connected bot a private message from its configured owner account to link the chat and begin. See [Create your first agent](docs/INSTALL.md#create-your-first-agent) for the setup steps.
+Fresh installations start with zero agents. Sign in to the panel and create an agent with a name and optional instructions. Nimbot starts its Agent Host and opens the setup page, where you can connect a Telegram or Discord bot. Open **AI providers** in the sidebar to save an API key for OpenAI, Anthropic, Google, or OpenRouter, sign in to OpenAI with a ChatGPT device code, or connect an OpenCode Console workspace. All agents use these shared provider connections. Send the connected bot a private message from its configured owner account to link the chat and begin. See [Create your first agent](docs/INSTALL.md#create-your-first-agent) for the setup steps.
 
 No Telegram or per-agent environment variables are required. `.env` contains administrator authentication and trusted deployment settings; internal Agent Host credentials are generated automatically.
 
@@ -152,7 +152,7 @@ separately selected. If Telegram is connected, deletion stops polling and remove
 the local Telegram chat binding and credentials. Remove a Discord connection from setup before
 deleting its agent. Deleting the Telegram bot identity is a separate action in BotFather.
 
-Explicitly deleting agent data removes its workspace, OpenCode state, and Host task state, including private memory and the tool outbox. Approval history, delegation records, peer notes, and the MCP catalog live in the separate Server database. Deleting an agent also revokes its MCP grants and retires its stored MCP credentials. Backups can still contain copies of deleted data.
+Explicitly deleting agent data removes its workspace, OpenCode session history, and Host task state, including private memory and the tool outbox. Shared provider connections belong to the installation. Approval history, delegation records, peer notes, and the MCP catalog live in the separate Server database. Deleting an agent also revokes its MCP grants and retires its stored MCP credentials. Backups can still contain copies of deleted data.
 
 ### Tasks and recovery
 
@@ -315,9 +315,9 @@ regenerate `{url, token}`. Create or edit with `cadence={"kind":"webhook"}` and
 
 ### Persistence and diagnostics
 
-Server state in `server.sqlite` includes agents, owners, instructions, verified bot identities, chat bindings, desired process state, the durable task queue, and schedules with their saved prompts, cadences, time zones, UTC next-run timestamps, and private webhook tokens. It retains the latest 20 run records per schedule and reads execution status from the associated task row. Private credential directories live alongside SQLite in `SERVER_STATE_DIR` (default `.nimbot-native/` for native development, `/data` in Docker). Each agent separately persists workspace files, OpenCode sessions and provider credentials, browser profiles, and task records/results under `agents/<agent ID>/`. Docker stores the entire tree in one named data volume. Back up the complete tree and `.env`; backups contain secrets.
+Server state in `server.sqlite` includes agents, owners, instructions, verified bot identities, chat bindings, desired process state, the durable task queue, and schedules with their saved prompts, cadences, time zones, UTC next-run timestamps, and private webhook tokens. It retains the latest 20 run records per schedule and reads execution status from the associated task row. Private credential directories live alongside SQLite in `SERVER_STATE_DIR` (default `.nimbot-native/` for native development, `/data` in Docker). Each agent persists workspace files, browser profiles, and task records and results under `agents/<agent ID>/`. The installation-wide database under `ai-providers/` holds provider credentials and workspace-scoped OpenCode sessions. Docker stores the entire tree in one named data volume. Back up the complete tree and `.env`; backups contain secrets.
 
-Provider credentials are stored only in each agent's engine-state directory. The panel forwards authentication operations over that agent's authenticated internal API; OAuth tokens never return to the server or browser. OpenAI supports an API key or ChatGPT device login, Anthropic, Google, and OpenRouter support API keys, and OpenCode Console uses device login. The Host must be running and idle to change authentication. Tasks stay queued during device login and are eligible to start once the attempt ends. Other agents remain independent. OpenCode renews OAuth tokens locally. In **Model and usage**, choose an enabled model for the agent or use **Automatic** to follow the OpenCode default. The Agent Host validates API keys with the provider before saving. A rejected or unverified replacement leaves the previous credential active. Validation checks access to an authenticated provider endpoint. Balance and model access are outside this check. Disconnecting removes the local credential without revoking it at the provider.
+Manage API keys and device sign-ins from **AI providers** in the sidebar, even before creating an agent. OpenAI supports API keys and ChatGPT device sign-in, Anthropic, Google, and OpenRouter support API keys, and OpenCode Console uses device sign-in. OpenCode stores credentials and renews OAuth tokens in the installation-wide database. The panel displays connection status and device authorization instructions. All current and future agents use the saved connection. In **Model and usage**, choose a model for the agent or use **Automatic** to follow its OpenCode default. Nimbot validates API keys before saving. Failed validation or sign-in keeps the previous connection. Disconnecting removes the saved connection for all agents. The provider manages revocation.
 
 Both applications expose health checks and emit structured JSON logs with agent and task IDs. Prompts and results are not logged, and credentials are redacted. `NIMBOT_LOG=silent` disables logging. The panel reports bot polling, owner chat linking, process status, and authenticated Host readiness separately; Host readiness checks workspace access and busy state. **AI provider status** shows separate checks for active credentials and when each result was recorded. Stopping or restarting an agent may interrupt active work. Interrupted tasks are not automatically replayed.
 
@@ -399,8 +399,8 @@ Server rejects the existing database or the panel port is already in use.
 each agent as a child process and keeps bot polling and credentials in the Server.
 The panel identifies native development, shows each Host process state, and
 provides start, stop, and restart controls. Stop and restart require confirmation
-because they may interrupt active work. The panel's AI providers page describes
-shared credential access under one OS account. Both deployment modes use the
+because they may interrupt active work. The sidebar's AI providers page manages
+shared AI credentials. Both deployment modes use the
 authenticated process lifecycle API.
 The Docker image runs the same subprocess runtime. See the [installation guide](docs/INSTALL.md)
 and [operations guide](docs/OPERATIONS.md) for Docker CLI management and complete-volume backups.

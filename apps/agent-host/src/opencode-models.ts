@@ -152,13 +152,16 @@ export function quotaWindows(
 export function createOpenCodeModels(
   request: OpenCodeRequest,
   isBusy: () => boolean,
+  credentialRevision: () => string = () => "",
 ): EngineModels & {
   changed(): void;
   hasCost(model: ModelReference): Promise<boolean>;
 } {
   // Only the Server requests admissions. UI reads never create or invalidate one.
   let generation = 0;
-  let issued: { admission: ModelAdmission; expiresAt: number } | undefined;
+  let issued:
+    | { admission: ModelAdmission; expiresAt: number; credentials: string }
+    | undefined;
   const changed = () => {
     generation++;
     issued = undefined;
@@ -186,6 +189,7 @@ export function createOpenCodeModels(
       };
       if (issue && isBusy()) return result;
       try {
+        const connectionRevision = credentialRevision();
         const [raw, catalogValue, credentials] = await Promise.all([
           selected
             ? undefined
@@ -233,7 +237,12 @@ export function createOpenCodeModels(
             result.windows = quotaWindows(rawLimits, model, source === "go");
           }
         }
-        if (revision !== generation || (issue && isBusy())) return result;
+        if (
+          revision !== generation ||
+          credentialRevision() !== connectionRevision ||
+          (issue && isBusy())
+        )
+          return result;
         result.state = result.windows.some((window) => window.exhausted)
           ? "exhausted"
           : result.windows.length
@@ -243,6 +252,7 @@ export function createOpenCodeModels(
           result.admission = { model, revision: randomUUID() };
           issued = {
             admission: result.admission,
+            credentials: connectionRevision,
             expiresAt: Date.now() + 120_000,
           };
         }
@@ -261,6 +271,7 @@ export function createOpenCodeModels(
       if (
         issued?.admission.revision !== admission.revision ||
         Date.now() >= issued.expiresAt ||
+        issued.credentials !== credentialRevision() ||
         !sameModel(issued.admission.model, admission.model)
       )
         return false;

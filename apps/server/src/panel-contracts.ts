@@ -55,6 +55,7 @@ export interface PanelSession {
   authenticated: true;
   deploymentMode: "native" | "docker";
   capabilities: {
+    providers?: boolean;
     createAgent: boolean;
     mcp?: boolean;
     scheduleSettings?: boolean;

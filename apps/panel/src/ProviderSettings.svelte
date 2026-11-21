@@ -1,17 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type {
-    AgentDetail,
-    ProviderSettings,
-  } from "../../server/src/panel-contracts.js";
+  import type { ProviderSettings } from "../../server/src/panel-contracts.js";
   let {
-    agent,
     settings,
     busy,
     action,
     refresh,
   }: {
-    agent: AgentDetail;
     settings: ProviderSettings | undefined;
     busy: boolean;
     action: (
@@ -36,7 +31,7 @@
   let blocked = $derived(busy || !settings || settings.busy);
   $effect(() => {
     if (!settings) return;
-    const storageKey = `nimbot-login-${agent.id}`;
+    const storageKey = "nimbot-provider-login";
     try {
       const previous = sessionStorage.getItem(storageKey);
       if (previous && previous !== settings.login?.id) interrupted = true;
@@ -70,30 +65,17 @@
   }
 </script>
 
-<h1 tabindex="-1">AI providers for {agent.name}</h1>
-<p>
-  Credentials are saved in this agent's engine-state directory. All agents and
-  the Server share access under one OS account.
-</p>
+<h1 tabindex="-1">AI providers</h1>
 <p id="provider-help">
-  The Agent Host must be running and idle to change authentication. Saving a key
-  does not verify its validity, balance, or model access. OpenCode chooses the
-  model automatically until you choose one for this agent.
+  All agents share these connections. Choose each agent’s model on its Model and
+  usage page.
 </p>
-<a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/usage`}
-  >Model and usage</a
->
 {#if !settings}
-  <p role="status">
-    Provider settings unavailable. Start the agent and refresh to try again.
-  </p>
-  <a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-    >Open agent setup</a
-  >
+  <p role="status">Provider settings unavailable. Refresh to try again.</p>
   <button class="btn" onclick={refresh}>Refresh provider settings</button>
 {:else}
   {#if settings.busy && !waiting}<p role="status">
-      Agent is busy. Wait for its task or authentication change to finish.
+      An authentication change is in progress.
     </p>{/if}
   {#if interrupted}<p role="status">
       The previous login was interrupted. Start a new login.
@@ -106,9 +88,11 @@
           ? provider.id === "opencode"
             ? "Configured — OpenCode Console device login"
             : "Configured — ChatGPT device login"
-          : provider.method === "api_key"
-            ? "Configured — API key"
-            : "Not configured"}
+          : provider.reconnectRequired
+            ? "Reconnect required"
+            : provider.method === "api_key"
+              ? "Configured — API key"
+              : "Not configured"}
       </p>
       {#if provider.id !== "opencode"}
         <form
@@ -137,8 +121,8 @@
         {#if provider.id === "openai"}
           <p>
             Or sign in with your ChatGPT account using a device code. A
-            successful login replaces this agent's OpenAI credential. Failed or
-            cancelled attempts keep it.
+            successful login replaces the shared OpenAI credential. Failed or
+            cancelled attempts keep the current connection.
           </p>
         {:else}
           <p>
@@ -177,14 +161,11 @@
               <p><code>{settings.login.code}</code></p>
               <button class="btn" onclick={copy}>Copy code</button>
               <p>{copied}</p>
-              <p>
-                Waiting for authorization. Queued tasks wait until login
-                finishes.
-              </p>
+              <p>Waiting for authorization.</p>
             {:else if settings.login.state === "completed"}<p>
                 {provider.id === "openai"
-                  ? "ChatGPT login completed for this agent."
-                  : "OpenCode Console login completed for this agent."}
+                  ? "ChatGPT login completed for all agents."
+                  : "OpenCode Console login completed for all agents."}
               </p>
             {:else if settings.login.state === "cancelled"}<p>
                 Device login cancelled. The previous credential was kept.
@@ -216,6 +197,3 @@
     </section>
   {/each}
 {/if}
-<a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-  >Back to agent</a
->
