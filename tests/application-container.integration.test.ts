@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,6 +17,7 @@ it.skipIf(!image)(
     const id = randomUUID();
     const name = `nimbot-application-${id}`;
     const volume = `${name}-data`;
+    const restoredVolume = `${name}-restored`;
     const directory = await mkdtemp(join(tmpdir(), "nimbot-application-"));
     const fixture = join(directory, "native-telegram.mjs");
     await copyFile(
@@ -32,7 +33,7 @@ it.skipIf(!image)(
     const hash = await hashPassword(password);
     let origin = "";
     let cookie = "";
-    async function start() {
+    async function start(dataVolume = volume) {
       await docker(
         "run",
         "-d",
@@ -44,7 +45,7 @@ it.skipIf(!image)(
         "--publish",
         "127.0.0.1::3000",
         "--mount",
-        `type=volume,src=${volume},dst=/data`,
+        `type=volume,src=${dataVolume},dst=/data`,
         "--mount",
         `type=bind,src=${fixture},dst=/app/tests/fixtures/native-telegram.mjs,readonly`,
         "--env",
@@ -63,6 +64,19 @@ it.skipIf(!image)(
           mount.Destination.includes("docker.sock"),
         ),
       ).toBe(false);
+      await expect
+        .poll(
+          () =>
+            docker(
+              "container",
+              "inspect",
+              "--format",
+              "{{.State.Health.Status}}",
+              name,
+            ),
+          { timeout: 25000 },
+        )
+        .toBe("healthy");
       origin = `http://127.0.0.1:${bindings[0].HostPort}`;
       // Requests use the configured same-origin value; published ephemeral ports are a fixture detail.
       await expect
@@ -108,6 +122,7 @@ it.skipIf(!image)(
       const config = JSON.parse(await docker("image", "inspect", image!))[0]
         .Config;
       expect(config.User).toBe("node");
+      expect(config.Healthcheck.Test[0]).toBe("CMD");
       expect(Object.keys(config.ExposedPorts)).toEqual(["3000/tcp"]);
       await docker("volume", "create", volume);
       await start();
@@ -163,7 +178,50 @@ it.skipIf(!image)(
         confirm: agentId,
       });
       await stop();
-      await start();
+      // The documented offline backup uses tar stdout so archives belong to the operator.
+      const archive = execFileSync(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "--user",
+          "0:0",
+          "--mount",
+          `type=volume,source=${volume},target=/data,readonly`,
+          "--entrypoint",
+          "tar",
+          image!,
+          "-czf",
+          "-",
+          "-C",
+          "/data",
+          ".",
+        ],
+        { timeout: 120000, maxBuffer: 64 * 1024 * 1024 },
+      );
+      await docker("volume", "create", restoredVolume);
+      execFileSync(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "-i",
+          "--user",
+          "0:0",
+          "--mount",
+          `type=volume,source=${restoredVolume},target=/data`,
+          "--entrypoint",
+          "tar",
+          image!,
+          "--numeric-owner",
+          "-xzpf",
+          "-",
+          "-C",
+          "/data",
+        ],
+        { input: archive, timeout: 120000, maxBuffer: 2000000 },
+      );
+      await start(restoredVolume);
       await expect
         .poll(async () => (await get(`/api/agents/${agentId}`)).hostState, {
           timeout: 15000,
@@ -242,6 +300,7 @@ it.skipIf(!image)(
     } finally {
       await docker("rm", "-f", name).catch(() => {});
       await docker("volume", "rm", volume).catch(() => {});
+      await docker("volume", "rm", restoredVolume).catch(() => {});
       await rm(directory, { recursive: true, force: true });
     }
   },

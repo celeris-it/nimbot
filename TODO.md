@@ -84,9 +84,16 @@ path first, then the recommended Docker deployment in the next milestone.
       browser tests cover both deployment modes and reject retired routes. The
       OpenCode MCP and FTS5 gates now use the single application image; native
       lifecycle and application-container tests cover recovery and retained data.
-- [ ] Replace Compose-dependent install and operations steps with Docker CLI
+- [x] Replace Compose-dependent install and operations steps with Docker CLI
       instructions. Review install, uninstall, and release scripts for
       assumptions about per-agent containers, volumes, and networks.
+      Installer and uninstaller now manage one labeled application container and
+      one data volume through Docker CLI. They retain data by default, reject old
+      layouts and foreign labels, and refuse to replace missing saved data.
+      The old migration, activation and per-agent-volume recovery pipeline is
+      removed; this fresh release declares no supported predecessor. Terminal
+      tests cover installation, retries and explicit purge. Docker gates verify
+      health, private source permissions and complete-volume backup/restore.
 - [x] Verify a clean Docker installation without Compose, panel lifecycle
       operations, and data persistence across container recreation.
       Verification: the opt-in application-container gate creates a fresh named
@@ -102,5 +109,5 @@ path first, then the recommended Docker deployment in the next milestone.
       Security section's statements about agent isolation and Server
       credentials. Finish aligning AGENTS.md once the per-agent container
       code is removed.
-- [ ] Update docs/INSTALL.md and docs/OPERATIONS.md with setup, backups,
+- [x] Update docs/INSTALL.md and docs/OPERATIONS.md with setup, backups,
       recovery, and the fresh-install requirement.

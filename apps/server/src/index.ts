@@ -4,7 +4,6 @@ import { createProcessAgents } from "./process-agents.js";
 import { openAgentProcessStore } from "./agent-process-store.js";
 import { openProcessHostCredentials } from "./process-host-credentials.js";
 import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
-import { waitForUpgradeActivation } from "./upgrade-activation.js";
 import { createDiscordAttachments } from "./discord-attachments.js";
 import { formatScheduleList } from "./chat-schedules.js";
 import { taskOutcomeText } from "./bot.js";
@@ -658,12 +657,8 @@ async function main(): Promise<void> {
       await taskServices.wake([id]);
     },
   });
-  const activation = waitForUpgradeActivation(
-    stateDir,
-    process.env.NIMBOT_UPGRADE_TOKEN,
-  );
   const server = serve({
-    fetch: (request) => activation.fetch(request, panel.fetch),
+    fetch: panel.fetch,
     hostname: panelConfig.hostname,
     port: panelConfig.port,
   });
@@ -671,7 +666,6 @@ async function main(): Promise<void> {
     log.error("server.panel_start_failed", {
       hint: "Check PANEL_HOST and PANEL_PORT.",
     });
-    activation.close();
     stop();
     process.exitCode = 1;
   });
@@ -689,7 +683,7 @@ async function main(): Promise<void> {
       });
   };
   const usageTimer = setInterval(() => {
-    if (activation.isActive()) refreshQueues();
+    refreshQueues();
   }, 30_000);
   usageTimer.unref();
   let stopping = false;
@@ -700,7 +694,6 @@ async function main(): Promise<void> {
       log.error("server.agent_hosts_stop_failed");
       process.exitCode = 1;
     });
-    activation.close();
     clearInterval(usageTimer);
     void operationalAlerts
       ?.close()
@@ -717,7 +710,6 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  if (!(await activation.wait())) return;
   const restored = await processAgents.restore();
   for (const result of restored)
     if (result.status === "rejected")

@@ -9,10 +9,44 @@ development is documented in [README.md](../README.md#development).
 This subprocess release requires a new data volume. It does not migrate or import
 previous per-agent container installations. Existing databases are rejected and
 old containers, volumes and files remain until you explicitly remove them.
-The legacy Compose installer and upgrade scripts are being replaced; use the
-Docker CLI procedure below for this release.
+The optional installer uses the same Docker CLI layout. The previous automatic
+upgrade and per-agent-volume recovery scripts are retired.
 
-## Install
+## Optional assisted installation
+
+Docker Engine or Docker Desktop must already be running. On Linux and macOS,
+run this in an interactive terminal (you can download and inspect it first):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash
+```
+
+The script downloads source, builds one application image, asks for the panel
+port, origin and password, creates one named data volume, and starts one
+application container. It does not use Compose or mount the Docker socket.
+Password input is hidden and travels only over stdin to the hash helper.
+Configuration is saved in a private `.env`; its additional `PANEL_PUBLISH_PORT`
+setting is installer metadata, not a Server bind setting.
+
+Use `--directory /absolute/path` to choose an empty destination, and optionally
+`--version vX.Y.Z` for an initial release tag that includes this layout:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash -s -- --directory "$HOME/nimbot"
+```
+
+The default destination is `~/.local/share/nimbot`. Previous installation markers
+are rejected without deleting data. Re-running with the same directory reuses
+source, password and retained data; it does not download updates. Local Unix
+Docker contexts are supported. Containers and volumes are named using a generated
+installation ID so separate installations can coexist with different panel ports.
+The marker's first line is `subprocess-v1`; never execute its contents as shell.
+
+After a failed installation, fix the reported error and retry the same command.
+Resources and configuration are retained. The script waits for application health;
+agent and provider readiness are checked separately in the panel.
+
+## Install with Docker CLI
 
 Use Docker Engine on Linux or Docker Desktop on macOS. Start from a checkout of
 the desired Nimbot revision. Node.js, pnpm, OpenCode and Chromium are installed
@@ -94,12 +128,26 @@ For another revision of this subprocess installation, stop the application and
 back up its entire data volume first. Build the target image, remove only the
 stopped application container, and run the same Docker command with the retained
 volume and `.env`. Active tasks can be interrupted during the maintenance window.
-Release-script alignment and complete operations instructions are tracked in
-[TODO.md](../TODO.md); keep the previous image and a backup before replacing it.
+See [upgrade and recovery](OPERATIONS.md#upgrade-and-recovery) for the manual
+procedure. `upgrade.sh` reports unsupported automatic upgrades without changing
+resources. Keep the previous image and a complete backup before replacing it.
 
 ## Uninstall
 
-To stop and remove the application while retaining all data:
+For an installer-managed deployment, use its saved script:
+
+```sh
+bash /absolute/path/to/installation/uninstall.sh
+```
+
+It asks for confirmation and retains the data volume and `.env`. Add
+`--purge-data` only to permanently erase them; this requires a second typed
+confirmation. Images, source, backups and the installation marker remain. The
+script inspects only its exact application and data-volume names and refuses
+foreign ownership labels. Rerun the installer with the same directory to resume
+retained data.
+
+For a manual deployment, stop and remove the application while retaining data:
 
 ```sh
 docker stop nimbot
@@ -123,8 +171,9 @@ from the panel retains its own data unless you select the explicit purge option.
 Server and its Hosts, then restores agents whose desired state was running.
 For panel lifecycle actions, use **Start agent**, **Stop agent** or **Restart
 agent**. `/stop` in a chat cancels only that agent's current task.
-The detailed operations guide is still being aligned with this release; old
-per-agent container and Compose recovery procedures do not apply.
+See [OPERATIONS.md](OPERATIONS.md) for complete-volume backups, recovery,
+troubleshooting and the shared trust model. Old per-agent-container and Compose
+recovery procedures do not apply.
 
 ### Optional Discord connection
 

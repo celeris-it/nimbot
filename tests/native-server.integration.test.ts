@@ -57,6 +57,7 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
             DOCKER_SOCKET_PATH: "/missing/docker.sock",
             AGENT_HOST_IMAGE: "invalid image",
             SERVER_CONTAINER_NAME: "invalid container",
+            NIMBOT_UPGRADE_TOKEN: "obsolete-activation-token",
           },
           stdio: ["ignore", "pipe", "pipe"],
         },

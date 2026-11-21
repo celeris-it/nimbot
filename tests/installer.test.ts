@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import {
   mkdtemp,
   mkdir,
@@ -14,23 +14,22 @@ import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-vi.setConfig({ testTimeout: 30000 });
-const exec = promisify(execFile);
+const execute = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
 const temporary: string[] = [];
 afterEach(async () => {
   await Promise.all(
-    temporary.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+    temporary
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
   );
 });
 
-// Give the scripts a real controlling terminal, including when their stdin is a pipe.
-// Docker and HTTPS downloads are simulated; no real engine or network is used.
+// A real controlling terminal also verifies the curl | bash entry path.
+// Docker and downloads are simulated; no external service is used.
 const terminal = String.raw`
 import os, sys, json, socket, pty, select, time
 config = json.loads(sys.argv[1])
-sock = socket.socket(socket.AF_UNIX)
-sock.bind(os.environ['FAKE_SOCKET'])
 pid, fd = pty.fork()
 if pid == 0:
     os.execvpe(config['command'][0], config['command'], os.environ)
@@ -64,135 +63,115 @@ const docker = String.raw`#!/usr/bin/env python3
 import os, sys, json
 from pathlib import Path
 args = sys.argv[1:]
-dir = Path(os.environ['INSTALL_DIR'])
 statefile = Path(os.environ['FAKE_STATE'])
 state = json.loads(statefile.read_text())
 with open(os.environ['FAKE_LOG'], 'a') as f: f.write(json.dumps(args) + '\n')
-marker = dir / '.nimbot-installation'
-owner = marker.read_text().splitlines()[0] if marker.exists() else 'unknown'
-if os.environ.get('FAKE_FAIL') == args[0]: sys.exit(1)
 def save(): statefile.write_text(json.dumps(state))
+def labels():
+    return dict(args[i+1].split('=',1) for i,a in enumerate(args) if a == '--label')
+def fail(): sys.exit(1)
 if args[0] == 'context': print(os.environ.get('FAKE_ENDPOINT', 'unix://' + os.environ['FAKE_SOCKET']))
 elif args[0] == 'info': pass
-elif args[:2] == ['compose', 'version']: print('Docker Compose version v2.39.0')
-elif args[0] == 'version': print(os.environ.get('FAKE_API', '1.47'))
-elif args[0] == 'build': pass
-elif args[0] == 'image' and args[1] == 'inspect': print('sha256:' + 'a'*64)
-elif args[0] == 'run' and 'stat' in args: print('0')
-elif args[0] == 'run' and '/app/scripts/upgrade.mjs' in args:
-    print('Upgrade helper invoked')
+elif args[0] == 'build':
+    if os.environ.get('FAKE_FAIL') == 'build': fail()
 elif args[0] == 'run':
-    password = sys.stdin.read()
-    if len(password) < 8 or len(password) > 256: sys.exit(1)
-    print('scrypt:' + 'a'*32 + ':' + 'b'*128)
-elif args[0] == 'compose':
-    if os.environ.get('FAKE_CHECK_PORT_ENV') and 'PANEL_PUBLISH_PORT' in os.environ: sys.exit(1)
-    if 'up' in args:
-        if os.environ.get('FAKE_FAIL') == 'health': sys.exit(1)
-        state['container']['server'] = {'owner': owner, 'project': 'nimbot-' + owner}
-        state['network']['default'] = {'owner': owner}
-        state['volume']['server-state'] = {'owner': owner}
-        save()
-elif args[0] in ['container', 'network', 'volume'] or args[0] in ['ps', 'inspect']:
-    kind = 'container' if args[0] in ['ps', 'inspect'] else args[0]
-    action = 'ls' if args[0] == 'ps' else ('inspect' if args[0] == 'inspect' else args[1])
+    if '-i' in args:
+        password = sys.stdin.read()
+        if len(password) < 8 or len(password) > 256: fail()
+        print('scrypt:' + 'a'*32 + ':' + 'b'*128)
+    elif '-d' in args:
+        if os.environ.get('FAKE_FAIL') == 'run': fail()
+        name = args[args.index('--name')+1]
+        state['container'][name] = {'labels': labels(), 'status':'running', 'health':'healthy'}
+        save(); print(name)
+    else: sys.exit(2)
+elif args[0] in ['container', 'volume']:
+    kind, action = args[:2]
     resources = state[kind]
     if action == 'ls':
-        if '--filter' not in args: sys.exit(2)
-        filter = args[args.index('--filter')+1]
-        for key, value in resources.items():
-            if filter.startswith('name='):
-                if key == 'server': print(key)
-            elif filter == 'label=io.nimbot.installation' or filter == 'label=io.nimbot.agent-id': print(key)
-            elif filter.startswith('label=io.nimbot.installation=') and value['owner'] == filter.split('=', 2)[2]: print(key)
+        if os.environ.get('FAKE_FAIL') == 'list': fail()
+        print('\n'.join(resources))
+    elif action == 'create':
+        resources.setdefault(args[-1], {'labels': labels()}); save(); print(args[-1])
     elif action == 'inspect':
-        ref = args[-1]
-        if ref not in resources: sys.exit(1)
-        value = resources[ref]
-        if 'com.docker.compose.project' in args[args.index('--format')+1]: print(value.get('project', ''))
-        else: print('foreign' if os.environ.get('FAKE_FOREIGN') == ref else value['owner'])
-    elif action == 'stop': pass
+        if os.environ.get('FAKE_FAIL') == 'inspect': fail()
+        name = args[-1]
+        if name not in resources: fail()
+        item = resources[name]
+        fmt = args[args.index('--format')+1]
+        if '.State.Status' in fmt: print(item['status'] + ' ' + ('unhealthy' if os.environ.get('FAKE_FAIL') == 'health' else item['health']))
+        elif 'io.nimbot.layout' in fmt: print(item['labels'].get('io.nimbot.layout',''))
+        else: print('foreign' if os.environ.get('FAKE_FOREIGN') == name else item['labels'].get('io.nimbot.installation',''))
+    elif action == 'start': resources[args[-1]]['status']='running'; save()
+    elif action == 'stop': resources[args[-1]]['status']='exited'; save()
     elif action == 'rm':
-        ref = args[-1]
-        if os.environ.get('FAKE_REMOVE_FAIL') == ref: sys.exit(1)
-        del resources[ref]; save()
+        if os.environ.get('FAKE_REMOVE_FAIL') == args[-1]: fail()
+        del resources[args[-1]]; save()
     else: sys.exit(2)
 else: sys.exit(2)
 `;
-
-const hostPortPrompt = "Panel host port [default: 3000]: ";
-const defaultUrlPrompt = "Panel URL [default: http://localhost:3000,";
-const defaultPanelAnswers = [
-  [hostPortPrompt, ""],
-  [defaultUrlPrompt, ""],
+const panelAnswers = [
+  ["Panel host port [default: 3000]: ", ""],
+  ["Panel URL [default: http://localhost:3000,", ""],
+  ["characters, hidden): ", "long-enough-password"],
+  ["Repeat password: ", "long-enough-password"],
 ];
-
-async function fixture(legacyCompose = false) {
-  const dir = await mkdtemp(join(tmpdir(), "nimbot-installer-"));
-  temporary.push(dir);
-  const bin = join(dir, "bin");
-  const source = join(dir, "source");
-  const destination = join(dir, "installation with spaces");
+type Resource = {
+  labels: Record<string, string>;
+  status?: string;
+  health?: string;
+};
+type State = {
+  container: Record<string, Resource>;
+  volume: Record<string, Resource>;
+};
+async function fixture() {
+  const directory = await mkdtemp(join(tmpdir(), "nimbot-installer-"));
+  temporary.push(directory);
+  const bin = join(directory, "bin");
+  const source = join(directory, "source");
+  const destination = join(directory, "installation with spaces");
   await mkdir(bin);
   await mkdir(source);
-  for (const name of [
-    "compose.yaml",
+  await mkdir(join(source, "infrastructure/docker"), { recursive: true });
+  for (const file of [
     "install.sh",
     "uninstall.sh",
     "upgrade.sh",
     "release.json",
+    "infrastructure/docker/nimbot.Dockerfile",
   ])
-    await cp(join(root, name), join(source, name));
-  if (legacyCompose) {
-    const composePath = join(source, "compose.yaml");
-    const compose = await readFile(composePath, "utf8");
-    await writeFile(
-      composePath,
-      compose.replaceAll("${PANEL_PUBLISH_PORT:-3000}", "3000"),
-    );
-  }
-  const archive = join(dir, "source.tar.gz");
-  await exec("tar", ["-czf", archive, "-C", dir, "source"]);
+    await cp(join(root, file), join(source, file));
+  const archive = join(directory, "source.tar.gz");
+  await execute("tar", ["-czf", archive, "-C", directory, "source"]);
   await writeFile(join(bin, "docker"), docker, { mode: 0o755 });
   await writeFile(
     join(bin, "curl"),
     '#!/usr/bin/env bash\nwhile [ "$1" != -o ]; do shift; done\ncp "$FAKE_ARCHIVE" "$2"\n',
     { mode: 0o755 },
   );
-  const statePath = join(dir, "state.json");
-  const log = join(dir, "docker.log");
-  await writeFile(
-    statePath,
-    JSON.stringify({ container: {}, network: {}, volume: {} }),
-  );
+  const statePath = join(directory, "state.json");
+  const log = join(directory, "docker.log");
+  await writeFile(statePath, JSON.stringify({ container: {}, volume: {} }));
   await writeFile(log, "");
-  let invocation = 0;
   const env = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
-    INSTALL_DIR: destination,
     FAKE_STATE: statePath,
     FAKE_LOG: log,
     FAKE_ARCHIVE: archive,
+    FAKE_SOCKET: join(directory, "docker.sock"),
     DOCKER_HOST: "",
     DOCKER_CONTEXT: "",
   };
   async function run(
     script: "install" | "uninstall" | "upgrade",
-    answers: string[][],
+    answers: string[][] = [],
     extra: string[] = [],
     overrides: Record<string, string> = {},
     pipe = false,
   ) {
-    const command = [
-      "bash",
-      join(root, `${script}.sh`),
-      "--directory",
-      destination,
-      ...extra,
-    ];
-    // stdin is a pipe in the remote curl | bash invocation; /dev/tty remains usable.
-    const actual = pipe
+    const command = pipe
       ? [
           "bash",
           "-c",
@@ -201,390 +180,293 @@ async function fixture(legacyCompose = false) {
           join(root, "install.sh"),
           destination,
         ]
-      : command;
-    const result = await exec(
+      : [
+          "bash",
+          join(root, `${script}.sh`),
+          "--directory",
+          destination,
+          ...extra,
+        ];
+    const result = await execute(
       "python3",
-      ["-c", terminal, JSON.stringify({ command: actual, answers })],
-      {
-        env: {
-          ...env,
-          FAKE_SOCKET: join(dir, `docker-${invocation++}.sock`),
-          ...overrides,
-        },
-        maxBuffer: 1024 * 1024,
-      },
+      ["-c", terminal, JSON.stringify({ command, answers })],
+      { env: { ...env, ...overrides }, maxBuffer: 1024 * 1024 },
     );
     return JSON.parse(result.stdout) as { code: number; output: string };
   }
-  // Reuse one socket path: the terminal runner unlinks it before each binding.
-  const stableSocket = join(dir, "docker.sock");
-  const runStable: typeof run = async (...args) => {
-    await rm(stableSocket, { force: true });
-    const [script, answers, extra = [], overrides = {}, pipe = false] = args;
-    return run(
-      script,
-      answers,
-      extra,
-      { FAKE_SOCKET: stableSocket, ...overrides },
-      pipe,
-    );
-  };
-  const install = () =>
-    runStable("install", [
-      ...defaultPanelAnswers,
-      ["characters, hidden): ", "long-enough-password"],
-      ["Repeat password: ", "long-enough-password"],
-    ]);
   const readState = async () =>
-    JSON.parse(await readFile(statePath, "utf8")) as Record<
-      string,
-      Record<string, { owner: string; project?: string }>
-    >;
-  async function addAgents() {
-    const state = await readState();
-    const owner = (
+    JSON.parse(await readFile(statePath, "utf8")) as State;
+  const writeState = async (state: State) =>
+    writeFile(statePath, JSON.stringify(state));
+  const commands = async () =>
+    (await readFile(log, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as string[]);
+  async function resources() {
+    const marker = (
       await readFile(join(destination, ".nimbot-installation"), "utf8")
-    ).split("\n")[0]!;
-    state.container!.agent = { owner };
-    state.network!.agent = { owner };
-    state.volume!.agent = { owner };
-    state.volume!.foreign = { owner: "foreign" };
-    state.network!.foreign = { owner: "foreign" };
-    await writeFile(statePath, JSON.stringify(state));
+    ).split("\n");
+    return {
+      id: marker[1]!,
+      container: `nimbot-${marker[1]}`,
+      volume: `nimbot-${marker[1]}-data`,
+      marker,
+    };
   }
   return {
-    run: runStable,
-    install,
+    directory,
     destination,
-    log,
+    run,
     readState,
-    addAgents,
-    statePath,
+    writeState,
+    commands,
+    resources,
+    install: () => run("install", panelAnswers),
   };
 }
 
-it("installs through piped stdin, writes private configuration, and waits for health", async () => {
+it("installs one application through piped stdin without Compose or a socket mount", async () => {
   const f = await fixture();
-  const result = await f.run(
-    "install",
-    [
-      ...defaultPanelAnswers,
-      ["characters, hidden): ", "long-enough-password"],
-      ["Repeat password: ", "long-enough-password"],
-    ],
-    [],
-    {},
-    true,
-  );
+  const result = await f.run("install", panelAnswers, [], {}, true);
   expect(result.code, result.output).toBe(0);
   expect(result.output).toContain("Nimbot is ready at http://localhost:3000");
   expect(result.output).not.toContain("long-enough-password");
-  const config = await readFile(join(f.destination, ".env"), "utf8");
-  expect(config).toContain("PANEL_PUBLISH_PORT=3000\n");
-  expect(config).toContain("PANEL_URL='http://localhost:3000'\n");
-  expect(config).toContain("DOCKER_SOCKET_GID=");
-  expect(config).toContain("NIMBOT_INSTALLATION_ID=");
-  expect(config).not.toContain("long-enough-password");
+  const env = await readFile(join(f.destination, ".env"), "utf8");
+  expect(env).toContain("PANEL_PASSWORD_HASH=scrypt:");
+  expect(env).not.toMatch(
+    /DOCKER_SOCKET|AGENT_HOST_IMAGE|long-enough-password|'scrypt/,
+  );
   expect((await stat(join(f.destination, ".env"))).mode & 0o777).toBe(0o600);
-  expect(await readFile(f.log, "utf8")).toContain('"--wait-timeout", "120"');
+  const commands = await f.commands();
+  expect(commands.filter((a) => a[0] === "build")).toHaveLength(1);
+  expect(
+    commands.some((a) => a.includes("compose") || a[0] === "network"),
+  ).toBe(false);
+  const run = commands.find((a) => a[0] === "run" && a.includes("-d"))!;
+  expect(run).toContain("127.0.0.1:3000:3000");
+  expect(run).toContain("--init");
+  expect(run).not.toContain("--user");
+  expect(run.filter((a) => a === "--mount")).toHaveLength(1);
+  expect(run.join(" ")).not.toContain("docker.sock");
+  const { container, volume, marker } = await f.resources();
+  expect(marker[0]).toBe("subprocess-v1");
+  expect(Object.keys((await f.readState()).container)).toEqual([container]);
+  expect(Object.keys((await f.readState()).volume)).toEqual([volume]);
 });
 
-it("reuses an installation without replacing its password or downloading updates", async () => {
+it("reuses configuration and the retained volume after uninstall without downloading or resetting the password", async () => {
   const f = await fixture();
   expect((await f.install()).code).toBe(0);
-  const config = await readFile(join(f.destination, ".env"), "utf8");
-  const result = await f.run("install", []);
+  const env = await readFile(join(f.destination, ".env"), "utf8");
+  const { container, volume } = await f.resources();
+  const before = (await f.commands()).length;
+  expect((await f.run("uninstall", [["Continue? [y/N]: ", "y"]])).code).toBe(0);
+  expect((await f.readState()).container[container]).toBeUndefined();
+  expect((await f.readState()).volume[volume]).toBeDefined();
+  const result = await f.run("install");
   expect(result.code, result.output).toBe(0);
   expect(result.output).toContain("Reusing existing installation");
-  expect(await readFile(join(f.destination, ".env"), "utf8")).toBe(config);
+  expect(await readFile(join(f.destination, ".env"), "utf8")).toBe(env);
+  const later = (await f.commands()).slice(before);
+  expect(
+    later.some((a) => a.includes("password.js") || a.includes("--stdin")),
+  ).toBe(false);
+  expect(later.some((a) => a[0] === "volume" && a[1] === "create")).toBe(false);
 });
 
-it("uses the selected port in the default URL and keeps it on retry", async () => {
+it("validates ports and URLs and saves a Docker env-file with an HTTPS origin", async () => {
   const f = await fixture();
-  const urlPrompt = "Panel URL [default: http://localhost:4000,";
   const result = await f.run("install", [
-    [hostPortPrompt, "0"],
-    [hostPortPrompt, "65536"],
-    [hostPortPrompt, "abc"],
-    [hostPortPrompt, "4000"],
-    [urlPrompt, "http://localhost:3000"],
-    [urlPrompt, ""],
+    ["Panel host port [default: 3000]: ", "65536"],
+    ["Panel host port [default: 3000]: ", "3101"],
+    ["Panel URL [default: http://localhost:3101,", "https://example.test/path"],
+    [
+      "Panel URL [default: http://localhost:3101,",
+      "https://nimbot.example.test",
+    ],
     ["characters, hidden): ", "long-enough-password"],
     ["Repeat password: ", "long-enough-password"],
   ]);
   expect(result.code, result.output).toBe(0);
-  expect(result.output).toContain("Enter a port between 1 and 65535.");
-  expect(result.output).toContain(
-    "Enter http://localhost:4000 or an HTTPS origin",
-  );
-  expect(result.output).toContain("Nimbot is ready at http://localhost:4000");
-  expect(result.output).toContain("ssh -L 4000:127.0.0.1:4000");
-  const configPath = join(f.destination, ".env");
-  const config = await readFile(configPath, "utf8");
-  expect(config).toContain("PANEL_PUBLISH_PORT=4000\n");
-  expect(config).toContain("PANEL_URL='http://localhost:4000'\n");
-
-  const retry = await f.run("install", [], [], {
-    PANEL_PUBLISH_PORT: "9999",
-    FAKE_CHECK_PORT_ENV: "1",
-  });
-  expect(retry.code, retry.output).toBe(0);
-  expect(retry.output).toContain("Nimbot is ready at http://localhost:4000");
-  expect(await readFile(configPath, "utf8")).toBe(config);
+  const env = await readFile(join(f.destination, ".env"), "utf8");
+  expect(env).toContain("PANEL_PUBLISH_PORT=3101");
+  expect(env).toContain("PANEL_URL=https://nimbot.example.test\n");
+  expect(
+    (await f.commands()).find((a) => a[0] === "run" && a.includes("-d")),
+  ).toContain("127.0.0.1:3101:3000");
 });
 
-it("uses port 3000 with legacy Compose and a saved configuration without a host port", async () => {
-  const f = await fixture(true);
-  const result = await f.run("install", [
-    [defaultUrlPrompt, "http://localhost:3000"],
-    ["characters, hidden): ", "long-enough-password"],
-    ["Repeat password: ", "long-enough-password"],
-  ]);
-  expect(result.code, result.output).toBe(0);
-  expect(result.output).toContain(
-    "This release publishes the panel on host port 3000.",
-  );
-  const configPath = join(f.destination, ".env");
-  const config = (await readFile(configPath, "utf8")).replace(
-    "PANEL_PUBLISH_PORT=3000\n",
-    "",
-  );
-  await writeFile(configPath, config);
-
-  const retry = await f.run("install", []);
-  expect(retry.code, retry.output).toBe(0);
-  expect(retry.output).toContain("ssh -L 3000:127.0.0.1:3000");
-  expect(await readFile(configPath, "utf8")).toBe(config);
-});
-
-it("rejects remote contexts and unrelated destination directories before builds", async () => {
+it("rejects remote Docker and pre-existing legacy state without mutating resources", async () => {
   const f = await fixture();
-  const remote = await f.run("install", [], [], {
-    FAKE_ENDPOINT: "ssh://host",
-  });
-  expect(remote.code).not.toBe(0);
-  expect(remote.output).toContain("remote Docker is unsupported");
+  expect(
+    (await f.run("install", [], [], { FAKE_ENDPOINT: "tcp://remote:2375" }))
+      .code,
+  ).toBe(1);
   await mkdir(f.destination);
-  await writeFile(join(f.destination, "mine"), "keep");
-  const occupied = await f.run("install", []);
-  expect(occupied.code).not.toBe(0);
-  expect(occupied.output).toContain("Destination is not empty");
-  expect(await readFile(join(f.destination, "mine"), "utf8")).toBe("keep");
+  const marker = "a".repeat(32) + "\n/old/docker.sock\n";
+  await writeFile(join(f.destination, ".nimbot-installation"), marker);
+  const result = await f.run("install");
+  expect(result.output).toContain("fresh subprocess installation");
+  expect(
+    await readFile(join(f.destination, ".nimbot-installation"), "utf8"),
+  ).toBe(marker);
+  expect(
+    (await f.commands()).every((a) => ["context", "info"].includes(a[0]!)),
+  ).toBe(true);
+  expect((await f.run("uninstall")).code).toBe(1);
 });
 
-it("allows password correction and an existing HTTPS origin", async () => {
-  const f = await fixture();
-  const urlPrompt = "Panel URL [default: http://localhost:4000,";
-  const result = await f.run("install", [
-    [hostPortPrompt, "4000"],
-    [urlPrompt, "https://nimbot.example.com:65536"],
-    [urlPrompt, "https://nimbot.example.com:8443"],
-    ["8–256 characters, hidden): ", "seven!!"],
-    ["Repeat password: ", "seven!!"],
-    ["characters, hidden): ", "long-enough-password"],
-    ["Repeat password: ", "different"],
-    ["characters, hidden): ", "eight!#?"],
-    ["Repeat password: ", "eight!#?"],
-  ]);
-  expect(result.code, result.output).toBe(0);
-  expect(result.output).toContain("Password was rejected");
-  expect(result.output).toContain("Passwords do not match");
-  expect(result.output).toContain("forward to 127.0.0.1:4000");
-  expect(result.output).toContain(
-    "Nimbot is ready at https://nimbot.example.com:8443",
-  );
-  const config = await readFile(join(f.destination, ".env"), "utf8");
-  expect(config).toContain("PANEL_PUBLISH_PORT=4000\n");
-  expect(config).toContain("PANEL_URL='https://nimbot.example.com:8443'\n");
-});
-
-it.each(["build", "health"])(
-  "reports %s failures and keeps the installation for retry",
+it.each(["build", "run", "health"])(
+  "keeps resources and configuration after a %s failure and permits retry",
   async (failure) => {
     const f = await fixture();
-    const result = await f.run(
-      "install",
-      failure === "build"
-        ? []
-        : [
-            ...defaultPanelAnswers,
-            ["characters, hidden): ", "long-enough-password"],
-            ["Repeat password: ", "long-enough-password"],
-          ],
-      [],
-      { FAKE_FAIL: failure },
-    );
-    expect(result.code).not.toBe(0);
+    const failed = await f.run("install", panelAnswers, [], {
+      FAKE_FAIL: failure,
+    });
+    expect(failed.code).toBe(1);
     expect(
       await readFile(join(f.destination, ".nimbot-installation"), "utf8"),
-    ).toMatch(/^[a-f0-9]{32}\n/);
-    expect(result.output).toContain(
-      failure === "health" ? "did not become healthy" : "Installation failed",
+    ).toContain("subprocess-v1");
+    const retry = await f.run(
+      "install",
+      failure === "build" ? panelAnswers : [],
     );
+    expect(retry.code, retry.output).toBe(0);
   },
 );
 
-it("uninstalls server before agents, keeps data, and leaves foreign resources alone", async () => {
+it("rejects foreign labels and uncertain resource listings before lifecycle mutations", async () => {
   const f = await fixture();
   expect((await f.install()).code).toBe(0);
-  await f.addAgents();
-  const result = await f.run("uninstall", [["Continue? [y/N]: ", "y"]]);
-  expect(result.code, result.output).toBe(0);
-  const state = await f.readState();
-  expect(state.container).toEqual({});
-  expect(state.network).toEqual({ foreign: { owner: "foreign" } });
-  expect(Object.keys(state.volume!)).toEqual([
-    "server-state",
-    "agent",
-    "foreign",
-  ]);
-  expect(await readFile(join(f.destination, ".env"), "utf8")).toContain(
-    "PANEL_PASSWORD_HASH",
-  );
-  const calls = (await readFile(f.log, "utf8"))
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as string[]);
-  const stops = calls.filter(
-    (args) => args[0] === "container" && args[1] === "stop",
-  );
-  expect(stops[0]?.at(-1)).toBe("server");
+  const { container } = await f.resources();
+  const before = (await f.commands()).length;
+  for (const overrides of [
+    { FAKE_FOREIGN: container },
+    { FAKE_FAIL: "list" },
+    { FAKE_FAIL: "inspect" },
+  ]) {
+    expect((await f.run("install", [], [], overrides)).code).toBe(1);
+    expect((await f.run("uninstall", [], [], overrides)).code).toBe(1);
+  }
+  expect(
+    (await f.commands())
+      .slice(before)
+      .every(
+        (a) =>
+          ["context", "info"].includes(a[0]!) ||
+          ["ls", "inspect"].includes(a[1]!),
+      ),
+  ).toBe(true);
 });
 
-it("requires purge confirmation before any mutation and can purge retained data later", async () => {
+it("requires both purge confirmations before deleting anything and preserves foreign resources", async () => {
   const f = await fixture();
   expect((await f.install()).code).toBe(0);
-  await f.addAgents();
-  const denied = await f.run(
+  const { container, volume } = await f.resources();
+  const state = await f.readState();
+  state.container.foreign = { labels: { "io.nimbot.installation": "other" } };
+  state.volume.foreign = { labels: {} };
+  await f.writeState(state);
+  expect(
+    (await f.run("uninstall", [["Continue? [y/N]: ", "n"]], ["--purge-data"]))
+      .code,
+  ).toBe(0);
+  const rejected = await f.run(
     "uninstall",
     [
       ["Continue? [y/N]: ", "y"],
-      ["permanent data deletion: ", "no"],
+      ["Type DELETE NIMBOT DATA", "NO"],
     ],
     ["--purge-data"],
   );
-  expect(denied.code).not.toBe(0);
-  expect((await f.readState()).container!.server).toBeDefined();
-  expect((await f.run("uninstall", [["Continue? [y/N]: ", "y"]])).code).toBe(0);
+  expect(rejected.code).toBe(1);
+  expect((await f.readState()).container[container]).toBeDefined();
   const purged = await f.run(
     "uninstall",
     [
       ["Continue? [y/N]: ", "y"],
-      ["permanent data deletion: ", "DELETE NIMBOT DATA"],
+      ["Type DELETE NIMBOT DATA", "DELETE NIMBOT DATA"],
     ],
     ["--purge-data"],
   );
   expect(purged.code, purged.output).toBe(0);
-  expect((await f.readState()).volume).toEqual({
-    foreign: { owner: "foreign" },
+  const after = await f.readState();
+  expect(after.container[container]).toBeUndefined();
+  expect(after.volume[volume]).toBeUndefined();
+  expect(after.container.foreign).toBeDefined();
+  expect(after.volume.foreign).toBeDefined();
+  await expect(readFile(join(f.destination, ".env"))).rejects.toMatchObject({
+    code: "ENOENT",
   });
-  await expect(readFile(join(f.destination, ".env"))).rejects.toThrow();
 });
 
-it("rejects foreign resources after inspection and permits retry after partial cleanup", async () => {
+it("retains data on partial uninstall and permits a later explicit purge", async () => {
   const f = await fixture();
-  expect((await f.install()).code).toBe(0);
-  await f.addAgents();
-  const foreign = await f.run("uninstall", [], [], { FAKE_FOREIGN: "server" });
-  expect(foreign.code).not.toBe(0);
-  expect(foreign.output).toContain("Refusing foreign container");
-  const partial = await f.run("uninstall", [["Continue? [y/N]: ", "y"]], [], {
-    FAKE_REMOVE_FAIL: "agent",
-  });
-  expect(partial.code).not.toBe(0);
-  expect((await f.readState()).container!.agent).toBeDefined();
+  await f.install();
+  const { container, volume } = await f.resources();
+  expect(
+    (
+      await f.run("uninstall", [["Continue? [y/N]: ", "y"]], [], {
+        FAKE_REMOVE_FAIL: container,
+      })
+    ).code,
+  ).toBe(1);
+  expect((await f.readState()).volume[volume]).toBeDefined();
   expect((await f.run("uninstall", [["Continue? [y/N]: ", "y"]])).code).toBe(0);
+  expect((await f.readState()).volume[volume]).toBeDefined();
+  expect(
+    (
+      await f.run(
+        "uninstall",
+        [
+          ["Continue? [y/N]: ", "y"],
+          ["Type DELETE NIMBOT DATA", "DELETE NIMBOT DATA"],
+        ],
+        ["--purge-data"],
+      )
+    ).code,
+  ).toBe(0);
 });
 
-it("rejects unsupported Docker and a conflicting server without building", async () => {
+it("pins an initial release, serializes maintenance, and never invokes the old upgrade helper", async () => {
   const f = await fixture();
-  const unsupported = await f.run("install", [], [], { FAKE_API: "1.46" });
-  expect(unsupported.code).not.toBe(0);
-  expect(unsupported.output).toContain("1.47 or newer");
-  expect(await readFile(f.log, "utf8")).not.toContain('"build"');
-  expect((await f.install()).code).toBe(0);
-  const conflict = await f.run("install", [], [], { FAKE_FOREIGN: "server" });
-  expect(conflict.code).not.toBe(0);
-  expect(conflict.output).toContain("belongs to another installation");
-});
-
-it("cancels uninstall without changes and cleans incomplete setup resources", async () => {
-  const f = await fixture();
-  expect((await f.install()).code).toBe(0);
-  const before = await f.readState();
-  const owner = before.container!.server!.owner;
-  before.network!.pending = { owner };
-  before.volume!.pending = { owner };
-  await writeFile(f.statePath, JSON.stringify(before));
-  const cancelled = await f.run("uninstall", [["Continue? [y/N]: ", ""]]);
-  expect(cancelled.code).toBe(0);
-  expect(await f.readState()).toEqual(before);
-  const result = await f.run("uninstall", [["Continue? [y/N]: ", "y"]]);
-  expect(result.code, result.output).toBe(0);
-  expect((await f.readState()).network).toEqual({});
-  expect((await f.readState()).volume!.pending).toEqual({ owner });
-});
-
-it("installs a pinned release and rejects switching tags through the installer", async () => {
-  const f = await fixture();
-  const result = await f.run(
-    "install",
-    [
-      ...defaultPanelAnswers,
-      ["characters, hidden): ", "long-enough-password"],
-      ["Repeat password: ", "long-enough-password"],
-    ],
-    ["--version", "v1.0.0"],
+  const first = await f.run("install", panelAnswers, ["--version", "v1.0.0"]);
+  expect(first.code, first.output).toBe(0);
+  expect((await f.resources()).marker[3]).toBe("v1.0.0");
+  expect(
+    (await f.run("install", [], ["--version", "v2.0.0"])).output,
+  ).toContain("manual update procedure");
+  await symlink("123", join(f.destination, ".nimbot-maintenance"));
+  expect((await f.run("install")).output).toContain(
+    "maintenance is already in progress",
   );
-  expect(result.code).toBe(0);
-  expect(await readFile(join(f.destination, ".nimbot-release"), "utf8")).toBe(
-    "v1.0.0\n",
-  );
-  const retry = await f.run("install", [], ["--version", "v2.0.0"]);
-  expect(retry.code).not.toBe(0);
-  expect(retry.output).toContain("Use upgrade.sh");
+  const before = (await f.commands()).length;
+  const upgrade = await f.run("upgrade", [], ["--version", "v2.0.0"]);
+  expect(upgrade.code).toBe(1);
+  expect(upgrade.output).toContain("does not migrate or import");
+  expect((await f.commands()).length).toBe(before);
+  expect(
+    JSON.parse(await readFile(join(root, "release.json"), "utf8")).upgradeFrom,
+  ).toBeNull();
 });
 
-it("stages the release for a custom directory and leaves the service alone on build failure", async () => {
+it("does not replace a missing retained data volume with an empty one", async () => {
   const f = await fixture();
-  expect((await f.install()).code).toBe(0);
-  await rm(join(f.destination, ".nimbot-release"));
-  const before = await f.readState();
-  const failed = await f.run("upgrade", [], ["--version", "v1.0.0"], {
-    FAKE_FAIL: "build",
-  });
-  expect(failed.code).not.toBe(0);
-  expect(await f.readState()).toEqual(before);
-  const completed = await f.run("upgrade", [], ["--version", "v1.0.0"]);
-  expect(completed.code).toBe(0);
-  expect(completed.output).toContain("Upgrade helper invoked");
-});
-
-it("serializes maintenance and routes an interrupted upgrade to recovery", async () => {
-  const f = await fixture();
-  expect((await f.install()).code).toBe(0);
-  await writeFile(join(f.destination, ".nimbot-upgrade.json"), "{}");
-  const before = await f.readState();
-  const refused = await f.run("uninstall", [], []);
-  expect(refused.code).not.toBe(0);
-  expect(refused.output).toContain("An upgrade is pending");
-  const owner = (
-    await readFile(join(f.destination, ".nimbot-installation"), "utf8")
-  ).split("\n")[0];
-  await writeFile(
-    join(f.destination, ".nimbot-upgrade-helper"),
-    `nimbot-upgrade-${owner}:v1.0.0\n`,
-  );
-  await symlink(
-    String(process.pid),
-    join(f.destination, ".nimbot-maintenance"),
-  );
-  const busy = await f.run("upgrade", [], ["--rollback"]);
-  expect(busy.code).not.toBe(0);
-  expect(busy.output).toContain("maintenance is still running");
-  await rm(join(f.destination, ".nimbot-maintenance"));
-  const resumed = await f.run("upgrade", [], ["--rollback"]);
-  expect(resumed.code).toBe(0);
-  expect(resumed.output).toContain("Upgrade helper invoked");
-  expect(await f.readState()).toEqual(before);
+  await f.install();
+  const { volume } = await f.resources();
+  await f.run("uninstall", [["Continue? [y/N]: ", "y"]]);
+  const state = await f.readState();
+  delete state.volume[volume];
+  await f.writeState(state);
+  const before = (await f.commands()).length;
+  const result = await f.run("install");
+  expect(result.code).toBe(1);
+  expect(result.output).toContain("data volume is missing");
+  expect(
+    (await f.commands())
+      .slice(before)
+      .some((a) => a[0] === "volume" && a[1] === "create"),
+  ).toBe(false);
 });

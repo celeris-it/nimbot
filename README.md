@@ -23,9 +23,9 @@ required. Only the panel is published; all agents run as non-root subprocesses
 inside the same container.
 
 This release requires a fresh installation. It does not import previous
-per-agent Docker state, and leaves existing data untouched. The legacy installer,
-upgrade and uninstall scripts are still being aligned with the subprocess
-architecture; use the documented Docker CLI procedure for now.
+per-agent Docker state, and leaves existing data untouched. The optional installer
+and uninstaller use the same Docker CLI layout. Automatic upgrades and imports
+from the previous layout are not supported.
 
 ## Upgrade and uninstall
 
@@ -394,8 +394,8 @@ provides start, stop, and restart controls. Stop and restart require confirmatio
 because they may interrupt active work. The panel explains that all agents and
 the Server share one trust domain, including access to Server secrets. Both
 deployment modes use the authenticated process lifecycle API.
-The Docker image runs the same subprocess runtime. See [TODO.md](TODO.md) for
-remaining release-script and operations-documentation alignment.
+The Docker image runs the same subprocess runtime. See the [installation guide](docs/INSTALL.md)
+and [operations guide](docs/OPERATIONS.md) for Docker CLI management and complete-volume backups.
 
 After building, run the native Server lifecycle gate with:
 

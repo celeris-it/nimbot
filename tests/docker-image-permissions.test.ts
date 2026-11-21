@@ -9,17 +9,15 @@ const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
 
 it.skipIf(process.env.NIMBOT_TEST_DOCKER_IMAGES !== "1")(
-  "builds images with readable runtime files from owner-only source",
+  "builds the application image with readable runtime files from owner-only source",
   async () => {
     const context = await mkdtemp(join(tmpdir(), "nimbot-image-permissions-"));
-    const server = `nimbot-image-permissions-server:${basename(context)}`;
-    const host = `nimbot-image-permissions-host:${basename(context)}`;
-    const upgrade = `nimbot-image-permissions-upgrade:${basename(context)}`;
+    const application = `nimbot-image-permissions:${basename(context)}`;
     const docker = (...args: string[]) =>
       exec("docker", args, { maxBuffer: 8 * 1024 * 1024 });
-    const serverDockerfile = join(
+    const applicationDockerfile = join(
       context,
-      "infrastructure/docker/server.Dockerfile",
+      "infrastructure/docker/nimbot.Dockerfile",
     );
     const schemaCheck = `
       import { readFileSync, readdirSync } from 'node:fs';
@@ -48,27 +46,16 @@ it.skipIf(process.env.NIMBOT_TEST_DOCKER_IMAGES !== "1")(
       }
       await exec("chmod", ["-R", "u=rwX,go=", context]);
 
-      await docker("build", "-f", serverDockerfile, "-t", server, context);
       await docker(
         "build",
         "-f",
-        join(context, "infrastructure/docker/agent-host.Dockerfile"),
+        applicationDockerfile,
         "-t",
-        host,
-        context,
-      );
-      await docker(
-        "build",
-        "--target",
-        "upgrade",
-        "-f",
-        serverDockerfile,
-        "-t",
-        upgrade,
+        application,
         context,
       );
 
-      for (const image of [server, host]) {
+      for (const image of [application]) {
         await docker(
           "run",
           "--rm",
@@ -82,30 +69,9 @@ it.skipIf(process.env.NIMBOT_TEST_DOCKER_IMAGES !== "1")(
           schemaCheck,
         );
       }
-      await docker(
-        "run",
-        "--rm",
-        "--network",
-        "none",
-        "--user",
-        "12345:12345",
-        "--entrypoint",
-        "node",
-        upgrade,
-        "--input-type=module",
-        "-e",
-        `${schemaCheck}
-        for (const file of readdirSync('/app/scripts')) {
-          if (file.startsWith('upgrade') && file.endsWith('.mjs')) {
-            readFileSync('/app/scripts/' + file);
-          }
-        }
-        readFileSync('/app/scripts/upgrade.mjs');
-      `,
-      );
     } finally {
       await Promise.all([
-        docker("image", "rm", server, host, upgrade).catch(() => undefined),
+        docker("image", "rm", application).catch(() => undefined),
         rm(context, { recursive: true, force: true }),
       ]);
     }

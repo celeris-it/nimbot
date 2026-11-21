@@ -2,7 +2,6 @@
 set +x
 set -euo pipefail
 umask 077
-trap 'printf "Uninstall stopped after an error. Remaining resources and configuration were kept; fix the error and rerun this script.\n" >&2' ERR
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 install_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 purge=false
@@ -14,51 +13,50 @@ while [ "$#" -gt 0 ]; do
     *) fail "Unknown option: $1" ;;
   esac
 done
-command -v docker >/dev/null || fail 'Docker is required.'
 install_dir=$(cd "$install_dir" && pwd -P)
 marker="$install_dir/.nimbot-installation"
-[ -f "$marker" ] || fail 'Not a managed Nimbot installation; no resources were changed.'
-installation_id=$(sed -n '1p' "$marker")
-socket=$(sed -n '2p' "$marker")
+[ -f "$marker" ] && [ "$(sed -n '1p' "$marker")" = subprocess-v1 ] || fail 'Not a managed subprocess installation. Existing data was retained; use the original release tools for older installations.'
+installation_id=$(sed -n '2p' "$marker")
+endpoint=$(sed -n '3p' "$marker")
 [[ "$installation_id" =~ ^[a-f0-9]{32}$ ]] || fail 'Invalid installation marker.'
-case "$socket" in /*) ;; *) fail 'Invalid Docker socket in installation marker.' ;; esac
-[ -S "$socket" ] || fail 'Saved Docker socket is unavailable. Start Docker and retry.'
+case "$endpoint" in unix:///*) ;; *) fail 'Invalid saved Docker endpoint.' ;; esac
+command -v docker >/dev/null || fail 'Docker is required.'
 unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
-export DOCKER_HOST="unix://$socket"
+export DOCKER_HOST="$endpoint"
 docker info >/dev/null || fail 'Cannot access the saved Docker Engine.'
 lock="$install_dir/.nimbot-maintenance"
 ln -s "$$" "$lock" 2>/dev/null || fail 'Installation maintenance is already in progress.'
 trap 'rm -f -- "$lock"' EXIT
-[ ! -f "$install_dir/.nimbot-upgrade.json" ] || fail 'An upgrade is pending. Run upgrade.sh --rollback.'
-exec 3<> /dev/tty || fail 'An interactive terminal is required.'
-project="nimbot-$installation_id"
-label="io.nimbot.installation=$installation_id"
-
-# Inspect every candidate again before mutation. Do not rely only on list filters.
-owned() {
-  local kind="$1" ref="$2" actual
-  if [ "$kind" = container ]; then
-    actual=$(docker container inspect --format '{{index .Config.Labels "io.nimbot.installation"}}' "$ref")
-  else
-    actual=$(docker "$kind" inspect --format '{{index .Labels "io.nimbot.installation"}}' "$ref")
-  fi
-  [ "$actual" = "$installation_id" ] || fail "Refusing foreign $kind: $ref"
+trap 'printf "Uninstall stopped after an error. Remaining data and configuration were kept; fix the error and retry.\n" >&2' ERR
+container="nimbot-$installation_id"
+volume="$container-data"
+lookup() {
+  local kind="$1" name="$2" names candidate
+  if [ "$kind" = container ]; then names=$(docker container ls -a --format '{{.Names}}') || fail 'Cannot list containers.'
+  else names=$(docker volume ls --format '{{.Name}}') || fail 'Cannot list volumes.'; fi
+  while IFS= read -r candidate; do
+    if [ "$candidate" = "$name" ]; then printf '%s' "$name"; return; fi
+  done <<< "$names"
 }
-containers=$(docker container ls -aq --filter "label=$label")
-networks=$(docker network ls -q --filter "label=$label")
-volumes=$(docker volume ls -q --filter "label=$label")
-server=$(docker ps -aq --filter name='^/nimbot-server$')
-if [ -n "$server" ]; then
-  owned container "$server"
-  actual_project=$(docker container inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$server")
-  [ "$actual_project" = "$project" ] || fail 'The server Compose project does not match this installation.'
-fi
-printf 'Uninstall Nimbot from %s.\nContainers and networks for this installation will be removed.\n' "$install_dir"
-if "$purge"; then
-  printf 'Live agent files, conversations, credentials, server state and .env will be deleted. Upgrade backups are kept.\n'
-else
-  printf 'All volumes, credentials, .env, images and source files will be kept.\nRetained data does not automatically recreate removed agent containers.\n'
-fi
+owned() {
+  local kind="$1" name="$2" label layout
+  if [ "$kind" = container ]; then
+    label=$(docker container inspect --format '{{index .Config.Labels "io.nimbot.installation"}}' "$name") || fail 'Cannot inspect resource ownership.'
+    layout=$(docker container inspect --format '{{index .Config.Labels "io.nimbot.layout"}}' "$name") || fail 'Cannot inspect resource ownership.'
+  else
+    label=$(docker volume inspect --format '{{index .Labels "io.nimbot.installation"}}' "$name") || fail 'Cannot inspect resource ownership.'
+    layout=$(docker volume inspect --format '{{index .Labels "io.nimbot.layout"}}' "$name") || fail 'Cannot inspect resource ownership.'
+  fi
+  [ "$label" = "$installation_id" ] && [ "$layout" = subprocess-v1 ] || fail "Refusing foreign $kind: $name"
+}
+saved_container=$(lookup container "$container")
+saved_volume=$(lookup volume "$volume")
+[ -z "$saved_container" ] || owned container "$container"
+[ -z "$saved_volume" ] || owned volume "$volume"
+exec 3<> /dev/tty || fail 'An interactive terminal is required.'
+printf 'Remove the Nimbot application container from %s.\n' "$install_dir"
+if "$purge"; then printf 'The complete data volume and .env will be permanently deleted. Backups and source files remain.\n'
+else printf 'All data, credentials, .env, images and source files will be kept.\n'; fi
 printf 'Continue? [y/N]: ' >&3
 IFS= read -r answer <&3 || fail 'Input cancelled.'
 case "$answer" in y|Y|yes|YES) ;; *) printf 'Cancelled.\n'; exit 0 ;; esac
@@ -67,32 +65,15 @@ if "$purge"; then
   IFS= read -r answer <&3 || fail 'Input cancelled.'
   [ "$answer" = 'DELETE NIMBOT DATA' ] || fail 'Data deletion was not confirmed; no resources were changed.'
 fi
-# Stop server first, so it cannot create more resources while uninstalling.
-if [ -n "$server" ]; then
-  owned container "$server"
-  docker container stop --time 15 "$server" >/dev/null
+if [ -n "$saved_container" ]; then
+  owned container "$container"
+  docker container stop --time 30 "$container" >/dev/null
+  owned container "$container"
+  docker container rm "$container" >/dev/null
 fi
-# Refresh inventory after shutdown: an in-flight provisioning operation may have settled.
-containers=$(docker container ls -aq --filter "label=$label")
-for ref in $containers; do
-  owned container "$ref"
-  docker container stop --time 15 "$ref" >/dev/null
-  docker container rm "$ref" >/dev/null
-done
-networks=$(docker network ls -q --filter "label=$label")
-for ref in $networks; do
-  owned network "$ref"
-  docker network rm "$ref" >/dev/null
-done
 if "$purge"; then
-  volumes=$(docker volume ls -q --filter "label=$label")
-  for ref in $volumes; do
-    owned volume "$ref"
-    docker volume rm "$ref" >/dev/null
-  done
-  rm -f "$install_dir/.env"
+  if [ -n "$saved_volume" ]; then owned volume "$volume"; docker volume rm "$volume" >/dev/null; fi
+  rm -f -- "$install_dir/.env"
 fi
-printf 'Nimbot was uninstalled. Images and source files remain at %s.\n' "$install_dir"
-if ! "$purge"; then
-  printf 'Data was retained. Run this script with --purge-data if you later decide to delete it.\n'
-fi
+printf 'Nimbot was uninstalled. Images, source files and backups remain at %s.\n' "$install_dir"
+if ! "$purge"; then printf 'Data was retained. Rerun install.sh with the same directory to resume, or uninstall.sh --purge-data to erase it.\n'; fi

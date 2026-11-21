@@ -36,4 +36,5 @@ ENV PANEL_HOST=0.0.0.0
 ENV PANEL_PORT=3000
 VOLUME /data
 EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3000/login', {signal: AbortSignal.timeout(3000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
 CMD ["node", "apps/server/dist/index.js"]
