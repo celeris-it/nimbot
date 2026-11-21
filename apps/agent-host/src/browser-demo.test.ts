@@ -34,6 +34,19 @@ describe("environment notes", () => {
     expect(ENVIRONMENT_NOTES).toContain(browserCommand());
     expect(prompt.endsWith("User task:\nSummarize example.org")).toBe(true);
   });
+
+  it("gives the user's language preference precedence over the English fallback", () => {
+    const task = "Please reply in Spanish.";
+    const prompt = withEnvironmentNotes(task);
+    expect(prompt).toContain("Reply in the language the user requests.");
+    expect(prompt).toContain(
+      "follow the language of the conversation and use English as the fallback",
+    );
+    expect(prompt).toContain(
+      "Project language conventions apply to project materials.",
+    );
+    expect(prompt.endsWith(`User task:\n${task}`)).toBe(true);
+  });
 });
 
 it("uses the assigned native profile or a persistent task-state profile in containers", () => {

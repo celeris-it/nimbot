@@ -48,6 +48,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Each connected platform uses its own bot and owner-bound private chat. Both platforms share the agent’s workspace, AI context, and durable task queue.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
+- Agents reply in the language you request. Otherwise, they follow the conversation’s language and fall back to English.
 - Choose a model per agent, review tokens and reported cost by agent or task, and pause the agent’s queue when OpenCode reports an exhausted Console budget or Go allowance.
 - Run saved prompts once, daily, weekly, at fixed intervals, or on authenticated webhook requests configured from the panel, with results delivered to the owner's Telegram or Discord chat, as selected for each schedule.
 - Send documents up to 10 MiB to a Telegram agent and ask it to return generated files in the same chat.

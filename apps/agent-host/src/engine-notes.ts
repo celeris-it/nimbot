@@ -9,9 +9,10 @@ export function browserCommand(
   return `${quote(node)} ${quote(script)}`;
 }
 
-/** Facts about the Agent Host environment the engine cannot discover on its own. */
+/** Runtime context and conversation guidance for the engine. */
 export const ENVIRONMENT_NOTES = [
   "Environment notes (not part of the user's request):",
+  "- Reply in the language the user requests. Otherwise, follow the language of the conversation and use English as the fallback. Project language conventions apply to project materials.",
   `- To read a public web page with a real browser, run in the terminal: ${browserCommand()} <https-url>`,
   "  It prints one JSON object with the final url, title and visible text, and exits non-zero with a JSON error if the page cannot be loaded.",
   "  This agent has its own persistent browser profile. Cookies and local storage survive later calls and restarts. Run one browser probe at a time; a concurrent call using the same profile may fail while it is in use.",
