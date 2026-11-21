@@ -78,6 +78,11 @@ path first, then the recommended Docker deployment in the next milestone.
       loopback.
 - [ ] Remove the per-agent Docker provisioning, reconciliation, and panel
       controls once both paths use Agent Host subprocesses.
+      Progress: both runtime entry paths now use subprocesses. Removed the unused
+      Docker preflight, image resolution, per-agent provisioner, provisioning
+      cancellation control and resource-removal service with their obsolete tests.
+      The legacy registry, recovery/reconciliation code and panel controls remain
+      to be removed in subsequent changes.
 - [ ] Replace Compose-dependent install and operations steps with Docker CLI
       instructions. Review install, uninstall, and release scripts for
       assumptions about per-agent containers, volumes, and networks.
