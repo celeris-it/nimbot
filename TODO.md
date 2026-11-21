@@ -104,10 +104,18 @@ path first, then the recommended Docker deployment in the next milestone.
 
 ## Documentation
 
-- [ ] Update README.md alongside implementation to describe the new
+- [x] Update README.md alongside implementation to describe the new
       architecture, native development mode, and trust model, including the
       Security section's statements about agent isolation and Server
       credentials. Finish aligning AGENTS.md once the per-agent container
       code is removed.
 - [x] Update docs/INSTALL.md and docs/OPERATIONS.md with setup, backups,
       recovery, and the fresh-install requirement.
+
+## Landing
+
+- [ ] Update landing with the new information
+
+## Clean
+
+- [ ] Remove this TODO.md after finishing all tasks
