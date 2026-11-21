@@ -7,6 +7,8 @@ import {
 } from "./tool-bridge.js";
 import type { EngineTaskContext } from "./engine.js";
 import { request as httpRequest } from "node:http";
+import { createScheduleToolDefinitions } from "./schedule-tools.js";
+import { createAttachments } from "./attachments.js";
 
 const bridges: ToolBridge[] = [];
 afterEach(async () => {
@@ -73,6 +75,33 @@ const call = (id = 1, args: unknown = { value: "hello" }) => ({
   id,
   method: "tools/call",
   params: { name: "echo", arguments: args },
+});
+
+it("registers scheduling and attachment tools together for owner chat tasks", async () => {
+  const task = context();
+  const definitions = [
+    ...createScheduleToolDefinitions(),
+    createAttachments("/workspace").tool,
+  ];
+  task.tools!.operations = definitions.map(({ operation }) => operation);
+
+  const bridge = await createToolBridge(task, definitions);
+  bridges.push(bridge);
+  const response = await send(bridge, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/list",
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    result: {
+      tools: [
+        { name: "schedule_context" },
+        { name: "schedule_propose" },
+        { name: "attach_file" },
+      ],
+    },
+  });
 });
 
 it("discovers only granted registered tools and returns structured results without scope credentials", async () => {
