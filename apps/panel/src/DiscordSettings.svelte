@@ -40,9 +40,8 @@
 <section class="card" aria-label="Discord connection">
   <h2>Discord connection</h2>
   <p>
-    Optional Discord connection. Text messages join this agent's shared queue.
-    Progress, approvals, and results return to the channel that received the
-    task.
+    Text messages join this agent's shared queue. Progress, approvals, and
+    results return to the channel that received the task.
   </p>
   {#if agent.discord?.connection}
     {#if agent.discord.conversation}
@@ -135,8 +134,8 @@
   {#if agent.discord?.connection}
     <h3>Remove Discord</h3>
     <p>
-      Disconnecting Discord keeps this agent, its files, and Telegram intact. It
-      does not delete the bot in Discord.
+      Disconnecting Discord keeps the agent and its files. The bot remains in
+      Discord.
     </p>
     <form onsubmit={remove} aria-busy={busy} aria-describedby="form-error">
       <label for="discord-confirm">Type {agent.id} to confirm removal</label>

@@ -108,14 +108,16 @@ when separation is required. Never mount the Docker socket into the application.
 
 ## Create your first agent
 
-1. In Telegram, open `@BotFather`, send `/newbot`, and copy the new bot's token.
-2. Sign in to the panel, choose **Create agent**, and enter its name, optional instructions, your numeric Telegram user ID, and the token. You can find your ID by messaging `@userinfobot`.
-3. Wait for setup to finish. Each agent gets its own Agent Host process, persistent directories and bot. Use **Start agent** if its Host fails to start; do not create it again.
+1. Sign in to the panel, choose **Create agent**, and enter its name and optional instructions.
+2. Wait for its Agent Host to start. If startup fails, choose **Start agent** on the setup page.
+3. On the setup page, connect either or both messaging platforms.
+   - **Telegram:** Use `/newbot` in `@BotFather` to create a bot. Under **Telegram connection**, enter your numeric Telegram user ID and the bot token, then choose **Connect Telegram**.
+   - **Discord:** Create a bot in the Discord Developer Portal. Copy your user ID with Discord Developer Mode enabled. Under **Discord connection**, enter that ID and the bot token, then choose **Connect Discord**.
 4. On the agent's setup page, choose **Configure AI providers**. Keep its Agent Host running and wait for any task to finish. Save an API key for OpenAI, Anthropic, Google, or OpenRouter. For OpenAI, you can instead choose **Sign in with ChatGPT**, open the displayed OpenAI link, and enter the device code there. Enable device code login in your ChatGPT account security settings or workspace permissions if required. To connect a Console workspace for Console budgets or the Go allowance, choose **Sign in to OpenCode Console** and complete authorization using the displayed link and code. Wait for the panel to confirm completion. Keys and tokens are never shown after saving, and each agent is configured independently.
 5. In **Model and usage**, choose an enabled model or leave **Automatic** to use OpenCode's default.
-6. Open the bot link from the panel and send a task. Your first private message links the chat automatically.
+6. Send the connected bot a task in a private message from the configured owner account. The first message links the owner chat automatically.
 
-Every agent needs its own BotFather bot and its own provider authentication. Only its owner can use it; their first private message links the chat automatically. No Telegram or per-agent environment variables are needed. API keys and OAuth tokens stay in that agent's engine-state directory. OpenCode renews OAuth tokens there automatically. Changing one agent's authentication never changes another's; starting a new agent does not copy any credentials.
+Each agent needs its own provider authentication. Each messaging connection uses a distinct bot and accepts private messages from its configured owner. API keys and OAuth tokens stay in that agent's engine-state directory. OpenCode renews OAuth tokens there automatically. Changing one agent's authentication never changes another's; starting a new agent does not copy any credentials.
 
 During device login, tasks stay in that agent’s queue and are eligible to start once the attempt ends. You can cancel from the panel. Failed, cancelled, or timed-out attempts keep the previous credential. There is a ten-minute local time limit, and a Host restart interrupts pending login; start a new attempt afterwards. Refreshing the browser recovers a login still running in the Host. Saving credentials and Host readiness do not verify validity, balance, or model access.
 

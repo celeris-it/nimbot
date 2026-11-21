@@ -63,6 +63,7 @@ import { createMcpExecution } from "./mcp-execution.js";
 import { createMcpTools } from "./mcp-tools.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
+import { createTelegramLink } from "./agent-registration.js";
 import { openAgentRegistry } from "./agent-registry.js";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
     approvalRules = openApprovalRules(statePath, () => false);
     agentGrants = openAgentGrants(statePath, {
       exists: (id) => !!registry.get(id),
-      telegramOwner: (id) => registry.get(id)?.ownerId,
+      telegramOwner: (id) => registry.get(id)?.ownerId ?? undefined,
       discordOwner: (id) => registry.getDiscordConnection(id)?.ownerId,
     });
     agentNotes = openAgentNotes(statePath);
@@ -204,6 +205,7 @@ async function main(): Promise<void> {
     }
   }
   const discord = createDiscordConfiguration(registry, discordSecrets);
+  const linkTelegram = createTelegramLink(registry, botSecrets);
   const discordDelivery = createDiscordNotifications(discord.resolve);
   function linkedDiscord(id: string): DiscordConversation | undefined {
     const connection = registry.getDiscordConnection(id);
@@ -297,6 +299,7 @@ async function main(): Promise<void> {
           const chatId = registry.getOwnerChat(id);
           return (
             !!agent &&
+            agent.ownerId !== null &&
             agent.botId !== null &&
             chatId !== undefined &&
             agentAccess(id).canExecute(agent.botId, agent.ownerId, chatId)
@@ -468,7 +471,8 @@ async function main(): Promise<void> {
         taskServices.stop(id);
       },
       afterStart: async (id) => {
-        registeredBots?.start(id);
+        if (agentAccess(id).getSetup().bot === "linked")
+          registeredBots?.start(id);
         void registeredDiscord.start(id);
         await taskServices.wake([id]);
       },
@@ -563,6 +567,7 @@ async function main(): Promise<void> {
       grants: agentGrants,
       candidates: (id) => {
         const owner = registry.get(id)?.ownerId;
+        if (owner == null) return [];
         return registry
           .listIds()
           .filter((other) => other !== id)
@@ -613,6 +618,10 @@ async function main(): Promise<void> {
         ),
     },
     registerAgent: processAgents.register,
+    connectTelegram: async (id, ownerId, token) => {
+      await linkTelegram(id, ownerId, token);
+      if (runtimeReady(id)) registeredBots?.start(id);
+    },
     getAgentSetup: (id) => {
       const agent = registry.get(id);
       return agent

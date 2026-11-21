@@ -16,7 +16,7 @@ async function fixture() {
     ["a", "123"],
     ["b", "456"],
   ]) {
-    registry.createPending({ id: id!, name: id!, ownerId: 42 });
+    registry.createPending({ id: id!, name: id! });
     registry.setDiscordConnection(
       id!,
       {
@@ -141,7 +141,7 @@ it("keeps credential failures isolated from other agents", async () => {
   }
 });
 
-it("dispatches persisted Discord messages and cancels a scheduled run from the owner DM", async () => {
+it("dispatches persisted Discord-only messages and cancels a scheduled run from the owner DM", async () => {
   const { createAgentTaskServices } = await import("./agent-task-services.js");
   const { openTaskStore } = await import("./task-queue.js");
   const { HostTaskError } = await import("./host-tasks.js");
@@ -172,7 +172,7 @@ it("dispatches persisted Discord messages and cancels a scheduled run from the o
   const services = createAgentTaskServices(async (agentId) => ({
     agentId,
     store,
-    ownerId: () => 42,
+    ownerId: () => f.registry.get(agentId)?.ownerId ?? 0,
     run,
     discord: {
       admit: () => true,

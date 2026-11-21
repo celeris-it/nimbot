@@ -17,17 +17,28 @@
     action,
     refresh,
     discordAction,
+    connectTelegram,
   }: {
     agent: AgentDetail;
     busy: boolean;
     mcpAvailable: boolean;
     action: (kind: "start") => Promise<void>;
     refresh: () => void;
+    connectTelegram: (fields: Record<string, string>) => Promise<void>;
     discordAction: (
       kind: "save" | "remove" | "test",
       fields: Record<string, string>,
     ) => Promise<void>;
   } = $props();
+  let telegramOwner = $state("");
+  let telegramToken = $state("");
+  async function submitTelegram(event: SubmitEvent) {
+    event.preventDefault();
+    if (busy) return;
+    const fields = { ownerId: telegramOwner, token: telegramToken };
+    telegramToken = "";
+    await connectTelegram(fields);
+  }
   const providerLabels = {
     available: "Available",
     rejected: "Reconnect required",
@@ -49,10 +60,10 @@
       : agent.process?.state === "stopping"
         ? "The Agent Host is stopping. Wait for the operation to finish."
         : available
-          ? "The agent and its bot were saved and its Agent Host is available."
+          ? "The Agent Host is available."
           : agent.process?.state === "running"
             ? "The process is running, but its Host API is unavailable. Refresh status or restart the agent."
-            : "The agent and its bot were saved. Start the Agent Host to make it available; do not create the same agent again.",
+            : "The agent is saved. Start the Agent Host to make it available.",
   );
 </script>
 
@@ -67,9 +78,6 @@
 <a class="btn" href={`${base}/schedules`}>{scheduleText.link}</a>
 {#if agent.capabilities.edit}<a class="btn" href={`${base}/settings`}
     >Edit agent</a
-  >{/if}
-{#if agent.capabilities.replaceToken}<a class="btn" href={`${base}/token`}
-    >Replace bot token</a
   >{/if}
 <section class="card" aria-label="Creation result">
   <h2>
@@ -132,37 +140,79 @@
       {/if}
     </section>
   {/if}
-  {#if agent.setupAccess}
-    <dl>
-      <dt>Bot link</dt>
-      <dd>{botAccessLabels[agent.setupAccess.bot]}</dd>
-      <dt>Owner verification</dt>
-      <dd>{ownerLabels[agent.setupAccess.owner]}</dd>
-    </dl>
-  {/if}
   <dl>
     <dt>Identifier</dt>
     <dd>{agent.id}</dd>
-    <dt>Bot</dt>
-    <dd>{agent.botUsername ? `@${agent.botUsername}` : "Pending"}</dd>
   </dl>
-  <p>Telegram bot: {botLabel(agent)}.</p>
-  {#if agent.botConnection?.failure}<p>
-      {failureLabels[agent.botConnection.failure]}
-    </p>{/if}
-  {#if agent.botConnection?.status === "polling"}<p>
-      The owner’s first private message links this bot automatically. Tasks
-      require completed setup and an available Agent Host.
-    </p>{/if}
-  {#if !agent.botConnection}<p>
-      Connecting this bot to Telegram is still pending. It cannot receive tasks
-      yet.
-    </p>{/if}
   <button class="btn" onclick={refresh}>Refresh status</button>
   {#if agent.capabilities.delete}<a class="btn" href={`${base}/delete`}
       >Delete agent…</a
     >{/if}
   <a class="btn" href="/">Back to panel</a>
+</section>
+
+<section class="card" aria-label="Telegram connection">
+  <h2>Telegram connection</h2>
+  {#if agent.capabilities.connectTelegram}
+    <p>
+      Create a separate bot in BotFather and enter its token and owner's numeric
+      Telegram user ID.
+    </p>
+    <form
+      onsubmit={submitTelegram}
+      aria-describedby="form-error"
+      aria-busy={busy}
+    >
+      <label for="telegram-owner">Owner's Telegram ID</label>
+      <input
+        class="input"
+        id="telegram-owner"
+        inputmode="numeric"
+        pattern="[1-9][0-9]*"
+        required
+        bind:value={telegramOwner}
+      />
+      <label for="telegram-token">Telegram bot token</label>
+      <input
+        class="input"
+        id="telegram-token"
+        type="password"
+        maxlength="256"
+        autocomplete="off"
+        required
+        bind:value={telegramToken}
+      />
+      <button class="btn" type="submit" disabled={busy}
+        >{busy ? "Saving…" : "Connect Telegram"}</button
+      >
+    </form>
+  {:else if agent.botUsername}
+    <dl>
+      <dt>Bot</dt>
+      <dd>@{agent.botUsername}</dd>
+      {#if agent.setupAccess}
+        <dt>Bot link</dt>
+        <dd>{botAccessLabels[agent.setupAccess.bot]}</dd>
+        <dt>Owner verification</dt>
+        <dd>{ownerLabels[agent.setupAccess.owner]}</dd>
+      {/if}
+    </dl>
+    <p>Telegram bot: {botLabel(agent)}.</p>
+    {#if agent.botConnection?.failure}<p>
+        {failureLabels[agent.botConnection.failure]}
+      </p>{/if}
+    {#if agent.botConnection?.status === "polling" && agent.setupAccess?.owner === "pending"}
+      <p>
+        Send the bot a private message from the configured owner's account to
+        link the chat.
+      </p>
+    {/if}
+    {#if agent.capabilities.replaceToken}<a class="btn" href={`${base}/token`}
+        >Replace bot token</a
+      >{/if}
+  {:else}
+    <p>Telegram is unavailable.</p>
+  {/if}
 </section>
 
 {#if agent.discord}

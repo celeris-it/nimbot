@@ -104,7 +104,9 @@
       schedule?.cadence.kind === "interval"
         ? schedule.cadence.minutes
         : data.limits.minIntervalMinutes;
-    deliveryChannel = schedule?.deliveryChannel ?? "telegram";
+    deliveryChannel =
+      schedule?.deliveryChannel ??
+      (data.discordOwnerLinked && !data.ownerLinked ? "discord" : "telegram");
     timeZone = schedule?.timeZone ?? data.defaultTimeZone;
     localError = "";
     invalid = undefined;

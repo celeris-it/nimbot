@@ -123,8 +123,6 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
       const first = await post("/api/agents", {
         name: "First",
         instructions: "Be brief",
-        ownerId: "42",
-        token: "123:fixture-token",
       });
       const id: string = first.agentId;
       await expect
@@ -154,6 +152,18 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
         })
         .toBe("ready");
       expect(await readFile(file, "utf8")).toBe("persistent workspace");
+      expect(await get(`/api/agents/${id}`)).toMatchObject({
+        botUsername: null,
+        botConnection: { status: "not_started" },
+        capabilities: { connectTelegram: true, replaceToken: false },
+      });
+      await post(`/api/agents/${id}/telegram`, {
+        ownerId: "42",
+        token: "123:fixture-token",
+      });
+      await expect
+        .poll(async () => (await get(`/api/agents/${id}`)).botConnection.status)
+        .toBe("polling");
       const second = await post("/api/agents", {
         name: "Second",
         instructions: "",

@@ -41,6 +41,7 @@
   let connected = $derived(
     agents.filter((item) => item.botConnection?.status === "polling").length,
   );
+  let telegramBots = $derived(agents.filter((item) => item.botUsername).length);
   let needsAttention = $derived(agents.filter(attention).length);
   let filtered = $derived(
     agents.filter((item) => {
@@ -128,7 +129,7 @@
     {#snippet actions()}<Icon name="bot" size={20} />{/snippet}
     <div data-ui="connection-total">
       <strong>{connected.toString().padStart(2, "0")}</strong><span
-        >bots polling<small>of {agents.length} registered</small></span
+        >bots polling<small>of {telegramBots} registered</small></span
       ><span data-ui="connection-symbol"
         ><Icon name="activity" size={28} /></span
       >
@@ -136,7 +137,7 @@
     <ProgressMeter
       label="Bot connections"
       value={connected}
-      max={agents.length}
+      max={telegramBots}
     />
     <p data-ui="muted">
       The owner’s first private message links their chat automatically. Polling
@@ -212,9 +213,7 @@
           >
             <AgentAvatar name={item.name} small /><span
               ><strong>{item.name}</strong><small
-                >{item.botUsername
-                  ? `@${item.botUsername}`
-                  : "Bot link pending"}</small
+                >{item.botUsername ? `@${item.botUsername}` : item.id}</small
               ></span
             ><StatusBadge
               label={setupLabel(item)}
@@ -243,9 +242,7 @@
           <div>
             <h3>{selected.name}</h3>
             <p>
-              {selected.botUsername
-                ? `@${selected.botUsername}`
-                : "Telegram bot not linked yet"}
+              {selected.botUsername ? `@${selected.botUsername}` : selected.id}
             </p>
           </div>
           <Icon name="bot" size={34} />
@@ -256,27 +253,26 @@
               >Telegram bot<strong>{botLabel(selected)}</strong></span
             >
           </div>
-          <div>
-            <Icon name="shield" /><span
-              >Owner verification<strong
-                >{selected.setupAccess
-                  ? ownerLabels[selected.setupAccess.owner]
-                  : "Unavailable"}</strong
-              ></span
-            >
-          </div>
-          <div>
-            <Icon name="terminal" /><span
-              >Bot link<strong
-                >{selected.setupAccess
-                  ? botAccessLabels[selected.setupAccess.bot]
-                  : "Unavailable"}</strong
-              ></span
-            >
-          </div>
+          {#if selected.botUsername}<div>
+              <Icon name="shield" /><span
+                >Owner verification<strong
+                  >{selected.setupAccess
+                    ? ownerLabels[selected.setupAccess.owner]
+                    : "Unavailable"}</strong
+                ></span
+              >
+            </div>
+            <div>
+              <Icon name="terminal" /><span
+                >Bot link<strong
+                  >{selected.setupAccess
+                    ? botAccessLabels[selected.setupAccess.bot]
+                    : "Unavailable"}</strong
+                ></span
+              >
+            </div>{/if}
         </div>
         <div data-ui="preview-actions">
-          <p>One Telegram bot per agent. Every conversation in its place.</p>
           <div>
             {#if selected.botUsername}<ActionButton
                 href={`https://t.me/${selected.botUsername}`}

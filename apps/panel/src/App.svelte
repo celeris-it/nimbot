@@ -426,6 +426,17 @@
       );
     }
   }
+  async function connectTelegram(fields: Record<string, string>) {
+    if (!agent) return;
+    await mutate(
+      `/api/agents/${encodeURIComponent(agent.id)}/telegram`,
+      fields,
+      () => {
+        notice = "Telegram connection saved.";
+        void load();
+      },
+    );
+  }
   async function discordAction(
     kind: "save" | "remove" | "test",
     fields: Record<string, string>,
@@ -1070,14 +1081,16 @@
           save={saveModel}
           refresh={load}
         />{/key}
-    {:else if route[2] === "setup"}<AgentStatus
-        {agent}
-        {busy}
-        mcpAvailable={session?.capabilities.mcp ?? false}
-        {action}
-        {discordAction}
-        refresh={() => load()}
-      />
+    {:else if route[2] === "setup"}
+      {#key agent.id}<AgentStatus
+          {agent}
+          {busy}
+          mcpAvailable={session?.capabilities.mcp ?? false}
+          {action}
+          {discordAction}
+          {connectTelegram}
+          refresh={() => load()}
+        />{/key}
     {:else if route[2] === "settings" || route[2] === "token"}
       {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
     {:else if route[2] === "process/stop" || route[2] === "process/restart"}
@@ -1108,14 +1121,15 @@
     {:else if route[2] === "delete"}
       <h1 tabindex="-1">Delete {agent.name}?</h1>
       <p>
-        Its Agent Host and Telegram polling will be stopped, and its local bot
-        binding and connection credentials erased. Agent data is kept unless you
-        explicitly delete it below.
+        Its Agent Host will stop. Agent data is kept unless you explicitly
+        delete it below.
       </p>
-      <p>
-        This does not delete the bot in Telegram. Remove or revoke it separately
-        with BotFather if you no longer need it.
-      </p>
+      {#if agent.botUsername}
+        <p>
+          Local Telegram credentials and the chat binding will be erased. The
+          Telegram bot can be revoked separately in BotFather.
+        </p>
+      {/if}
       <form
         onsubmit={(event) => {
           event.preventDefault();

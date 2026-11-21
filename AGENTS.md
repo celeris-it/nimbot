@@ -53,7 +53,7 @@ Run lint, type-check, and tests before finishing any change.
 - An installation is a single trust domain that includes the Server and its agents. Agents can read each other's data and Server state, including secrets. Do not present Server-side approvals, grants, or rules as a security boundary against an agent with shell access, and keep this trust model accurate in the panel and documentation.
 - Start Agent Hosts with an explicit minimal environment. Do not pass Server configuration or secrets to them. Keep one Host API token per agent and bind Agent Hosts to loopback.
 - The Docker deployment runs the whole application as non-root in one container per installation, without the Docker socket.
-- Each agent must have its own distinct Telegram bot and owner-bound private chat; the authenticated web panel handles administration. Do not add a management bot. Do not introduce a shared selected-agent or `/use` workflow.
+- Agents can connect Telegram, Discord, or both after creation. Each connection uses a distinct bot and an owner-bound private chat. The authenticated web panel handles administration. Do not add a management bot. Do not introduce a shared selected-agent or `/use` workflow.
 - Keep Telegram bot tokens and all polling connections in the Server process. Never hand them to Agent Host processes, model context, task events, or logs.
 - Keep Telegram-specific code out of the agent runtime.
 - Keep OpenCode-specific code behind the engine interface.

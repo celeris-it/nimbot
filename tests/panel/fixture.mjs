@@ -194,6 +194,7 @@ const panel = createPanel(
       store: schedules,
       runNow: scheduler.runNow,
       ownerLinked: (id) => !!agents.get(id)?.ownerLinked,
+      discordOwnerLinked: (id) => !!agents.get(id)?.discordOwnerLinked,
     },
     usage: { ...usage, wake: async () => {} },
     providers: {
@@ -239,7 +240,7 @@ const panel = createPanel(
     discord: {
       status: (id) => ({
         state: agents.get(id)?.discord ? "ready" : "stopped",
-        ownerLinked: false,
+        ownerLinked: !!agents.get(id)?.discordOwnerLinked,
       }),
       test: async () => ({ status: "delivered", sentParts: 1 }),
       get: (id) => agents.get(id)?.discord,
@@ -264,12 +265,14 @@ const panel = createPanel(
       return agent
         ? {
             name: agent.name,
-            botUsername: "developer_bot",
+            botUsername: agent.noTelegram ? null : "developer_bot",
             provisioning:
               agent.processState === "running" ? "ready" : "pending",
-            botConnection: { status: "polling" },
+            botConnection: {
+              status: agent.noTelegram ? "not_started" : "polling",
+            },
             setupAccess: {
-              bot: "linked",
+              bot: agent.noTelegram ? "unlinked" : "linked",
               owner: agent.ownerLinked ? "verified" : "pending",
             },
             process: {
@@ -283,14 +286,20 @@ const panel = createPanel(
         : undefined;
     },
     registerAgent: async (input) => {
-      if (input.token !== "valid-token") throw new Error("private-token-error");
       const id = "created";
       agents.set(id, {
         name: input.name,
         instructions: input.instructions,
         processState: "running",
+        noTelegram: true,
       });
       return { agentId: id, provisioning: "ready" };
+    },
+    connectTelegram: async (id, _ownerId, token) => {
+      const agent = agents.get(id);
+      if (!agent.noTelegram || token !== "valid-token")
+        throw new Error("private-token-error");
+      agent.noTelegram = false;
     },
     agentSettings: {
       get: (id) => {
@@ -426,6 +435,10 @@ app.post("/__test/delegations/:source", (c) => {
 });
 app.post("/__test/owner/:id", (c) => {
   agents.get(c.req.param("id")).ownerLinked = true;
+  return c.json({ ok: true });
+});
+app.post("/__test/discord-owner/:id", (c) => {
+  agents.get(c.req.param("id")).discordOwnerLinked = true;
   return c.json({ ok: true });
 });
 app.post("/__test/providers/:id/:state", (c) => {

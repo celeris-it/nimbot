@@ -800,31 +800,81 @@ test("logs in, follows deep links and browser history, and signs out", async ({
   expect(violations).toEqual([]);
 });
 
-test("preserves nonsecret creation fields on failure, clears the token and starts the Host", async ({
+test("creates an agent using only Discord and defaults new schedules to Discord", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await login(page);
+  await page.getByRole("link", { name: "Create agent", exact: true }).click();
+  await expect(page.getByLabel("Owner's Telegram ID")).toHaveCount(0);
+  await expect(page.getByLabel("Discord bot token")).toHaveCount(0);
+  await page.getByLabel("Name", { exact: true }).fill("Researcher");
+  await page.keyboard.press("Tab");
+  const instructions = page.getByLabel("Instructions (optional)");
+  await expect(instructions).toBeFocused();
+  await instructions.fill("Be concise");
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("button", { name: "Create agent" }),
+  ).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/agents\/created\/setup$/);
+  await expect(
+    page.getByRole("heading", { name: "Agent Host running." }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const discord = page.getByRole("region", { name: "Discord connection" });
+  await discord
+    .getByLabel("Owner's Discord user ID")
+    .fill("987654321098765432");
+  await discord.getByLabel("Discord bot token").fill("valid-discord-token");
+  await discord.getByRole("button", { name: "Connect Discord" }).click();
+  await expect(
+    discord.getByText("notification_bot", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Connect Telegram" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Replace bot token" }),
+  ).toHaveCount(0);
+  await request.post("/__test/discord-owner/created");
+  await page.getByRole("link", { name: "Manage schedules" }).click();
+  await page.getByRole("button", { name: "New schedule" }).click();
+  await expect(page.getByLabel("Delivery channel")).toHaveValue("discord");
+});
+
+test("connects Telegram after creation and clears rejected tokens", async ({
   page,
 }) => {
   await login(page);
   await page.getByRole("link", { name: "Create agent", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("Researcher");
-  await page.getByLabel("Instructions (optional)").fill("Be concise");
-  await page.getByLabel("Owner's Telegram ID").fill("42");
-  await page.getByLabel("Telegram bot token").fill("wrong-token");
-  await page.getByRole("button", { name: "Create agent" }).click();
-  await expect(page.getByRole("alert")).toContainText("Could not register");
-  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
-    "Researcher",
-  );
-  await expect(page.getByLabel("Owner's Telegram ID")).toHaveValue("42");
-  await expect(page.getByLabel("Telegram bot token")).toHaveValue("");
-  await page.getByLabel("Telegram bot token").fill("valid-token");
   await page.getByRole("button", { name: "Create agent" }).click();
   await expect(page).toHaveURL(/\/agents\/created\/setup$/);
-  await expect(
-    page.getByRole("heading", { name: "Agent Host running." }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Cancel setup" })).toHaveCount(
-    0,
+  const telegram = page.getByRole("region", { name: "Telegram connection" });
+  await telegram.getByLabel("Owner's Telegram ID").fill("42");
+  const token = telegram.getByLabel("Telegram bot token");
+  await token.fill("wrong-token");
+  await telegram.getByRole("button", { name: "Connect Telegram" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Could not connect Telegram",
   );
+  await expect(telegram.getByLabel("Owner's Telegram ID")).toHaveValue("42");
+  await expect(token).toHaveValue("");
+  await token.fill("valid-token");
+  await telegram.getByRole("button", { name: "Connect Telegram" }).click();
+  await expect(
+    telegram.getByText("@developer_bot", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    telegram.getByRole("link", { name: "Replace bot token" }),
+  ).toBeVisible();
 });
 
 test("saves edits without document navigation and does not overwrite a draft", async ({
@@ -888,7 +938,12 @@ for (const deleteData of [false, true])
     await page.goto("/agents/dev/delete");
     await expect(page.getByRole("checkbox")).not.toBeChecked();
     await expect(
-      page.getByText("This does not delete the bot", { exact: false }),
+      page.getByText(
+        "The Telegram bot can be revoked separately in BotFather.",
+        {
+          exact: false,
+        },
+      ),
     ).toBeVisible();
     if (deleteData) await page.getByRole("checkbox").check();
     const sent = page.waitForRequest((request) =>
@@ -1637,7 +1692,9 @@ for (const deploymentMode of ["native", "docker"] as const)
       ),
     ).toBe(true);
     await page.goto("/agents/new");
-    await expect(page.getByText(/its Agent Host process starts/)).toBeVisible();
+    await expect(
+      page.getByText(/Connect Telegram or Discord from setup/),
+    ).toBeVisible();
     await expect(page.getByText(/its container is prepared/)).toHaveCount(0);
     await page.screenshot({
       path: `/tmp/nimbot-${deploymentMode}-create-mobile.png`,

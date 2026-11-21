@@ -84,7 +84,12 @@ export function createScheduleAdmission(
       }
       const agent = registry.get(schedule.agentId);
       const chatId = registry.getOwnerChat(schedule.agentId);
-      if (!agent || agent.botId === null || chatId === undefined)
+      if (
+        !agent ||
+        agent.ownerId === null ||
+        agent.botId === null ||
+        chatId === undefined
+      )
         return undefined;
       const access = createAgentAccess(registry, agent.id, () =>
         allowsWork(agent.id),

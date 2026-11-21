@@ -18,6 +18,7 @@ export function createAgentAccess(
   function linked() {
     const agent = registry.get(agentId);
     return agent &&
+      agent.ownerId !== null &&
       agent.botId !== null &&
       Number.isSafeInteger(agent.botId) &&
       agent.botId > 0 &&

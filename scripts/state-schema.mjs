@@ -6,11 +6,27 @@ const serverV2 = readFileSync(
   new URL("./state-schema/server-v2.sql", import.meta.url),
   "utf8",
 );
+const serverProcessV2 = readFileSync(
+  new URL("./state-schema/server-process-v2.sql", import.meta.url),
+  "utf8",
+);
+function migrateReferencedTable(db, sql) {
+  db.exec(sql);
+  if (db.prepare("PRAGMA foreign_key_check").get())
+    throw new Error("Server schema migration produced invalid references.");
+}
 const definitions = {
   "server-process": {
-    version: 1,
+    version: 2,
     applicationId: 0x4e494d50,
-    migrations: {},
+    get current() {
+      return baseline("server-process") + "\n" + serverProcessV2;
+    },
+    migrations: {
+      2(db) {
+        migrateReferencedTable(db, serverProcessV2);
+      },
+    },
   },
   server: {
     version: 2,
@@ -19,11 +35,7 @@ const definitions = {
     },
     migrations: {
       2(db) {
-        db.exec(serverV2);
-        if (db.prepare("PRAGMA foreign_key_check").get())
-          throw new Error(
-            "Server schema migration produced invalid references.",
-          );
+        migrateReferencedTable(db, serverV2);
       },
     },
   },
@@ -91,6 +103,9 @@ export function prepareStateSchema(path, kind, options = {}) {
   if (!definition || !Object.hasOwn(definitions, kind))
     throw new Error("Unknown SQLite store.");
   let db;
+  const rebuildsReferencedTable =
+    definition === definitions.server ||
+    definition === definitions["server-process"];
   try {
     if (typeof path === "string") {
       const file = lstatSync(path, { throwIfNoEntry: false });
@@ -116,9 +131,9 @@ export function prepareStateSchema(path, kind, options = {}) {
         "Subprocess Server state cannot be opened by the per-agent Docker runtime.",
       );
     }
-    // The server v2 migration rebuilds a referenced table. SQLite requires
+    // These migrations rebuild referenced tables. SQLite requires
     // disabling enforcement outside the transaction and checking before commit.
-    if (definition === definitions.server) db.exec("PRAGMA foreign_keys = OFF");
+    if (rebuildsReferencedTable) db.exec("PRAGMA foreign_keys = OFF");
     let current = false;
     while (!current) {
       transaction(db, () => {
@@ -151,5 +166,6 @@ export function prepareStateSchema(path, kind, options = {}) {
     throw new Error(`${kind}.sqlite: ${error.message}`, { cause: error });
   } finally {
     if (typeof path === "string") db?.close();
+    else if (rebuildsReferencedTable) db?.exec("PRAGMA foreign_keys = ON");
   }
 }

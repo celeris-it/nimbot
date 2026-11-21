@@ -46,16 +46,25 @@ export const discordTestForm = z.strictObject({
 
 export const tokenForm = z.object({ token: z.string().trim().min(1).max(256) });
 
-export const registerAgentForm = z.object({
-  name: z.string(),
+export const telegramConfigureForm = z.object({
   ownerId: z
     .string()
     .regex(/^[1-9]\d*$/)
     .refine((id) => Number.isSafeInteger(Number(id)))
     .transform(Number),
-  token: z.string(),
-  instructions: z.string().default(""),
+  token: tokenForm.shape.token,
 });
+
+export const registerAgentForm = z
+  .object({
+    name: settingsForm.shape.name,
+    ownerId: telegramConfigureForm.shape.ownerId.optional(),
+    token: telegramConfigureForm.shape.token.optional(),
+    instructions: settingsForm.shape.instructions.default(""),
+  })
+  .refine(
+    ({ ownerId, token }) => (ownerId === undefined) === (token === undefined),
+  );
 
 /** The agent being confirmed is the one in the path. */
 export const confirmForm = (id: string) => z.object({ confirm: z.literal(id) });

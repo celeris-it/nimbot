@@ -168,6 +168,7 @@ export const failureLabels = {
     "Telegram polling could not continue. Check connectivity and whether another instance is polling this bot.",
 };
 export function botLabel(agent: AgentSummary) {
+  if (!agent.botUsername) return "Not configured";
   return agent.botConnection
     ? connectionLabels[agent.botConnection.status]
     : "Not connected yet";

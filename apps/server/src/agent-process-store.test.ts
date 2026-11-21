@@ -37,7 +37,7 @@ async function fixture() {
 
 it("initializes a versioned fresh Server schema without Docker state", async () => {
   const { path, db, store } = await fixture();
-  expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(1);
+  expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(2);
   expect(db.prepare("PRAGMA application_id").get()?.application_id).toBe(
     0x4e494d50,
   );

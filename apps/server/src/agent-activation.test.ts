@@ -37,9 +37,13 @@ async function fixture() {
     ["b", 456],
   ]);
   for (const [id, botId] of identities) {
-    registry.createPending({ id, name: `Agent ${id}`, ownerId: 42 });
-    registry.bindBot(id, botId, `${id}_bot`);
-    registry.setCredentialRef(id, `file:telegram-${id}`);
+    registry.createPending({ id, name: `Agent ${id}` });
+    registry.linkTelegram(
+      id,
+      42,
+      { id: botId, username: `${id}_bot` },
+      `file:telegram-${id.repeat(36)}`,
+    );
   }
   const bots = new Map<string, ReturnType<typeof createBot>>();
   const bindings = new Map<string, ReturnType<typeof openChatBinding>>();
@@ -47,7 +51,9 @@ async function fixture() {
   const replies: { agentId: string; chatId: number; text: string }[] = [];
   function openRuntimes() {
     for (const [id, botId] of identities) {
-      const agent = registry.get(id)!;
+      const saved = registry.get(id)!;
+      if (saved.ownerId === null) throw new Error("Missing Telegram owner");
+      const agent = { ...saved, ownerId: saved.ownerId };
       const binding = openChatBinding(path, agent);
       bindings.set(id, binding);
       const onActivation = vi.fn((chatId: number) => {

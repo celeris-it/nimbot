@@ -15,28 +15,20 @@
   // Form state belongs to this route and is never replaced by status polling.
   let name = $state(untrack(() => agent?.settings?.name ?? ""));
   let instructions = $state(untrack(() => agent?.settings?.instructions ?? ""));
-  let ownerId = $state("");
   let token = $state("");
   async function send(event: SubmitEvent) {
     event.preventDefault();
     if (busy) return;
-    const fields =
-      mode === "token"
-        ? { token }
-        : mode === "settings"
-          ? { name, instructions }
-          : { name, instructions, ownerId, token };
+    const fields: Record<string, string> =
+      mode === "token" ? { token } : { name, instructions };
     token = "";
-    await submit(fields as Record<string, string>);
+    await submit(fields);
   }
 </script>
 
 {#if mode === "new"}
   <h1 tabindex="-1">Create agent.</h1>
-  <p>
-    Create a separate bot in BotFather first. One Telegram bot belongs to one
-    agent.
-  </p>
+  <p>Connect Telegram or Discord from setup after creating the agent.</p>
 {:else if mode === "settings"}
   <h1 tabindex="-1">Edit agent.</h1>
   <p>
@@ -80,26 +72,8 @@
         include passwords or tokens.
       </p>
     {/if}
-    {#if mode === "new"}
-      <label for="ownerId">Owner's Telegram ID</label>
-      <input
-        class="input"
-        id="ownerId"
-        name="ownerId"
-        inputmode="numeric"
-        pattern="[1-9][0-9]*"
-        required
-        aria-describedby="owner-help"
-        bind:value={ownerId}
-      />
-      <p id="owner-help">
-        Enter your numeric Telegram user ID. Only that user can use this agent.
-      </p>
-    {/if}
-    {#if mode !== "settings"}
-      <label for="token"
-        >{mode === "token" ? "New Telegram token" : "Telegram bot token"}</label
-      >
+    {#if mode === "token"}
+      <label for="token">New Telegram token</label>
       <input
         class="input"
         type="password"
@@ -116,12 +90,6 @@
         again if the operation fails.
       </p>
     {/if}
-    {#if mode === "new"}<p>
-        On creation, the bot is verified and its Agent Host process starts with
-        its own persistent data directories. This can take a few seconds. The
-        Server then connects the bot; the owner can send a private message to
-        begin.
-      </p>{/if}
     <button class="btn" type="submit" disabled={busy}
       >{busy
         ? "Saving…"

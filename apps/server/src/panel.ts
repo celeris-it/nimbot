@@ -48,6 +48,7 @@ import {
   registerAgentForm,
   settingsForm,
   tokenForm,
+  telegramConfigureForm,
 } from "./panel-schemas.js";
 import { createMcpPanel, type McpPanelDeps } from "./mcp-panel.js";
 
@@ -144,6 +145,11 @@ export interface PanelDeps {
   registerAgent?: (
     input: import("./agent-registration.js").AgentRegistrationInput,
   ) => Promise<{ agentId: string; provisioning: string }>;
+  connectTelegram?: (
+    id: string,
+    ownerId: number,
+    token: string,
+  ) => Promise<void>;
   getAgentSetup?: (id: string) =>
     | {
         name: string;
@@ -934,7 +940,10 @@ export function createPanel(
       providerChecks: agentSettings?.providerChecks?.(id),
       capabilities: {
         edit: !!settings,
-        replaceToken: !!settings && !!agentSettings?.saveToken,
+        connectTelegram:
+          !!deps.connectTelegram && setup.setupAccess?.bot === "unlinked",
+        replaceToken:
+          !!settings && !!agentSettings?.saveToken && !!setup.botUsername,
         process:
           setup.process && deps.processAction
             ? {
@@ -1053,6 +1062,29 @@ export function createPanel(
       );
     }
   });
+  app.post("/api/agents/:id/telegram", async (c) => {
+    const id = c.req.param("id");
+    if (!deps.connectTelegram || !getAgentSetup?.(id))
+      return c.json({ error: "Agent not found." }, 404);
+    const form = await parseForm(
+      c,
+      telegramConfigureForm,
+      "Enter a valid Telegram owner ID and bot token.",
+    );
+    if (form.response) return form.response;
+    try {
+      await deps.connectTelegram(id, form.data.ownerId, form.data.token);
+      return c.json({ saved: true });
+    } catch {
+      return c.json(
+        {
+          error:
+            "Could not connect Telegram. Check the owner ID, token, and whether the bot is already linked.",
+        },
+        400,
+      );
+    }
+  });
   app.post("/api/agents/:id/token", async (c) => {
     const id = c.req.param("id");
     if (!agentSettings?.get(id) || !agentSettings.saveToken)
@@ -1091,7 +1123,7 @@ export function createPanel(
       return c.json(
         {
           error:
-            "Could not register the agent; check the owner, bot token, and whether the bot is already linked",
+            "Could not create the agent. Check its settings and any supplied Telegram connection.",
         },
         400,
       );

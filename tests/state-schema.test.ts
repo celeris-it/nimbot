@@ -84,6 +84,63 @@ it("rejects unknown and future schemas", () => {
   );
 });
 
+it("migrates subprocess state with saved Telegram and Discord connections to optional ownership", () => {
+  const path = fixture(
+    "server-process",
+    `${legacy("server-process")}
+    PRAGMA application_id = 0x4e494d50;
+    PRAGMA user_version = 1;
+    INSERT INTO agents (id, name, owner_id, bot_id, bot_username, credential_ref)
+      VALUES ('a', 'Agent', 42, 123, 'test_bot', 'telegram-ref');
+    INSERT INTO agent_processes (agent_id, desired_state) VALUES ('a', 'running');
+    INSERT INTO agent_host_credentials (agent_id, credential_ref) VALUES ('a', 'host-ref');
+    INSERT INTO chat_bindings (agent_id, bot_id, owner_id, chat_id) VALUES ('a', 123, 42, 42);
+    INSERT INTO agent_discord_connections (agent_id, bot_id, bot_username, owner_id, credential_ref)
+      VALUES ('a', '456', 'discord_bot', '789', 'discord-ref');
+    INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at, updated_at)
+      VALUES ('t', 'a', 123, 42, 'saved', 'queued', 1, 1);
+    INSERT INTO schedules (id, agent_id, name, prompt, cadence_kind, timezone, enabled, created_at, updated_at, webhook_token, delivery_channel)
+      VALUES ('s', 'a', 'Saved', 'Prompt', 'webhook', 'UTC', 1, 1, 1, 'saved-token', 'discord');
+    `,
+  );
+  prepareStateSchema(path, "server-process");
+  prepareStateSchema(path, "server-process");
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 2 });
+  expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
+  expect(
+    read(path, "SELECT owner_id, bot_id, credential_ref FROM agents"),
+  ).toEqual({
+    owner_id: 42,
+    bot_id: 123,
+    credential_ref: "telegram-ref",
+  });
+  expect(read(path, "SELECT desired_state FROM agent_processes")).toEqual({
+    desired_state: "running",
+  });
+  expect(
+    read(path, "SELECT credential_ref FROM agent_host_credentials"),
+  ).toEqual({ credential_ref: "host-ref" });
+  expect(read(path, "SELECT chat_id FROM chat_bindings")).toEqual({
+    chat_id: 42,
+  });
+  expect(
+    read(path, "SELECT credential_ref FROM agent_discord_connections"),
+  ).toEqual({ credential_ref: "discord-ref" });
+  expect(read(path, "SELECT status FROM tasks")).toEqual({ status: "queued" });
+  expect(read(path, "SELECT delivery_channel FROM schedules")).toEqual({
+    delivery_channel: "discord",
+  });
+  const db = new DatabaseSync(path);
+  try {
+    db.exec("INSERT INTO agents (id, name) VALUES ('b', 'Unlinked')");
+    expect(
+      db.prepare("SELECT owner_id FROM agents WHERE id = 'b'").get(),
+    ).toEqual({ owner_id: null });
+  } finally {
+    db.close();
+  }
+});
+
 it("rolls back the failed step and safely retries an ordered migration", () => {
   const database = fixture("server", legacy("server"));
   const first = (db: DatabaseSync) =>

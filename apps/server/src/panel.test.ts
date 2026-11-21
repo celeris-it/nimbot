@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hashPassword } from "./panel-auth.js";
 import { createPanel, type PanelDeps } from "./panel.js";
 
@@ -286,6 +286,12 @@ it("authenticates agent registration and validates owner fields without echoing 
     (await post("/api/agents", "name=Dev&ownerId=1e2&token=secret", cookie))
       .status,
   ).toBe(400);
+  expect(
+    (await post("/api/agents", "name=Dev&ownerId=42", cookie)).status,
+  ).toBe(400);
+  expect(
+    (await post("/api/agents", "name=Dev&token=123%3Asecret", cookie)).status,
+  ).toBe(400);
   expect(calls).toEqual([]);
   const response = await post("/api/agents", body, cookie);
   expect(response.status).toBe(201);
@@ -296,6 +302,8 @@ it("authenticates agent registration and validates owner fields without echoing 
   expect(calls).toEqual([
     { name: "Dev", ownerId: 42, token: "123:secret", instructions: "" },
   ]);
+  expect((await post("/api/agents", "name=Discord", cookie)).status).toBe(201);
+  expect(calls.at(-1)).toEqual({ name: "Discord", instructions: "" });
   const failed = await post(
     "/api/agents",
     "name=Dev&ownerId=42&token=invalid",
@@ -370,6 +378,46 @@ function apiSetup(overrides: PanelDeps = {}) {
     app.request(path, { headers: { Cookie: cookie } });
   return { app, post, login, get, calls, records };
 }
+
+it("validates and protects first-time Telegram linking", async () => {
+  const connectTelegram = vi.fn(
+    async (_id: string, _ownerId: number, token: string) => {
+      if (token === "invalid") throw new Error("private-token-details");
+    },
+  );
+  const f = apiSetup({
+    connectTelegram,
+    getAgentSetup: (id) =>
+      id === "dev"
+        ? {
+            name: "Developer",
+            botUsername: null,
+            provisioning: "ready",
+            setupAccess: { bot: "unlinked", owner: "pending" },
+          }
+        : undefined,
+  });
+  const path = "/api/agents/dev/telegram";
+  const fields = { ownerId: "42", token: "123:secret" };
+  expect((await f.post(path, fields)).status).toBe(401);
+  const cookie = await f.login();
+  expect(
+    (await f.post(path, fields, cookie, "https://other.example")).status,
+  ).toBe(403);
+  expect((await f.post(path, { token: "123:secret" }, cookie)).status).toBe(
+    400,
+  );
+  expect(
+    (await f.post("/api/agents/missing/telegram", fields, cookie)).status,
+  ).toBe(404);
+  expect(connectTelegram).not.toHaveBeenCalled();
+  const rejected = await f.post(path, { ...fields, token: "invalid" }, cookie);
+  expect(rejected.status).toBe(400);
+  expect(await rejected.text()).not.toContain("private-token-details");
+  const saved = await f.post(path, fields, cookie);
+  expect(await saved.json()).toEqual({ saved: true });
+  expect(connectTelegram).toHaveBeenLastCalledWith("dev", 42, "123:secret");
+});
 
 it("authenticates JSON session endpoints with the same cookie and invalidates logout", async () => {
   const { app, post, login, get } = apiSetup();

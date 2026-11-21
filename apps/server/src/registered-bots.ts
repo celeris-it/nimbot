@@ -62,8 +62,10 @@ export function createRegisteredBots(
     let credentialsLoaded = false;
     try {
       const agent = registry.get(id);
+      const ownerId = agent?.ownerId;
       if (
         !agent ||
+        ownerId == null ||
         !agent.botId ||
         !agent.botUsername ||
         !agent.credentialRef ||
@@ -78,7 +80,7 @@ export function createRegisteredBots(
       const host = await hosts.read(id);
       credentialsLoaded = true;
       if (connection.controller.signal.aborted) return;
-      binding = openChatBinding(config.statePath, agent);
+      binding = openChatBinding(config.statePath, { ...agent, ownerId });
       const access = createAgentAccess(registry, id, () =>
         config.runtimeReady(id),
       );
@@ -87,7 +89,7 @@ export function createRegisteredBots(
         : createBotTasks({
             store: config.taskStore,
             agentId: id,
-            ownerId: () => registry.get(id)?.ownerId ?? agent.ownerId,
+            ownerId: () => registry.get(id)?.ownerId ?? ownerId,
             run: withAgentInstructions(
               createHostTasks(host, request, undefined, config.taskWaitMs),
               () => registry.get(id)?.instructions ?? "",
@@ -106,7 +108,7 @@ export function createRegisteredBots(
           answerSchedule: tasks.answerSchedule,
           agent: {
             id,
-            ownerId: agent.ownerId,
+            ownerId,
             get name() {
               return registry.get(id)?.name ?? agent.name;
             },
@@ -144,7 +146,7 @@ export function createRegisteredBots(
         !info.is_bot ||
         info.id !== agent.botId ||
         !info.username ||
-        !access.canActivate(info.id, agent.ownerId)
+        !access.canActivate(info.id, ownerId)
       ) {
         connection.state = { status: "failed", failure: "identity_mismatch" };
         return;

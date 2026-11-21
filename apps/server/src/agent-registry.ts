@@ -11,7 +11,7 @@ export interface DiscordConnection {
 export interface RegisteredAgent {
   id: string;
   name: string;
-  ownerId: number;
+  ownerId: number | null;
   instructions: string;
   botId: number | null;
   botUsername: string | null;
@@ -195,10 +195,33 @@ export function openAgentRegistry(path: string) {
         throw error;
       }
     },
+    linkTelegram(
+      id: string,
+      ownerId: number,
+      bot: { id: number; username: string },
+      credentialRef: string,
+    ) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        assertBotAvailable(id, bot.id);
+        const result = db
+          .prepare(
+            `UPDATE agents SET owner_id = ?, bot_id = ?, bot_username = ?, credential_ref = ?
+          WHERE id = ? AND deleted_at IS NULL AND bot_id IS NULL AND credential_ref IS NULL`,
+          )
+          .run(ownerId, bot.id, bot.username, credentialRef, id);
+        if (!result.changes)
+          throw new Error("Agent is unavailable or Telegram is already linked");
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
     createPending(agent: {
       id: string;
       name: string;
-      ownerId: number;
+      ownerId?: number;
       instructions?: string;
     }) {
       const name = agent.name.trim();
@@ -208,15 +231,15 @@ export function openAgentRegistry(path: string) {
         !name ||
         name.length > 128 ||
         instructions.length > 4000 ||
-        !Number.isSafeInteger(agent.ownerId) ||
-        agent.ownerId <= 0
+        (agent.ownerId !== undefined &&
+          (!Number.isSafeInteger(agent.ownerId) || agent.ownerId <= 0))
       )
         throw new Error("Invalid agent settings");
       db.exec("BEGIN IMMEDIATE");
       try {
         db.prepare(
           "INSERT INTO agents (id, name, owner_id, instructions) VALUES (?, ?, ?, ?)",
-        ).run(agent.id, name, agent.ownerId, instructions);
+        ).run(agent.id, name, agent.ownerId ?? null, instructions);
         db.prepare(
           "INSERT INTO agent_processes (agent_id, desired_state) VALUES (?, 'stopped')",
         ).run(agent.id);

@@ -76,6 +76,7 @@ export interface AgentDetail extends AgentSummary {
   hostState?: "ready" | "busy" | "unavailable";
   capabilities: {
     edit: boolean;
+    connectTelegram?: boolean;
     replaceToken: boolean;
     process?: { start: boolean; stop: boolean; restart: boolean };
     delete: boolean;

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { expect, it, vi } from "vitest";
 import { openAgentRegistry } from "./agent-registry.js";
 import { openBotSecrets } from "./bot-secret.js";
-import { createAgentRegistration } from "./agent-registration.js";
+import {
+  createAgentRegistration,
+  createTelegramLink,
+} from "./agent-registration.js";
 
 const input = {
   name: " Developer ",
@@ -22,9 +25,6 @@ async function fixture() {
     is_bot: true,
   }));
   const provision = vi.fn(async (id: string) => {
-    const agent = registry.get(id)!;
-    expect(agent.botId).toBe(123);
-    expect(await secrets.read(agent.credentialRef!)).toBe(input.token);
     expect(registry.get(id)).toBeDefined();
   });
   let setupStatus: "pending" | "failed" = "pending";
@@ -69,7 +69,59 @@ it("links verified bot and saved credentials atomically before Host startup", as
       credentialRef: expect.stringMatching(/^file:telegram-/),
     });
     expect(JSON.stringify(result)).not.toContain(input.token);
+    expect(
+      await f.secrets.read(f.registry.get(result.agentId)!.credentialRef!),
+    ).toBe(input.token);
     expect(f.provision).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.close();
+  }
+});
+
+it("saves an agent before any messaging setup and lets exactly one first Telegram link win", async () => {
+  const f = await fixture();
+  try {
+    const { agentId } = await f.register({
+      name: "Researcher",
+      instructions: "",
+    });
+    expect(f.registry.get(agentId)).toMatchObject({
+      name: "Researcher",
+      ownerId: null,
+      botId: null,
+      credentialRef: null,
+    });
+    expect(f.provision).toHaveBeenCalledExactlyOnceWith(agentId);
+    expect(f.verify).not.toHaveBeenCalled();
+    expect(await f.files()).toEqual([]);
+
+    const link = createTelegramLink(f.registry, f.secrets, f.verify);
+    await expect(link(agentId, 42, "invalid")).rejects.toThrow(
+      "Invalid Telegram",
+    );
+    const outcomes = await Promise.allSettled([
+      link(agentId, 42, input.token),
+      link(agentId, 43, input.token),
+    ]);
+    const winners = outcomes.flatMap((outcome, index) =>
+      outcome.status === "fulfilled" ? [42 + index] : [],
+    );
+    expect(winners).toHaveLength(1);
+    expect(f.registry.get(agentId)).toMatchObject({
+      ownerId: winners[0],
+      botId: 123,
+    });
+    expect(await f.files()).toHaveLength(1);
+
+    const other = await f.register({ name: "Other", instructions: "" });
+    await expect(link(other.agentId, 42, input.token)).rejects.toThrow(
+      "already assigned",
+    );
+    expect(f.registry.get(other.agentId)).toMatchObject({
+      ownerId: null,
+      botId: null,
+    });
+    expect(await f.files()).toHaveLength(1);
   } finally {
     await f.close();
   }

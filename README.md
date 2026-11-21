@@ -2,7 +2,7 @@
 
 **Your AI agents, on your own server.**
 
-Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram and optional Discord direct messages. Each agent has a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
+Nimbot is a self-hosted platform for creating and managing persistent AI agents through a web panel and talking to them through Telegram or Discord direct messages. Each agent has a persistent workspace, a terminal, and a browser, and keeps working on long-running tasks while you are offline.
 
 > **Project status:** The MVP is complete. Native development uses Server-managed Agent Host subprocesses; the Docker deployment packages the same application in one non-root container.
 
@@ -22,10 +22,11 @@ data volume. Docker Compose, host Node.js and a Docker socket mount are not
 required. Only the panel is published; all agents run as non-root subprocesses
 inside the same container.
 
-This release requires a fresh installation. It does not import previous
-per-agent Docker state, and leaves existing data untouched. The optional installer
+Moving from the per-agent Docker layout requires a fresh installation. The old
+data remains in place. The optional installer
 and uninstaller use the same Docker CLI layout. Automatic upgrades and imports
-from the previous layout are not supported.
+from the previous layout are not supported. Updates within the subprocess layout
+preserve existing agents and connections.
 
 ## Upgrade and uninstall
 
@@ -36,15 +37,15 @@ named data volume; deleting that volume is a separate, explicit purge. See
 [installation and removal](docs/INSTALL.md) for commands. See [operations](docs/OPERATIONS.md) for complete-volume backups, recovery and
 manual revision updates. This release has no automated upgrade or import path.
 
-Fresh installations start with zero agents. Sign in to the panel and create each agent with a name, optional instructions, its owner's numeric Telegram user ID, and a token from a distinct bot created in BotFather. Nimbot verifies the bot, starts its Agent Host process, and provides its Telegram link. Open **Configure AI providers** on that agent’s setup page. Save an API key for OpenAI, Anthropic, Google, or OpenRouter, sign in to OpenAI with a ChatGPT device code, or connect an OpenCode Console workspace. Each agent has its own credentials and login method; then send its bot a private message. The chat is linked automatically on first contact; no /start command is required.
+Fresh installations start with zero agents. Sign in to the panel and create an agent with a name and optional instructions. Nimbot starts its Agent Host and opens the setup page, where you can connect a Telegram or Discord bot. Open **Configure AI providers** to save an API key for OpenAI, Anthropic, Google, or OpenRouter, sign in to OpenAI with a ChatGPT device code, or connect an OpenCode Console workspace. Each agent has its own provider credentials. Send the connected bot a private message from its configured owner account to link the chat and begin. See [Create your first agent](docs/INSTALL.md#create-your-first-agent) for the setup steps.
 
 No Telegram or per-agent environment variables are required. `.env` contains administrator authentication and trusted deployment settings; internal Agent Host credentials are generated automatically.
 
 ## Features
 
 - Create, list, configure, start, stop, restart, and delete agents through an authenticated web panel.
-- Give each agent a distinct Telegram bot, owner-bound private chat, dedicated Agent Host, and persistent workspace.
-- Optionally connect a Discord bot and owner DM to the same agent, workspace, AI context, and durable task queue. Configure, replace, test, and remove the connection from the panel.
+- Give each agent a dedicated Agent Host and persistent workspace. Connect Telegram, Discord, or both from the setup page after creating the agent.
+- Each connected platform uses its own bot and owner-bound private chat. Both platforms share the agent’s workspace, AI context, and durable task queue.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
 - Choose a model per agent, review tokens and reported cost by agent or task, and pause the agent’s queue when OpenCode reports an exhausted Console budget or Go allowance.
@@ -54,7 +55,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
 - Replace revoked bot tokens securely and retain persistent data by default when deleting an agent.
 
-The panel uses one locally configured administrator account. Each agent has one Telegram owner; everyone else is ignored, including owners of other agents. There is no management bot, shared selected agent, or `/use` workflow. Tasks, progress, approvals, and results use their originating channel. Each optional Discord connection has its own configured owner and private DM binding.
+The panel uses one locally configured administrator account. Each connection has one configured owner. The bot accepts private messages only from that owner. There is no management bot, shared selected agent, or `/use` workflow. Tasks, progress, approvals, and results use their originating channel.
 
 ### Telegram commands
 
@@ -139,15 +140,16 @@ The server verifies BotFather tokens with Telegram and rejects bots already link
 
 Agent names and instructions persist across restarts. Instructions are snapshotted as context for each new task; edits do not modify running work or the Telegram bot's profile. Names allow up to 128 characters and instructions up to 4000 characters.
 
-The Server commits bot identity and desired process state before starting an Agent
+The Server saves the agent and its desired process state before starting its Agent
 Host. Each agent gets distinct workspace, engine, task and browser directories
 under `agents/<agent ID>/`, plus its own Host API credential. Hosts bind to
 loopback and receive a minimal environment. Both deployment modes use the same
 process lifecycle operations; neither requires access to the Docker daemon.
 
 Deletion requires explicit confirmation and keeps agent data unless purge is
-separately selected. It stops polling and removes the local agent binding and
-credentials. Deleting the Telegram bot identity is a separate action in BotFather.
+separately selected. If Telegram is connected, deletion stops polling and removes
+the local Telegram chat binding and credentials. Remove a Discord connection from setup before
+deleting its agent. Deleting the Telegram bot identity is a separate action in BotFather.
 
 Explicitly deleting agent data removes its workspace, OpenCode state, and Host task state, including private memory and the tool outbox. Approval history, delegation records, peer notes, and the MCP catalog live in the separate Server database. Deleting an agent also revokes its MCP grants and retires its stored MCP credentials. Backups can still contain copies of deleted data.
 

@@ -90,9 +90,6 @@ export function createProcessAgents(options: {
     }
   }
   async function start(agentId: string, restart = false) {
-    const agent = requireAgent(agentId);
-    if (!agent.botId || !agent.botUsername || !agent.credentialRef)
-      throw new Error("Link an agent bot before starting its Host");
     if (restart) await options.beforeStop(agentId);
     const host = restart
       ? await manager.restart(agentId)

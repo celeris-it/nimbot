@@ -192,6 +192,28 @@ it("uses process readiness for Telegram startup without consulting Docker metada
   expect(makeBot.mock.calls[0]?.[0].telegramBotToken).toBe(input.token);
 });
 
+it("starts and restores a Host for an agent with no messaging connection", async () => {
+  const f = await fixture();
+  const result = await f.runtime.register({
+    name: "Discord agent",
+    instructions: "",
+  });
+  expect(result.provisioning).toBe("ready");
+  const id = result.agentId;
+  expect(f.registry.get(id)).toMatchObject({ ownerId: null, botId: null });
+  expect(f.settings.verifyBot).not.toHaveBeenCalled();
+  expect(await readdir(join(f.directory, "bot-secrets"))).toEqual([]);
+  await f.runtime.close();
+
+  const runtime = createProcessAgents(f.settings);
+  cleanup.push(() => runtime.close());
+  expect(await runtime.restore()).toEqual([
+    { status: "fulfilled", value: expect.anything() },
+  ]);
+  expect(runtime.ready(id)).toBe(true);
+  expect(await getHostStatus(await runtime.readHost(id))).toBe("ready");
+});
+
 it("admits native schedules only with a current owner binding and rechecks readiness after Host I/O", async () => {
   const f = await fixture();
   const { agentId: id } = await f.runtime.register(input);
