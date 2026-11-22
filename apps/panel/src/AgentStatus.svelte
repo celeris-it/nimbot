@@ -72,33 +72,30 @@
       : "Agent Host unavailable."}
   </h2>
   <p>{processMessage}</p>
-  {#if agent.process}
-    <p>Process: {processLabels[agent.process.state]}.</p>
-    <p>
-      After a Server restart: {agent.process.desiredState === "running"
-        ? "restore this agent’s Host"
-        : "leave this agent stopped"}.
-    </p>
-    {#if agent.capabilities.process?.start}<button
-        class="panel-button"
-        disabled={busy}
-        onclick={() => action("start")}
-        >{busy ? "Starting…" : "Start agent"}</button
-      >{/if}
-    {#if agent.capabilities.process?.stop}<a
-        class="panel-button"
-        href={`${base}/process/stop`}>Stop agent…</a
-      >{/if}
-    {#if agent.capabilities.process?.restart}<a
-        class="panel-button"
-        href={`${base}/process/restart`}>Restart agent…</a
-      >{/if}
-  {/if}
-  {#if agent.hostState}<p>
-      Agent Host: {{ ready: "Available", busy: "Busy", unavailable: "Offline" }[
-        agent.hostState
-      ]}
-    </p>{/if}
+  <dl>
+    {#if agent.process}
+      <dt>Process</dt>
+      <dd>{processLabels[agent.process.state]}</dd>
+    {/if}
+    {#if agent.hostState}
+      <dt>Host API</dt>
+      <dd>
+        {{ ready: "Available", busy: "Busy", unavailable: "Offline" }[
+          agent.hostState
+        ]}
+      </dd>
+    {/if}
+    {#if agent.process}
+      <dt>After a Server restart</dt>
+      <dd>
+        {agent.process.desiredState === "running"
+          ? "Restore this agent’s Host"
+          : "Leave this agent stopped"}
+      </dd>
+    {/if}
+    <dt>Identifier</dt>
+    <dd>{agent.id}</dd>
+  </dl>
   {#if agent.providerChecks}
     <section aria-labelledby="ai-provider-status">
       <h2 id="ai-provider-status">AI provider status</h2>
@@ -126,15 +123,23 @@
       {/if}
     </section>
   {/if}
-  <dl>
-    <dt>Identifier</dt>
-    <dd>{agent.id}</dd>
-  </dl>
-  <button class="panel-button" onclick={refresh}>Refresh status</button>
-  {#if agent.capabilities.delete}<a class="panel-button" href={`${base}/delete`}
-      >Delete agent…</a
-    >{/if}
-  <a class="panel-button" href="/">Back to panel</a>
+  <div class="button-row">
+    {#if agent.process && agent.capabilities.process?.start}<button
+        class="panel-button panel-button-primary"
+        disabled={busy}
+        onclick={() => action("start")}
+        >{busy ? "Starting…" : "Start agent"}</button
+      >{/if}
+    {#if agent.process && agent.capabilities.process?.stop}<a
+        class="panel-button"
+        href={`${base}/process/stop`}>Stop agent…</a
+      >{/if}
+    {#if agent.process && agent.capabilities.process?.restart}<a
+        class="panel-button"
+        href={`${base}/process/restart`}>Restart agent…</a
+      >{/if}
+    <button class="panel-button" onclick={refresh}>Refresh status</button>
+  </div>
 </section>
 
 <section class="panel-card" aria-label="Telegram connection">
@@ -168,14 +173,18 @@
         required
         bind:value={telegramToken}
       />
-      <button class="panel-button" type="submit" disabled={busy}
-        >{busy ? "Saving…" : "Connect Telegram"}</button
+      <button
+        class="panel-button panel-button-primary"
+        type="submit"
+        disabled={busy}>{busy ? "Saving…" : "Connect Telegram"}</button
       >
     </form>
   {:else if agent.botUsername}
     <dl>
       <dt>Bot</dt>
       <dd>@{agent.botUsername}</dd>
+      <dt>Connection</dt>
+      <dd>{botLabel(agent)}</dd>
       {#if agent.setupAccess}
         <dt>Bot link</dt>
         <dd>{botAccessLabels[agent.setupAccess.bot]}</dd>
@@ -183,7 +192,6 @@
         <dd>{ownerLabels[agent.setupAccess.owner]}</dd>
       {/if}
     </dl>
-    <p>Telegram bot: {botLabel(agent)}.</p>
     {#if agent.botConnection?.failure}<p>
         {failureLabels[agent.botConnection.failure]}
       </p>{/if}
@@ -193,10 +201,9 @@
         link the chat.
       </p>
     {/if}
-    {#if agent.capabilities.replaceToken}<a
-        class="panel-button"
-        href={`${base}/token`}>Replace bot token</a
-      >{/if}
+    {#if agent.capabilities.replaceToken}<div class="button-row">
+        <a class="panel-button" href={`${base}/token`}>Replace bot token</a>
+      </div>{/if}
   {:else}
     <p>Telegram is unavailable.</p>
   {/if}
@@ -204,4 +211,19 @@
 
 {#if agent.discord}
   {#key agent.id}<DiscordSettings {agent} {busy} action={discordAction} />{/key}
+{/if}
+
+{#if agent.capabilities.delete}
+  <section class="panel-card" aria-label="Danger zone" data-tone="danger">
+    <h2>Danger zone</h2>
+    <p>
+      Deleting an agent stops its Host. Its data is kept unless you choose to
+      delete it on the next page.
+    </p>
+    <div class="button-row">
+      <a class="panel-button panel-button-danger" href={`${base}/delete`}
+        >Delete agent…</a
+      >
+    </div>
+  </section>
 {/if}

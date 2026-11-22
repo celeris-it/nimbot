@@ -17,6 +17,12 @@
   let moreButton: HTMLElement | undefined = $state();
   let visibleCount = $state(1);
   let overflow = $derived(links.slice(visibleCount));
+  let current = $derived(links.find((link) => link.view === currentView));
+  let currentHidden = $derived(
+    overflow.some((link) => link.view === currentView),
+  );
+  // Reserve room for "More · Current" so the button never changes the fit.
+  let moreLabel = $derived(current ? `More · ${current.label}` : "More");
   let base = $derived(`/agents/${encodeURIComponent(agentId)}`);
 
   function fitLinks() {
@@ -112,7 +118,7 @@
           data-current={overflow.some((link) => link.view === currentView)}
           aria-label="More agent options"
         >
-          More
+          {currentHidden ? moreLabel : "More"}
         </summary>
         <ul class="panel-menu agent-nav-options" data-ui="agent-nav-options">
           {#each overflow as link (link.view)}
@@ -127,7 +133,7 @@
       {#each links as link (link.view)}
         <span data-ui="agent-nav-link">{link.label}</span>
       {/each}
-      <span data-ui="agent-nav-more">More</span>
+      <span data-ui="agent-nav-more">{moreLabel}</span>
     </div>
   </div>
 </nav>

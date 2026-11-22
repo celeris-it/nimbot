@@ -298,7 +298,7 @@
       >Keep connected</button
     >
     <button
-      class="panel-button disconnect-confirm"
+      class="panel-button panel-button-danger"
       disabled={blocked}
       onclick={disconnect}>Disconnect provider</button
     >
@@ -407,9 +407,6 @@
     user-select: all;
   }
   .provider-disconnect button,
-  .disconnect-confirm {
-    color: var(--color-error);
-  }
   .provider-notice {
     align-items: start;
     gap: 0.75rem;

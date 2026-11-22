@@ -205,7 +205,7 @@ If the provider is unavailable, denies access, or rate limits the check, the
 previous credential stays active. An OAuth connection without a conclusive
 sign-in signal appears as **Unverified**. The checks use no inference quota.
 
-Open **Manage schedules** to investigate three consecutive execution failures.
+Open **Schedules** to investigate three consecutive execution failures.
 A successful execution resets the streak. Timed, manual and webhook runs share
 the same streak. Skips, cancellations and interruptions leave it unchanged.
 
@@ -301,7 +301,7 @@ allow a task to start shortly before the account reaches a limit.
 
 ### Scheduled tasks
 
-Open **Manage schedules** on the agent page for the last run outcome, execution
+Open **Schedules** on the agent page for the last run outcome, execution
 status, and recent history. The owner can use `/schedules` to check next run times
 enabled state, and delivery channels in Telegram or Discord without contacting the
 Host. Choose **Delivery channel** when creating or editing a schedule in the panel.

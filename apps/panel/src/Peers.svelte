@@ -76,7 +76,10 @@
           <option value="delegate">Delegate tasks</option>
         </select>
       </label>
-      <button class="panel-button" disabled={busy || !target}>Add grant</button>
+      <button
+        class="panel-button panel-button-primary"
+        disabled={busy || !target}>Add grant</button
+      >
     </form>
   {/if}
 {/if}

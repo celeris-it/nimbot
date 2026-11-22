@@ -8,7 +8,7 @@ import { nextRun } from "../../server/src/schedules/schedule-time.js";
 export const scheduleText = {
   title: (name: string) => `Schedules for ${name}`,
   pageTitle: "Schedules",
-  link: "Manage schedules",
+  link: "Schedules",
   back: "Back to agent",
   new: "New schedule",
   create: "Create schedule",

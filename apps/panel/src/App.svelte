@@ -79,7 +79,10 @@
   let notice = $state("");
   let password = $state("");
   let deleteData = $state(false);
-  let navigationExpanded = $state(false);
+  const labelsKey = "nimbot-panel-nav-labels";
+  let narrow = $state(false);
+  let menuOpen = $state(false);
+  let navigationExpanded = $state(storedLabels());
   let controller: AbortController | undefined;
   let inFlight = false;
   let route = $derived(
@@ -123,7 +126,7 @@
     [
       { view: "setup", label: "Overview" },
       { view: "usage", label: "Model and usage" },
-      { view: "memory", label: "Review memory" },
+      { view: "memory", label: "Memory" },
       { view: "approvals", label: "Approvals" },
       { view: "peers", label: "Agent access" },
       { view: "delegations", label: "Delegations" },
@@ -131,7 +134,7 @@
       { view: "schedules", label: scheduleText.link },
       {
         view: "settings",
-        label: "Edit agent",
+        label: "Agent settings",
         hidden: !agent?.capabilities.edit,
       },
     ].filter((link) => !link.hidden),
@@ -181,6 +184,21 @@
         : title,
   );
 
+  function storedLabels() {
+    try {
+      return localStorage.getItem(labelsKey) !== "hidden";
+    } catch {
+      return true;
+    }
+  }
+  function toggleLabels() {
+    navigationExpanded = !navigationExpanded;
+    try {
+      localStorage.setItem(labelsKey, navigationExpanded ? "shown" : "hidden");
+    } catch {
+      // Storage can be unavailable; the choice then lasts for this visit only.
+    }
+  }
   async function focusHeading() {
     await tick();
     document.querySelector<HTMLElement>("h1")?.focus();
@@ -222,6 +240,7 @@
     notice = "";
     password = "";
     deleteData = false;
+    menuOpen = false;
     void load();
   }
   function expired() {
@@ -479,6 +498,7 @@
       session = undefined;
       navigate("/");
     });
+    if (error) document.getElementById("password")?.focus();
   }
   async function submit(fields: Record<string, string>) {
     if (path === "/agents/new") {
@@ -838,6 +858,13 @@
     if (!busy) navigate(url.pathname + url.search);
   }
   onMount(() => {
+    const query = window.matchMedia("(max-width: 760px)");
+    const syncNarrow = () => {
+      narrow = query.matches;
+      if (!narrow) menuOpen = false;
+    };
+    syncNarrow();
+    query.addEventListener("change", syncNarrow);
     document.addEventListener("click", click);
     const pop = () => navigate(location.pathname + location.search, true);
     const visible = () => {
@@ -863,6 +890,7 @@
     void load();
     return () => {
       clearInterval(timer);
+      query.removeEventListener("change", syncNarrow);
       controller?.abort();
       document.removeEventListener("click", click);
       window.removeEventListener("popstate", pop);
@@ -900,6 +928,14 @@
       />
     {/if}
     <div data-ui="header-actions">
+      {#if narrow}<button
+          class="panel-button panel-button-ghost"
+          type="button"
+          aria-expanded={menuOpen}
+          aria-controls="main-navigation-links"
+          onclick={() => (menuOpen = !menuOpen)}
+          ><Icon name={menuOpen ? "collapsePanel" : "expandPanel"} size={16} /> Menu</button
+        >{/if}
       <span data-ui="installation"
         ><Icon name="shield" size={15} />
         {native ? "Native development" : "Docker deployment"}</span
@@ -914,23 +950,23 @@
       ><Icon name="shield" size={15} /> SELF-HOSTED & PRIVATE</span
     >{/if}
 </header>
-{#if session && path !== "/login"}
+{#if session && path !== "/login" && (!narrow || menuOpen)}
   <nav
     aria-label="Main navigation"
     data-ui="main-navigation"
-    data-expanded={navigationExpanded}
+    data-expanded={narrow || navigationExpanded}
   >
-    <button
-      class="panel-button panel-button-ghost"
-      type="button"
-      aria-label={navigationExpanded ? "Hide labels" : "Show labels"}
-      aria-expanded={navigationExpanded}
-      aria-controls="main-navigation-links"
-      onclick={() => (navigationExpanded = !navigationExpanded)}
-    >
-      <Icon name={navigationExpanded ? "collapsePanel" : "expandPanel"} />
-      {#if navigationExpanded}<span>Hide labels</span>{/if}
-    </button>
+    {#if !narrow}<button
+        class="panel-button panel-button-ghost"
+        type="button"
+        aria-label={navigationExpanded ? "Hide labels" : "Show labels"}
+        aria-expanded={navigationExpanded}
+        aria-controls="main-navigation-links"
+        onclick={toggleLabels}
+      >
+        <Icon name={navigationExpanded ? "collapsePanel" : "expandPanel"} />
+        {#if navigationExpanded}<span>Hide labels</span>{/if}
+      </button>{/if}
     <ul class="panel-menu" id="main-navigation-links">
       {#each mainLinks as link (link.href)}
         <li>
@@ -963,7 +999,9 @@
       ? "dashboard"
       : "detail"}
 >
-  <p id="form-error" role="alert" tabindex="-1">{error}</p>
+  {#if path !== "/login"}<p id="form-error" role="alert" tabindex="-1">
+      {error}
+    </p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if updateError}<p role="status">{updateError}</p>
     <button class="panel-button" onclick={() => load()}
@@ -979,6 +1017,7 @@
           <label for="password">Administrator password</label>
           <input
             class="panel-input"
+            aria-invalid={error ? "true" : undefined}
             id="password"
             name="password"
             type="password"
@@ -989,6 +1028,7 @@
             bind:value={password}
           />
           <p id="password-help">Use the password configured on your server.</p>
+          <p id="form-error" role="alert" tabindex="-1">{error}</p>
           <button class="panel-button" type="submit" disabled={busy}
             >{busy ? "Signing in…" : "Sign in to the panel"}</button
           >
@@ -998,10 +1038,10 @@
   {:else if !loaded}<p role="status">Loading…</p>
   {:else if missing}<h1 tabindex="-1">Page not found.</h1>
     <p>This agent or action is no longer available.</p>
-    <a class="panel-button" href="/">Back to panel</a>
+    <a class="panel-button" href="/">All agents</a>
   {:else if !contentAvailable}
     <h1 tabindex="-1">Status unavailable.</h1>
-    <a class="panel-button" href="/">Back to panel</a>
+    <a class="panel-button" href="/">All agents</a>
   {:else if path === "/"}
     <Dashboard
       agents={status.agents}
@@ -1041,8 +1081,10 @@
         Use an IANA time zone such as America/New_York or UTC. It applies to new
         schedules in Telegram and prefills the schedule form in the panel.
       </p>
-      <button type="submit" class="panel-button" disabled={busy}
-        >Save settings</button
+      <button
+        type="submit"
+        class="panel-button panel-button-primary"
+        disabled={busy}>Save settings</button
       >
     </form>
   {:else if path === "/providers"}
@@ -1186,21 +1228,23 @@
           : "stopped"}. Active work may be interrupted. Files and conversation
         history are kept.
       </p>
-      <button
-        class="panel-button"
-        disabled={busy}
-        onclick={() =>
-          action(route?.[2] === "process/restart" ? "restart" : "stop")}
-        >{busy
-          ? "Working…"
-          : route[2] === "process/restart"
-            ? "Confirm restart"
-            : "Confirm stop"}</button
-      >
-      <a
-        class="panel-button"
-        href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
-      >
+      <div class="button-row">
+        <button
+          class={`panel-button ${route[2] === "process/restart" ? "panel-button-primary" : "panel-button-danger"}`}
+          disabled={busy}
+          onclick={() =>
+            action(route?.[2] === "process/restart" ? "restart" : "stop")}
+          >{busy
+            ? "Working…"
+            : route[2] === "process/restart"
+              ? "Confirm restart"
+              : "Confirm stop"}</button
+        >
+        <a
+          class="panel-button panel-button-ghost"
+          href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
+        >
+      </div>
     {:else if route[2] === "delete"}
       <h1 tabindex="-1">Delete {agent.name}?</h1>
       <p>
@@ -1230,12 +1274,21 @@
           Also permanently delete the agent data directory and AI conversation history,
           including its workspace, task history and browser profile.</label
         >
-        <button class="panel-button" type="submit" disabled={busy}
-          >Confirm deletion</button
-        ><a
-          class="panel-button"
-          href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
-        >
+        <div class="button-row">
+          <button
+            class="panel-button panel-button-danger"
+            type="submit"
+            disabled={busy}
+            >{busy
+              ? "Deleting…"
+              : deleteData
+                ? "Delete agent and its data"
+                : "Delete agent, keep its data"}</button
+          ><a
+            class="panel-button panel-button-ghost"
+            href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
+          >
+        </div>
       </form>
     {/if}
   {/if}

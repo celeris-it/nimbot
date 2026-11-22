@@ -127,7 +127,10 @@
       Create a bot in the Discord Developer Portal. Its token is stored
       privately and never shown here. Enter it again if saving fails.
     </p>
-    <button class="panel-button" type="submit" disabled={busy}
+    <button
+      class="panel-button panel-button-primary"
+      type="submit"
+      disabled={busy}
       >{busy
         ? "Saving…"
         : agent.discord?.connection

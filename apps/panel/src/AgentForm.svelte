@@ -90,7 +90,10 @@
         again if the operation fails.
       </p>
     {/if}
-    <button class="panel-button" type="submit" disabled={busy}
+    <button
+      class="panel-button panel-button-primary"
+      type="submit"
+      disabled={busy}
       >{busy
         ? "Saving…"
         : mode === "new"
@@ -100,7 +103,7 @@
             : "Save changes"}</button
     >
     <a
-      class="panel-button"
+      class="panel-button panel-button-ghost"
       href={agent ? `/agents/${encodeURIComponent(agent.id)}/setup` : "/"}
       >{mode === "new" ? "Cancel" : "Back to agent"}</a
     >

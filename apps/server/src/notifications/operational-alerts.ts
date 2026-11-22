@@ -89,7 +89,7 @@ export function createOperationalAlerts(deps: Deps) {
         schedule.agentId,
         subject,
         failure,
-        `Scheduled task "${schedule.name}" on "${agentName}" failed three times in a row. Open Manage schedules in the Nimbot panel to see recent runs.`,
+        `Scheduled task "${schedule.name}" on "${agentName}" failed three times in a row. Open Schedules on the agent in the Nimbot panel to see recent runs.`,
       );
     } else {
       store.clear(schedule.agentId, subject);

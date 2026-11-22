@@ -96,7 +96,9 @@
       pattern="[0-9]*"
     /></label
   >
-  <button class="panel-button" disabled={busy}>Add rule</button>
+  <button class="panel-button panel-button-primary" disabled={busy}
+    >Add rule</button
+  >
 </form>
 
 <h2>Decision history</h2>

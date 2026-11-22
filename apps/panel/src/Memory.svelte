@@ -42,8 +42,11 @@
   >
 {/if}
 {#if !memories}
-  <p role="status">
-    Memory unavailable. Start the agent and refresh to try again.
+  <p role="status" data-tone="warning">
+    Memory is unavailable because the Agent Host is not running.
+    <a href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+      >Open Overview to start it</a
+    >, then refresh.
   </p>
   <button class="panel-button" onclick={() => go(page)}>Refresh memory</button>
 {:else if memories.memories.length === 0}
@@ -60,7 +63,7 @@
             · Expires {date(memory.expiresAt)}{/if}
         </p>
         <button
-          class="panel-button"
+          class="panel-button panel-button-danger"
           disabled={busy}
           aria-label={`Delete note ${memory.title}`}
           onclick={() => remove(memory.id)}>Delete</button
@@ -69,18 +72,18 @@
     {/each}
   </ul>
 {/if}
-<nav aria-label="Memory pages">
-  <button
-    class="panel-button"
-    disabled={busy || page <= 1}
-    onclick={() => go(page - 1)}>Previous</button
-  >
-  <button
-    class="panel-button"
-    disabled={busy || !memories?.hasMore}
-    onclick={() => go(page + 1)}>Next</button
-  >
-</nav>
+{#if memories}<nav aria-label="Memory pages">
+    <button
+      class="panel-button"
+      disabled={busy || page <= 1}
+      onclick={() => go(page - 1)}>Previous</button
+    >
+    <button
+      class="panel-button"
+      disabled={busy || !memories?.hasMore}
+      onclick={() => go(page + 1)}>Next</button
+    >
+  </nav>{/if}
 <a class="panel-button" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
   >Back to agent</a
 >

@@ -66,7 +66,10 @@
             autocomplete="new-password"
             required
           />
-          <button class="panel-button" disabled={busy} type="submit"
+          <button
+            class="panel-button panel-button-primary"
+            disabled={busy}
+            type="submit"
             >{definition.hasCredential
               ? "Replace credential"
               : "Save credential"}</button

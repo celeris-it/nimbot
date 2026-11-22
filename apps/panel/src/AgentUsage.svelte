@@ -148,8 +148,10 @@
           >
         {/each}
       </select>
-      <button class="panel-button" type="submit" disabled={busy}
-        >Save model</button
+      <button
+        class="panel-button panel-button-primary"
+        type="submit"
+        disabled={busy}>Save model</button
       >
     </form>
     {#if !catalog.catalogAvailable}

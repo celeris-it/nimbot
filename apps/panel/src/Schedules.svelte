@@ -241,7 +241,7 @@
       href={`/agents/${encodeURIComponent(agent.id)}/setup`}>{text.back}</a
     >
     <button
-      class="panel-button"
+      class="panel-button panel-button-primary"
       id="new-schedule"
       disabled={busy || atLimit}
       onclick={() => openForm()}
@@ -406,7 +406,7 @@
             </section>
           {/if}
           <div data-ui="schedule-actions">
-            <button class="panel-button" type="submit"
+            <button class="panel-button panel-button-primary" type="submit"
               >{busy ? text.saving : editId ? text.save : text.create}</button
             >
             <button class="panel-button" type="button" onclick={closeForm}

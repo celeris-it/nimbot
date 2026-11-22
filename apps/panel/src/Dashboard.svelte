@@ -67,7 +67,7 @@
 
 <div data-ui="page-heading">
   <div>
-    <span data-ui="eyebrow">YOUR WORKSPACE, ALWAYS ON</span>
+    <span data-ui="eyebrow">OVERVIEW</span>
     <h1 tabindex="-1">Your agents.</h1>
   </div>
   <div data-ui="heading-actions">
@@ -82,28 +82,25 @@
 </div>
 
 <div data-ui="overview-grid">
-  <Surface
-    title="At a glance"
-    description="A little space for everything you're building."
-  >
+  <Surface title="At a glance" description="Agent Hosts and bot connections.">
     {#snippet actions()}<span data-ui="icon-disc"
         ><Icon name="grid" size={17} /></span
       >{/snippet}
     <div class="metrics" aria-label="Agent overview">
       <Metric
         label="Total agents"
-        value={agents.length.toString().padStart(2, "0")}
+        value={agents.length}
         description="Independent workspaces"
       />
       <Metric
         label="Running"
-        value={configured.toString().padStart(2, "0")}
+        value={configured}
         description="Agent Hosts running"
       />
       <Metric
         label="Needs attention"
-        value={needsAttention.toString().padStart(2, "0")}
-        description="Setup or bot issues"
+        value={needsAttention}
+        description="Failed Host or bot connection"
       />
     </div>
     <div data-ui="overview-footer">
@@ -115,8 +112,8 @@
       </div>
       <p>
         {agents.length
-          ? "One agent. One bot. Its own space."
-          : "Your next idea starts with an agent."}
+          ? `${agents.length} ${agents.length === 1 ? "workspace" : "workspaces"}`
+          : "No agents yet."}
       </p>
       {#if canCreate}<a
           class="panel-button panel-button-icon panel-button-ghost"
@@ -125,10 +122,10 @@
         >{/if}
     </div>
   </Surface>
-  <Surface title="Telegram connections">
+  <Surface title="Telegram bots">
     {#snippet actions()}<Icon name="bot" size={20} />{/snippet}
     <div data-ui="connection-total">
-      <strong>{connected.toString().padStart(2, "0")}</strong><span
+      <strong>{connected}</strong><span
         >bots polling<small>of {telegramBots} registered</small></span
       ><span data-ui="connection-symbol"
         ><Icon name="activity" size={28} /></span
@@ -140,8 +137,9 @@
       max={telegramBots}
     />
     <p data-ui="muted">
-      The owner’s first private message links their chat automatically. Polling
-      alone does not confirm task availability.
+      Bots are polled by the Server even while an Agent Host is stopped, so this
+      count can be higher than Running. The owner’s first private message links
+      their chat. Discord connections are shown on each agent’s page.
     </p>
   </Surface>
 </div>
@@ -162,8 +160,7 @@
 <Surface tone="muted">
   <div data-ui="workspace-heading">
     <h2>
-      Agent workspaces <span>{filtered.length.toString().padStart(2, "0")}</span
-      >
+      Agent workspaces <span>{filtered.length}</span>
     </h2>
     <FilterGroup
       label="Filter agents"
