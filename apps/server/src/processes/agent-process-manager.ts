@@ -6,7 +6,7 @@ import {
   agentProcessDirectories,
   prepareAgentProcess,
 } from "./agent-process-config.js";
-import type { AgentHostConfig } from "./agent-host.js";
+import type { AgentHostConfig } from "../host/agent-host.js";
 
 export interface AgentProcessState {
   agentId: string;

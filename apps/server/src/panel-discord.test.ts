@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 import { createPanel } from "./panel.js";
 import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";
-import { openAgentRegistry } from "./agent-registry.js";
+import { openAgentRegistry } from "./agents/agent-registry.js";
 import { openDiscordSecrets } from "./discord-secret.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 

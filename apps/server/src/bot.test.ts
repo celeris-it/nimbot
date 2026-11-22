@@ -1,12 +1,12 @@
 import { openChatBinding, type ChatBinding } from "./chat-binding.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBot, type BotConfig } from "./bot.js";
-import { HostTaskError } from "./host-tasks.js";
+import { HostTaskError } from "./host/host-tasks.js";
 import { createBotTasks } from "./bot-tasks.js";
 import { openTaskStore } from "./task-queue.js";
-import type { BotAccess } from "./agent-access.js";
-import type { HostStatus } from "./agent-host.js";
-import type { HostApproval } from "./host-tasks.js";
+import type { BotAccess } from "./agents/agent-access.js";
+import type { HostStatus } from "./host/agent-host.js";
+import type { HostApproval } from "./host/host-tasks.js";
 
 function setup(
   execute?: (
@@ -486,8 +486,8 @@ it("rechecks persisted setup after Host health and never executes incomplete age
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { openAgentRegistry } = await import("./agent-registry.js");
-  const { createAgentAccess } = await import("./agent-access.js");
+  const { openAgentRegistry } = await import("./agents/agent-registry.js");
+  const { createAgentAccess } = await import("./agents/agent-access.js");
   const dir = await mkdtemp(join(tmpdir(), "nimbot-bot-admission-"));
   const path = join(dir, "state.sqlite");
   const registry = openAgentRegistry(path);

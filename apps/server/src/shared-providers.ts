@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAgentProcessManager } from "./agent-process-manager.js";
+import { createAgentProcessManager } from "./processes/agent-process-manager.js";
 import { createHostProviders } from "./host-providers.js";
 import type { DeviceProvider, ProviderId } from "./provider-contracts.js";
 

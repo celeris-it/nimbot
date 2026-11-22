@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ApprovalForward } from "./approval-relay.js";
-import type { HostApproval } from "./host-tasks.js";
+import type { HostApproval } from "./host/host-tasks.js";
 import type { ChatTask, RoutedTask, TaskStore } from "./task-queue.js";
 
 /** Native OpenCode permissions keep their existing semantics; model titles never match action rules. */

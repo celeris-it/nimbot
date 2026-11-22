@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentHostConfig } from "./agent-host.js";
+import type { AgentHostConfig } from "./host/agent-host.js";
 import {
   providers,
   providerCheckStates,

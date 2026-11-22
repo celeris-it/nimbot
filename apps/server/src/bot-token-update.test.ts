@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { expect, it, vi } from "vitest";
 import { openBotSecrets } from "./bot-secret.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
-import { openAgentRegistry } from "./agent-registry.js";
+import { openAgentRegistry } from "./agents/agent-registry.js";
 
 it("verifies identity, stores private files and preserves their reference at startup", async () => {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-secrets-"));

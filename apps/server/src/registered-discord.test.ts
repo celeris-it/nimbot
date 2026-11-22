@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it, vi } from "vitest";
-import { openAgentRegistry } from "./agent-registry.js";
+import { openAgentRegistry } from "./agents/agent-registry.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
 import { createDiscordGateway } from "./discord-gateway.js";
@@ -144,7 +144,7 @@ it("keeps credential failures isolated from other agents", async () => {
 it("dispatches persisted Discord-only messages and cancels a scheduled run from the owner DM", async () => {
   const { createAgentTaskServices } = await import("./agent-task-services.js");
   const { openTaskStore } = await import("./task-queue.js");
-  const { HostTaskError } = await import("./host-tasks.js");
+  const { HostTaskError } = await import("./host/host-tasks.js");
   const { openScheduleStore } = await import("./schedule-store.js");
   const f = await fixture();
   const store = openTaskStore(f.path);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ToolOutcome } from "./tool-dispatch.js";
+import type { ToolOutcome } from "../tool-dispatch.js";
 import {
   createHostApprovals,
   createHostTasks,
@@ -17,7 +17,7 @@ it("cancels only a validated exact Host ID with a bounded authenticated request"
     .fn<typeof fetch>()
     .mockResolvedValue(Response.json({ private: "hidden" }));
   const cancel = createHostCancellation(config, request);
-  expect(await cancel("../foreign")).toBe(false);
+  expect(await cancel("../../foreign")).toBe(false);
   expect(request).not.toHaveBeenCalled();
   expect(await cancel(id)).toBe(true);
   expect(request).toHaveBeenCalledExactlyOnceWith(

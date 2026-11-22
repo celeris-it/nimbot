@@ -2,7 +2,7 @@ import { mkdtemp, rm, stat, readdir, readFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { openAgentRegistry } from "./agent-registry.js";
+import { openAgentRegistry } from "./agents/agent-registry.js";
 import { openDiscordSecrets } from "./discord-secret.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 import { verifyDiscordBot, isDiscordId } from "./discord-identity.js";

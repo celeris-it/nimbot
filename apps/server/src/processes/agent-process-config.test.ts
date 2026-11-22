@@ -100,14 +100,19 @@ describe("Agent Host subprocess configuration", () => {
     expect(prepared.env.PLAYWRIGHT_BROWSERS_PATH).toBe("/opt/playwright");
   });
 
-  it.each(["", "..", "../other", "/tmp/other", "a/b", "a\\b", "a".repeat(49)])(
-    "rejects invalid agent ID %j before allocating directories",
-    (agentId) => {
-      expect(() => agentProcessDirectories("/tmp/data", agentId)).toThrow(
-        "Invalid agent ID",
-      );
-    },
-  );
+  it.each([
+    "",
+    "..",
+    "../../other",
+    "/tmp/other",
+    "a/b",
+    "a\\b",
+    "a".repeat(49),
+  ])("rejects invalid agent ID %j before allocating directories", (agentId) => {
+    expect(() => agentProcessDirectories("/tmp/data", agentId)).toThrow(
+      "Invalid agent ID",
+    );
+  });
 
   it("rejects invalid launch settings before touching the filesystem", async () => {
     const settings = await options();

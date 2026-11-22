@@ -17,7 +17,7 @@ import { createBotTasks } from "../apps/server/src/bot-tasks.js";
 import {
   createHostTasks,
   type HostTaskExecution,
-} from "../apps/server/src/host-tasks.js";
+} from "../apps/server/src/host/host-tasks.js";
 import { openTaskStore } from "../apps/server/src/task-queue.js";
 import type { ServerToolHandler } from "../apps/server/src/tool-dispatch.js";
 

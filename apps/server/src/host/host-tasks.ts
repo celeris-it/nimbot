@@ -1,12 +1,12 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { AgentHostConfig } from "./agent-host.js";
-import type { TaskCapability } from "./task-capabilities.js";
-import type { ToolOutcome } from "./tool-dispatch.js";
+import type { TaskCapability } from "../task-capabilities.js";
+import type { ToolOutcome } from "../tool-dispatch.js";
 import {
   taskUsage,
   type ModelAdmission,
   type TaskUsage,
-} from "./usage-contracts.js";
+} from "../usage-contracts.js";
 
 export class HostModelAdmissionExpired extends Error {}
 

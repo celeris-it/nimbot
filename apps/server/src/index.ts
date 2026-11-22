@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { readServerMode } from "./server-mode.js";
-import { createProcessAgents } from "./process-agents.js";
-import { openAgentProcessStore } from "./agent-process-store.js";
-import { openProcessHostCredentials } from "./process-host-credentials.js";
+import { createProcessAgents } from "./processes/process-agents.js";
+import { openAgentProcessStore } from "./processes/agent-process-store.js";
+import { openProcessHostCredentials } from "./processes/process-host-credentials.js";
 import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
 import { createDiscordAttachments } from "./discord-attachments.js";
 import { formatScheduleList } from "./chat-schedules.js";
@@ -13,8 +13,8 @@ import {
   createHostTasks,
   createHostApprovals,
   createHostCancellation,
-} from "./host-tasks.js";
-import { withAgentInstructions } from "./agent-instructions.js";
+} from "./host/host-tasks.js";
+import { withAgentInstructions } from "./agents/agent-instructions.js";
 import { createSharedProviders } from "./shared-providers.js";
 import { prepareSharedEngine } from "./shared-engine-state.js";
 import {
@@ -47,7 +47,7 @@ import { createNotifications } from "./notifications.js";
 import { createDiscordNotifications } from "./discord-notifications.js";
 import { log } from "./logger.js";
 import { createRegisteredBots } from "./registered-bots.js";
-import { createAgentAccess } from "./agent-access.js";
+import { createAgentAccess } from "./agents/agent-access.js";
 import { openTaskStore } from "./task-queue.js";
 import { openScheduleStore } from "./schedule-store.js";
 import {
@@ -65,10 +65,10 @@ import { createMcpTools } from "./mcp-tools.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 import { createBotTokenUpdate } from "./bot-token-update.js";
 import { createTelegramLink } from "./agent-registration.js";
-import { openAgentRegistry } from "./agent-registry.js";
+import { openAgentRegistry } from "./agents/agent-registry.js";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { getHostStatus } from "./agent-host.js";
+import { getHostStatus } from "./host/agent-host.js";
 import { serve } from "@hono/node-server";
 import { createPanel } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";

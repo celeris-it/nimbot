@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it, vi } from "vitest";
-import { createBot } from "./bot.js";
-import { openChatBinding } from "./chat-binding.js";
+import { createBot } from "../bot.js";
+import { openChatBinding } from "../chat-binding.js";
 import { openAgentRegistry } from "./agent-registry.js";
 import { createAgentAccess } from "./agent-access.js";
 

@@ -22,7 +22,7 @@ import {
   createHostTasks,
   createHostApprovals,
   createHostCancellation,
-} from "../apps/server/src/host-tasks.js";
+} from "../apps/server/src/host/host-tasks.js";
 import { openNotificationStore } from "../apps/server/src/notification-store.js";
 import { createPeerTools } from "../apps/server/src/peer-tools.js";
 import {

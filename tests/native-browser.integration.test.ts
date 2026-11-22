@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { browserCommand } from "../apps/agent-host/src/engine-notes.js";
-import { prepareAgentProcess } from "../apps/server/src/agent-process-config.js";
+import { prepareAgentProcess } from "../apps/server/src/processes/agent-process-config.js";
 
 const execute = promisify(execFile);
 

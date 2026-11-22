@@ -28,14 +28,14 @@ import {
   type ServerToolHandler,
 } from "./tool-dispatch.js";
 import { InlineKeyboard, type Bot, type InputFile } from "grammy";
-import type { BotAccess } from "./agent-access.js";
+import type { BotAccess } from "./agents/agent-access.js";
 import { createApprovalBook } from "./approvals.js";
 import { sendTaskOutcome } from "./bot.js";
 import {
   HostTaskError,
   type HostApproval,
   type HostTaskExecution,
-} from "./host-tasks.js";
+} from "./host/host-tasks.js";
 import {
   createRoutedTaskQueue,
   type ChatTask,

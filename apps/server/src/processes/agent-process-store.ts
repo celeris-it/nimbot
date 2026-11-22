@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
+import { prepareStateSchema } from "../../../../scripts/state-schema.mjs";
 import type {
   AgentProcessState,
   AgentProcessStore,

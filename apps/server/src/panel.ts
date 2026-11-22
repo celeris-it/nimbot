@@ -12,7 +12,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { verifyPassword } from "./panel-auth.js";
-import type { HostStatus } from "./agent-host.js";
+import type { HostStatus } from "./host/agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 import type {
   AgentDetail,
@@ -156,9 +156,9 @@ export interface PanelDeps {
         botUsername: string | null;
         provisioning: string;
         botConnection?: import("./registered-bots.js").RegisteredBotState;
-        setupAccess?: import("./agent-access.js").AgentSetupAccess;
+        setupAccess?: import("./agents/agent-access.js").AgentSetupAccess;
         process?: {
-          state: import("./agent-process-manager.js").ProcessStatus;
+          state: import("./processes/agent-process-manager.js").ProcessStatus;
           desiredState?: "running" | "stopped";
         };
       }

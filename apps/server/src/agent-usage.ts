@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { AgentHostConfig } from "./agent-host.js";
+import type { AgentHostConfig } from "./host/agent-host.js";
 import { log } from "./logger.js";
 import {
   modelCatalog,

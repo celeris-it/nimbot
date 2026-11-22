@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
-import { openAgentRegistry } from "./agent-registry.js";
+import { openAgentRegistry } from "./agents/agent-registry.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 
 it("atomically binds the owner DM and deduplicates messages across restart", async () => {

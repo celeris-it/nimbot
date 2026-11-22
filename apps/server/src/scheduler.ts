@@ -1,12 +1,12 @@
-import { createAgentAccess } from "./agent-access.js";
+import { createAgentAccess } from "./agents/agent-access.js";
 import type { NotificationResult } from "./notifications.js";
 import type { createDurableNotifications } from "./durable-notifications.js";
-import type { openAgentRegistry } from "./agent-registry.js";
+import type { openAgentRegistry } from "./agents/agent-registry.js";
 import {
   getHostStatus,
   type AgentHostConfig,
   type HostStatus,
-} from "./agent-host.js";
+} from "./host/agent-host.js";
 import { log as defaultLog, type Logger } from "./logger.js";
 import type {
   Schedule,

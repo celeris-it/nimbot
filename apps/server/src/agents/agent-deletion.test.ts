@@ -1,4 +1,4 @@
-import { openAgentProcessStore } from "./agent-process-store.js";
+import { openAgentProcessStore } from "../processes/agent-process-store.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openAgentRegistry } from "./agent-registry.js";
@@ -6,8 +6,8 @@ import { createAgentDeletion } from "./agent-deletion.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openTaskStore } from "./task-queue.js";
-import { openScheduleStore } from "./schedule-store.js";
+import { openTaskStore } from "../task-queue.js";
+import { openScheduleStore } from "../schedule-store.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -127,7 +127,7 @@ describe("agent deletion", () => {
   it("refuses invalid IDs before touching anything", async () => {
     const registry = fixture();
     const { run, events } = deletion(registry);
-    await expect(run("../x")).rejects.toThrow("Invalid agent ID");
+    await expect(run("../../x")).rejects.toThrow("Invalid agent ID");
     expect(events).toEqual([]);
   });
 

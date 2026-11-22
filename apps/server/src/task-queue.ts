@@ -6,7 +6,7 @@ import type { TelegramDocument } from "./telegram-attachments.js";
 import { isDiscordId } from "./discord-identity.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { HostModelAdmissionExpired, HostTaskError } from "./host-tasks.js";
+import { HostModelAdmissionExpired, HostTaskError } from "./host/host-tasks.js";
 import { log as defaultLog, type Logger } from "./logger.js";
 
 export type TaskStatus =

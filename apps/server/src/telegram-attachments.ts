@@ -1,5 +1,5 @@
 import { InputFile, type Bot } from "grammy";
-import type { AgentHostConfig } from "./agent-host.js";
+import type { AgentHostConfig } from "./host/agent-host.js";
 
 export const ATTACHMENT_LIMIT = 10 * 1024 * 1024;
 export const ATTACHMENT_OPERATION = "workspace.attach_file";

@@ -1,4 +1,4 @@
-import type { HostApproval, HostTaskExecution } from "./host-tasks.js";
+import type { HostApproval, HostTaskExecution } from "../host/host-tasks.js";
 
 /** Snapshot settings at submission so edits cannot change an in-flight task. */
 export function withAgentInstructions(

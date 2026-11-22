@@ -13,7 +13,7 @@ import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
 import {
   createHostApprovals,
   createHostTasks,
-} from "../apps/server/src/host-tasks.js";
+} from "../apps/server/src/host/host-tasks.js";
 
 // Exercise the existing bidirectional approval exchange as a transport probe,
 // without introducing tool events or changing permission handling yet.

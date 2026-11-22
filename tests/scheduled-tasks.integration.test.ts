@@ -8,17 +8,17 @@ import { createHostApi } from "../apps/agent-host/src/http.js";
 import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-store.js";
 import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
 import type { Engine } from "../apps/agent-host/src/engine.js";
-import { createAgentAccess } from "../apps/server/src/agent-access.js";
+import { createAgentAccess } from "../apps/server/src/agents/agent-access.js";
 import { createAgentTaskServices } from "../apps/server/src/agent-task-services.js";
-import { getHostStatus } from "../apps/server/src/agent-host.js";
-import { openAgentRegistry } from "../apps/server/src/agent-registry.js";
+import { getHostStatus } from "../apps/server/src/host/agent-host.js";
+import { openAgentRegistry } from "../apps/server/src/agents/agent-registry.js";
 import { createBot } from "../apps/server/src/bot.js";
 import { openChatBinding } from "../apps/server/src/chat-binding.js";
 import { createDurableNotifications } from "../apps/server/src/durable-notifications.js";
 import {
   createHostApprovals,
   createHostTasks,
-} from "../apps/server/src/host-tasks.js";
+} from "../apps/server/src/host/host-tasks.js";
 import { openNotificationStore } from "../apps/server/src/notification-store.js";
 import { createNotifications } from "../apps/server/src/notifications.js";
 import { openScheduleStore } from "../apps/server/src/schedule-store.js";

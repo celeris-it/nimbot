@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { openAgentRegistry } from "./agent-registry.js";
-import { openChatBinding } from "./chat-binding.js";
+import { openChatBinding } from "../chat-binding.js";
 
 it("creates its schema once and restores metadata without storing tokens", async () => {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-registry-"));

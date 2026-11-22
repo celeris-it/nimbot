@@ -17,7 +17,7 @@ import { createBotTasks } from "../apps/server/src/bot-tasks.js";
 import {
   createHostTasks,
   type HostTaskExecution,
-} from "../apps/server/src/host-tasks.js";
+} from "../apps/server/src/host/host-tasks.js";
 import {
   openTaskStore,
   type RoutedTask,

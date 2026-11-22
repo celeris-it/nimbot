@@ -39,7 +39,7 @@ it("does not infer interruption from missing, malformed, mismatched or unavailab
   ).toBeUndefined();
   const request = vi.fn<typeof fetch>();
   expect(
-    await getHostTaskStatus(config, "../current", request),
+    await getHostTaskStatus(config, "../../current", request),
   ).toBeUndefined();
   expect(request).not.toHaveBeenCalled();
 });

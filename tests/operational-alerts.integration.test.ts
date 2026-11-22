@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { openAgentRegistry } from "../apps/server/src/agent-registry.js";
+import { openAgentRegistry } from "../apps/server/src/agents/agent-registry.js";
 import { createDurableNotifications } from "../apps/server/src/durable-notifications.js";
 import { openNotificationStore } from "../apps/server/src/notification-store.js";
 import { createNotifications } from "../apps/server/src/notifications.js";

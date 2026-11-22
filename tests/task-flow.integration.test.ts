@@ -7,7 +7,7 @@ import { createHostApi } from "../apps/agent-host/src/http.js";
 import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-store.js";
 import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
 import type { Engine } from "../apps/agent-host/src/engine.js";
-import { createHostTasks } from "../apps/server/src/host-tasks.js";
+import { createHostTasks } from "../apps/server/src/host/host-tasks.js";
 import {
   createTaskQueue,
   openTaskStore,

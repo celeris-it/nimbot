@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
-import { HostTaskError } from "./host-tasks.js";
+import { HostTaskError } from "./host/host-tasks.js";
 import {
   createTaskQueue,
   openTaskStore,

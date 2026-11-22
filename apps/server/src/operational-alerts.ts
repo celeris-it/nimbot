@@ -1,4 +1,4 @@
-import type { openAgentRegistry } from "./agent-registry.js";
+import type { openAgentRegistry } from "./agents/agent-registry.js";
 import type { createDurableNotifications } from "./durable-notifications.js";
 import type { createHostProviders } from "./host-providers.js";
 import { log } from "./logger.js";

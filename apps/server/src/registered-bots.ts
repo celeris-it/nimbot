@@ -1,18 +1,18 @@
 import { createTelegramAttachments } from "./telegram-attachments.js";
 import { log } from "./logger.js";
 import { GrammyError } from "grammy";
-import type { openAgentRegistry } from "./agent-registry.js";
+import type { openAgentRegistry } from "./agents/agent-registry.js";
 import type { openBotSecrets } from "./bot-secret.js";
-import type { AgentHostConfig } from "./agent-host.js";
+import type { AgentHostConfig } from "./host/agent-host.js";
 import { openChatBinding } from "./chat-binding.js";
-import { createAgentAccess } from "./agent-access.js";
+import { createAgentAccess } from "./agents/agent-access.js";
 import { createBot } from "./bot.js";
-import { createHostApprovals, createHostTasks } from "./host-tasks.js";
+import { createHostApprovals, createHostTasks } from "./host/host-tasks.js";
 import { createBotTasks } from "./bot-tasks.js";
 import type { TaskStore } from "./task-queue.js";
 import type { ScheduleStore } from "./schedule-store.js";
-import { getHostStatus } from "./agent-host.js";
-import { withAgentInstructions } from "./agent-instructions.js";
+import { getHostStatus } from "./host/agent-host.js";
+import { withAgentInstructions } from "./agents/agent-instructions.js";
 import { DEFAULT_RETRY_DELAYS_MS, retryTransient } from "./retry.js";
 import { createTelegramNotifications } from "./telegram-notifications.js";
 

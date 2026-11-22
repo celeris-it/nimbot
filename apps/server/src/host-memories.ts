@@ -1,4 +1,4 @@
-import type { AgentHostConfig } from "./agent-host.js";
+import type { AgentHostConfig } from "./host/agent-host.js";
 
 export class HostMemoryError extends Error {
   constructor(readonly status: 400 | 404 | 503) {

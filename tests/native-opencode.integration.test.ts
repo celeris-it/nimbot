@@ -15,15 +15,15 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it } from "vitest";
-import { openAgentRegistry } from "../apps/server/src/agent-registry.js";
-import { openAgentProcessStore } from "../apps/server/src/agent-process-store.js";
-import { openProcessHostCredentials } from "../apps/server/src/process-host-credentials.js";
+import { openAgentRegistry } from "../apps/server/src/agents/agent-registry.js";
+import { openAgentProcessStore } from "../apps/server/src/processes/agent-process-store.js";
+import { openProcessHostCredentials } from "../apps/server/src/processes/process-host-credentials.js";
 import { openBotSecrets } from "../apps/server/src/bot-secret.js";
-import { createProcessAgents } from "../apps/server/src/process-agents.js";
-import { agentProcessDirectories } from "../apps/server/src/agent-process-config.js";
+import { createProcessAgents } from "../apps/server/src/processes/process-agents.js";
+import { agentProcessDirectories } from "../apps/server/src/processes/agent-process-config.js";
 import { prepareSharedEngine } from "../apps/server/src/shared-engine-state.js";
 import { createSharedProviders } from "../apps/server/src/shared-providers.js";
-import { createHostTasks } from "../apps/server/src/host-tasks.js";
+import { createHostTasks } from "../apps/server/src/host/host-tasks.js";
 
 function openDatabase(path: string, readOnly = false) {
   const db = new DatabaseSync(path, { readOnly });

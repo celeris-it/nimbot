@@ -1,16 +1,16 @@
 import { rm } from "node:fs/promises";
-import type { openAgentRegistry } from "./agent-registry.js";
+import type { openAgentRegistry } from "../agents/agent-registry.js";
 import type { openAgentProcessStore } from "./agent-process-store.js";
-import type { openBotSecrets } from "./bot-secret.js";
+import type { openBotSecrets } from "../bot-secret.js";
 import type { openProcessHostCredentials } from "./process-host-credentials.js";
-import type { ScheduleStore } from "./schedule-store.js";
+import type { ScheduleStore } from "../schedule-store.js";
 import { createAgentProcessManager } from "./agent-process-manager.js";
 import { agentProcessDirectories } from "./agent-process-config.js";
 import {
   createAgentRegistration,
   type AgentSetupStatus,
-} from "./agent-registration.js";
-import { createAgentDeletion } from "./agent-deletion.js";
+} from "../agent-registration.js";
+import { createAgentDeletion } from "../agents/agent-deletion.js";
 
 /** Server-owned lifecycle service. Telegram credentials never enter Host configuration. */
 export function createProcessAgents(options: {

@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { openAgentProcessStore } from "./agent-process-store.js";
+import { openAgentProcessStore } from "./processes/agent-process-store.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it, vi } from "vitest";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";
-import { openAgentRegistry } from "./agent-registry.js";
+import { openAgentRegistry } from "./agents/agent-registry.js";
 import { openTaskStore } from "./task-queue.js";
 
 let nextUpdateId = 0;

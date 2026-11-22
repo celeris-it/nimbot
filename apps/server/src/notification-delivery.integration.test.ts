@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it, vi } from "vitest";
-import { openAgentRegistry } from "./agent-registry.js";
+import { openAgentRegistry } from "./agents/agent-registry.js";
 import { openDiscordSecrets } from "./discord-secret.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 import { createDiscordNotifications } from "./discord-notifications.js";
