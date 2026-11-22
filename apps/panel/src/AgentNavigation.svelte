@@ -1,139 +1,63 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { Icon } from "./components/index.js";
+  import type { IconName } from "./components/icons.js";
 
   let {
     links,
     agentId,
     currentView,
   }: {
-    links: { view: string; label: string }[];
+    links: { view: string; label: string; icon: IconName }[];
     agentId: string;
     currentView: string | undefined;
   } = $props();
-  let nav: HTMLElement;
-  let bar: HTMLDivElement;
-  let measurement: HTMLDivElement;
-  let more: HTMLDetailsElement | undefined = $state();
-  let moreButton: HTMLElement | undefined = $state();
-  let visibleCount = $state(1);
-  let overflow = $derived(links.slice(visibleCount));
+  let disclosure: HTMLDetailsElement;
+  let summary: HTMLElement;
   let current = $derived(links.find((link) => link.view === currentView));
-  let currentHidden = $derived(
-    overflow.some((link) => link.view === currentView),
-  );
-  // Reserve room for "More · Current" so the button never changes the fit.
-  let moreLabel = $derived(current ? `More · ${current.label}` : "More");
   let base = $derived(`/agents/${encodeURIComponent(agentId)}`);
 
-  function fitLinks() {
-    const style = getComputedStyle(bar);
-    const barInsets =
-      parseFloat(style.paddingLeft) +
-      parseFloat(style.paddingRight) +
-      parseFloat(style.borderLeftWidth) +
-      parseFloat(style.borderRightWidth);
-    const available = nav.getBoundingClientRect().width - barInsets;
-    const widths = Array.from(
-      measurement.children,
-      (item) => item.getBoundingClientRect().width,
-    );
-    const moreWidth = widths.pop() ?? 0;
-    if (widths.reduce((total, width) => total + width, 0) <= available) {
-      visibleCount = widths.length;
-      return;
-    }
-    let remaining = available - moreWidth;
-    let count = 0;
-    for (const width of widths) {
-      if (width > remaining) break;
-      remaining -= width;
-      count++;
-    }
-    visibleCount = Math.max(1, count);
-  }
-
-  onMount(() => {
-    fitLinks();
-    const observer = new ResizeObserver(fitLinks);
-    observer.observe(nav);
-    observer.observe(measurement);
-    return () => observer.disconnect();
-  });
-
-  function dismissOutside(event: MouseEvent) {
-    if (
-      more?.open &&
-      event.target instanceof Node &&
-      !more.contains(event.target)
-    )
-      more.open = false;
-  }
-
-  function dismissOnFocusOut(event: FocusEvent) {
-    if (
-      more?.open &&
-      event.relatedTarget instanceof Node &&
-      !more.contains(event.relatedTarget)
-    )
-      more.open = false;
-  }
-
   function dismissWithEscape(event: KeyboardEvent) {
-    if (event.key === "Escape" && more?.open) {
-      more.open = false;
-      moreButton?.focus();
+    if (
+      event.key === "Escape" &&
+      disclosure.open &&
+      event.target instanceof Node &&
+      disclosure.contains(event.target)
+    ) {
+      disclosure.open = false;
+      summary.focus();
     }
   }
 </script>
 
-<svelte:window onclick={dismissOutside} onkeydown={dismissWithEscape} />
+<svelte:window onkeydown={dismissWithEscape} />
 
-{#snippet linkItem(link: (typeof links)[number])}
-  <a
-    data-ui="agent-nav-link"
-    href={`${base}/${link.view}`}
-    aria-current={currentView === link.view ? "page" : undefined}
-    >{link.label}</a
-  >
+{#snippet options()}
+  <ul class="panel-menu" data-ui="agent-nav-options">
+    {#each links as link (link.view)}
+      <li>
+        <a
+          data-ui="agent-nav-link"
+          href={`${base}/${link.view}`}
+          aria-current={currentView === link.view ? "page" : undefined}
+        >
+          <Icon name={link.icon} size={16} />
+          {link.label}
+        </a>
+      </li>
+    {/each}
+  </ul>
 {/snippet}
 
-<nav bind:this={nav} aria-label="Agent navigation" data-ui="agent-navigation">
-  <div
-    data-ui="agent-nav-bar"
-    data-overflow={overflow.length > 0}
-    bind:this={bar}
-  >
-    {#each links.slice(0, visibleCount) as link (link.view)}
-      {@render linkItem(link)}
-    {/each}
-    {#if overflow.length}
-      <details
-        class="agent-nav-overflow"
-        bind:this={more}
-        onfocusout={dismissOnFocusOut}
-      >
-        <summary
-          bind:this={moreButton}
-          data-ui="agent-nav-more"
-          data-current={overflow.some((link) => link.view === currentView)}
-          aria-label="More agent options"
-        >
-          {currentHidden ? moreLabel : "More"}
-        </summary>
-        <ul class="panel-menu agent-nav-options" data-ui="agent-nav-options">
-          {#each overflow as link (link.view)}
-            <li>{@render linkItem(link)}</li>
-          {/each}
-        </ul>
-      </details>
-    {/if}
+<nav aria-label="Agent navigation" data-ui="agent-navigation">
+  <div data-ui="agent-nav-sidebar">
+    <p>Agent sections</p>
+    {@render options()}
   </div>
-  <div data-ui="agent-nav-measure" aria-hidden="true">
-    <div bind:this={measurement}>
-      {#each links as link (link.view)}
-        <span data-ui="agent-nav-link">{link.label}</span>
-      {/each}
-      <span data-ui="agent-nav-more">{moreLabel}</span>
-    </div>
-  </div>
+  <details bind:this={disclosure}>
+    <summary bind:this={summary}>
+      Agent sections{current ? ` · ${current.label}` : ""}
+      <Icon name="chevron" size={16} />
+    </summary>
+    {@render options()}
+  </details>
 </nav>

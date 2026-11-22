@@ -1,5 +1,9 @@
 export const icons = {
   grid: "icon-[lucide--layout-grid]",
+  home: "icon-[lucide--house]",
+  notebook: "icon-[lucide--notebook-text]",
+  key: "icon-[lucide--key-round]",
+  delegate: "icon-[lucide--arrow-left-right]",
   plug: "icon-[lucide--plug]",
   settings: "icon-[lucide--sliders-horizontal]",
   expandPanel: "icon-[lucide--panel-left-open]",

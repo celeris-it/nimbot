@@ -4,7 +4,15 @@
     label = "Search",
     placeholder = "Search…",
     value = $bindable(""),
-  }: { label?: string; placeholder?: string; value?: string } = $props();
+    onfocus,
+    oninput,
+  }: {
+    label?: string;
+    placeholder?: string;
+    value?: string;
+    onfocus?: (event: FocusEvent) => void;
+    oninput?: (event: Event) => void;
+  } = $props();
 </script>
 
 <label class="panel-input" data-ui="search"
@@ -12,6 +20,8 @@
     type="search"
     aria-label={label}
     {placeholder}
+    {onfocus}
+    {oninput}
     bind:value
   /></label
 >

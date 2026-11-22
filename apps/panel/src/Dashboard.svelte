@@ -14,21 +14,23 @@
     Icon,
     Metric,
     ProgressMeter,
-    SearchField,
     StatusBadge,
     Surface,
   } from "./components/index.js";
 
   let {
     agents,
+    matchingAgents,
+    clearSearch,
     canCreate,
     refresh,
   }: {
     agents: AgentSummary[];
+    matchingAgents: AgentSummary[];
+    clearSearch: () => void;
     canCreate: boolean;
     refresh: () => void;
   } = $props();
-  let query = $state("");
   let filter = $state("all");
   let selectedId = $state("");
   const attention = (item: AgentSummary) =>
@@ -44,18 +46,13 @@
   let telegramBots = $derived(agents.filter((item) => item.botUsername).length);
   let needsAttention = $derived(agents.filter(attention).length);
   let filtered = $derived(
-    agents.filter((item) => {
-      const matches = `${item.name} ${item.botUsername ?? ""} ${item.id}`
-        .toLowerCase()
-        .includes(query.trim().toLowerCase());
-      return (
-        matches &&
-        (filter === "all" ||
-          (filter === "ready"
-            ? item.process?.state === "running"
-            : attention(item)))
-      );
-    }),
+    matchingAgents.filter(
+      (item) =>
+        filter === "all" ||
+        (filter === "ready"
+          ? item.process?.state === "running"
+          : attention(item)),
+    ),
   );
   // Selection is a local preview only; it never changes Telegram routing.
   let selected = $derived(
@@ -150,11 +147,6 @@
       class="panel-badge">{agents.length}</span
     >
   </div>
-  <SearchField
-    label="Search agents"
-    placeholder="Find an agent…"
-    bind:value={query}
-  />
 </div>
 
 <Surface tone="muted">
@@ -192,7 +184,7 @@
       {#snippet actions()}<button
           class="panel-button"
           onclick={() => {
-            query = "";
+            clearSearch();
             filter = "all";
           }}>Clear filters</button
         >{/snippet}

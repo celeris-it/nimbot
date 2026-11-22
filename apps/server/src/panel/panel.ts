@@ -1225,6 +1225,7 @@ export function createPanel(
     "usage",
     "memory",
     "approvals",
+    "access",
     "peers",
     "delegations",
     "mcp",
@@ -1254,6 +1255,8 @@ export function createPanel(
           (!deps.processAction || !getAgentSetup(id)?.process))
       )
         return c.notFound();
+      if (suffix === "peers" || suffix === "mcp")
+        return c.redirect(`/agents/${encodeURIComponent(id)}/access`, 302);
       return entry(c);
     });
   }

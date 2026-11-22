@@ -19,8 +19,10 @@
   import { ApiError, post, request } from "./api.js";
   import Dashboard from "./Dashboard.svelte";
   import { Icon } from "./components/index.js";
+  import type { IconName } from "./components/icons.js";
   import AgentForm from "./AgentForm.svelte";
   import AgentStatus from "./AgentStatus.svelte";
+  import AgentHeader from "./AgentHeader.svelte";
   import AgentNavigation from "./AgentNavigation.svelte";
   import ProviderSettings from "./ProviderSettings.svelte";
   import AgentUsageView from "./AgentUsage.svelte";
@@ -44,8 +46,19 @@
 
   let path = $state(location.pathname);
   let session = $state<PanelSession>();
-  let native = $derived(session?.deploymentMode === "native");
   let status = $state<PanelStatus>({ agents: [] });
+  let agentQuery = $state("");
+  let directoryLoading = $state(false);
+  let directoryUnavailable = $state(false);
+  let directoryAttempt = $state(0);
+  let matchingAgents = $derived.by(() => {
+    const query = agentQuery.trim().toLowerCase().replace(/^@/, "");
+    return status.agents.filter((item) =>
+      `${item.name} ${item.botUsername ?? ""} ${item.id}`
+        .toLowerCase()
+        .includes(query),
+    );
+  });
   let agent = $state<AgentDetail>();
   let providerSettings = $state<ProviderSettingsState>();
   let agentModels = $state<AgentModels>();
@@ -60,7 +73,7 @@
   let mcpDefinitions = $state<McpDefinitionSummary[]>([]);
   let mcpDefinition = $state<McpDefinition>();
   let mcpDiscoveryAgents = $state<{ id: string; name: string }[]>([]);
-  let mcpAgentDefinitions = $state<McpAgentDefinition[]>([]);
+  let mcpAgentDefinitions = $state<McpAgentDefinition[]>();
   let peers = $state<{
     grants: PeerGrant[];
     candidates: { id: string; name: string }[];
@@ -87,7 +100,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|usage|memory|approvals|peers|delegations|mcp|schedules|token|delete|process\/(?:stop|restart))$/,
+      /^\/agents\/([^/]+)\/(setup|settings|usage|memory|approvals|access|delegations|schedules|token|delete|process\/(?:stop|restart))$/,
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
@@ -123,22 +136,66 @@
     ).filter((link) => link.available),
   );
   let agentLinks = $derived(
-    [
-      { view: "setup", label: "Overview" },
-      { view: "usage", label: "Model and usage" },
-      { view: "memory", label: "Memory" },
-      { view: "approvals", label: "Approvals" },
-      { view: "peers", label: "Agent access" },
-      { view: "delegations", label: "Delegations" },
-      { view: "mcp", label: "MCP access", hidden: !session?.capabilities.mcp },
-      { view: "schedules", label: scheduleText.link },
-      {
-        view: "settings",
-        label: "Agent settings",
-        hidden: !agent?.capabilities.edit,
-      },
-    ].filter((link) => !link.hidden),
+    (
+      [
+        { view: "setup", label: "Overview", icon: "home" },
+        { view: "usage", label: "Model and usage", icon: "activity" },
+        { view: "memory", label: "Memory", icon: "notebook" },
+        { view: "approvals", label: "Approvals", icon: "shield" },
+        { view: "access", label: "Access", icon: "key" },
+        { view: "delegations", label: "Delegations", icon: "delegate" },
+        { view: "schedules", label: scheduleText.link, icon: "clock" },
+        {
+          view: "settings",
+          label: "Agent settings",
+          icon: "settings",
+          hidden: !agent?.capabilities.edit,
+        },
+      ] satisfies {
+        view: string;
+        label: string;
+        icon: IconName;
+        hidden?: boolean;
+      }[]
+    ).filter((link) => !link.hidden),
   );
+  let currentAgent = $derived(
+    agent ??
+      status.agents.find((item) => encodeURIComponent(item.id) === route?.[1]),
+  );
+  let switchSection = $derived(
+    agentLinks.some(
+      (link) => link.view === route?.[2] && link.view !== "settings",
+    )
+      ? (route?.[2] ?? "setup")
+      : "setup",
+  );
+  $effect(() => {
+    if (!session || path === "/" || path === "/login") return;
+    // Refresh the header's directory independently of the selected agent view.
+    void directoryAttempt;
+    const current = new AbortController();
+    directoryLoading = true;
+    directoryUnavailable = false;
+    void request<PanelStatus>("/api/status", { signal: current.signal })
+      .then((data) => {
+        if (!current.signal.aborted) status = data;
+      })
+      .catch((cause: unknown) => {
+        if (current.signal.aborted) return;
+        if (cause instanceof ApiError && cause.status === 401) expired();
+        else directoryUnavailable = true;
+      })
+      .finally(() => {
+        if (!current.signal.aborted) directoryLoading = false;
+      });
+    return () => current.abort();
+  });
+  function refreshAgentDirectory() {
+    if (path === "/") {
+      if (updateError) void load();
+    } else if (!directoryLoading) directoryAttempt++;
+  }
   let title = $derived(
     path === "/login"
       ? "Sign in"
@@ -148,33 +205,31 @@
           ? "AI providers"
           : mcpRoute
             ? "MCP catalog"
-            : route?.[2] === "mcp"
-              ? "MCP access"
+            : route?.[2] === "access"
+              ? "Access"
               : route?.[2] === "usage"
                 ? "Model and usage"
                 : route?.[2] === "schedules"
                   ? scheduleText.pageTitle
                   : route?.[2] === "delegations"
                     ? "Delegations"
-                    : route?.[2] === "peers"
-                      ? "Agent access"
-                      : route?.[2] === "approvals"
-                        ? "Approvals"
-                        : route?.[2] === "memory"
-                          ? "Memory"
-                          : path === "/agents/new"
-                            ? "Create agent"
-                            : route?.[2] === "settings"
-                              ? "Edit agent"
-                              : route?.[2] === "token"
-                                ? "Bot token"
-                                : route?.[2] === "delete"
-                                  ? "Delete agent"
-                                  : route?.[2] === "process/restart"
-                                    ? "Restart agent"
-                                    : route?.[2] === "process/stop"
-                                      ? "Stop agent"
-                                      : "Agent setup",
+                    : route?.[2] === "approvals"
+                      ? "Approvals"
+                      : route?.[2] === "memory"
+                        ? "Memory"
+                        : path === "/agents/new"
+                          ? "Create agent"
+                          : route?.[2] === "settings"
+                            ? "Edit agent"
+                            : route?.[2] === "token"
+                              ? "Bot token"
+                              : route?.[2] === "delete"
+                                ? "Delete agent"
+                                : route?.[2] === "process/restart"
+                                  ? "Restart agent"
+                                  : route?.[2] === "process/stop"
+                                    ? "Stop agent"
+                                    : "Agent setup",
   );
   let viewLabel = $derived(
     path === "/settings"
@@ -219,6 +274,9 @@
     else history.pushState(null, "", next);
     const url = new URL(next, location.origin);
     path = url.pathname;
+    agentQuery = "";
+    directoryLoading = false;
+    directoryUnavailable = false;
     delegationPage = delegationPageOf(url.search);
     usageBefore = usageCursor(url.search);
     agentModels = undefined;
@@ -227,8 +285,13 @@
     mcpDefinition = undefined;
     mcpDiscoveryAgents = [];
     mcpDefinitions = [];
-    mcpAgentDefinitions = [];
-    agent = undefined;
+    mcpAgentDefinitions = undefined;
+    peers = undefined;
+    if (
+      !agent ||
+      !url.pathname.startsWith(`/agents/${encodeURIComponent(agent.id)}/`)
+    )
+      agent = undefined;
     providerSettings = undefined;
     schedules = undefined;
     scheduleTimeZone = "";
@@ -245,9 +308,24 @@
   }
   function expired() {
     session = undefined;
+    status = { agents: [] };
     navigate("/login", true);
   }
-  async function load() {
+  async function loadAccessSection<T>(
+    url: string,
+    signal: AbortSignal,
+    update: (data: T | undefined) => void,
+  ) {
+    try {
+      const data = await request<T>(url, { signal });
+      if (!signal.aborted) update(data);
+    } catch (cause) {
+      if (signal.aborted || (cause instanceof ApiError && cause.status === 401))
+        throw cause;
+      update(undefined);
+    }
+  }
+  async function load(accessSection?: "peers" | "mcp") {
     if (inFlight || path === "/login") {
       if (path === "/login") loaded = true;
       return;
@@ -313,9 +391,11 @@
           mcpDiscoveryAgents = discovery.agents;
         }
       } else if (route) {
-        agent = await request<AgentDetail>(`/api/agents/${route[1]}`, {
+        const detail = await request<AgentDetail>(`/api/agents/${route[1]}`, {
           signal: current.signal,
         });
+        if (current.signal.aborted) return;
+        agent = detail;
         if (route[2] === "usage") {
           const url = `/api/agents/${route[1]}`;
           [agentModels, usage] = await Promise.all([
@@ -326,20 +406,24 @@
             ),
           ]);
         }
-        if (route[2] === "peers") {
-          try {
-            peers = await request<typeof peers>(
-              `/api/agents/${route[1]}/peers`,
-              { signal: current.signal },
-            );
-          } catch (cause) {
-            if (
-              current.signal.aborted ||
-              (cause instanceof ApiError && cause.status === 401)
-            )
-              throw cause;
-            peers = undefined;
-          }
+        if (route[2] === "access") {
+          const url = `/api/agents/${route[1]}`;
+          await Promise.all([
+            accessSection !== "mcp" &&
+              loadAccessSection<NonNullable<typeof peers>>(
+                `${url}/peers`,
+                current.signal,
+                (data) => (peers = data),
+              ),
+            accessSection !== "peers" &&
+              session.capabilities.mcp &&
+              loadAccessSection<{ definitions: McpAgentDefinition[] }>(
+                `${url}/mcp`,
+                current.signal,
+                (data) => (mcpAgentDefinitions = data?.definitions),
+              ),
+          ]);
+          if (current.signal.aborted) return;
         }
         if (route[2] === "delegations") {
           try {
@@ -394,13 +478,6 @@
           }
         }
         const view = route[2];
-        if (view === "mcp") {
-          const data = await request<{ definitions: McpAgentDefinition[] }>(
-            `/api/agents/${route[1]}/mcp`,
-            { signal: current.signal },
-          );
-          mcpAgentDefinitions = data.definitions;
-        }
         if (view === "schedules")
           schedules = await request<ScheduleList>(
             `/api/agents/${route[1]}/schedules`,
@@ -515,6 +592,10 @@
             mode === "token"
               ? "Token saved. Restart this agent to reconnect its bot."
               : "Changes saved.";
+          if (mode === "settings") {
+            directoryAttempt++;
+            void load();
+          }
         },
       );
     }
@@ -702,7 +783,7 @@
     if (path === startedPath && session) {
       controller?.abort();
       inFlight = false;
-      void load();
+      void load("mcp");
     }
   }
   async function cancelDelegation(id: string) {
@@ -734,7 +815,9 @@
       () => {
         done = true;
         notice = kind === "grant" ? "Grant added." : "Grant revoked.";
-        void load();
+        controller?.abort();
+        inFlight = false;
+        void load("peers");
       },
     );
     return done;
@@ -920,13 +1003,18 @@
     >nimbot<span data-ui="wordmark-dot">.</span></a
   >
   {#if session && path !== "/login"}
-    {#if loaded && contentAvailable && !missing && agent && route}
-      <AgentNavigation
-        links={agentLinks}
-        agentId={agent.id}
-        currentView={route[2]}
+    {#key path}
+      <AgentHeader
+        agents={status.agents}
+        matches={matchingAgents}
+        current={currentAgent}
+        section={switchSection}
+        loading={path === "/" ? !loaded : directoryLoading}
+        unavailable={path === "/" ? !!updateError : directoryUnavailable}
+        refresh={refreshAgentDirectory}
+        bind:query={agentQuery}
       />
-    {/if}
+    {/key}
     <div data-ui="header-actions">
       {#if narrow}<button
           class="panel-button panel-button-ghost"
@@ -936,10 +1024,7 @@
           onclick={() => (menuOpen = !menuOpen)}
           ><Icon name={menuOpen ? "collapsePanel" : "expandPanel"} size={16} /> Menu</button
         >{/if}
-      <span data-ui="installation"
-        ><Icon name="shield" size={15} />
-        {native ? "Native development" : "Docker deployment"}</span
-      ><button
+      <button
         class="panel-button panel-button-ghost"
         disabled={busy}
         onclick={() => mutate("/api/logout", {}, expired)}
@@ -990,306 +1075,324 @@
     </ul>
   </nav>
 {/if}
-<main
-  id="main"
-  tabindex="-1"
-  data-page={path === "/login"
-    ? "login"
-    : path === "/"
-      ? "dashboard"
-      : "detail"}
->
-  {#if path !== "/login"}<p id="form-error" role="alert" tabindex="-1">
-      {error}
-    </p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
-  {#if updateError}<p role="status">{updateError}</p>
-    <button class="panel-button" onclick={() => load()}
-      >Retry loading {viewLabel}</button
-    >{/if}
-  {#if path === "/login"}
-    <section aria-label="Sign in">
-      <small>ADMINISTRATION</small>
-      <h1 tabindex="-1">Your agent workspace.</h1>
-      <p>Sign in to check the status of your installation.</p>
-      <div class="panel-card">
-        <form onsubmit={login} aria-describedby="form-error" aria-busy={busy}>
-          <label for="password">Administrator password</label>
-          <input
-            class="panel-input"
-            aria-invalid={error ? "true" : undefined}
-            id="password"
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            required
-            maxlength="256"
-            aria-describedby="password-help form-error"
-            bind:value={password}
-          />
-          <p id="password-help">Use the password configured on your server.</p>
-          <p id="form-error" role="alert" tabindex="-1">{error}</p>
-          <button class="panel-button" type="submit" disabled={busy}
-            >{busy ? "Signing in…" : "Sign in to the panel"}</button
-          >
-        </form>
-      </div>
-    </section>
-  {:else if !loaded}<p role="status">Loading…</p>
-  {:else if missing}<h1 tabindex="-1">Page not found.</h1>
-    <p>This agent or action is no longer available.</p>
-    <a class="panel-button" href="/">All agents</a>
-  {:else if !contentAvailable}
-    <h1 tabindex="-1">Status unavailable.</h1>
-    <a class="panel-button" href="/">All agents</a>
-  {:else if path === "/"}
-    <Dashboard
-      agents={status.agents}
-      canCreate={session?.capabilities.createAgent ?? false}
-      refresh={() => load()}
-    />
-  {:else if path === "/settings"}
-    <h1 tabindex="-1">Settings</h1>
-    <form
-      class="panel-card"
-      aria-busy={busy}
-      aria-describedby="form-error"
-      onsubmit={(event) => {
-        event.preventDefault();
-        void mutate<ScheduleDefaults>(
-          "/api/settings/schedules",
-          { timeZone: scheduleTimeZone },
-          (result) => {
-            scheduleTimeZone = result.timeZone;
-            notice = "Schedule time zone saved.";
-          },
-        );
-      }}
-    >
-      <label for="schedule-default-zone">Schedule time zone</label>
-      <input
-        id="schedule-default-zone"
-        class="panel-input"
-        aria-describedby="schedule-default-zone-help"
-        bind:value={scheduleTimeZone}
-        required
-        disabled={busy}
-        spellcheck="false"
-        placeholder="America/New_York"
-      />
-      <p id="schedule-default-zone-help">
-        Use an IANA time zone such as America/New_York or UTC. It applies to new
-        schedules in Telegram and prefills the schedule form in the panel.
-      </p>
-      <button
-        type="submit"
-        class="panel-button panel-button-primary"
-        disabled={busy}>Save settings</button
-      >
-    </form>
-  {:else if path === "/providers"}
-    <ProviderSettings
-      settings={providerSettings}
-      {busy}
-      action={providerAction}
-      refresh={() => load()}
-    />
-  {:else if path === "/agents/new"}
-    {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
-  {:else if path === "/mcp"}
-    <h1 tabindex="-1">MCP catalog</h1>
-    <a class="panel-button panel-button-primary" href="/mcp/new"
-      >Add integration</a
-    >
-    {#if mcpDefinitions.length === 0}
-      <p>No integrations in the catalog.</p>
-    {:else}
-      <section class="panel-card" aria-label="Integrations">
-        <ul>
-          {#each mcpDefinitions as definition (definition.id)}
-            <li>
-              <a href={`/mcp/${encodeURIComponent(definition.id)}`}
-                >{definition.label}</a
-              >
-              · {definition.enabled ? "Enabled" : "Disabled"}
-              {#if definition.blockedTools?.length}<span class="panel-badge"
-                  >Review needed</span
-                >{/if}
-            </li>
-          {/each}
-        </ul>
+<div data-ui="page-layout">
+  {#if !missing && agent && route}
+    {#key path}<AgentNavigation
+        links={agentLinks}
+        agentId={agent.id}
+        currentView={route[2]}
+      />{/key}
+  {/if}
+  <main
+    id="main"
+    tabindex="-1"
+    data-page={path === "/login"
+      ? "login"
+      : path === "/"
+        ? "dashboard"
+        : "detail"}
+  >
+    {#if path !== "/login"}<p id="form-error" role="alert" tabindex="-1">
+        {error}
+      </p>{/if}
+    {#if notice}<p role="status">{notice}</p>{/if}
+    {#if updateError}<p role="status">{updateError}</p>
+      <button class="panel-button" onclick={() => load()}
+        >Retry loading {viewLabel}</button
+      >{/if}
+    {#if path === "/login"}
+      <section aria-label="Sign in">
+        <small>ADMINISTRATION</small>
+        <h1 tabindex="-1">Your agent workspace.</h1>
+        <p>Sign in to check the status of your installation.</p>
+        <div class="panel-card">
+          <form onsubmit={login} aria-describedby="form-error" aria-busy={busy}>
+            <label for="password">Administrator password</label>
+            <input
+              class="panel-input"
+              aria-invalid={error ? "true" : undefined}
+              id="password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              maxlength="256"
+              aria-describedby="password-help form-error"
+              bind:value={password}
+            />
+            <p id="password-help">
+              Use the password configured on your server.
+            </p>
+            <p id="form-error" role="alert" tabindex="-1">{error}</p>
+            <button class="panel-button" type="submit" disabled={busy}
+              >{busy ? "Signing in…" : "Sign in to the panel"}</button
+            >
+          </form>
+        </div>
       </section>
-    {/if}
-  {:else if mcpRoute}
-    <h1 tabindex="-1">
-      {mcpDefinition ? `Edit ${mcpDefinition.label}` : "Add MCP integration"}
-    </h1>
-    <a class="panel-button" href="/mcp">Back to catalog</a>
-    {#key path + (mcpDefinition?.revision ?? "")}
-      <McpDefinitionForm
-        definition={mcpDefinition}
-        {busy}
-        save={saveMcp}
-        discoveryAgents={mcpDiscoveryAgents}
-        discover={discoverMcp}
-      />
-    {/key}
-  {:else if agent && route}
-    {#if route[2] === "schedules" && schedules}
-      {#key agent.id}<Schedules
-          {agent}
-          data={schedules}
-          {busy}
-          save={saveSchedule}
-          action={scheduleAction}
-          refresh={() => load()}
-        />{/key}
-    {:else if route[2] === "mcp"}
-      {#key agent.id}
-        <McpAgentAccess
-          {agent}
-          {busy}
-          definitions={mcpAgentDefinitions}
-          action={mcpAgentAction}
-        />
-      {/key}
-    {:else if route[2] === "delegations"}
-      <Delegations
-        {agent}
-        data={delegations}
-        page={delegationPage}
-        {busy}
-        cancel={cancelDelegation}
+    {:else if !loaded}<p role="status">Loading…</p>
+    {:else if missing}<h1 tabindex="-1">Page not found.</h1>
+      <p>This agent or action is no longer available.</p>
+      <a class="panel-button" href="/">All agents</a>
+    {:else if !contentAvailable}
+      <h1 tabindex="-1">Status unavailable.</h1>
+      <a class="panel-button" href="/">All agents</a>
+    {:else if path === "/"}
+      <Dashboard
+        agents={status.agents}
+        {matchingAgents}
+        clearSearch={() => (agentQuery = "")}
+        canCreate={session?.capabilities.createAgent ?? false}
         refresh={() => load()}
       />
-    {:else if route[2] === "peers"}
-      {#key agent.id}<Peers
-          {agent}
-          data={peers}
-          {busy}
-          grant={(target, permission) =>
-            peerAction("grant", target, permission)}
-          revoke={async (target, permission) => {
-            await peerAction("revoke", target, permission);
-          }}
-        />{/key}
-    {:else if route[2] === "approvals"}
-      {#key agent.id}<Approvals
-          {agent}
-          history={approvalHistory}
-          rules={approvalRules}
-          {busy}
-          createRule={createApprovalRule}
-          revokeRule={revokeApprovalRule}
-        />{/key}
-    {:else if route[2] === "memory"}
-      {#key agent.id}<Memory
-          {agent}
-          {memories}
-          page={memoryPage}
-          {busy}
-          remove={deleteMemory}
-          enabled={agent.memoryEnabled}
-          setEnabled={setMemoryEnabled}
-          go={(next) => {
-            memoryPage = next;
-            void load();
-          }}
-        />{/key}
-    {:else if route[2] === "usage"}
-      {#key agent.id}<AgentUsageView
-          {agent}
-          catalog={agentModels}
-          data={usage}
-          before={usageBefore}
-          {busy}
-          save={saveModel}
-          refresh={load}
-        />{/key}
-    {:else if route[2] === "setup"}
-      {#key agent.id}<AgentStatus
-          {agent}
-          {busy}
-          {action}
-          {discordAction}
-          {connectTelegram}
-          refresh={() => load()}
-        />{/key}
-    {:else if route[2] === "settings" || route[2] === "token"}
-      {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
-    {:else if route[2] === "process/stop" || route[2] === "process/restart"}
-      <h1 tabindex="-1">
-        {route[2] === "process/restart" ? "Restart" : "Stop"}
-        {agent.name}?
-      </h1>
-      <p>
-        The Agent Host process will be {route[2] === "process/restart"
-          ? "stopped and started again"
-          : "stopped"}. Active work may be interrupted. Files and conversation
-        history are kept.
-      </p>
-      <div class="button-row">
-        <button
-          class={`panel-button ${route[2] === "process/restart" ? "panel-button-primary" : "panel-button-danger"}`}
-          disabled={busy}
-          onclick={() =>
-            action(route?.[2] === "process/restart" ? "restart" : "stop")}
-          >{busy
-            ? "Working…"
-            : route[2] === "process/restart"
-              ? "Confirm restart"
-              : "Confirm stop"}</button
-        >
-        <a
-          class="panel-button panel-button-ghost"
-          href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
-        >
-      </div>
-    {:else if route[2] === "delete"}
-      <h1 tabindex="-1">Delete {agent.name}?</h1>
-      <p>
-        Its Agent Host will stop. Agent data is kept unless you explicitly
-        delete it below.
-      </p>
-      {#if agent.botUsername}
-        <p>
-          Local Telegram credentials and the chat binding will be erased. The
-          Telegram bot can be revoked separately in BotFather.
-        </p>
-      {/if}
+    {:else if path === "/settings"}
+      <h1 tabindex="-1">Settings</h1>
       <form
+        class="panel-card"
+        aria-busy={busy}
+        aria-describedby="form-error"
         onsubmit={(event) => {
           event.preventDefault();
-          void action("delete");
+          void mutate<ScheduleDefaults>(
+            "/api/settings/schedules",
+            { timeZone: scheduleTimeZone },
+            (result) => {
+              scheduleTimeZone = result.timeZone;
+              notice = "Schedule time zone saved.";
+            },
+          );
         }}
-        aria-describedby="form-error"
-        aria-busy={busy}
       >
-        <label
-          ><input
-            class="panel-checkbox"
-            type="checkbox"
-            bind:checked={deleteData}
-          />
-          Also permanently delete the agent data directory and AI conversation history,
-          including its workspace, task history and browser profile.</label
+        <label for="schedule-default-zone">Schedule time zone</label>
+        <input
+          id="schedule-default-zone"
+          class="panel-input"
+          aria-describedby="schedule-default-zone-help"
+          bind:value={scheduleTimeZone}
+          required
+          disabled={busy}
+          spellcheck="false"
+          placeholder="America/New_York"
+        />
+        <p id="schedule-default-zone-help">
+          Use an IANA time zone such as America/New_York or UTC. It applies to
+          new schedules in Telegram and prefills the schedule form in the panel.
+        </p>
+        <button
+          type="submit"
+          class="panel-button panel-button-primary"
+          disabled={busy}>Save settings</button
         >
+      </form>
+    {:else if path === "/providers"}
+      <ProviderSettings
+        settings={providerSettings}
+        {busy}
+        action={providerAction}
+        refresh={() => load()}
+      />
+    {:else if path === "/agents/new"}
+      {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
+    {:else if path === "/mcp"}
+      <h1 tabindex="-1">MCP catalog</h1>
+      <a class="panel-button panel-button-primary" href="/mcp/new"
+        >Add integration</a
+      >
+      {#if mcpDefinitions.length === 0}
+        <p>No integrations in the catalog.</p>
+      {:else}
+        <section class="panel-card" aria-label="Integrations">
+          <ul>
+            {#each mcpDefinitions as definition (definition.id)}
+              <li>
+                <a href={`/mcp/${encodeURIComponent(definition.id)}`}
+                  >{definition.label}</a
+                >
+                · {definition.enabled ? "Enabled" : "Disabled"}
+                {#if definition.blockedTools?.length}<span class="panel-badge"
+                    >Review needed</span
+                  >{/if}
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
+    {:else if mcpRoute}
+      <h1 tabindex="-1">
+        {mcpDefinition ? `Edit ${mcpDefinition.label}` : "Add MCP integration"}
+      </h1>
+      <a class="panel-button" href="/mcp">Back to catalog</a>
+      {#key path + (mcpDefinition?.revision ?? "")}
+        <McpDefinitionForm
+          definition={mcpDefinition}
+          {busy}
+          save={saveMcp}
+          discoveryAgents={mcpDiscoveryAgents}
+          discover={discoverMcp}
+        />
+      {/key}
+    {:else if agent && route}
+      {#if route[2] === "schedules" && schedules}
+        {#key agent.id}<Schedules
+            {agent}
+            data={schedules}
+            {busy}
+            save={saveSchedule}
+            action={scheduleAction}
+            refresh={() => load()}
+          />{/key}
+      {:else if route[2] === "access"}
+        <h1 tabindex="-1">Access for {agent.name}</h1>
+        {#key agent.id}
+          <div data-ui="agent-access-grid">
+            <Peers
+              {agent}
+              data={peers}
+              {busy}
+              refresh={() => load("peers")}
+              grant={(target, permission) =>
+                peerAction("grant", target, permission)}
+              revoke={async (target, permission) => {
+                await peerAction("revoke", target, permission);
+              }}
+            />
+            {#if session?.capabilities.mcp}
+              <McpAgentAccess
+                {busy}
+                definitions={mcpAgentDefinitions}
+                refresh={() => load("mcp")}
+                action={mcpAgentAction}
+              />
+            {/if}
+          </div>
+        {/key}
+      {:else if route[2] === "delegations"}
+        <Delegations
+          {agent}
+          data={delegations}
+          page={delegationPage}
+          {busy}
+          cancel={cancelDelegation}
+          refresh={() => load()}
+        />
+      {:else if route[2] === "approvals"}
+        {#key agent.id}<Approvals
+            {agent}
+            history={approvalHistory}
+            rules={approvalRules}
+            {busy}
+            createRule={createApprovalRule}
+            revokeRule={revokeApprovalRule}
+          />{/key}
+      {:else if route[2] === "memory"}
+        {#key agent.id}<Memory
+            {agent}
+            {memories}
+            page={memoryPage}
+            {busy}
+            remove={deleteMemory}
+            enabled={agent.memoryEnabled}
+            setEnabled={setMemoryEnabled}
+            go={(next) => {
+              memoryPage = next;
+              void load();
+            }}
+          />{/key}
+      {:else if route[2] === "usage"}
+        {#key agent.id}<AgentUsageView
+            {agent}
+            catalog={agentModels}
+            data={usage}
+            before={usageBefore}
+            {busy}
+            save={saveModel}
+            refresh={load}
+          />{/key}
+      {:else if route[2] === "setup"}
+        {#key agent.id}<AgentStatus
+            {agent}
+            {busy}
+            {action}
+            {discordAction}
+            {connectTelegram}
+            refresh={() => load()}
+          />{/key}
+      {:else if route[2] === "settings" || route[2] === "token"}
+        {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
+      {:else if route[2] === "process/stop" || route[2] === "process/restart"}
+        <h1 tabindex="-1">
+          {route[2] === "process/restart" ? "Restart" : "Stop"}
+          {agent.name}?
+        </h1>
+        <p>
+          The Agent Host process will be {route[2] === "process/restart"
+            ? "stopped and started again"
+            : "stopped"}. Active work may be interrupted. Files and conversation
+          history are kept.
+        </p>
         <div class="button-row">
           <button
-            class="panel-button panel-button-danger"
-            type="submit"
+            class={`panel-button ${route[2] === "process/restart" ? "panel-button-primary" : "panel-button-danger"}`}
             disabled={busy}
+            onclick={() =>
+              action(route?.[2] === "process/restart" ? "restart" : "stop")}
             >{busy
-              ? "Deleting…"
-              : deleteData
-                ? "Delete agent and its data"
-                : "Delete agent, keep its data"}</button
-          ><a
+              ? "Working…"
+              : route[2] === "process/restart"
+                ? "Confirm restart"
+                : "Confirm stop"}</button
+          >
+          <a
             class="panel-button panel-button-ghost"
             href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
           >
         </div>
-      </form>
+      {:else if route[2] === "delete"}
+        <h1 tabindex="-1">Delete {agent.name}?</h1>
+        <p>
+          Its Agent Host will stop. Agent data is kept unless you explicitly
+          delete it below.
+        </p>
+        {#if agent.botUsername}
+          <p>
+            Local Telegram credentials and the chat binding will be erased. The
+            Telegram bot can be revoked separately in BotFather.
+          </p>
+        {/if}
+        <form
+          onsubmit={(event) => {
+            event.preventDefault();
+            void action("delete");
+          }}
+          aria-describedby="form-error"
+          aria-busy={busy}
+        >
+          <label
+            ><input
+              class="panel-checkbox"
+              type="checkbox"
+              bind:checked={deleteData}
+            />
+            Also permanently delete the agent data directory and AI conversation history,
+            including its workspace, task history and browser profile.</label
+          >
+          <div class="button-row">
+            <button
+              class="panel-button panel-button-danger"
+              type="submit"
+              disabled={busy}
+              >{busy
+                ? "Deleting…"
+                : deleteData
+                  ? "Delete agent and its data"
+                  : "Delete agent, keep its data"}</button
+            ><a
+              class="panel-button panel-button-ghost"
+              href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
+            >
+          </div>
+        </form>
+      {/if}
     {/if}
-  {/if}
-</main>
+  </main>
+</div>

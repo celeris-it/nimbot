@@ -344,6 +344,17 @@
   .usage-model {
     min-width: 16rem;
   }
+  @container (48rem <= width <= 58rem) {
+    section[aria-labelledby="usage-heading"] :global(.panel-table :is(th, td)) {
+      padding-inline: 0.75rem;
+    }
+    .usage-origin {
+      min-width: 8rem;
+    }
+    .usage-model {
+      min-width: 12rem;
+    }
+  }
   .model-id {
     font-family: var(--font-mono);
     word-break: break-all;

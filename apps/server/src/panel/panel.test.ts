@@ -694,6 +694,7 @@ it("serves known deep links with a strict production CSP and returns 404 for unk
   for (const path of [
     "/",
     "/agents/dev/setup",
+    "/agents/dev/access",
     "/agents/dev/settings",
     "/agents/dev/token",
     "/agents/dev/process/stop",
@@ -716,6 +717,7 @@ it("serves known deep links with a strict production CSP and returns 404 for unk
     "/agent/settings",
     "/settings/telegram",
     "/agents/missing/setup",
+    "/agents/missing/access",
   ])
     expect((await get(path, cookie)).status, path).toBe(404);
 });

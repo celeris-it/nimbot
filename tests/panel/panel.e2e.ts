@@ -13,10 +13,9 @@ async function login(page: Page) {
 
 async function openAgentSection(page: Page, name: string) {
   const nav = page.getByRole("navigation", { name: "Agent navigation" });
-  const link = nav.locator("a").and(nav.getByText(name, { exact: true }));
-  await expect(link).toBeAttached();
-  if (!(await link.isVisible()))
-    await nav.getByLabel("More agent options").click();
+  await expect(nav).toBeVisible();
+  const link = nav.getByRole("link", { name, exact: true });
+  if (!(await link.isVisible())) await nav.locator("summary").click();
   await link.click();
 }
 
@@ -406,9 +405,9 @@ test("edits the MCP catalog and manages an agent's grant and write-only credenti
   await expect(page.getByLabel("Tool name")).toHaveCount(1);
 
   await page.goto("/agents/dev/setup");
-  await openAgentSection(page, "MCP access");
+  await openAgentSection(page, "Access");
   await expect(
-    page.getByRole("heading", { name: "MCP access for Developer" }),
+    page.getByRole("heading", { name: "Access for Developer" }),
   ).toBeFocused();
   const integration = page.getByRole("region", { name: "Team docs" });
   await expect(integration.getByText(/Access withheld/)).toBeVisible();
@@ -475,6 +474,7 @@ test("keeps changed MCP tools disabled until an explicit schema review is saved"
   await page.goto("/mcp");
   await expect(page.getByText("Review needed", { exact: true })).toBeVisible();
   await page.goto("/agents/dev/mcp");
+  await expect(page).toHaveURL("/agents/dev/access");
   const integration = page.getByRole("region", {
     name: "Renamed changed docs",
   });
@@ -554,7 +554,7 @@ test("manages peer grants, reads approval history and deletes private memory", a
   );
   await login(page);
   await page.goto("/agents/dev/setup");
-  await openAgentSection(page, "Agent access");
+  await openAgentSection(page, "Access");
   await expect(page.getByText("No grants.", { exact: false })).toBeVisible();
   await page.getByLabel("Target agent").selectOption({ label: "Researcher" });
   await page.getByLabel("Permission").selectOption({ label: "Delegate tasks" });
@@ -1219,6 +1219,7 @@ test("saves edits without document navigation and does not overwrite a draft", a
   });
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("status")).toHaveText("Changes saved.");
+  await expect(page.getByLabel("Switch agent, Edited developer")).toBeVisible();
   expect(documents).toBe(0);
   await page.getByRole("link", { name: "Back to agent" }).click();
   await expect(
@@ -1426,9 +1427,9 @@ test("moves between agent pages with an expandable main navigation", async ({
   await openAgentSection(page, "Memory");
   await expect(memory).toHaveAttribute("aria-current", "page");
   await openAgentSection(page, "Schedules");
-  await expect(agentNav.locator('a[aria-current="page"]')).toHaveText(
-    "Schedules",
-  );
+  await expect(
+    agentNav.getByRole("link", { name: "Schedules" }),
+  ).toHaveAttribute("aria-current", "page");
   await page.goBack();
   await expect(memory).toHaveAttribute("aria-current", "page");
 
@@ -1479,6 +1480,53 @@ test("moves between agent pages with an expandable main navigation", async ({
   }
 });
 
+test("switches agents from a deep link and searches from the header", async ({
+  page,
+  request,
+}) => {
+  await request.post("/__test/agent/research");
+  await login(page);
+  await page.goto("/agents/dev/access");
+  const header = page.getByRole("banner");
+  const switcher = header.getByLabel("Switch agent, Developer");
+  const research = header.getByRole("link", { name: /^Researcher/ });
+  await switcher.focus();
+  await page.keyboard.press("Enter");
+  await expect(research).toHaveAttribute("href", "/agents/research/access");
+  await research.focus();
+  await page.keyboard.press("Escape");
+  await expect(research).toBeHidden();
+  await expect(switcher).toBeFocused();
+  await page.keyboard.press("Enter");
+  await research.click();
+  await expect(page).toHaveURL("/agents/research/access");
+  await expect(header.getByLabel("Switch agent, Researcher")).toBeVisible();
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  const search = header.getByRole("searchbox", { name: "Search agents" });
+  await search.fill("no-such-agent");
+  const results = header.getByRole("region", { name: "Matching agents" });
+  await expect(results.getByRole("status")).toHaveText("No matching agents.");
+  await search.fill("@DEVELOPER_BOT");
+  const developer = results.getByRole("link", { name: /^Developer/ });
+  await expect(developer).toHaveAttribute("href", "/agents/dev/setup");
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(320);
+  await page.keyboard.press("ArrowDown");
+  await expect(developer).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(results).toBeHidden();
+  await expect(search).toBeFocused();
+  await search.fill("dev");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL("/agents/dev/setup");
+  await expect(
+    page.getByRole("heading", { name: "Developer", exact: true }),
+  ).toBeFocused();
+  await expect(search).toHaveValue("");
+});
+
 test("keeps capability-gated links out of both navigation bars", async ({
   page,
 }) => {
@@ -1514,108 +1562,186 @@ test("keeps capability-gated links out of both navigation bars", async ({
   await expect(
     agentNav.getByText("Agent settings", { exact: true }),
   ).toHaveCount(0);
-  await expect(agentNav.getByText("MCP access", { exact: true })).toHaveCount(
-    0,
-  );
+  let mcpRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/agents/dev/mcp")
+      mcpRequests++;
+  });
+  await openAgentSection(page, "Access");
+  await expect(
+    page.getByRole("region", { name: "Other agents" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "MCP integrations" }),
+  ).toHaveCount(0);
+  expect(mcpRequests).toBe(0);
 });
 
-test("keeps the agent top bar on one line and exposes overflow by keyboard", async ({
+test("keeps the available Access section usable and retries only the failed section", async ({
   page,
-}, info) => {
+}) => {
+  await login(page);
+  let peerRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/agents/dev/peers")
+      peerRequests++;
+  });
+  await page.route(
+    "**/api/agents/dev/mcp",
+    (route) =>
+      route.fulfill({ status: 503, json: { error: "MCP unavailable" } }),
+    { times: 1 },
+  );
+  await page.goto("/agents/dev/peers");
+  await expect(page).toHaveURL("/agents/dev/access");
+  const peers = page.getByRole("region", { name: "Other agents" });
+  const mcp = page.getByRole("region", { name: "MCP integrations" });
+  await expect(peers.getByText(/No grants/)).toBeVisible();
+  await expect(mcp.getByRole("status")).toHaveText(
+    "MCP integrations unavailable.",
+  );
+  const retry = mcp.getByRole("button", {
+    name: "Retry loading MCP integrations",
+  });
+  const recovered = page.waitForResponse("**/api/agents/dev/mcp");
+  await retry.click();
+  expect((await recovered).ok()).toBe(true);
+  await expect(retry).toHaveCount(0);
+  await expect(peers.getByText(/No grants/)).toBeVisible();
+  expect(peerRequests).toBe(1);
+});
+
+test("shows the current agent section and supports keyboard navigation at narrow widths", async ({
+  page,
+}) => {
   await login(page);
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto("/agents/dev/settings");
   const nav = page.getByRole("navigation", { name: "Agent navigation" });
-  const overview = nav.getByRole("link", { name: "Overview" });
-  const more = nav.getByLabel("More agent options");
+  const summary = nav.locator("summary");
   const edit = nav.getByRole("link", { name: "Agent settings" });
-  await expect(overview).toBeVisible();
-  await expect(more).toHaveText("More · Agent settings");
-  await expect(more).toHaveAttribute("data-current", "true");
-  expect((await overview.boundingBox())?.y).toBe((await more.boundingBox())?.y);
+  await expect(summary).toHaveText("Agent sections · Agent settings");
   await expect(edit).toBeHidden();
-  await more.focus();
+  await summary.focus();
   await page.keyboard.press("Enter");
   await expect(edit).toHaveAttribute("aria-current", "page");
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await page.screenshot({
-    path: info.outputPath("agent-navigation-overflow.png"),
-    animations: "disabled",
-  });
   await page.keyboard.press("Tab");
-  const firstOverflowLink = nav
-    .locator('[data-ui="agent-nav-options"]')
-    .getByRole("link")
-    .first();
-  await expect(firstOverflowLink).toBeFocused();
-  await expect(firstOverflowLink).toHaveCSS("outline-style", "solid");
+  await expect(nav.getByRole("link", { name: "Overview" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(edit).toBeHidden();
-  await expect(more).toBeFocused();
-  await more.click();
-  await expect(edit).toBeVisible();
-  await page
-    .getByRole("heading", { name: "Edit agent." })
-    .click({ position: { x: 5, y: 5 } });
-  await expect(edit).toBeHidden();
+  await expect(summary).toBeFocused();
   await openAgentSection(page, "Schedules");
   await expect(page).toHaveURL(/\/agents\/dev\/schedules$/);
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+  await expect(summary).toHaveText("Agent sections · Schedules");
   await expect(nav.getByRole("link", { name: "Schedules" })).toBeHidden();
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await expect(
-    nav.getByRole("link", { name: "Model and usage" }),
-  ).toBeVisible();
+  await page.goBack();
+  await expect(summary).toHaveText("Agent sections · Agent settings");
+  await page.setViewportSize({ width: 1050, height: 800 });
+  await expect(summary).toBeVisible();
+  await page.setViewportSize({ width: 1051, height: 800 });
+  await expect(summary).toBeHidden();
+  await expect(edit).toHaveAttribute("aria-current", "page");
 });
 
-test("aligns the agent top bar with the logo and uses the wide viewport", async ({
+test("shares the agent panel with the right navigation and stacks cards on phones", async ({
   page,
 }, info) => {
   await login(page);
+  await page.route("**/api/agents/dev", async (route) => {
+    const response = await route.fetch();
+    const agent = await response.json();
+    await route.fulfill({ response, json: { ...agent, providerChecks: [] } });
+  });
   await page.goto("/agents/dev/setup");
-  const header = page.getByRole("banner");
-  const logo = header.getByRole("link", { name: "Nimbot home" });
-  const agentNav = header.getByRole("navigation", { name: "Agent navigation" });
-  const signOut = header.getByRole("button", { name: "Sign out" });
-  const main = page.getByRole("main");
-  for (const width of [601, 1280, 1920]) {
+  const globalNav = page.getByRole("navigation", { name: "Main navigation" });
+  const panel = page.locator('[data-ui="page-layout"]');
+  const agentNav = panel.getByRole("navigation", { name: "Agent navigation" });
+  const main = panel.getByRole("main");
+  const overview = main.locator('[data-ui="agent-overview"]');
+  const host = overview.getByRole("region", { name: /Agent Host stopped/ });
+  const provider = overview.getByRole("region", { name: "AI provider status" });
+  const telegram = overview.getByRole("region", {
+    name: "Telegram connection",
+  });
+  const discord = overview.getByRole("region", { name: "Discord connection" });
+  const danger = overview.getByRole("region", { name: "Danger zone" });
+
+  await expect(main.getByRole("heading", { level: 1 })).toHaveCSS(
+    "position",
+    "absolute",
+  );
+  await expect(overview.getByRole("region")).toHaveCount(5);
+  const [outerColor, innerColor] = await Promise.all(
+    [panel, host].map((card) =>
+      card.evaluate((element) => getComputedStyle(element).backgroundColor),
+    ),
+  );
+  expect(outerColor).not.toBe(innerColor);
+
+  for (const width of [1280, 1920, 320, 375]) {
     await page.setViewportSize({ width, height: 800 });
-    await expect(agentNav).toBeVisible();
-    const [logoBox, navBox, signOutBox, headerBox, mainBox] = await Promise.all(
-      [
-        logo.boundingBox(),
-        agentNav.boundingBox(),
-        signOut.boundingBox(),
-        header.boundingBox(),
-        main.boundingBox(),
-      ],
+    await expect(discord).toBeVisible();
+    const [
+      agentBox,
+      mainBox,
+      hostBox,
+      providerBox,
+      telegramBox,
+      discordBox,
+      dangerBox,
+    ] = await Promise.all(
+      [agentNav, main, host, provider, telegram, discord, danger].map((item) =>
+        item.boundingBox(),
+      ),
     );
-    if (!(logoBox && navBox && signOutBox && headerBox && mainBox))
-      throw new Error("Expected visible header and page content");
-    const navCenter = navBox.y + navBox.height / 2;
-    expect(navCenter).toBeCloseTo(logoBox.y + logoBox.height / 2, 0);
-    expect(navCenter).toBeCloseTo(signOutBox.y + signOutBox.height / 2, 0);
-    expect(logoBox.x + logoBox.width).toBeLessThan(navBox.x);
-    expect(navBox.x + navBox.width).toBeLessThan(signOutBox.x);
-    const viewportWidth = await page.evaluate(
-      () => document.documentElement.clientWidth,
-    );
-    expect(viewportWidth - headerBox.x - headerBox.width).toBeLessThanOrEqual(
-      56,
-    );
-    expect(mainBox.x + mainBox.width).toBeCloseTo(
-      headerBox.x + headerBox.width,
-      0,
-    );
+    if (!(
+      agentBox &&
+      mainBox &&
+      hostBox &&
+      providerBox &&
+      telegramBox &&
+      discordBox &&
+      dangerBox
+    ))
+      throw new Error("Expected the agent navigation and overview cards");
+    if (width >= 1280) {
+      const globalBox = await globalNav.boundingBox();
+      if (!globalBox) throw new Error("Expected global navigation");
+      expect(globalBox.x + globalBox.width).toBeLessThan(mainBox.x);
+      expect(mainBox.x + mainBox.width).toBeCloseTo(agentBox.x);
+      await expect(main).toHaveCSS("border-inline-end-width", "1px");
+      expect(hostBox.y).toBe(providerBox.y);
+      expect(telegramBox.y).toBe(discordBox.y);
+      await expect(agentNav.getByRole("link")).toHaveCount(8);
+      const selected = agentNav.getByRole("link", { name: "Overview" });
+      await expect(selected).toHaveAttribute("aria-current", "page");
+      await expect(selected).toHaveCSS("border-top-left-radius", "9999px");
+      await expect(selected.locator('[data-ui="icon"]')).toHaveCSS(
+        "mask-image",
+        /url\("data:image\/svg\+xml/,
+      );
+    } else {
+      expect(agentBox.y + agentBox.height).toBeCloseTo(mainBox.y);
+      await expect(agentNav).toHaveCSS("border-block-end-width", "1px");
+      expect(hostBox.y + hostBox.height).toBeLessThan(providerBox.y);
+      expect(telegramBox.y + telegramBox.height).toBeLessThan(discordBox.y);
+    }
+    expect(
+      Math.max(
+        telegramBox.y + telegramBox.height,
+        discordBox.y + discordBox.height,
+      ),
+    ).toBeLessThan(dangerBox.y);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    if (width === 1280 || width === 375)
+      await page.screenshot({
+        path: info.outputPath(`agent-overview-${width}.png`),
+        fullPage: true,
+      });
   }
-  await expect(
-    agentNav.getByRole("link", { name: "Agent settings" }),
-  ).toBeVisible();
-  await expect(agentNav.getByLabel("More agent options")).toHaveCount(0);
-  await page.screenshot({ path: info.outputPath("wide-agent-header.png") });
 });
 
 test("does not overlap polls, pauses while hidden and cancels obsolete requests", async ({
@@ -2029,7 +2155,11 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
     .getByRole("button", { name: "Remove Discord connection" })
     .click();
   await expect(discord.getByText("Discord is not configured.")).toBeVisible();
-  await expect(page.getByText("@developer_bot", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Telegram connection" })
+      .getByText("@developer_bot", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Developer", exact: true }),
   ).toBeVisible();
@@ -2109,7 +2239,11 @@ test("shows independent Discord conversation and owner-link status while Telegra
     page.getByText("Owner DM: Linked.", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Connection", { exact: true })).toBeVisible();
-  await expect(page.getByText("@developer_bot", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Telegram connection" })
+      .getByText("@developer_bot", { exact: true }),
+  ).toBeVisible();
 });
 
 test("creates a webhook schedule, shows credentials, triggers it, and revokes its token", async ({
@@ -2192,13 +2326,8 @@ for (const deploymentMode of ["native", "docker"] as const)
     await expect(
       page
         .getByRole("banner")
-        .getByText(
-          deploymentMode === "native"
-            ? "Native development"
-            : "Docker deployment",
-          { exact: true },
-        ),
-    ).toBeVisible();
+        .getByText(/^(Native development|Docker deployment)$/),
+    ).toHaveCount(0);
     await page.goto("/agents/dev/setup");
     await expect(
       page.getByRole("heading", { name: "Agent Host stopped." }),
