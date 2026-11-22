@@ -6,7 +6,7 @@ import {
   taskUsage,
   type ModelAdmission,
   type TaskUsage,
-} from "../usage-contracts.js";
+} from "../providers/usage-contracts.js";
 
 export class HostModelAdmissionExpired extends Error {}
 

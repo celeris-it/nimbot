@@ -5,7 +5,7 @@
     AgentUsage,
     ModelReference,
     QuotaStatus,
-  } from "../../server/src/usage-contracts.js";
+  } from "../../server/src/providers/usage-contracts.js";
 
   let {
     agent,

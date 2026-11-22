@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isDiscordId } from "./discord/discord-identity.js";
-import { isApiKey } from "./provider-contracts.js";
+import { isApiKey } from "./providers/provider-contracts.js";
 
 /** Form field schemas for the panel API. Each route supplies its own error message. */
 export const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,47}$/;

@@ -1,9 +1,9 @@
-import type { ProviderCheck } from "./provider-contracts.js";
-import { HostProviderError } from "./host-providers.js";
-import type { createAgentUsage } from "./agent-usage.js";
-import { modelReference } from "./usage-contracts.js";
+import type { ProviderCheck } from "./providers/provider-contracts.js";
+import { HostProviderError } from "./providers/host-providers.js";
+import type { createAgentUsage } from "./providers/agent-usage.js";
+import { modelReference } from "./providers/usage-contracts.js";
 import { z } from "zod";
-import { HostMemoryError } from "./host-memories.js";
+import { HostMemoryError } from "./memory/host-memories.js";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -30,7 +30,7 @@ import {
 } from "./schedules/schedule-store.js";
 import { validateCadence } from "./schedules/schedule-time.js";
 import type { ScheduleRunNowResult } from "./schedules/scheduler.js";
-import { isProviderId } from "./provider-contracts.js";
+import { isProviderId } from "./providers/provider-contracts.js";
 import { parseForm, validated } from "./validate.js";
 import {
   approvalRuleForm,
@@ -91,7 +91,9 @@ export interface PanelDeps {
     discordOwnerLinked?(agentId: string): boolean;
   };
   providers?: Omit<
-    ReturnType<typeof import("./shared-providers.js").createSharedProviders>,
+    ReturnType<
+      typeof import("./providers/shared-providers.js").createSharedProviders
+    >,
     "checks" | "close"
   >;
   usage?: ReturnType<typeof createAgentUsage> & {
@@ -126,7 +128,9 @@ export interface PanelDeps {
     get(id: string): boolean;
     set(id: string, enabled: boolean): boolean;
   };
-  memories?: ReturnType<typeof import("./host-memories.js").createHostMemories>;
+  memories?: ReturnType<
+    typeof import("./memory/host-memories.js").createHostMemories
+  >;
   discord?: {
     status?(
       id: string,

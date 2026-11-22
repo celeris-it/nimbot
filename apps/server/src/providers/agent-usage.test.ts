@@ -8,9 +8,9 @@ import {
   createHostUsage,
   openAgentUsage,
 } from "./agent-usage.js";
-import { createRoutedTaskQueue, openTaskStore } from "./tasks/task-queue.js";
-import { HostModelAdmissionExpired } from "./host/host-tasks.js";
-import { openScheduleStore } from "./schedules/schedule-store.js";
+import { createRoutedTaskQueue, openTaskStore } from "../tasks/task-queue.js";
+import { HostModelAdmissionExpired } from "../host/host-tasks.js";
+import { openScheduleStore } from "../schedules/schedule-store.js";
 
 const model = { providerId: "opencode", modelId: "fixture" };
 const origin = { platform: "telegram", botId: 123, chatId: 42 } as const;

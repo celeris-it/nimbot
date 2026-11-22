@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AgentDetail } from "../../server/src/panel-contracts.js";
-  import { providers } from "../../server/src/provider-contracts.js";
+  import { providers } from "../../server/src/providers/provider-contracts.js";
   import DiscordSettings from "./DiscordSettings.svelte";
   import {
     processLabels,

@@ -7,7 +7,10 @@ import type {
 import type { ScheduleCadence } from "./schedules/schedule-time.js";
 export type { Schedule, ScheduleRun } from "./schedules/schedule-store.js";
 export type { ScheduleRunNowResult } from "./schedules/scheduler.js";
-export type { ProviderSettings, DeviceLogin } from "./provider-contracts.js";
+export type {
+  ProviderSettings,
+  DeviceLogin,
+} from "./providers/provider-contracts.js";
 export type { DelegationHistoryEntry } from "./tasks/task-queue.js";
 export type DelegationHistory = ReturnType<
   import("./tasks/task-queue.js").TaskStore["listDelegations"]
@@ -73,7 +76,7 @@ export interface AgentDetail extends AgentSummary {
   settings?: { name: string; instructions: string };
   /** Present when the memory tools can be switched for this agent. */
   memoryEnabled?: boolean;
-  providerChecks?: import("./provider-contracts.js").ProviderCheck[];
+  providerChecks?: import("./providers/provider-contracts.js").ProviderCheck[];
   hostState?: "ready" | "busy" | "unavailable";
   capabilities: {
     edit: boolean;

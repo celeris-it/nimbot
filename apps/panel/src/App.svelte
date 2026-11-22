@@ -28,7 +28,7 @@
     AgentModels,
     AgentUsage,
     ModelReference,
-  } from "../../server/src/usage-contracts.js";
+  } from "../../server/src/providers/usage-contracts.js";
   import Memory from "./Memory.svelte";
   import Approvals from "./Approvals.svelte";
   import Peers from "./Peers.svelte";
@@ -38,7 +38,7 @@
   import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
   import type { ApprovalRequest } from "../../server/src/approvals/approval-store.js";
   import type { ApprovalRule } from "../../server/src/approvals/approval-rules.js";
-  import type { MemoryEntry } from "../../server/src/host-memories.js";
+  import type { MemoryEntry } from "../../server/src/memory/host-memories.js";
   import Schedules from "./Schedules.svelte";
   import { scheduleText } from "./labels.js";
 

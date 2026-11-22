@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAgentProcessManager } from "./processes/agent-process-manager.js";
+import { createAgentProcessManager } from "../processes/agent-process-manager.js";
 import { createHostProviders } from "./host-providers.js";
 import type { DeviceProvider, ProviderId } from "./provider-contracts.js";
 
@@ -16,7 +16,7 @@ export function createSharedProviders(options: {
   const manager = createAgentProcessManager({
     dataDirectory: options.directory,
     hostEntrypoint: fileURLToPath(
-      new URL("../../agent-host/dist/serve-providers.js", import.meta.url),
+      new URL("../../../agent-host/dist/serve-providers.js", import.meta.url),
     ),
     executablePath: options.executablePath,
     sharedEngineDirectory: resolve(options.directory),

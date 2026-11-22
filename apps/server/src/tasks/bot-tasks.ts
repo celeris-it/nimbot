@@ -48,7 +48,10 @@ import {
   type TaskOutcome,
   type TaskStore,
 } from "./task-queue.js";
-import type { ModelAdmission, TaskUsage } from "../usage-contracts.js";
+import type {
+  ModelAdmission,
+  TaskUsage,
+} from "../providers/usage-contracts.js";
 import type { createDiscordAttachments } from "../discord/discord-attachments.js";
 import { createChatSchedules } from "../schedules/chat-schedules.js";
 import { splitTelegramText } from "../telegram/telegram-text.js";

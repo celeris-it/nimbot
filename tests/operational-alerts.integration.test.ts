@@ -8,7 +8,7 @@ import { openNotificationStore } from "../apps/server/src/notifications/notifica
 import { createNotifications } from "../apps/server/src/notifications/notifications.js";
 import { openOperationalAlertStore } from "../apps/server/src/notifications/operational-alert-store.js";
 import { createOperationalAlerts } from "../apps/server/src/notifications/operational-alerts.js";
-import type { ProviderCheck } from "../apps/server/src/provider-contracts.js";
+import type { ProviderCheck } from "../apps/server/src/providers/provider-contracts.js";
 import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 import {
   openTaskStore,

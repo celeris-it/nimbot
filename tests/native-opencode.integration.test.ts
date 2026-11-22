@@ -21,8 +21,8 @@ import { openProcessHostCredentials } from "../apps/server/src/processes/process
 import { openBotSecrets } from "../apps/server/src/telegram/bot-secret.js";
 import { createProcessAgents } from "../apps/server/src/processes/process-agents.js";
 import { agentProcessDirectories } from "../apps/server/src/processes/agent-process-config.js";
-import { prepareSharedEngine } from "../apps/server/src/shared-engine-state.js";
-import { createSharedProviders } from "../apps/server/src/shared-providers.js";
+import { prepareSharedEngine } from "../apps/server/src/providers/shared-engine-state.js";
+import { createSharedProviders } from "../apps/server/src/providers/shared-providers.js";
 import { createHostTasks } from "../apps/server/src/host/host-tasks.js";
 
 function openDatabase(path: string, readOnly = false) {

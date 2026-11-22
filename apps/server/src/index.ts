@@ -15,21 +15,21 @@ import {
   createHostCancellation,
 } from "./host/host-tasks.js";
 import { withAgentInstructions } from "./agents/agent-instructions.js";
-import { createSharedProviders } from "./shared-providers.js";
-import { prepareSharedEngine } from "./shared-engine-state.js";
+import { createSharedProviders } from "./providers/shared-providers.js";
+import { prepareSharedEngine } from "./providers/shared-engine-state.js";
 import {
   createAgentUsage,
   createHostUsage,
   openAgentUsage,
-} from "./agent-usage.js";
-import { createHostMemories } from "./host-memories.js";
+} from "./providers/agent-usage.js";
+import { createHostMemories } from "./memory/host-memories.js";
 import { openApprovalStore } from "./approvals/approval-store.js";
 import { openAgentGrants } from "./peers/agent-grants.js";
 import { openAgentNotes } from "./peers/agent-notes.js";
 import { createPeerTools } from "./peers/peer-tools.js";
 import { createDelegationExecution } from "./delegation/delegation-execution.js";
 import { openApprovalRules } from "./approvals/approval-rules.js";
-import { MEMORY_OPERATIONS } from "./memory-operations.js";
+import { MEMORY_OPERATIONS } from "./memory/memory-operations.js";
 import type {
   ChatTask,
   DiscordConversation,

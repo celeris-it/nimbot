@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
-import { createPanel } from "./panel.js";
-import { hashPassword } from "./panel-auth.js";
-import { readPanelConfig } from "./panel-config.js";
+import { createPanel } from "../panel.js";
+import { hashPassword } from "../panel-auth.js";
+import { readPanelConfig } from "../panel-config.js";
 import { createHostMemories, HostMemoryError } from "./host-memories.js";
 
 const host = { url: "http://agent-a:3001", token: "x".repeat(32) };
@@ -54,7 +54,7 @@ it("maps Host failures and rejects invalid IDs before any request", async () => 
   );
   const memories = createHostMemories(async () => host, request);
   await expect(memories.remove("a", id)).rejects.toMatchObject({ status: 404 });
-  await expect(memories.remove("a", "../x")).rejects.toMatchObject({
+  await expect(memories.remove("a", "../../x")).rejects.toMatchObject({
     status: 400,
   });
   expect(request).toHaveBeenCalledTimes(1);

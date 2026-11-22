@@ -8,7 +8,7 @@ import {
   createAgentUsage,
   createHostUsage,
   openAgentUsage,
-} from "../../apps/server/dist/agent-usage.js";
+} from "../../apps/server/dist/providers/agent-usage.js";
 import { openTaskStore } from "../../apps/server/dist/tasks/task-queue.js";
 import { openScheduleStore } from "../../apps/server/dist/schedules/schedule-store.js";
 import { openMcpCatalog } from "../../apps/server/dist/mcp-catalog.js";
@@ -16,16 +16,16 @@ import { openMcpCredentials } from "../../apps/server/dist/mcp-credentials.js";
 import { openAgentGrants } from "../../apps/server/dist/peers/agent-grants.js";
 import { openApprovalRules } from "../../apps/server/dist/approvals/approval-rules.js";
 import { openApprovalStore } from "../../apps/server/dist/approvals/approval-store.js";
-import { createHostMemories } from "../../apps/server/dist/host-memories.js";
+import { createHostMemories } from "../../apps/server/dist/memory/host-memories.js";
 import { openMemoryStore } from "../../apps/agent-host/dist/memory-store.js";
 import { createHostApi } from "../../apps/agent-host/dist/http.js";
 import { createScheduler } from "../../apps/server/dist/schedules/scheduler.js";
-import { HostProviderError } from "../../apps/server/dist/host-providers.js";
+import { HostProviderError } from "../../apps/server/dist/providers/host-providers.js";
 import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/index.mjs";
 import { Hono } from "../../apps/server/node_modules/hono/dist/index.js";
 import { createPanel } from "../../apps/server/dist/panel.js";
 import { hashPassword } from "../../apps/server/dist/panel-auth.js";
-import { providers } from "../../apps/server/dist/provider-contracts.js";
+import { providers } from "../../apps/server/dist/providers/provider-contracts.js";
 
 const agents = new Map();
 let nativeMode = false;

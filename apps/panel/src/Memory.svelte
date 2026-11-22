@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MemoryEntry } from "../../server/src/host-memories.js";
+  import type { MemoryEntry } from "../../server/src/memory/host-memories.js";
   let {
     agent,
     memories,

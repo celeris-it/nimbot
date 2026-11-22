@@ -10,7 +10,7 @@ import {
 import { resolve } from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
-import { agentProcessDirectories } from "./processes/agent-process-config.js";
+import { agentProcessDirectories } from "../processes/agent-process-config.js";
 import { providers, type ProviderId } from "./provider-contracts.js";
 
 // These tables belong to the OpenCode version pinned in the Docker image.
