@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { Icon } from "./components/index.js";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   let {
     agent,
@@ -38,7 +39,9 @@
 </script>
 
 <section class="panel-card" aria-label="Discord connection">
-  <h2>Discord connection</h2>
+  <h2 class="card-title" data-brand="discord">
+    <Icon name="discord" size={20} />Discord connection
+  </h2>
   <p>
     Text messages join this agent's shared queue. Progress, approvals, and
     results return to the channel that received the task.
@@ -77,13 +80,15 @@
     <button
       class="panel-button"
       disabled={busy}
-      onclick={() => testDelivery(true)}>Send Discord test</button
+      onclick={() => testDelivery(true)}
+      ><Icon name="send" size={16} />Send Discord test</button
     >
     {#if requestId}
       <button
         class="panel-button"
         disabled={busy}
-        onclick={() => testDelivery(false)}>Check last test status</button
+        onclick={() => testDelivery(false)}
+        ><Icon name="refresh" size={16} />Check last test status</button
       >
       <p>
         Checking reuses the last request and does not send it again. A new test
@@ -131,7 +136,7 @@
       class="panel-button panel-button-primary"
       type="submit"
       disabled={busy}
-      >{busy
+      ><Icon name="link" size={16} />{busy
         ? "Saving…"
         : agent.discord?.connection
           ? "Replace Discord connection"
@@ -158,7 +163,7 @@
         class="panel-button"
         type="submit"
         disabled={busy || confirmation !== agent.id}
-        >Remove Discord connection</button
+        ><Icon name="trash" size={16} />Remove Discord connection</button
       >
     </form>
   {/if}

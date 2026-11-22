@@ -1472,3 +1472,21 @@ main:focus {
     transition: none !important;
   }
 }
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.card-title > [data-ui="icon"] {
+  color: var(--color-muted);
+}
+.card-title[data-brand="telegram"] > [data-ui="icon"] {
+  color: #27a7e7;
+}
+.card-title[data-brand="discord"] > [data-ui="icon"] {
+  color: #8c96ff;
+}
+[data-tone="danger"] .card-title > [data-ui="icon"] {
+  color: var(--color-error);
+}

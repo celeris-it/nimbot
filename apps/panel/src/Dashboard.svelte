@@ -120,7 +120,7 @@
     </div>
   </Surface>
   <Surface title="Telegram bots">
-    {#snippet actions()}<Icon name="bot" size={20} />{/snippet}
+    {#snippet actions()}<Icon name="telegram" size={20} />{/snippet}
     <div data-ui="connection-total">
       <strong>{connected}</strong><span
         >bots polling<small>of {telegramBots} registered</small></span
@@ -234,7 +234,7 @@
         </div>
         <div data-ui="preview-facts">
           <div>
-            <Icon name="activity" /><span
+            <Icon name="telegram" /><span
               >Telegram bot<strong>{botLabel(selected)}</strong></span
             >
           </div>

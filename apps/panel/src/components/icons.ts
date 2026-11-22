@@ -23,5 +23,16 @@ export const icons = {
   close: "icon-[lucide--x]",
   activity: "icon-[lucide--activity]",
   logout: "icon-[lucide--log-out]",
+  telegram: "icon-[simple-icons--telegram]",
+  discord: "icon-[simple-icons--discord]",
+  server: "icon-[lucide--server]",
+  cpu: "icon-[lucide--cpu]",
+  send: "icon-[lucide--send]",
+  trash: "icon-[lucide--trash-2]",
+  play: "icon-[lucide--play]",
+  stop: "icon-[lucide--square]",
+  restart: "icon-[lucide--rotate-cw]",
+  link: "icon-[lucide--link]",
+  info: "icon-[lucide--info]",
 } as const;
 export type IconName = keyof typeof icons;

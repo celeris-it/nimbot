@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   import { providers } from "../../server/src/providers/provider-contracts.js";
+  import { Icon } from "./components/index.js";
   import DiscordSettings from "./DiscordSettings.svelte";
   import {
     processLabels,
@@ -68,8 +69,8 @@
 <div data-ui="agent-overview">
   <div data-ui="agent-overview-grid">
     <section class="panel-card" aria-labelledby="agent-host-heading">
-      <h2 id="agent-host-heading">
-        {agent.process
+      <h2 id="agent-host-heading" class="card-title">
+        <Icon name="server" size={20} />{agent.process
           ? `Agent Host ${processLabels[agent.process.state].toLowerCase()}.`
           : "Agent Host unavailable."}
       </h2>
@@ -103,22 +104,30 @@
             class="panel-button panel-button-primary"
             disabled={busy}
             onclick={() => action("start")}
-            >{busy ? "Starting…" : "Start agent"}</button
+            ><Icon name="play" size={16} />{busy
+              ? "Starting…"
+              : "Start agent"}</button
           >{/if}
         {#if agent.process && agent.capabilities.process?.stop}<a
             class="panel-button"
-            href={`${base}/process/stop`}>Stop agent…</a
+            href={`${base}/process/stop`}
+            ><Icon name="stop" size={16} />Stop agent…</a
           >{/if}
         {#if agent.process && agent.capabilities.process?.restart}<a
             class="panel-button"
-            href={`${base}/process/restart`}>Restart agent…</a
+            href={`${base}/process/restart`}
+            ><Icon name="restart" size={16} />Restart agent…</a
           >{/if}
-        <button class="panel-button" onclick={refresh}>Refresh status</button>
+        <button class="panel-button" onclick={refresh}
+          ><Icon name="refresh" size={16} />Refresh status</button
+        >
       </div>
     </section>
     {#if agent.providerChecks}
       <section class="panel-card" aria-labelledby="ai-provider-status">
-        <h2 id="ai-provider-status">AI provider status</h2>
+        <h2 id="ai-provider-status" class="card-title">
+          <Icon name="cpu" size={20} />AI provider status
+        </h2>
         {#if agent.providerChecks.length}
           <dl>
             {#each agent.providerChecks as check (check.id)}
@@ -146,7 +155,9 @@
   </div>
   <div data-ui="agent-overview-grid">
     <section class="panel-card" aria-label="Telegram connection">
-      <h2>Telegram connection</h2>
+      <h2 class="card-title" data-brand="telegram">
+        <Icon name="telegram" size={20} />Telegram connection
+      </h2>
       {#if agent.capabilities.connectTelegram}
         <p>
           Create a separate bot in BotFather and enter its token and owner's
@@ -179,7 +190,10 @@
           <button
             class="panel-button panel-button-primary"
             type="submit"
-            disabled={busy}>{busy ? "Saving…" : "Connect Telegram"}</button
+            disabled={busy}
+            ><Icon name="link" size={16} />{busy
+              ? "Saving…"
+              : "Connect Telegram"}</button
           >
         </form>
       {:else if agent.botUsername}
@@ -205,7 +219,9 @@
           </p>
         {/if}
         {#if agent.capabilities.replaceToken}<div class="button-row">
-            <a class="panel-button" href={`${base}/token`}>Replace bot token</a>
+            <a class="panel-button" href={`${base}/token`}
+              ><Icon name="key" size={16} />Replace bot token</a
+            >
           </div>{/if}
       {:else}
         <p>Telegram is unavailable.</p>
@@ -223,14 +239,16 @@
 
   {#if agent.capabilities.delete}
     <section class="panel-card" aria-label="Danger zone" data-tone="danger">
-      <h2>Danger zone</h2>
+      <h2 class="card-title">
+        <Icon name="alert" size={20} />Danger zone
+      </h2>
       <p>
         Deleting an agent stops its Host. Its data is kept unless you choose to
         delete it on the next page.
       </p>
       <div class="button-row">
         <a class="panel-button panel-button-danger" href={`${base}/delete`}
-          >Delete agent…</a
+          ><Icon name="trash" size={16} />Delete agent…</a
         >
       </div>
     </section>
