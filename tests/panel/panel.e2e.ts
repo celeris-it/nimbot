@@ -24,6 +24,27 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("recovers an uncertain sign-in using the session", async ({ page }) => {
+  await page.goto("/login");
+  await page.route("**/api/login", (route) => route.abort(), { times: 1 });
+  const password = page.getByLabel("Administrator password");
+  const submit = page.getByRole("button", { name: "Sign in to the panel" });
+  await password.fill("panel-test-password");
+  await submit.click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Could not confirm sign-in",
+  );
+  await page.route("**/api/login", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await password.fill("panel-test-password");
+  await submit.click();
+  await expect(
+    page.getByRole("heading", { name: "Your agents." }),
+  ).toBeVisible();
+});
+
 test("selects an agent model and shows its published quota in the panel", async ({
   page,
 }) => {
@@ -1141,14 +1162,14 @@ test("preserves last state on polling errors and handles expiry", async ({
     else await route.continue();
   });
   await expect(
-    page.getByText("Could not update the status.", { exact: false }),
+    page.getByText("Could not update this view (Overview).", { exact: false }),
   ).toBeVisible({ timeout: 8000 });
   await expect(
     page.getByRole("heading", { name: "Developer", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Refresh status" }).last().click();
+  await page.getByRole("button", { name: "Retry loading Overview" }).click();
   await expect(
-    page.getByText("Could not update the status.", { exact: false }),
+    page.getByText("Could not update this view (Overview).", { exact: false }),
   ).toHaveCount(0);
   await context.clearCookies();
   await page.getByRole("button", { name: "Refresh status" }).click();
@@ -1339,6 +1360,7 @@ test("keeps the agent top bar on one line and exposes overflow by keyboard", asy
   const more = nav.getByLabel("More agent options");
   const edit = nav.getByRole("link", { name: "Edit agent" });
   await expect(overview).toBeVisible();
+  await expect(more).toHaveText("More");
   await expect(more).toHaveAttribute("data-current", "true");
   expect((await overview.boundingBox())?.y).toBe((await more.boundingBox())?.y);
   await expect(edit).toBeHidden();

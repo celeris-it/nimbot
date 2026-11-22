@@ -227,8 +227,7 @@ header {
 }
 [data-ui="agent-nav-more"] {
   justify-content: center;
-  width: 44px;
-  padding: 0;
+  min-width: 44px;
   cursor: pointer;
 }
 [data-ui="agent-nav-more"]::-webkit-details-marker {

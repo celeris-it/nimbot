@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Icon } from "./components/index.js";
 
   let {
     links,
@@ -113,7 +112,7 @@
           data-current={overflow.some((link) => link.view === currentView)}
           aria-label="More agent options"
         >
-          <Icon name="ellipsis" size={20} />
+          More
         </summary>
         <ul class="panel-menu agent-nav-options" data-ui="agent-nav-options">
           {#each overflow as link (link.view)}
@@ -128,7 +127,7 @@
       {#each links as link (link.view)}
         <span data-ui="agent-nav-link">{link.label}</span>
       {/each}
-      <span data-ui="agent-nav-more"></span>
+      <span data-ui="agent-nav-more">More</span>
     </div>
   </div>
 </nav>

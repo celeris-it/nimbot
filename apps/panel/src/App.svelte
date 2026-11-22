@@ -173,6 +173,13 @@
                                       ? "Stop agent"
                                       : "Agent setup",
   );
+  let viewLabel = $derived(
+    path === "/settings"
+      ? "Settings"
+      : route?.[2] === "setup"
+        ? "Overview"
+        : title,
+  );
 
   async function focusHeading() {
     await tick();
@@ -401,10 +408,11 @@
       if (cause instanceof ApiError && cause.status === 404) {
         missing = true;
         agent = undefined;
-      } else
+      } else {
         updateError = contentAvailable
-          ? "Could not update the status. The last known state is shown. Refresh to try again."
-          : "Could not load the status. Refresh to try again.";
+          ? `Could not update this view (${viewLabel}). Showing the last loaded data.`
+          : `Could not load this view (${viewLabel}).`;
+      }
       loaded = true;
     } finally {
       if (controller === current) {
@@ -436,10 +444,26 @@
         expired();
         return;
       }
-      error =
-        cause instanceof ApiError
-          ? cause.message
-          : "The result could not be confirmed. Refresh the status before retrying.";
+      if (
+        startedPath === "/login" &&
+        (!(cause instanceof ApiError) || cause.status >= 500)
+      ) {
+        const recovered = await request<PanelSession>("/api/session").catch(
+          () => undefined,
+        );
+        if (path !== startedPath) return;
+        if (recovered) {
+          session = recovered;
+          navigate("/");
+          return;
+        }
+        error =
+          "Could not confirm sign-in. Check your connection and try signing in again.";
+      } else
+        error =
+          cause instanceof ApiError
+            ? cause.message
+            : "The result could not be confirmed. Refresh the status before retrying.";
       await tick();
       document.getElementById("form-error")?.focus();
     } finally {
@@ -942,7 +966,8 @@
   <p id="form-error" role="alert" tabindex="-1">{error}</p>
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if updateError}<p role="status">{updateError}</p>
-    <button class="panel-button" onclick={() => load()}>Refresh status</button
+    <button class="panel-button" onclick={() => load()}
+      >Retry loading {viewLabel}</button
     >{/if}
   {#if path === "/login"}
     <section aria-label="Sign in">
