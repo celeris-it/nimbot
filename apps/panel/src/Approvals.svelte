@@ -58,7 +58,7 @@
           {date(rule.expiresAt)}{/if}
         {#if active(rule)}
           <button
-            class="btn"
+            class="panel-button"
             disabled={busy}
             aria-label={`Revoke rule for ${rule.actionType} on ${rule.target}`}
             onclick={() => revokeRule(rule.id)}>Revoke</button
@@ -83,7 +83,7 @@
   >
   <label>
     Rule
-    <select bind:value={effect}>
+    <select class="panel-select" bind:value={effect}>
       <option value="ask">Ask each time</option>
       <option value="deny">Deny</option>
       <option value="allow">Always allow (read-only only)</option>
@@ -96,7 +96,7 @@
       pattern="[0-9]*"
     /></label
   >
-  <button class="btn" disabled={busy}>Add rule</button>
+  <button class="panel-button" disabled={busy}>Add rule</button>
 </form>
 
 <h2>Decision history</h2>
@@ -121,6 +121,6 @@
     {/each}
   </ul>
 {/if}
-<a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+<a class="panel-button" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
   >Back to agent</a
 >

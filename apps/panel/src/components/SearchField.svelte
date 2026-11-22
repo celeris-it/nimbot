@@ -7,7 +7,7 @@
   }: { label?: string; placeholder?: string; value?: string } = $props();
 </script>
 
-<label class="input" data-ui="search"
+<label class="panel-input" data-ui="search"
   ><Icon name="search" size={17} /><input
     type="search"
     aria-label={label}

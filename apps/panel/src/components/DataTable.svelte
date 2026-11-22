@@ -20,7 +20,7 @@
 <!-- Keyboard focus allows native arrow-key scrolling when the table overflows. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div data-ui="table-scroll" tabindex="0" role="region" aria-label={caption}>
-  <table class="table">
+  <table class="panel-table">
     <caption>{caption}</caption><thead
       ><tr
         >{#each columns as column (column)}<th scope="col">{column}</th

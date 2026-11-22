@@ -44,14 +44,14 @@
   </p>
 {/if}
 <section
-  class="card"
+  class="panel-card"
   aria-label={mode === "token" ? "Bot credential" : "Agent settings"}
 >
   <form onsubmit={send} aria-describedby="form-error" aria-busy={busy}>
     {#if mode !== "token"}
       <label for="name">Name</label>
       <input
-        class="input"
+        class="panel-input"
         id="name"
         name="name"
         maxlength="128"
@@ -60,7 +60,7 @@
       />
       <label for="instructions">Instructions (optional)</label>
       <textarea
-        class="textarea"
+        class="panel-textarea"
         id="instructions"
         name="instructions"
         rows="8"
@@ -75,7 +75,7 @@
     {#if mode === "token"}
       <label for="token">New Telegram token</label>
       <input
-        class="input"
+        class="panel-input"
         type="password"
         id="token"
         name="token"
@@ -90,7 +90,7 @@
         again if the operation fails.
       </p>
     {/if}
-    <button class="btn" type="submit" disabled={busy}
+    <button class="panel-button" type="submit" disabled={busy}
       >{busy
         ? "Saving…"
         : mode === "new"
@@ -100,7 +100,7 @@
             : "Save changes"}</button
     >
     <a
-      class="btn"
+      class="panel-button"
       href={agent ? `/agents/${encodeURIComponent(agent.id)}/setup` : "/"}
       >{mode === "new" ? "Cancel" : "Back to agent"}</a
     >

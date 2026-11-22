@@ -23,8 +23,8 @@
 
 {#if href}
   <a
-    class="btn"
-    class:btn-primary={primary}
+    class="panel-button"
+    class:panel-button-primary={primary}
     {href}
     aria-disabled={disabled || undefined}
     tabindex={disabled ? -1 : undefined}
@@ -35,7 +35,12 @@
     >{#if icon}<Icon name={icon} />{/if}{@render children()}</a
   >
 {:else}
-  <button class="btn" class:btn-primary={primary} {type} {disabled} {onclick}
+  <button
+    class="panel-button"
+    class:panel-button-primary={primary}
+    {type}
+    {disabled}
+    {onclick}
     >{#if icon}<Icon name={icon} />{/if}{@render children()}</button
   >
 {/if}

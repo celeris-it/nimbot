@@ -37,7 +37,7 @@
   }
 </script>
 
-<section class="card" aria-label="Discord connection">
+<section class="panel-card" aria-label="Discord connection">
   <h2>Discord connection</h2>
   <p>
     Text messages join this agent's shared queue. Progress, approvals, and
@@ -74,12 +74,16 @@
       Send a fixed test message to the saved Discord owner. Up to five new
       notification attempts per minute are allowed.
     </p>
-    <button class="btn" disabled={busy} onclick={() => testDelivery(true)}
-      >Send Discord test</button
+    <button
+      class="panel-button"
+      disabled={busy}
+      onclick={() => testDelivery(true)}>Send Discord test</button
     >
     {#if requestId}
-      <button class="btn" disabled={busy} onclick={() => testDelivery(false)}
-        >Check last test status</button
+      <button
+        class="panel-button"
+        disabled={busy}
+        onclick={() => testDelivery(false)}>Check last test status</button
       >
       <p>
         Checking reuses the last request and does not send it again. A new test
@@ -92,7 +96,7 @@
   <form onsubmit={save} aria-busy={busy} aria-describedby="form-error">
     <label for="discord-owner">Owner's Discord user ID</label>
     <input
-      class="input"
+      class="panel-input"
       id="discord-owner"
       name="ownerId"
       inputmode="numeric"
@@ -109,7 +113,7 @@
     </p>
     <label for="discord-token">Discord bot token</label>
     <input
-      class="input"
+      class="panel-input"
       id="discord-token"
       name="token"
       type="password"
@@ -123,7 +127,7 @@
       Create a bot in the Discord Developer Portal. Its token is stored
       privately and never shown here. Enter it again if saving fails.
     </p>
-    <button class="btn" type="submit" disabled={busy}
+    <button class="panel-button" type="submit" disabled={busy}
       >{busy
         ? "Saving…"
         : agent.discord?.connection
@@ -140,7 +144,7 @@
     <form onsubmit={remove} aria-busy={busy} aria-describedby="form-error">
       <label for="discord-confirm">Type {agent.id} to confirm removal</label>
       <input
-        class="input"
+        class="panel-input"
         id="discord-confirm"
         name="confirm"
         autocomplete="off"
@@ -148,7 +152,7 @@
         bind:value={confirmation}
       />
       <button
-        class="btn"
+        class="panel-button"
         type="submit"
         disabled={busy || confirmation !== agent.id}
         >Remove Discord connection</button

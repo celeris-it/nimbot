@@ -118,7 +118,7 @@ One Nimbot Server serves the administration panel, maintains a separate Telegram
 
 - **Nimbot Server:** authentication, bot credentials and connections, owner authorization, agent registration, task routing and scheduling, process lifecycle, and diagnostics. Agent-generated commands run only in Agent Host processes, never in the Server process.
 - **Agent Host:** a separate child process per agent in both native and Docker deployments, using OpenCode as its sole AI engine and running the tools, tasks, workspace, and conversation state. An authenticated private API connects it to the server. Platform-specific code stays outside the runtime; OpenCode-specific code stays behind the engine interface.
-- **Panel:** Svelte 5, TypeScript, Vite, and daisyUI. Hono serves compiled assets and the same-origin API from one process. JavaScript is required; visible views refresh every five seconds and forms submit without document reloads.
+- **Panel:** Svelte 5, TypeScript, Vite, Tailwind CSS, and Iconify. Hono serves compiled assets and the same-origin API from one process. JavaScript is required; visible views refresh every five seconds and forms submit without document reloads.
 - **Storage:** SQLite and persistent directories, stored in one named volume for the Docker deployment. No PostgreSQL, Redis, Kubernetes, message broker, or separate frontend service is required.
 
 The stack uses strict TypeScript on Node.js, pnpm workspaces, Hono, Zod, grammY, Drizzle for task persistence, Node's built-in SQLite API for the registry, Docker, Playwright, Vitest, ESLint, and Prettier.

@@ -238,7 +238,8 @@ test("keeps changed MCP tools disabled until an explicit schema review is saved"
     });
   }
   const colors = await page
-    .locator(".alert[role=alert]")
+    .getByRole("alert")
+    .filter({ hasText: "Some tools are disabled" })
     .evaluate((element) => {
       const style = getComputedStyle(element);
       const canvas = document.createElement("canvas");
@@ -1217,7 +1218,12 @@ test("keeps the agent top bar on one line and exposes overflow by keyboard", asy
     animations: "disabled",
   });
   await page.keyboard.press("Tab");
-  await expect(nav.locator(".dropdown-content a").first()).toBeFocused();
+  const firstOverflowLink = nav
+    .locator('[data-ui="agent-nav-options"]')
+    .getByRole("link")
+    .first();
+  await expect(firstOverflowLink).toBeFocused();
+  await expect(firstOverflowLink).toHaveCSS("outline-style", "solid");
   await page.keyboard.press("Escape");
   await expect(edit).toBeHidden();
   await expect(more).toBeFocused();
@@ -1385,14 +1391,19 @@ test("keeps forms within mobile widths and retains readable theme contrast", asy
         b = luminance(second);
       return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
     }
-    return ["body", ".card", "button.btn", ".input"].map((selector) => {
+    return [
+      "body",
+      'section[aria-label="Agent settings"]',
+      'section[aria-label="Agent settings"] button[type="submit"]',
+      "input#name",
+    ].map((selector) => {
       const element = document.querySelector(selector)!;
       const style = getComputedStyle(element);
       return {
         selector,
         text: ratio(style.color, style.backgroundColor),
         border:
-          selector === ".input"
+          selector === "input#name"
             ? ratio(style.borderColor, style.backgroundColor)
             : undefined,
       };
@@ -1453,13 +1464,15 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
   await login(page);
   const overview = page.getByLabel("Agent overview");
   await expect(
-    overview.locator(".stat").filter({ hasText: "Total agents" }),
+    overview.locator('[data-ui="metric"]').filter({ hasText: "Total agents" }),
   ).toContainText("03");
   await expect(
-    overview.locator(".stat").filter({ hasText: "Running" }),
+    overview.locator('[data-ui="metric"]').filter({ hasText: "Running" }),
   ).toContainText("01");
   await expect(
-    overview.locator(".stat").filter({ hasText: "Needs attention" }),
+    overview
+      .locator('[data-ui="metric"]')
+      .filter({ hasText: "Needs attention" }),
   ).toContainText("01");
   const filters = page.getByRole("group", { name: "Filter agents" });
   await filters.getByRole("button", { name: /Needs attention/ }).click();
@@ -1576,6 +1589,16 @@ test("renders the reference-inspired dashboard across screen sizes without exter
     }),
   );
   await login(page);
+  const refreshIcon = page
+    .getByRole("button", { name: "Refresh status" })
+    .locator('[data-ui="icon"]');
+  await expect(refreshIcon).toBeVisible();
+  await expect(refreshIcon).toHaveCSS(
+    "mask-image",
+    /url\("data:image\/svg\+xml/,
+  );
+  await expect(refreshIcon).toHaveCSS("width", "18px");
+  await expect(refreshIcon).toHaveAttribute("aria-hidden", "true");
   await page.evaluate(() => document.fonts.ready);
   expect(
     await page.evaluate(() =>

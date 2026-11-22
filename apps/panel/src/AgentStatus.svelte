@@ -65,7 +65,7 @@
 </script>
 
 <h1 tabindex="-1">{agent.name}</h1>
-<section class="card" aria-label="Creation result">
+<section class="panel-card" aria-label="Creation result">
   <h2>
     {agent.process
       ? `Agent Host ${processLabels[agent.process.state].toLowerCase()}.`
@@ -80,17 +80,17 @@
         : "leave this agent stopped"}.
     </p>
     {#if agent.capabilities.process?.start}<button
-        class="btn"
+        class="panel-button"
         disabled={busy}
         onclick={() => action("start")}
         >{busy ? "Starting…" : "Start agent"}</button
       >{/if}
     {#if agent.capabilities.process?.stop}<a
-        class="btn"
+        class="panel-button"
         href={`${base}/process/stop`}>Stop agent…</a
       >{/if}
     {#if agent.capabilities.process?.restart}<a
-        class="btn"
+        class="panel-button"
         href={`${base}/process/restart`}>Restart agent…</a
       >{/if}
   {/if}
@@ -130,14 +130,14 @@
     <dt>Identifier</dt>
     <dd>{agent.id}</dd>
   </dl>
-  <button class="btn" onclick={refresh}>Refresh status</button>
-  {#if agent.capabilities.delete}<a class="btn" href={`${base}/delete`}
+  <button class="panel-button" onclick={refresh}>Refresh status</button>
+  {#if agent.capabilities.delete}<a class="panel-button" href={`${base}/delete`}
       >Delete agent…</a
     >{/if}
-  <a class="btn" href="/">Back to panel</a>
+  <a class="panel-button" href="/">Back to panel</a>
 </section>
 
-<section class="card" aria-label="Telegram connection">
+<section class="panel-card" aria-label="Telegram connection">
   <h2>Telegram connection</h2>
   {#if agent.capabilities.connectTelegram}
     <p>
@@ -151,7 +151,7 @@
     >
       <label for="telegram-owner">Owner's Telegram ID</label>
       <input
-        class="input"
+        class="panel-input"
         id="telegram-owner"
         inputmode="numeric"
         pattern="[1-9][0-9]*"
@@ -160,7 +160,7 @@
       />
       <label for="telegram-token">Telegram bot token</label>
       <input
-        class="input"
+        class="panel-input"
         id="telegram-token"
         type="password"
         maxlength="256"
@@ -168,7 +168,7 @@
         required
         bind:value={telegramToken}
       />
-      <button class="btn" type="submit" disabled={busy}
+      <button class="panel-button" type="submit" disabled={busy}
         >{busy ? "Saving…" : "Connect Telegram"}</button
       >
     </form>
@@ -193,8 +193,9 @@
         link the chat.
       </p>
     {/if}
-    {#if agent.capabilities.replaceToken}<a class="btn" href={`${base}/token`}
-        >Replace bot token</a
+    {#if agent.capabilities.replaceToken}<a
+        class="panel-button"
+        href={`${base}/token`}>Replace bot token</a
       >{/if}
   {:else}
     <p>Telegram is unavailable.</p>

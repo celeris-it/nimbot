@@ -27,15 +27,18 @@
 </script>
 
 <h1 tabindex="-1">MCP access for {agent.name}</h1>
-<a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+<a class="panel-button" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
   >Back to agent</a
 >
-<a class="btn" href="/mcp">MCP catalog</a>
+<a class="panel-button" href="/mcp">MCP catalog</a>
 {#if definitions.length === 0}
   <p>No integrations in the catalog.</p>
 {:else}
   {#each definitions as definition (definition.id)}
-    <section class="card" aria-labelledby={`integration-${definition.id}`}>
+    <section
+      class="panel-card"
+      aria-labelledby={`integration-${definition.id}`}
+    >
       <h2 id={`integration-${definition.id}`}>{definition.label}</h2>
       <p>
         {definition.granted ? "Access granted" : "Access withheld"} · {definition.enabled
@@ -55,7 +58,7 @@
         <form aria-busy={busy} onsubmit={(event) => save(event, definition)}>
           <label for={`credential-${definition.id}`}>Bearer credential</label>
           <input
-            class="input"
+            class="panel-input"
             id={`credential-${definition.id}`}
             type="password"
             bind:value={tokens[definition.id]}
@@ -63,7 +66,7 @@
             autocomplete="new-password"
             required
           />
-          <button class="btn" disabled={busy} type="submit"
+          <button class="panel-button" disabled={busy} type="submit"
             >{definition.hasCredential
               ? "Replace credential"
               : "Save credential"}</button
@@ -71,14 +74,14 @@
         </form>
         {#if definition.hasCredential}
           <button
-            class="btn"
+            class="panel-button"
             disabled={busy}
             onclick={() => action(definition, "credential", null)}
             >Remove credential</button
           >
         {/if}
         <button
-          class="btn"
+          class="panel-button"
           disabled={busy}
           onclick={() => {
             delete tokens[definition.id];
@@ -87,7 +90,7 @@
         >
       {:else}
         <button
-          class="btn"
+          class="panel-button"
           disabled={busy}
           onclick={() => action(definition, "grant")}>Grant access</button
         >

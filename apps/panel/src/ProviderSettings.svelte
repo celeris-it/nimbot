@@ -72,7 +72,9 @@
 </p>
 {#if !settings}
   <p role="status">Provider settings unavailable. Refresh to try again.</p>
-  <button class="btn" onclick={refresh}>Refresh provider settings</button>
+  <button class="panel-button" onclick={refresh}
+    >Refresh provider settings</button
+  >
 {:else}
   {#if settings.busy && !waiting}<p role="status">
       An authentication change is in progress.
@@ -81,7 +83,7 @@
       The previous login was interrupted. Start a new login.
     </p>{/if}
   {#each settings.providers as provider (provider.id)}
-    <section class="card" aria-label={provider.name}>
+    <section class="panel-card" aria-label={provider.name}>
       <h2>{provider.name}</h2>
       <p>
         {provider.method === "device"
@@ -102,7 +104,7 @@
         >
           <label for={`key-${provider.id}`}>{provider.name} API key</label>
           <input
-            class="input"
+            class="panel-input"
             id={`key-${provider.id}`}
             name="key"
             type="password"
@@ -112,7 +114,7 @@
             bind:value={keys[provider.id]}
             disabled={blocked}
           />
-          <button class="btn" type="submit" disabled={blocked}
+          <button class="panel-button" type="submit" disabled={blocked}
             >{provider.method ? "Replace with API key" : "Save API key"}</button
           >
         </form>
@@ -131,7 +133,7 @@
           </p>
         {/if}
         <button
-          class="btn"
+          class="panel-button"
           disabled={blocked}
           onclick={() => {
             interrupted = false;
@@ -159,7 +161,7 @@
                 > and enter this code:
               </p>
               <p><code>{settings.login.code}</code></p>
-              <button class="btn" onclick={copy}>Copy code</button>
+              <button class="panel-button" onclick={copy}>Copy code</button>
               <p>{copied}</p>
               <p>Waiting for authorization.</p>
             {:else if settings.login.state === "completed"}<p>
@@ -181,7 +183,7 @@
               </p>{/if}
           </div>
           {#if waiting}<button
-              class="btn"
+              class="panel-button"
               disabled={busy}
               onclick={() => action(provider.id, "cancel", settings?.login?.id)}
               >Cancel device login</button
@@ -189,7 +191,7 @@
         {/if}
       {/if}
       {#if provider.method}<button
-          class="btn"
+          class="panel-button"
           disabled={blocked}
           onclick={() => action(provider.id, "remove")}
           >Disconnect provider</button

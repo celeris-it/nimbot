@@ -10,11 +10,10 @@
   } = $props();
 </script>
 
-<div class="tabs tabs-box" role="group" aria-label={label}>
+<div class="fleet-filters" role="group" aria-label={label}>
   {#each options as option (option.value)}<button
       type="button"
-      class="tab"
-      class:tab-active={value === option.value}
+      class="fleet-filter"
       aria-pressed={value === option.value}
       onclick={() => (value = option.value)}
       >{option.label}{#if option.count !== undefined}<span>{option.count}</span

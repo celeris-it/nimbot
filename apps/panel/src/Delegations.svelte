@@ -41,10 +41,10 @@
 </script>
 
 <h1 tabindex="-1">Delegations from {agent.name}</h1>
-<button class="btn" disabled={busy} onclick={refresh}
+<button class="panel-button" disabled={busy} onclick={refresh}
   >Refresh delegations</button
 >
-<a class="btn" href={`${base}/setup`}>Back to agent</a>
+<a class="panel-button" href={`${base}/setup`}>Back to agent</a>
 {#if !data}
   <p role="status">Delegation history is unavailable. Refresh to try again.</p>
 {:else if data.delegations.length === 0}
@@ -53,7 +53,7 @@
   <ul class="history" aria-label="Delegation history" aria-busy={busy}>
     {#each data.delegations as entry (entry.id)}
       {@const reason = entry.reason ? reasons.get(entry.reason) : undefined}
-      <li class="card">
+      <li class="panel-card">
         <h2>To {entry.targetAgentId}</h2>
         <p>
           <strong>{statuses[entry.status]}</strong>
@@ -65,8 +65,10 @@
         <p class="brief">{entry.briefPreview}</p>
         {#if reason}<p>{reason}</p>{/if}
         {#if entry.canCancel}
-          <button class="btn" disabled={busy} onclick={() => cancel(entry.id)}
-            >Cancel child</button
+          <button
+            class="panel-button"
+            disabled={busy}
+            onclick={() => cancel(entry.id)}>Cancel child</button
           >
         {/if}
       </li>
@@ -76,11 +78,15 @@
 {#if page > 1 || data?.hasMore}
   <nav aria-label="Delegation pages">
     {#if page > 1}
-      <a class="btn" href={`${base}/delegations?page=${page - 1}`}>Previous</a>
+      <a class="panel-button" href={`${base}/delegations?page=${page - 1}`}
+        >Previous</a
+      >
     {/if}
     <span>Page {page}</span>
     {#if data?.hasMore && page < 1000}
-      <a class="btn" href={`${base}/delegations?page=${page + 1}`}>Next</a>
+      <a class="panel-button" href={`${base}/delegations?page=${page + 1}`}
+        >Next</a
+      >
     {/if}
   </nav>
 {/if}

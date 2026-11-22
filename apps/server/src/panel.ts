@@ -198,6 +198,7 @@ export function createPanel(
         styleSrc: ["'self'"],
         connectSrc: ["'self'"],
         fontSrc: ["'self'"],
+        imgSrc: ["data:"],
         formAction: ["'self'"],
         frameAncestors: ["'none'"],
         baseUri: ["'none'"],

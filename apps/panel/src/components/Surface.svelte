@@ -16,9 +16,8 @@
 </script>
 
 <section
-  class="card"
+  class="panel-card"
   data-ui="surface"
-  data-theme="nimbot"
   data-tone={tone}
   aria-label={title}
 >

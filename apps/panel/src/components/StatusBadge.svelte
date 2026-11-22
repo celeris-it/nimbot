@@ -6,4 +6,4 @@
     $props();
 </script>
 
-<span class="badge" data-ui="status" data-tone={tone}>{label}</span>
+<span class="panel-badge" data-ui="status" data-tone={tone}>{label}</span>

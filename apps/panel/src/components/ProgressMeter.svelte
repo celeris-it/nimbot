@@ -13,7 +13,7 @@
 <div data-ui="meter">
   <div><span>{label}</span><span>{value} / {max}</span></div>
   <progress
-    class="progress progress-primary"
+    class="panel-progress"
     aria-label={label}
     value={safeValue}
     max={safeMax}

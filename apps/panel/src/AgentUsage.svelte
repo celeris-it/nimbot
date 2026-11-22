@@ -91,18 +91,19 @@
 
 <h1 tabindex="-1">Model and usage for {agent.name}</h1>
 <nav class="actions" aria-label="Agent actions">
-  <a class="btn" href={`${base}/setup`}>Back to agent</a>
-  <a class="btn" href="/providers">AI providers</a>
-  <button class="btn" onclick={refresh} disabled={busy}>Refresh</button>
+  <a class="panel-button" href={`${base}/setup`}>Back to agent</a>
+  <a class="panel-button" href="/providers">AI providers</a>
+  <button class="panel-button" onclick={refresh} disabled={busy}>Refresh</button
+  >
 </nav>
 
-<section class="card" aria-labelledby="model-heading">
+<section class="panel-card" aria-labelledby="model-heading">
   <h2 id="model-heading">Model</h2>
   {#if catalog}
     <form onsubmit={submit} aria-busy={busy}>
       <label for="agent-model">Model for new turns</label>
       <select
-        class="select"
+        class="panel-select"
         id="agent-model"
         name="model"
         bind:value={selection}
@@ -120,7 +121,9 @@
           >
         {/each}
       </select>
-      <button class="btn" type="submit" disabled={busy}>Save model</button>
+      <button class="panel-button" type="submit" disabled={busy}
+        >Save model</button
+      >
     </form>
     {#if !catalog.catalogAvailable}
       <p role="status">Model catalog unavailable.</p>
@@ -130,7 +133,7 @@
   {/if}
 </section>
 
-<section class="card" aria-labelledby="quota-heading">
+<section class="panel-card" aria-labelledby="quota-heading">
   <h2 id="quota-heading">OpenCode quota</h2>
   {#if data?.quota}
     {@const quota = data.quota}
@@ -174,7 +177,7 @@
   {#if data}
     <div class="totals">
       {#each [{ name: "Today (UTC)", value: data.today }, { name: "This month (UTC)", value: data.month }] as total (total.name)}
-        <div class="card">
+        <div class="panel-card">
           <h3>{total.name}</h3>
           <dl>
             <div>
@@ -202,7 +205,7 @@
     </div>
     {#if data.tasks.length}
       <div class="history">
-        <table class="table">
+        <table class="panel-table">
           <caption>Task usage history</caption>
           <thead>
             <tr
@@ -262,9 +265,12 @@
     {/if}
     {#if before || data.next}
       <nav class="actions" aria-label="Usage history pages">
-        {#if before}<a class="btn" href={`${base}/usage`}>Newest tasks</a>{/if}
-        {#if data.next}<a class="btn" href={`${base}/usage?before=${data.next}`}
-            >Older tasks</a
+        {#if before}<a class="panel-button" href={`${base}/usage`}
+            >Newest tasks</a
+          >{/if}
+        {#if data.next}<a
+            class="panel-button"
+            href={`${base}/usage?before=${data.next}`}>Older tasks</a
           >{/if}
       </nav>
     {/if}
@@ -288,9 +294,6 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
     gap: 0.75rem;
-  }
-  .select {
-    max-width: 100%;
   }
   .history {
     overflow-x: auto;

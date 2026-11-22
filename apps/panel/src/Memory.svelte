@@ -34,7 +34,10 @@
     Memory tools are <strong>{enabled ? "on" : "off"}</strong> for chat tasks of this
     agent. Scheduled and webhook tasks never get them.
   </p>
-  <button class="btn" disabled={busy} onclick={() => setEnabled(!enabled)}
+  <button
+    class="panel-button"
+    disabled={busy}
+    onclick={() => setEnabled(!enabled)}
     >{enabled ? "Turn memory off" : "Turn memory on"}</button
   >
 {/if}
@@ -42,7 +45,7 @@
   <p role="status">
     Memory unavailable. Start the agent and refresh to try again.
   </p>
-  <button class="btn" onclick={() => go(page)}>Refresh memory</button>
+  <button class="panel-button" onclick={() => go(page)}>Refresh memory</button>
 {:else if memories.memories.length === 0}
   <p role="status">No saved notes{page > 1 ? " on this page" : ""}.</p>
 {:else}
@@ -57,7 +60,7 @@
             · Expires {date(memory.expiresAt)}{/if}
         </p>
         <button
-          class="btn"
+          class="panel-button"
           disabled={busy}
           aria-label={`Delete note ${memory.title}`}
           onclick={() => remove(memory.id)}>Delete</button
@@ -67,15 +70,17 @@
   </ul>
 {/if}
 <nav aria-label="Memory pages">
-  <button class="btn" disabled={busy || page <= 1} onclick={() => go(page - 1)}
-    >Previous</button
+  <button
+    class="panel-button"
+    disabled={busy || page <= 1}
+    onclick={() => go(page - 1)}>Previous</button
   >
   <button
-    class="btn"
+    class="panel-button"
     disabled={busy || !memories?.hasMore}
     onclick={() => go(page + 1)}>Next</button
   >
 </nav>
-<a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+<a class="panel-button" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
   >Back to agent</a
 >

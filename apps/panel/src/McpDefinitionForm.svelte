@@ -128,14 +128,14 @@
 
 <form aria-busy={busy} onsubmit={submit}>
   {#if definition?.blockedTools?.length}
-    <p class="alert" role="alert">
+    <p class="panel-alert" role="alert">
       Some tools are disabled after a remote change. Review their schemas and
       access before approving them again.
     </p>
   {/if}
   <label for="integration-label">Integration name</label>
   <input
-    class="input"
+    class="panel-input"
     id="integration-label"
     bind:value={label}
     maxlength="96"
@@ -143,7 +143,7 @@
   />
   <label for="integration-endpoint">HTTPS endpoint</label>
   <input
-    class="input"
+    class="panel-input"
     id="integration-endpoint"
     type="url"
     bind:value={endpoint}
@@ -156,13 +156,18 @@
     credentials.
   </p>
   <label
-    ><input class="checkbox" type="checkbox" bind:checked={enabled} /> Enable integration</label
+    ><input class="panel-checkbox" type="checkbox" bind:checked={enabled} /> Enable
+    integration</label
   >
 
   {#if definition}
     <h2>Connection test</h2>
     <label for="mcp-discovery-credential">Connection credential</label>
-    <select id="mcp-discovery-credential" bind:value={credentialAgent}>
+    <select
+      class="panel-select"
+      id="mcp-discovery-credential"
+      bind:value={credentialAgent}
+    >
       <option value="">No credential</option>
       {#each discoveryAgents as agent (agent.id)}
         <option value={agent.id}>{agent.name} ({agent.id})</option>
@@ -172,7 +177,7 @@
         Save the endpoint before testing the connection.
       </p>{/if}
     <button
-      class="btn"
+      class="panel-button"
       type="button"
       disabled={busy || endpointChanged}
       onclick={testConnection}>Test connection</button
@@ -190,7 +195,7 @@
               <li>
                 <code>{tool.name}</code>
                 <button
-                  class="btn"
+                  class="panel-button"
                   type="button"
                   disabled={busy ||
                     (tools.length >= 32 &&
@@ -214,11 +219,11 @@
   <h2>Approved tools</h2>
   {#if tools.length === 0}<p>No tools selected.</p>{/if}
   {#each tools as tool (tool.id)}
-    <fieldset class="card">
+    <fieldset class="panel-card">
       <legend>{tool.name || "New tool"}</legend>
       <label for={`mcp-tool-name-${tool.id}`}>Tool name</label>
       <input
-        class="input"
+        class="panel-input"
         id={`mcp-tool-name-${tool.id}`}
         bind:value={tool.name}
         oninput={() => (tool.reviewed = false)}
@@ -227,6 +232,7 @@
       />
       <label for={`mcp-tool-access-${tool.id}`}>Access</label>
       <select
+        class="panel-select"
         id={`mcp-tool-access-${tool.id}`}
         bind:value={tool.access}
         onchange={() => (tool.reviewed = false)}
@@ -236,7 +242,7 @@
       </select>
       <label for={`mcp-tool-schema-${tool.id}`}>Argument schema (JSON)</label>
       <textarea
-        class="textarea"
+        class="panel-textarea"
         id={`mcp-tool-schema-${tool.id}`}
         bind:value={tool.schema}
         oninput={() => (tool.reviewed = false)}
@@ -250,7 +256,7 @@
         </p>
         <label
           ><input
-            class="checkbox"
+            class="panel-checkbox"
             type="checkbox"
             bind:checked={tool.reviewed}
             disabled={busy}
@@ -260,7 +266,7 @@
         >
       {/if}
       <button
-        class="btn"
+        class="panel-button"
         type="button"
         disabled={busy}
         onclick={() => (tools = tools.filter((item) => item.id !== tool.id))}
@@ -271,13 +277,15 @@
   {#if parseError}<p role="alert">{parseError}</p>{/if}
   <div class="actions">
     <button
-      class="btn"
+      class="panel-button"
       type="button"
       disabled={busy || tools.length >= 32}
       onclick={addTool}>Add tool</button
     >
-    <button class="btn btn-primary" type="submit" disabled={busy}
-      >Save integration</button
+    <button
+      class="panel-button panel-button-primary"
+      type="submit"
+      disabled={busy}>Save integration</button
     >
   </div>
 </form>

@@ -44,7 +44,7 @@
         <li>
           {label[item.permission]} → <strong>{name(item.targetAgentId)}</strong>
           <button
-            class="btn"
+            class="panel-button"
             disabled={busy}
             aria-label={`Revoke ${label[item.permission]} to ${name(item.targetAgentId)}`}
             onclick={() => revoke(item.targetAgentId, item.permission)}
@@ -62,7 +62,7 @@
     <form onsubmit={submit}>
       <label>
         Target agent
-        <select bind:value={target} required>
+        <select class="panel-select" bind:value={target} required>
           <option value="" disabled>Choose an agent</option>
           {#each data.candidates as candidate (candidate.id)}
             <option value={candidate.id}>{candidate.name}</option>
@@ -71,15 +71,15 @@
       </label>
       <label>
         Permission
-        <select bind:value={permission}>
+        <select class="panel-select" bind:value={permission}>
           <option value="note">Send notes</option>
           <option value="delegate">Delegate tasks</option>
         </select>
       </label>
-      <button class="btn" disabled={busy || !target}>Add grant</button>
+      <button class="panel-button" disabled={busy || !target}>Add grant</button>
     </form>
   {/if}
 {/if}
-<a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+<a class="panel-button" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
   >Back to agent</a
 >

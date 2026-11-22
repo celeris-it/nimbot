@@ -72,7 +72,7 @@
   </div>
   <div data-ui="heading-actions">
     <button
-      class="btn btn-circle btn-ghost"
+      class="panel-button panel-button-icon panel-button-ghost"
       aria-label="Refresh status"
       onclick={refresh}><Icon name="refresh" /></button
     >{#if canCreate}<ActionButton primary href="/agents/new" icon="plus"
@@ -89,7 +89,7 @@
     {#snippet actions()}<span data-ui="icon-disc"
         ><Icon name="grid" size={17} /></span
       >{/snippet}
-    <div class="stats" aria-label="Agent overview">
+    <div class="metrics" aria-label="Agent overview">
       <Metric
         label="Total agents"
         value={agents.length.toString().padStart(2, "0")}
@@ -107,7 +107,7 @@
       />
     </div>
     <div data-ui="overview-footer">
-      <div class="avatar-group">
+      <div class="agent-avatar-group">
         {#each agents.slice(0, 4) as item (item.id)}<AgentAvatar
             name={item.name}
             small
@@ -119,7 +119,7 @@
           : "Your next idea starts with an agent."}
       </p>
       {#if canCreate}<a
-          class="btn btn-circle btn-ghost"
+          class="panel-button panel-button-icon panel-button-ghost"
           href="/agents/new"
           aria-label="Add a workspace"><Icon name="arrow" size={16} /></a
         >{/if}
@@ -148,8 +148,8 @@
 
 <div data-ui="workspace-toolbar">
   <div>
-    <Icon name="grid" size={16} /><strong>Your fleet</strong><span class="badge"
-      >{agents.length}</span
+    <Icon name="grid" size={16} /><strong>Your fleet</strong><span
+      class="panel-badge">{agents.length}</span
     >
   </div>
   <SearchField
@@ -193,7 +193,7 @@
       icon="search"
     >
       {#snippet actions()}<button
-          class="btn"
+          class="panel-button"
           onclick={() => {
             query = "";
             filter = "all";
@@ -222,11 +222,7 @@
           </button>
         {/each}
       </div>
-      <article
-        data-ui="agent-preview"
-        data-theme="nimbot"
-        aria-label="Selected agent"
-      >
+      <article data-ui="agent-preview" aria-label="Selected agent">
         <div data-ui="preview-top">
           <span data-ui="eyebrow">AGENT WORKSPACE</span><StatusBadge
             label={setupLabel(selected)}

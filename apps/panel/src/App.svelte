@@ -880,7 +880,7 @@
         ><Icon name="shield" size={15} />
         {native ? "Native development" : "Docker deployment"}</span
       ><button
-        class="btn btn-ghost"
+        class="panel-button panel-button-ghost"
         disabled={busy}
         onclick={() => mutate("/api/logout", {}, expired)}
         ><Icon name="logout" size={16} /> Sign out</button
@@ -897,7 +897,7 @@
     data-expanded={navigationExpanded}
   >
     <button
-      class="btn btn-ghost"
+      class="panel-button panel-button-ghost"
       type="button"
       aria-label={navigationExpanded ? "Hide labels" : "Show labels"}
       aria-expanded={navigationExpanded}
@@ -907,7 +907,7 @@
       <Icon name={navigationExpanded ? "collapsePanel" : "expandPanel"} />
       {#if navigationExpanded}<span>Hide labels</span>{/if}
     </button>
-    <ul class="menu" id="main-navigation-links">
+    <ul class="panel-menu" id="main-navigation-links">
       {#each mainLinks as link (link.href)}
         <li>
           <a
@@ -942,17 +942,18 @@
   <p id="form-error" role="alert" tabindex="-1">{error}</p>
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if updateError}<p role="status">{updateError}</p>
-    <button class="btn" onclick={() => load()}>Refresh status</button>{/if}
+    <button class="panel-button" onclick={() => load()}>Refresh status</button
+    >{/if}
   {#if path === "/login"}
     <section aria-label="Sign in">
       <small>ADMINISTRATION</small>
       <h1 tabindex="-1">Your agent workspace.</h1>
       <p>Sign in to check the status of your installation.</p>
-      <div class="card">
+      <div class="panel-card">
         <form onsubmit={login} aria-describedby="form-error" aria-busy={busy}>
           <label for="password">Administrator password</label>
           <input
-            class="input"
+            class="panel-input"
             id="password"
             name="password"
             type="password"
@@ -963,7 +964,7 @@
             bind:value={password}
           />
           <p id="password-help">Use the password configured on your server.</p>
-          <button class="btn" type="submit" disabled={busy}
+          <button class="panel-button" type="submit" disabled={busy}
             >{busy ? "Signing in…" : "Sign in to the panel"}</button
           >
         </form>
@@ -972,10 +973,10 @@
   {:else if !loaded}<p role="status">Loading…</p>
   {:else if missing}<h1 tabindex="-1">Page not found.</h1>
     <p>This agent or action is no longer available.</p>
-    <a class="btn" href="/">Back to panel</a>
+    <a class="panel-button" href="/">Back to panel</a>
   {:else if !contentAvailable}
     <h1 tabindex="-1">Status unavailable.</h1>
-    <a class="btn" href="/">Back to panel</a>
+    <a class="panel-button" href="/">Back to panel</a>
   {:else if path === "/"}
     <Dashboard
       agents={status.agents}
@@ -985,7 +986,7 @@
   {:else if path === "/settings"}
     <h1 tabindex="-1">Settings</h1>
     <form
-      class="card"
+      class="panel-card"
       aria-busy={busy}
       aria-describedby="form-error"
       onsubmit={(event) => {
@@ -1003,7 +1004,7 @@
       <label for="schedule-default-zone">Schedule time zone</label>
       <input
         id="schedule-default-zone"
-        class="input"
+        class="panel-input"
         aria-describedby="schedule-default-zone-help"
         bind:value={scheduleTimeZone}
         required
@@ -1015,7 +1016,9 @@
         Use an IANA time zone such as America/New_York or UTC. It applies to new
         schedules in Telegram and prefills the schedule form in the panel.
       </p>
-      <button type="submit" class="btn" disabled={busy}>Save settings</button>
+      <button type="submit" class="panel-button" disabled={busy}
+        >Save settings</button
+      >
     </form>
   {:else if path === "/providers"}
     <ProviderSettings
@@ -1028,11 +1031,13 @@
     {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
   {:else if path === "/mcp"}
     <h1 tabindex="-1">MCP catalog</h1>
-    <a class="btn btn-primary" href="/mcp/new">Add integration</a>
+    <a class="panel-button panel-button-primary" href="/mcp/new"
+      >Add integration</a
+    >
     {#if mcpDefinitions.length === 0}
       <p>No integrations in the catalog.</p>
     {:else}
-      <section class="card" aria-label="Integrations">
+      <section class="panel-card" aria-label="Integrations">
         <ul>
           {#each mcpDefinitions as definition (definition.id)}
             <li>
@@ -1040,7 +1045,7 @@
                 >{definition.label}</a
               >
               · {definition.enabled ? "Enabled" : "Disabled"}
-              {#if definition.blockedTools?.length}<span class="badge"
+              {#if definition.blockedTools?.length}<span class="panel-badge"
                   >Review needed</span
                 >{/if}
             </li>
@@ -1052,7 +1057,7 @@
     <h1 tabindex="-1">
       {mcpDefinition ? `Edit ${mcpDefinition.label}` : "Add MCP integration"}
     </h1>
-    <a class="btn" href="/mcp">Back to catalog</a>
+    <a class="panel-button" href="/mcp">Back to catalog</a>
     {#key path + (mcpDefinition?.revision ?? "")}
       <McpDefinitionForm
         definition={mcpDefinition}
@@ -1157,7 +1162,7 @@
         history are kept.
       </p>
       <button
-        class="btn"
+        class="panel-button"
         disabled={busy}
         onclick={() =>
           action(route?.[2] === "process/restart" ? "restart" : "stop")}
@@ -1167,8 +1172,9 @@
             ? "Confirm restart"
             : "Confirm stop"}</button
       >
-      <a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-        >Cancel</a
+      <a
+        class="panel-button"
+        href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
       >
     {:else if route[2] === "delete"}
       <h1 tabindex="-1">Delete {agent.name}?</h1>
@@ -1191,14 +1197,19 @@
         aria-busy={busy}
       >
         <label
-          ><input class="checkbox" type="checkbox" bind:checked={deleteData} />
+          ><input
+            class="panel-checkbox"
+            type="checkbox"
+            bind:checked={deleteData}
+          />
           Also permanently delete the agent data directory and AI conversation history,
           including its workspace, task history and browser profile.</label
         >
-        <button class="btn" type="submit" disabled={busy}
+        <button class="panel-button" type="submit" disabled={busy}
           >Confirm deletion</button
-        ><a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-          >Cancel</a
+        ><a
+          class="panel-button"
+          href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
         >
       </form>
     {/if}

@@ -103,7 +103,7 @@
     {/each}
     {#if overflow.length}
       <details
-        class="dropdown dropdown-end"
+        class="agent-nav-overflow"
         bind:this={more}
         onfocusout={dismissOnFocusOut}
       >
@@ -115,7 +115,7 @@
         >
           <Icon name="ellipsis" size={20} />
         </summary>
-        <ul class="menu dropdown-content">
+        <ul class="panel-menu agent-nav-options" data-ui="agent-nav-options">
           {#each overflow as link (link.view)}
             <li>{@render linkItem(link)}</li>
           {/each}

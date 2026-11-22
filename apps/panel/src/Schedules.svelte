@@ -236,18 +236,20 @@
     </p>
   {/if}
   <div data-ui="schedule-actions">
-    <a class="btn" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-      >{text.back}</a
+    <a
+      class="panel-button"
+      href={`/agents/${encodeURIComponent(agent.id)}/setup`}>{text.back}</a
     >
     <button
-      class="btn"
+      class="panel-button"
       id="new-schedule"
       disabled={busy || atLimit}
       onclick={() => openForm()}
       aria-describedby={atLimit ? "schedule-limit" : undefined}
       >{text.new}</button
     >
-    <button class="btn" disabled={busy} onclick={refresh}>{text.refresh}</button
+    <button class="panel-button" disabled={busy} onclick={refresh}
+      >{text.refresh}</button
     >
   </div>
   <p data-ui="muted">
@@ -255,7 +257,7 @@
   </p>
   {#if atLimit}<p id="schedule-limit" role="status">{text.limit}</p>{/if}
   {#if formVisible}
-    <section class="card" aria-labelledby="schedule-form-heading">
+    <section class="panel-card" aria-labelledby="schedule-form-heading">
       <h2 id="schedule-form-heading">{editId ? text.editTitle : text.new}</h2>
       {#if editId}<p>{text.editHelp}</p>{/if}
       <form
@@ -264,10 +266,10 @@
         aria-describedby="schedule-costs form-error schedule-form-error"
       >
         <p id="schedule-form-error" role="alert" tabindex="-1">{localError}</p>
-        <fieldset class="fieldset" disabled={busy}>
+        <fieldset class="schedule-fields" disabled={busy}>
           <label for="schedule-name">{text.name}</label>
           <input
-            class="input"
+            class="panel-input"
             id="schedule-name"
             name="name"
             required
@@ -276,7 +278,7 @@
           />
           <label for="schedule-prompt">{text.prompt}</label>
           <textarea
-            class="textarea"
+            class="panel-textarea"
             id="schedule-prompt"
             name="prompt"
             required
@@ -287,7 +289,7 @@
           <p id="schedule-prompt-help">{text.promptHelp}</p>
           <label for="schedule-delivery">Delivery channel</label>
           <select
-            class="select"
+            class="panel-select"
             id="schedule-delivery"
             bind:value={deliveryChannel}
           >
@@ -300,7 +302,7 @@
             </p>
           {/if}
           <label for="schedule-kind">{text.kind}</label>
-          <select class="select" id="schedule-kind" bind:value={kind}>
+          <select class="panel-select" id="schedule-kind" bind:value={kind}>
             {#each Object.entries(scheduleKinds) as [value, label] (value)}<option
                 {value}>{label}</option
               >{/each}
@@ -308,7 +310,7 @@
           {#if kind === "once"}
             <label for="schedule-date">{text.date}</label>
             <input
-              class="input"
+              class="panel-input"
               id="schedule-date"
               type="date"
               required
@@ -320,7 +322,7 @@
           {#if kind === "cron"}
             <label for="schedule-cron">{scheduleKinds.cron}</label>
             <input
-              class="input font-mono"
+              class="panel-input font-mono"
               id="schedule-cron"
               required
               maxlength={data.limits.maxCronExpressionLength}
@@ -338,7 +340,7 @@
           {:else if kind !== "interval" && kind !== "webhook"}
             <label for="schedule-time">{text.time}</label>
             <input
-              class="input"
+              class="panel-input"
               id="schedule-time"
               type="time"
               required
@@ -349,7 +351,7 @@
           {:else if kind === "interval"}
             <label for="schedule-minutes">{text.minutes}</label>
             <input
-              class="input"
+              class="panel-input"
               id="schedule-minutes"
               type="number"
               min={data.limits.minIntervalMinutes}
@@ -363,12 +365,15 @@
             </p>
           {/if}
           {#if kind === "weekly"}
-            <fieldset class="fieldset" aria-describedby="schedule-form-error">
-              <legend class="fieldset-legend">{text.weekdays}</legend>
+            <fieldset
+              class="schedule-fields"
+              aria-describedby="schedule-form-error"
+            >
+              <legend class="py-2 font-semibold">{text.weekdays}</legend>
               <div data-ui="schedule-weekdays">
                 {#each scheduleWeekdays as day, index (day)}<label
                     ><input
-                      class="checkbox"
+                      class="panel-checkbox"
                       type="checkbox"
                       aria-invalid={invalid === "weekdays"}
                       value={index}
@@ -381,7 +386,7 @@
           {#if kind !== "webhook"}
             <label for="schedule-zone">{text.zone}</label>
             <input
-              class="input"
+              class="panel-input"
               id="schedule-zone"
               required
               bind:value={timeZone}
@@ -401,10 +406,10 @@
             </section>
           {/if}
           <div data-ui="schedule-actions">
-            <button class="btn" type="submit"
+            <button class="panel-button" type="submit"
               >{busy ? text.saving : editId ? text.save : text.create}</button
             >
-            <button class="btn" type="button" onclick={closeForm}
+            <button class="panel-button" type="button" onclick={closeForm}
               >{text.cancel}</button
             >
           </div>
@@ -414,10 +419,10 @@
   {/if}
   {#if data.schedules.length === 0}<p>{text.none}</p>{/if}
   {#each data.schedules as schedule (schedule.id)}
-    <section class="card" aria-labelledby={`schedule-${schedule.id}`}>
+    <section class="panel-card" aria-labelledby={`schedule-${schedule.id}`}>
       <div data-ui="schedule-heading">
         <h2 id={`schedule-${schedule.id}`}>{schedule.name}</h2>
-        <span class="badge">{scheduleStateLabel(schedule)}</span>
+        <span class="panel-badge">{scheduleStateLabel(schedule)}</span>
       </div>
       <p>{scheduleCadenceLabel(schedule.cadence)}</p>
       <p>
@@ -443,34 +448,38 @@
       </dl>
       <div data-ui="schedule-actions">
         <button
-          class="btn"
+          class="panel-button"
           disabled={busy}
           onclick={() =>
             action(schedule.id, schedule.enabled ? "pause" : "resume")}
           >{schedule.enabled ? text.pause : text.resume}</button
         >
         <button
-          class="btn"
+          class="panel-button"
           disabled={busy}
           onclick={() => action(schedule.id, "run")}>{text.run}</button
         >
-        <button class="btn" disabled={busy} onclick={() => openForm(schedule)}
-          >{text.edit}</button
+        <button
+          class="panel-button"
+          disabled={busy}
+          onclick={() => openForm(schedule)}>{text.edit}</button
         >
-        <button class="btn" disabled={busy} onclick={() => remove(schedule)}
-          >{text.remove}</button
+        <button
+          class="panel-button"
+          disabled={busy}
+          onclick={() => remove(schedule)}>{text.remove}</button
         >
       </div>
       {#if schedule.cadence.kind === "webhook"}
         <button
-          class="btn"
+          class="panel-button"
           disabled={busy || webhookBusy}
           onclick={() => loadWebhook(schedule.id)}>{text.webhookShow}</button
         >
         {#if webhook?.id === schedule.id}
           <label for={`webhook-url-${schedule.id}`}>{text.webhookUrl}</label>
           <input
-            class="input"
+            class="panel-input"
             id={`webhook-url-${schedule.id}`}
             readonly
             value={webhook.url}
@@ -478,7 +487,7 @@
           <label for={`webhook-token-${schedule.id}`}>{text.webhookToken}</label
           >
           <input
-            class="input"
+            class="panel-input"
             id={`webhook-token-${schedule.id}`}
             readonly
             value={webhook.token}
@@ -486,13 +495,13 @@
           <p>{text.webhookHelp}</p>
           <div data-ui="schedule-actions">
             <button
-              class="btn"
+              class="panel-button"
               disabled={busy || webhookBusy}
               onclick={() => loadWebhook(schedule.id, true)}
               >{text.webhookRotate}</button
             >
             <button
-              class="btn"
+              class="panel-button"
               onclick={() => {
                 webhook = undefined;
               }}>{text.webhookHide}</button
@@ -527,8 +536,8 @@
     gap: 1.25rem;
     margin-top: 1.25rem;
   }
-  [data-ui="schedules"] :global(.btn) {
-    border-color: var(--field-border);
+  [data-ui="schedules"] :global(.panel-button) {
+    border-color: var(--color-field-border);
   }
   [data-ui="schedule-actions"],
   [data-ui="schedule-heading"] {
@@ -547,20 +556,13 @@
   [data-ui="schedule-warning"] {
     color: var(--color-warning);
   }
-  .fieldset {
+  .schedule-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     min-width: 0;
     padding: 0;
     gap: 0.8rem;
     font-size: inherit;
-  }
-  .select {
-    width: 100%;
-    font: inherit;
-    min-height: 48px;
-    background-color: var(--color-base-200);
-    color: var(--color-base-content);
-    border: 1px solid var(--field-border);
-    border-radius: 0.9rem;
   }
   [data-ui="schedule-weekdays"] {
     display: flex;
@@ -572,7 +574,7 @@
     align-items: center;
     min-height: 44px;
   }
-  .input {
+  .panel-input {
     min-width: 0;
   }
   dl {

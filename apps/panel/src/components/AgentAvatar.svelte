@@ -11,6 +11,6 @@
   );
 </script>
 
-<div class="avatar avatar-placeholder" data-small={small} aria-hidden="true">
+<div class="agent-avatar" data-small={small} aria-hidden="true">
   <div><span>{initials}</span></div>
 </div>

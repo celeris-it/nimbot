@@ -705,6 +705,7 @@ it("serves known deep links with a strict production CSP and returns 404 for unk
     const csp = response.headers.get("content-security-policy")!;
     expect(csp).toContain("script-src 'self'");
     expect(csp).toContain("connect-src 'self'");
+    expect(csp).toMatch(/(?:^|;\s*)img-src data:(?:;|$)/);
     expect(csp).not.toMatch(/unsafe-inline|unsafe-eval/);
   }
   for (const path of [

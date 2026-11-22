@@ -14,10 +14,10 @@
   } = $props();
 </script>
 
-<div class="stat">
-  <div class="stat-title">
+<div data-ui="metric">
+  <div class="metric-label">
     {label}{#if icon}<Icon name={icon} size={16} />{/if}
   </div>
-  <div class="stat-value">{value}</div>
-  {#if description}<div class="stat-desc">{description}</div>{/if}
+  <div class="metric-value">{value}</div>
+  {#if description}<div class="metric-description">{description}</div>{/if}
 </div>
