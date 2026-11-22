@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { NOTE_LIMITS, openAgentNotes } from "./agent-notes.js";
-import { openTaskStore } from "./task-queue.js";
+import { openTaskStore } from "./tasks/task-queue.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

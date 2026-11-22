@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createChatSchedules } from "./chat-schedules.js";
 import { openScheduleStore, type ScheduleOrigin } from "./schedule-store.js";
-import type { ChatTask } from "./task-queue.js";
+import type { ChatTask } from "./tasks/task-queue.js";
 
 const origin = { platform: "telegram", botId: 123, chatId: 42 } as const;
 const task: ChatTask = {

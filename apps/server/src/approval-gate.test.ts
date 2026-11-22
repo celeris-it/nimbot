@@ -9,7 +9,7 @@ import {
 } from "./approval-gate.js";
 import { openApprovalRules } from "./approval-rules.js";
 import { openApprovalStore } from "./approval-store.js";
-import type { RoutedTask } from "./task-queue.js";
+import type { RoutedTask } from "./tasks/task-queue.js";
 
 afterEach(() => vi.useRealTimers());
 const telegram = (chatId = 2, id = "t1", agentId = "a"): RoutedTask =>

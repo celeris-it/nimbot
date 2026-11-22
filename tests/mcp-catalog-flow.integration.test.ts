@@ -13,7 +13,7 @@ import {
   createToolBridge,
   type ToolBridge,
 } from "../apps/agent-host/src/tool-bridge.js";
-import { createBotTasks } from "../apps/server/src/bot-tasks.js";
+import { createBotTasks } from "../apps/server/src/tasks/bot-tasks.js";
 import {
   createHostTasks,
   type HostTaskExecution,
@@ -21,7 +21,7 @@ import {
 import {
   openTaskStore,
   type RoutedTask,
-} from "../apps/server/src/task-queue.js";
+} from "../apps/server/src/tasks/task-queue.js";
 import { openScheduleStore } from "../apps/server/src/schedule-store.js";
 import { openApprovalStore } from "../apps/server/src/approval-store.js";
 import { openApprovalRules } from "../apps/server/src/approval-rules.js";

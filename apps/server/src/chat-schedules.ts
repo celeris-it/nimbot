@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { nextRuns } from "./schedule-time.js";
-import type { ServerToolHandler } from "./tool-dispatch.js";
-import type { RoutedTask } from "./task-queue.js";
+import type { ServerToolHandler } from "./tasks/tool-dispatch.js";
+import type { RoutedTask } from "./tasks/task-queue.js";
 import {
   SCHEDULE_LIMITS,
   ScheduleValidationError,

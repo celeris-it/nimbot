@@ -8,9 +8,9 @@ import type { EngineTaskContext } from "../apps/agent-host/src/engine.js";
 import { createHostApi } from "../apps/agent-host/src/http.js";
 import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-store.js";
 import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
-import { createBotTasks } from "../apps/server/src/bot-tasks.js";
+import { createBotTasks } from "../apps/server/src/tasks/bot-tasks.js";
 import { createHostTasks } from "../apps/server/src/host/host-tasks.js";
-import { openTaskStore } from "../apps/server/src/task-queue.js";
+import { openTaskStore } from "../apps/server/src/tasks/task-queue.js";
 
 async function fixture(enabled = true, failFinish = false) {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-capability-flow-"));

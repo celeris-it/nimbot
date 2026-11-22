@@ -4,7 +4,7 @@ import {
   createNotifications,
   type NotificationResult,
 } from "./notifications.js";
-import type { ChatTask, TaskStore } from "./task-queue.js";
+import type { ChatTask, TaskStore } from "./tasks/task-queue.js";
 
 /** Sends only committed, bounded child outcomes to their immutable initiating conversation. */
 export function createDelegationDelivery(config: {

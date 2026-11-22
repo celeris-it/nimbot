@@ -12,7 +12,7 @@ import {
   createTaskQueue,
   openTaskStore,
   type TaskOutcome,
-} from "../apps/server/src/task-queue.js";
+} from "../apps/server/src/tasks/task-queue.js";
 
 const host = { url: "http://nimbot-dev:3001", token: "a".repeat(64) };
 

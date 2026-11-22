@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ToolOutcome } from "../tool-dispatch.js";
+import type { ToolOutcome } from "../tasks/tool-dispatch.js";
 import {
   createHostApprovals,
   createHostTasks,

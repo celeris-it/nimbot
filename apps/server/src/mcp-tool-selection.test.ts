@@ -1,8 +1,8 @@
 import { afterEach, expect, it } from "vitest";
 import { openMcpCatalog } from "./mcp-catalog.js";
 import { createMcpToolSelection } from "./mcp-tool-selection.js";
-import { createTaskCapabilities } from "./task-capabilities.js";
-import { openTaskStore } from "./task-queue.js";
+import { createTaskCapabilities } from "./tasks/task-capabilities.js";
+import { openTaskStore } from "./tasks/task-queue.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

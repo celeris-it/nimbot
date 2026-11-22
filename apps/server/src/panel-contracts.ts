@@ -8,9 +8,9 @@ import type { ScheduleCadence } from "./schedule-time.js";
 export type { Schedule, ScheduleRun } from "./schedule-store.js";
 export type { ScheduleRunNowResult } from "./scheduler.js";
 export type { ProviderSettings, DeviceLogin } from "./provider-contracts.js";
-export type { DelegationHistoryEntry } from "./task-queue.js";
+export type { DelegationHistoryEntry } from "./tasks/task-queue.js";
 export type DelegationHistory = ReturnType<
-  import("./task-queue.js").TaskStore["listDelegations"]
+  import("./tasks/task-queue.js").TaskStore["listDelegations"]
 >;
 export type { McpDefinition } from "./mcp-catalog.js";
 export type { McpDiscoveryResult } from "./mcp-discovery.js";

@@ -1,4 +1,4 @@
-import type { ChatTask, RoutedTask, TaskStore } from "./task-queue.js";
+import type { ChatTask, RoutedTask, TaskStore } from "./tasks/task-queue.js";
 
 /** Resolves an internal child exclusively from Server state, never from its prompt. */
 export function createDelegationExecution(config: {

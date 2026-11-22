@@ -7,8 +7,8 @@ import { MEMORY_OPERATIONS, memoryToolPolicy } from "./memory-operations.js";
 import { createPanel } from "./panel.js";
 import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";
-import { createTaskCapabilities } from "./task-capabilities.js";
-import { openTaskStore } from "./task-queue.js";
+import { createTaskCapabilities } from "./tasks/task-capabilities.js";
+import { openTaskStore } from "./tasks/task-queue.js";
 
 it("is off by default, per agent, and unknown agents cannot be switched", () => {
   const registry = openAgentRegistry(

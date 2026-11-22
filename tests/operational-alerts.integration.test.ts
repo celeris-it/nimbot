@@ -13,7 +13,7 @@ import { openScheduleStore } from "../apps/server/src/schedule-store.js";
 import {
   openTaskStore,
   type TaskStatus,
-} from "../apps/server/src/task-queue.js";
+} from "../apps/server/src/tasks/task-queue.js";
 import { createTelegramNotifications } from "../apps/server/src/telegram/telegram-notifications.js";
 
 async function fixture() {

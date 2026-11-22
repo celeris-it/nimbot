@@ -6,7 +6,7 @@ import {
   attachmentName,
   createWorkspaceAttachments,
 } from "../telegram/telegram-attachments.js";
-import type { DiscordQueuedTask } from "../task-queue.js";
+import type { DiscordQueuedTask } from "../tasks/task-queue.js";
 
 export interface DiscordDocument {
   id: string;

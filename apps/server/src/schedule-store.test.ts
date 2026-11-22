@@ -12,7 +12,7 @@ import {
   type ScheduleOrigin,
   type ScheduleRunOutcome,
 } from "./schedule-store.js";
-import { openTaskStore } from "./task-queue.js";
+import { openTaskStore } from "./tasks/task-queue.js";
 
 const START = Date.parse("2027-01-01T08:00:00Z");
 const MINUTE = 60_000;

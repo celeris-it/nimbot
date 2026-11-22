@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 import { acknowledgeDiscordApproval } from "./discord-interactions.js";
 import { createDiscordNotifications } from "./discord-notifications.js";
 import type { DiscordApprovalInteraction } from "./discord-approvals.js";
-import type { DiscordQueuedTask } from "../task-queue.js";
+import type { DiscordQueuedTask } from "../tasks/task-queue.js";
 
 const interaction: DiscordApprovalInteraction = {
   id: "123",

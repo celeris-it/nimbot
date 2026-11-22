@@ -8,7 +8,7 @@ import { createDiscordAttachments } from "./discord/discord-attachments.js";
 import { formatScheduleList } from "./chat-schedules.js";
 import { taskOutcomeText } from "./telegram/bot.js";
 import { createTelegramAttachments } from "./telegram/telegram-attachments.js";
-import { createAgentTaskServices } from "./agent-task-services.js";
+import { createAgentTaskServices } from "./tasks/agent-task-services.js";
 import {
   createHostTasks,
   createHostApprovals,
@@ -36,7 +36,7 @@ import type {
   DiscordDestination,
   DiscordQueuedTask,
   RoutedTask,
-} from "./task-queue.js";
+} from "./tasks/task-queue.js";
 import { openDiscordInbox } from "./discord/discord-inbox.js";
 import { createRegisteredDiscord } from "./discord/registered-discord.js";
 import { openOperationalAlertStore } from "./operational-alert-store.js";
@@ -48,7 +48,7 @@ import { createDiscordNotifications } from "./discord/discord-notifications.js";
 import { log } from "./logger.js";
 import { createRegisteredBots } from "./telegram/registered-bots.js";
 import { createAgentAccess } from "./agents/agent-access.js";
-import { openTaskStore } from "./task-queue.js";
+import { openTaskStore } from "./tasks/task-queue.js";
 import { openScheduleStore } from "./schedule-store.js";
 import {
   createScheduleAdmission,
@@ -72,7 +72,7 @@ import { getHostStatus } from "./host/agent-host.js";
 import { serve } from "@hono/node-server";
 import { createPanel } from "./panel.js";
 import { readPanelConfig } from "./panel-config.js";
-import { readTaskTimeoutSeconds, taskWaitMs } from "./task-timeout.js";
+import { readTaskTimeoutSeconds, taskWaitMs } from "./tasks/task-timeout.js";
 
 async function main(): Promise<void> {
   let panelConfig;

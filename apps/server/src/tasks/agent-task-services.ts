@@ -1,4 +1,4 @@
-import type { ApprovalForward } from "./approval-relay.js";
+import type { ApprovalForward } from "../approval-relay.js";
 import { createBotTasks } from "./bot-tasks.js";
 import type { RoutedTask, TaskStore } from "./task-queue.js";
 

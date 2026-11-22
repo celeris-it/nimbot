@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it } from "vitest";
-import { openTaskStore } from "./task-queue.js";
+import { openTaskStore } from "./tasks/task-queue.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

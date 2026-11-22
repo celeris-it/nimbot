@@ -14,7 +14,7 @@ import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-stor
 import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
 import { openAgentGrants } from "../apps/server/src/agent-grants.js";
 import { openAgentNotes } from "../apps/server/src/agent-notes.js";
-import { createAgentTaskServices } from "../apps/server/src/agent-task-services.js";
+import { createAgentTaskServices } from "../apps/server/src/tasks/agent-task-services.js";
 import { openApprovalRules } from "../apps/server/src/approval-rules.js";
 import { openApprovalStore } from "../apps/server/src/approval-store.js";
 import { createDelegationExecution } from "../apps/server/src/delegation-execution.js";
@@ -28,7 +28,7 @@ import { createPeerTools } from "../apps/server/src/peer-tools.js";
 import {
   openTaskStore,
   type RoutedTask,
-} from "../apps/server/src/task-queue.js";
+} from "../apps/server/src/tasks/task-queue.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

@@ -3,7 +3,7 @@ import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
 import type { McpCredentials } from "./mcp-credentials.js";
 import { createMcpConnection } from "./mcp-connection.js";
 import { createMcpToolSelection } from "./mcp-tool-selection.js";
-import type { ToolOutcome } from "./tool-dispatch.js";
+import type { ToolOutcome } from "./tasks/tool-dispatch.js";
 
 function canonical(value: unknown, depth = 0): unknown {
   if (depth > 32) throw new Error("MCP schema is too deep.");

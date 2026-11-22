@@ -6,7 +6,7 @@ import { createAgentDeletion } from "./agent-deletion.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openTaskStore } from "../task-queue.js";
+import { openTaskStore } from "../tasks/task-queue.js";
 import { openScheduleStore } from "../schedule-store.js";
 
 const cleanups: (() => void)[] = [];

@@ -15,8 +15,8 @@ import {
   createHostTasks,
   createHostApprovals,
 } from "../apps/server/src/host/host-tasks.js";
-import { openTaskStore } from "../apps/server/src/task-queue.js";
-import { createBotTasks } from "../apps/server/src/bot-tasks.js";
+import { openTaskStore } from "../apps/server/src/tasks/task-queue.js";
+import { createBotTasks } from "../apps/server/src/tasks/bot-tasks.js";
 
 it("shares Host context across simultaneous channel tasks, approvals, duplicates, and server restart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "cross-channel-recovery-"));

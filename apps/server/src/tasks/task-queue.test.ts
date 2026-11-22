@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
-import { HostTaskError } from "./host/host-tasks.js";
+import { HostTaskError } from "../host/host-tasks.js";
 import {
   createTaskQueue,
   openTaskStore,
@@ -397,7 +397,7 @@ describe("duplicate Telegram updates", () => {
 });
 
 it("logs task start and finish with agent and task IDs but never the prompt", async () => {
-  const { createLogger } = await import("./logger.js");
+  const { createLogger } = await import("../logger.js");
   const lines: Record<string, unknown>[] = [];
   const dir = await mkdtemp(join(tmpdir(), "nimbot-queue-log-"));
   const store = openTaskStore(join(dir, "state.sqlite"));

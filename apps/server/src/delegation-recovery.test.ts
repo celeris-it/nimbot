@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
-import { createAgentTaskServices } from "./agent-task-services.js";
-import type { createBotTasks } from "./bot-tasks.js";
+import { createAgentTaskServices } from "./tasks/agent-task-services.js";
+import type { createBotTasks } from "./tasks/bot-tasks.js";
 import { createDelegationExecution } from "./delegation-execution.js";
 import { openNotificationStore } from "./notification-store.js";
-import { openTaskStore } from "./task-queue.js";
+import { openTaskStore } from "./tasks/task-queue.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

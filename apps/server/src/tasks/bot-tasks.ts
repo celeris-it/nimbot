@@ -1,41 +1,44 @@
-import { log } from "./logger.js";
+import { log } from "../logger.js";
 import {
   ATTACHMENT_OPERATION,
   type createTelegramAttachments,
   type WorkspaceFile,
-} from "./telegram/telegram-attachments.js";
+} from "../telegram/telegram-attachments.js";
 import {
   createApprovalGate,
   type GateAction,
   type ApprovalGate,
-} from "./approval-gate.js";
-import { createApprovalRelay, type ApprovalForward } from "./approval-relay.js";
-import { createDelegatedHostApprovals } from "./delegated-host-approvals.js";
-import { createDelegationDelivery } from "./delegation-delivery.js";
-import type { openNotificationStore } from "./notification-store.js";
-import type { NotificationResult } from "./notifications.js";
-import { createTelegramNotifications } from "./telegram/telegram-notifications.js";
-import type { ApprovalRules } from "./approval-rules.js";
-import type { ApprovalStore } from "./approval-store.js";
+} from "../approval-gate.js";
+import {
+  createApprovalRelay,
+  type ApprovalForward,
+} from "../approval-relay.js";
+import { createDelegatedHostApprovals } from "../delegated-host-approvals.js";
+import { createDelegationDelivery } from "../delegation-delivery.js";
+import type { openNotificationStore } from "../notification-store.js";
+import type { NotificationResult } from "../notifications.js";
+import { createTelegramNotifications } from "../telegram/telegram-notifications.js";
+import type { ApprovalRules } from "../approval-rules.js";
+import type { ApprovalStore } from "../approval-store.js";
 import {
   createDiscordApprovals,
   type DiscordApprovalInteraction,
-} from "./discord/discord-approvals.js";
-import { acknowledgeDiscordApproval } from "./discord/discord-interactions.js";
+} from "../discord/discord-approvals.js";
+import { acknowledgeDiscordApproval } from "../discord/discord-interactions.js";
 import { createTaskCapabilities } from "./task-capabilities.js";
 import {
   createToolDispatcher,
   type ServerToolHandler,
 } from "./tool-dispatch.js";
 import { InlineKeyboard, type Bot, type InputFile } from "grammy";
-import type { BotAccess } from "./agents/agent-access.js";
-import { createApprovalBook } from "./approvals.js";
-import { sendTaskOutcome } from "./telegram/bot.js";
+import type { BotAccess } from "../agents/agent-access.js";
+import { createApprovalBook } from "../approvals.js";
+import { sendTaskOutcome } from "../telegram/bot.js";
 import {
   HostTaskError,
   type HostApproval,
   type HostTaskExecution,
-} from "./host/host-tasks.js";
+} from "../host/host-tasks.js";
 import {
   createRoutedTaskQueue,
   type ChatTask,
@@ -45,10 +48,10 @@ import {
   type TaskOutcome,
   type TaskStore,
 } from "./task-queue.js";
-import type { ModelAdmission, TaskUsage } from "./usage-contracts.js";
-import type { createDiscordAttachments } from "./discord/discord-attachments.js";
-import { createChatSchedules } from "./chat-schedules.js";
-import { splitTelegramText } from "./telegram/telegram-text.js";
+import type { ModelAdmission, TaskUsage } from "../usage-contracts.js";
+import type { createDiscordAttachments } from "../discord/discord-attachments.js";
+import { createChatSchedules } from "../chat-schedules.js";
+import { splitTelegramText } from "../telegram/telegram-text.js";
 
 /** One persistent queue and Host runner per agent; callbacks return to the saved origin. */
 export function createBotTasks(config: {

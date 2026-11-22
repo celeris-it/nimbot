@@ -19,9 +19,9 @@ import { createHostApi } from "../apps/agent-host/src/http.js";
 import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-store.js";
 import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
 import { createBot } from "../apps/server/src/telegram/bot.js";
-import { createBotTasks } from "../apps/server/src/bot-tasks.js";
+import { createBotTasks } from "../apps/server/src/tasks/bot-tasks.js";
 import { createHostTasks } from "../apps/server/src/host/host-tasks.js";
-import { openTaskStore } from "../apps/server/src/task-queue.js";
+import { openTaskStore } from "../apps/server/src/tasks/task-queue.js";
 import {
   ATTACHMENT_LIMIT,
   ATTACHMENT_OPERATION,

@@ -3,11 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { createAgentTaskServices } from "./agent-task-services.js";
+import { createAgentTaskServices } from "./tasks/agent-task-services.js";
 import { createPanel } from "./panel.js";
 import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";
-import { openTaskStore, type TaskStatus } from "./task-queue.js";
+import { openTaskStore, type TaskStatus } from "./tasks/task-queue.js";
 import type { DelegationHistory } from "./panel-contracts.js";
 
 const cleanups: (() => Promise<void>)[] = [];

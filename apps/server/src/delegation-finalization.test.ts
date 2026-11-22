@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { createBotTasks } from "./bot-tasks.js";
-import { openTaskStore, type Delegation } from "./task-queue.js";
+import { createBotTasks } from "./tasks/bot-tasks.js";
+import { openTaskStore, type Delegation } from "./tasks/task-queue.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

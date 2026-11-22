@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
-import { DELEGATION_LIMITS, openTaskStore } from "./task-queue.js";
-import { createBotTasks } from "./bot-tasks.js";
+import { DELEGATION_LIMITS, openTaskStore } from "./tasks/task-queue.js";
+import { createBotTasks } from "./tasks/bot-tasks.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

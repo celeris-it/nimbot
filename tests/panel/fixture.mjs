@@ -9,7 +9,7 @@ import {
   createHostUsage,
   openAgentUsage,
 } from "../../apps/server/dist/agent-usage.js";
-import { openTaskStore } from "../../apps/server/dist/task-queue.js";
+import { openTaskStore } from "../../apps/server/dist/tasks/task-queue.js";
 import { openScheduleStore } from "../../apps/server/dist/schedule-store.js";
 import { openMcpCatalog } from "../../apps/server/dist/mcp-catalog.js";
 import { openMcpCredentials } from "../../apps/server/dist/mcp-credentials.js";

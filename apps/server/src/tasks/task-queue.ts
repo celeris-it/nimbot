@@ -1,13 +1,16 @@
 import type {
   DiscordAttachmentInput,
   DiscordDocument,
-} from "./discord/discord-attachments.js";
-import type { TelegramDocument } from "./telegram/telegram-attachments.js";
-import { isDiscordId } from "./discord/discord-identity.js";
+} from "../discord/discord-attachments.js";
+import type { TelegramDocument } from "../telegram/telegram-attachments.js";
+import { isDiscordId } from "../discord/discord-identity.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { HostModelAdmissionExpired, HostTaskError } from "./host/host-tasks.js";
-import { log as defaultLog, type Logger } from "./logger.js";
+import {
+  HostModelAdmissionExpired,
+  HostTaskError,
+} from "../host/host-tasks.js";
+import { log as defaultLog, type Logger } from "../logger.js";
 
 export type TaskStatus =
   "queued" | "running" | "completed" | "failed" | "interrupted" | "cancelled";

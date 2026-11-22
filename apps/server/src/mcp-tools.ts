@@ -3,8 +3,11 @@ import type { ApprovalRules } from "./approval-rules.js";
 import type { McpCatalog } from "./mcp-catalog.js";
 import type { createMcpExecution } from "./mcp-execution.js";
 import { createMcpToolSelection } from "./mcp-tool-selection.js";
-import type { RoutedTask, TaskStore } from "./task-queue.js";
-import { ToolExecutionError, type ServerToolHandler } from "./tool-dispatch.js";
+import type { RoutedTask, TaskStore } from "./tasks/task-queue.js";
+import {
+  ToolExecutionError,
+  type ServerToolHandler,
+} from "./tasks/tool-dispatch.js";
 
 /** Trusted policy identifiers are independent of remote hints and model-visible names. */
 export const mcpActionType = (access: "read" | "write") => `mcp.${access}`;

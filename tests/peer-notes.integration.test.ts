@@ -12,13 +12,13 @@ import { openAgentGrants } from "../apps/server/src/agent-grants.js";
 import { openAgentNotes } from "../apps/server/src/agent-notes.js";
 import { openApprovalRules } from "../apps/server/src/approval-rules.js";
 import { openApprovalStore } from "../apps/server/src/approval-store.js";
-import { createBotTasks } from "../apps/server/src/bot-tasks.js";
+import { createBotTasks } from "../apps/server/src/tasks/bot-tasks.js";
 import type { HostTaskExecution } from "../apps/server/src/host/host-tasks.js";
 import { createPeerTools } from "../apps/server/src/peer-tools.js";
 import {
   openTaskStore,
   type RoutedTask,
-} from "../apps/server/src/task-queue.js";
+} from "../apps/server/src/tasks/task-queue.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

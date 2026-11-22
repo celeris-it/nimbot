@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { ApprovalRules } from "./approval-rules.js";
 import { actionFingerprint, type ApprovalStore } from "./approval-store.js";
-import type { RoutedTask, ChatTask } from "./task-queue.js";
+import type { RoutedTask, ChatTask } from "./tasks/task-queue.js";
 
 export interface GateAction {
   /** Trusted operation identifier; never model text. */

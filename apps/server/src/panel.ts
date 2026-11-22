@@ -114,7 +114,7 @@ export interface PanelDeps {
   };
   delegations?: {
     store: Pick<
-      import("./task-queue.js").TaskStore,
+      import("./tasks/task-queue.js").TaskStore,
       "listDelegations" | "getDelegation"
     >;
     cancel(sourceAgentId: string, id: string): Promise<boolean>;

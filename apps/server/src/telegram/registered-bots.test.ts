@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { openAgentRegistry } from "../agents/agent-registry.js";
-import { openTaskStore } from "../task-queue.js";
+import { openTaskStore } from "../tasks/task-queue.js";
 import { openScheduleStore } from "../schedule-store.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";

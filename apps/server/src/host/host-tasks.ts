@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { AgentHostConfig } from "./agent-host.js";
-import type { TaskCapability } from "../task-capabilities.js";
-import type { ToolOutcome } from "../tool-dispatch.js";
+import type { TaskCapability } from "../tasks/task-capabilities.js";
+import type { ToolOutcome } from "../tasks/tool-dispatch.js";
 import {
   taskUsage,
   type ModelAdmission,

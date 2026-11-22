@@ -7,7 +7,7 @@ import { expect, it, vi } from "vitest";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";
 import { openAgentRegistry } from "../agents/agent-registry.js";
-import { openTaskStore } from "../task-queue.js";
+import { openTaskStore } from "../tasks/task-queue.js";
 
 let nextUpdateId = 0;
 

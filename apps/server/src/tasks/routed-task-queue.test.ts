@@ -6,7 +6,7 @@ import {
   type RoutedTask,
   type TaskOutcome,
 } from "./task-queue.js";
-import { HostTaskError } from "./host/host-tasks.js";
+import { HostTaskError } from "../host/host-tasks.js";
 import { randomUUID } from "node:crypto";
 
 it("executes both platforms through one ordered context and routes progress and results", async () => {

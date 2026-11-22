@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Bot } from "grammy";
 import { afterEach, expect, it, vi } from "vitest";
-import { createAgentTaskServices } from "./agent-task-services.js";
+import { createAgentTaskServices } from "./tasks/agent-task-services.js";
 import { openAgentGrants } from "./agent-grants.js";
 import { createDiscordNotifications } from "./discord/discord-notifications.js";
 import { openNotificationStore } from "./notification-store.js";
 import { log } from "./logger.js";
-import { openTaskStore, type TaskOutcome } from "./task-queue.js";
+import { openTaskStore, type TaskOutcome } from "./tasks/task-queue.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

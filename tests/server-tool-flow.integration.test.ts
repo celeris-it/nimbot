@@ -13,13 +13,13 @@ import {
   createToolBridge,
   type ToolBridge,
 } from "../apps/agent-host/src/tool-bridge.js";
-import { createBotTasks } from "../apps/server/src/bot-tasks.js";
+import { createBotTasks } from "../apps/server/src/tasks/bot-tasks.js";
 import {
   createHostTasks,
   type HostTaskExecution,
 } from "../apps/server/src/host/host-tasks.js";
-import { openTaskStore } from "../apps/server/src/task-queue.js";
-import type { ServerToolHandler } from "../apps/server/src/tool-dispatch.js";
+import { openTaskStore } from "../apps/server/src/tasks/task-queue.js";
+import type { ServerToolHandler } from "../apps/server/src/tasks/tool-dispatch.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

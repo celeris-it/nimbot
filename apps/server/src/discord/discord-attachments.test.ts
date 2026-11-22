@@ -2,13 +2,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { createBotTasks } from "../bot-tasks.js";
+import { createBotTasks } from "../tasks/bot-tasks.js";
 import {
   createDiscordAttachments,
   discordAttachmentInput,
 } from "./discord-attachments.js";
 import { createDiscordNotifications } from "./discord-notifications.js";
-import { openTaskStore } from "../task-queue.js";
+import { openTaskStore } from "../tasks/task-queue.js";
 import {
   ATTACHMENT_LIMIT,
   ATTACHMENT_OPERATION,

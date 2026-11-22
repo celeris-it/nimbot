@@ -2,8 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { openApprovalRules } from "./approval-rules.js";
-import { openApprovalStore } from "./approval-store.js";
+import { openApprovalRules } from "../approval-rules.js";
+import { openApprovalStore } from "../approval-store.js";
 import { createBotTasks } from "./bot-tasks.js";
 import { openTaskStore } from "./task-queue.js";
 

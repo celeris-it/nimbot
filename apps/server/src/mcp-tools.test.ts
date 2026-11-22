@@ -9,9 +9,9 @@ import { openApprovalRules } from "./approval-rules.js";
 import { openMcpCatalog } from "./mcp-catalog.js";
 import { createMcpTools, mcpActionType, mcpTarget } from "./mcp-tools.js";
 import type { createMcpExecution } from "./mcp-execution.js";
-import { createTaskCapabilities } from "./task-capabilities.js";
-import { createToolDispatcher } from "./tool-dispatch.js";
-import { openTaskStore, type RoutedTask } from "./task-queue.js";
+import { createTaskCapabilities } from "./tasks/task-capabilities.js";
+import { createToolDispatcher } from "./tasks/tool-dispatch.js";
+import { openTaskStore, type RoutedTask } from "./tasks/task-queue.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

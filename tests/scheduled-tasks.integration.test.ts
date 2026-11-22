@@ -9,7 +9,7 @@ import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-stor
 import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
 import type { Engine } from "../apps/agent-host/src/engine.js";
 import { createAgentAccess } from "../apps/server/src/agents/agent-access.js";
-import { createAgentTaskServices } from "../apps/server/src/agent-task-services.js";
+import { createAgentTaskServices } from "../apps/server/src/tasks/agent-task-services.js";
 import { getHostStatus } from "../apps/server/src/host/agent-host.js";
 import { openAgentRegistry } from "../apps/server/src/agents/agent-registry.js";
 import { createBot } from "../apps/server/src/telegram/bot.js";
@@ -27,7 +27,7 @@ import {
   createScheduleSkipNotifier,
   createScheduler,
 } from "../apps/server/src/scheduler.js";
-import { openTaskStore } from "../apps/server/src/task-queue.js";
+import { openTaskStore } from "../apps/server/src/tasks/task-queue.js";
 
 const START = Date.parse("2027-01-01T08:00:00Z");
 const MINUTE = 60_000;
