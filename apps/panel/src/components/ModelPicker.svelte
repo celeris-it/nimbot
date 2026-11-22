@@ -8,12 +8,14 @@
 
   let {
     models,
-    value = $bindable(),
+    value,
+    onchange,
     disabled,
   }: {
     models: AgentModels["models"];
     value: ModelReference | null;
     disabled: boolean;
+    onchange: (model: ModelReference | null) => Promise<void>;
   } = $props();
 
   interface Option {
@@ -88,6 +90,7 @@
   }
 
   async function toggle() {
+    if (disabled) return;
     if (open) {
       close();
       return;
@@ -110,8 +113,12 @@
 
   function choose(option: Option) {
     if (disabled) return;
-    value = option.model;
     close(true);
+    const model = option.model;
+    if (matches(model, value)) return;
+    void onchange(
+      model ? { providerId: model.providerId, modelId: model.modelId } : null,
+    );
   }
 
   function scrollToActive() {
@@ -209,7 +216,7 @@
       onkeydown={(event) => {
         if (open && event.key === "Escape") close(true);
       }}
-      {disabled}
+      aria-disabled={disabled}
     >
       <span id={`${id}-value`} class="option-text">
         {#if currentModel}

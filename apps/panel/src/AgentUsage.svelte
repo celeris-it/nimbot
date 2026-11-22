@@ -27,22 +27,6 @@
   } = $props();
 
   let base = $derived(`/agents/${encodeURIComponent(agent.id)}`);
-  let savedProviderId = $derived(catalog?.selected?.providerId);
-  let savedModelId = $derived(catalog?.selected?.modelId);
-  // Model and usage refreshes the catalog while an administrator is editing.
-  let selection = $derived(
-    savedProviderId && savedModelId
-      ? { providerId: savedProviderId, modelId: savedModelId }
-      : null,
-  );
-  let selectedModel = $derived(
-    catalog?.models.find(
-      (model) =>
-        model.providerId === selection?.providerId &&
-        model.modelId === selection.modelId,
-    ),
-  );
-  let canSave = $derived(selection === null || !!selectedModel);
   const number = new Intl.NumberFormat();
   const usd = new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -111,17 +95,6 @@
     running: { label: "Running", tone: "neutral" },
     queued: { label: "Queued", tone: "neutral" },
   };
-
-  function submit(event: SubmitEvent) {
-    event.preventDefault();
-    if (busy) return;
-    if (selection === null) void save(null);
-    else if (selectedModel)
-      void save({
-        providerId: selectedModel.providerId,
-        modelId: selectedModel.modelId,
-      });
-  }
 </script>
 
 <h1 tabindex="-1">Model and usage for {agent.name}</h1>
@@ -135,18 +108,13 @@
 <section class="panel-card" aria-labelledby="model-heading">
   <h2 id="model-heading">Model</h2>
   {#if catalog}
-    <form onsubmit={submit} aria-busy={busy}>
-      <ModelPicker
-        models={catalog.models}
-        bind:value={selection}
-        disabled={busy}
-      />
-      <button
-        class="panel-button panel-button-primary"
-        type="submit"
-        disabled={busy || !canSave}>Save model</button
-      >
-    </form>
+    <ModelPicker
+      models={catalog.models}
+      value={catalog.selected}
+      disabled={busy}
+      onchange={save}
+    />
+    {#if busy}<p role="status">Saving model…</p>{/if}
     {#if !catalog.catalogAvailable}
       <p role="status">Model catalog unavailable.</p>
     {/if}
@@ -317,8 +285,7 @@
 </section>
 
 <style>
-  .actions,
-  form {
+  .actions {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
