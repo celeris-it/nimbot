@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { openMemoryStore } from "../apps/agent-host/src/memory-store.js";
 import { createMemoryTools } from "../apps/agent-host/src/memory-tools.js";
-import { openApprovalStore } from "../apps/server/src/approval-store.js";
+import { openApprovalStore } from "../apps/server/src/approvals/approval-store.js";
 import { createTaskCapabilities } from "../apps/server/src/tasks/task-capabilities.js";
 import { openTaskStore } from "../apps/server/src/tasks/task-queue.js";
 

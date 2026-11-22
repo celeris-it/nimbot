@@ -23,12 +23,12 @@ import {
   openAgentUsage,
 } from "./agent-usage.js";
 import { createHostMemories } from "./host-memories.js";
-import { openApprovalStore } from "./approval-store.js";
-import { openAgentGrants } from "./agent-grants.js";
-import { openAgentNotes } from "./agent-notes.js";
-import { createPeerTools } from "./peer-tools.js";
-import { createDelegationExecution } from "./delegation-execution.js";
-import { openApprovalRules } from "./approval-rules.js";
+import { openApprovalStore } from "./approvals/approval-store.js";
+import { openAgentGrants } from "./peers/agent-grants.js";
+import { openAgentNotes } from "./peers/agent-notes.js";
+import { createPeerTools } from "./peers/peer-tools.js";
+import { createDelegationExecution } from "./delegation/delegation-execution.js";
+import { openApprovalRules } from "./approvals/approval-rules.js";
 import { MEMORY_OPERATIONS } from "./memory-operations.js";
 import type {
   ChatTask,

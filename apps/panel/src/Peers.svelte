@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { PeerGrant } from "../../server/src/agent-grants.js";
+  import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
   let {
     agent,
     data,

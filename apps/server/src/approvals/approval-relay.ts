@@ -1,5 +1,5 @@
 import type { ApprovalDeliveryContext, Responder } from "./approval-gate.js";
-import type { ChatTask, TaskStore } from "./tasks/task-queue.js";
+import type { ChatTask, TaskStore } from "../tasks/task-queue.js";
 
 type Decision = "ok" | "expired" | "unknown";
 export type ApprovalForward = (

@@ -1,5 +1,8 @@
-import { UncertainExecutionError, type ApprovalGate } from "./approval-gate.js";
-import type { ApprovalRules } from "./approval-rules.js";
+import {
+  UncertainExecutionError,
+  type ApprovalGate,
+} from "./approvals/approval-gate.js";
+import type { ApprovalRules } from "./approvals/approval-rules.js";
 import type { McpCatalog } from "./mcp-catalog.js";
 import type { createMcpExecution } from "./mcp-execution.js";
 import { createMcpToolSelection } from "./mcp-tool-selection.js";

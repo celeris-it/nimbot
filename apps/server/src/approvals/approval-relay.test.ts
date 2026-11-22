@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { Bot } from "grammy";
 import { afterEach, expect, it, vi } from "vitest";
-import { createAgentTaskServices } from "./tasks/agent-task-services.js";
+import { createAgentTaskServices } from "../tasks/agent-task-services.js";
 import { createApprovalGate, type Responder } from "./approval-gate.js";
 import { createApprovalRelay } from "./approval-relay.js";
-import { createDelegatedHostApprovals } from "./delegated-host-approvals.js";
+import { createDelegatedHostApprovals } from "../delegation/delegated-host-approvals.js";
 import { openApprovalRules } from "./approval-rules.js";
 import { openApprovalStore } from "./approval-store.js";
-import { openTaskStore, type ChatTask } from "./tasks/task-queue.js";
+import { openTaskStore, type ChatTask } from "../tasks/task-queue.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

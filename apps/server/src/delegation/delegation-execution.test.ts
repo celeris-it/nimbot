@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import { createDelegationExecution } from "./delegation-execution.js";
-import { openTaskStore } from "./tasks/task-queue.js";
+import { openTaskStore } from "../tasks/task-queue.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

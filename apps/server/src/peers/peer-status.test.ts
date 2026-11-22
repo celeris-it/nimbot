@@ -6,7 +6,7 @@ import { afterEach, expect, it } from "vitest";
 import { openAgentGrants } from "./agent-grants.js";
 import { openAgentNotes } from "./agent-notes.js";
 import { createPeerTools, DELEGATION_NOTICE } from "./peer-tools.js";
-import { openTaskStore, type RoutedTask } from "./tasks/task-queue.js";
+import { openTaskStore, type RoutedTask } from "../tasks/task-queue.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

@@ -8,7 +8,7 @@ import {
   DELEGATION_LIMITS,
   openTaskStore,
   type TaskOutcome,
-} from "./tasks/task-queue.js";
+} from "../tasks/task-queue.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

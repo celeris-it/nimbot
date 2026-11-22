@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { NOTE_LIMITS, openAgentNotes } from "./agent-notes.js";
-import { openTaskStore } from "./tasks/task-queue.js";
+import { openTaskStore } from "../tasks/task-queue.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -111,7 +111,7 @@ it("preserves unread and read state across independent connections and restart",
 it("rejects invalid and oversized entries before altering an inbox", () => {
   const { store } = setup();
   for (const change of [
-    { sourceAgentId: "../agent" },
+    { sourceAgentId: "../../agent" },
     { targetAgentId: "a" },
     { targetAgentId: "" },
     { sourceTaskId: "not-a-task" },
@@ -122,7 +122,7 @@ it("rejects invalid and oversized entries before altering an inbox", () => {
   ])
     expect(() => store.send(input(change))).toThrow();
   expect(store.readUnread("b", () => true)).toEqual([]);
-  expect(() => store.readUnread("../agent", () => true)).toThrow();
+  expect(() => store.readUnread("../../agent", () => true)).toThrow();
   expect(store.send(input({ content: " trimmed " })).content).toBe("trimmed");
 });
 

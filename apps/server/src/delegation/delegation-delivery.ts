@@ -1,10 +1,10 @@
-import { createDurableNotifications } from "./notifications/durable-notifications.js";
-import type { openNotificationStore } from "./notifications/notification-store.js";
+import { createDurableNotifications } from "../notifications/durable-notifications.js";
+import type { openNotificationStore } from "../notifications/notification-store.js";
 import {
   createNotifications,
   type NotificationResult,
-} from "./notifications/notifications.js";
-import type { ChatTask, TaskStore } from "./tasks/task-queue.js";
+} from "../notifications/notifications.js";
+import type { ChatTask, TaskStore } from "../tasks/task-queue.js";
 
 /** Sends only committed, bounded child outcomes to their immutable initiating conversation. */
 export function createDelegationDelivery(config: {

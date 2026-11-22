@@ -35,9 +35,9 @@
   import Delegations from "./Delegations.svelte";
   import McpAgentAccess from "./McpAgentAccess.svelte";
   import McpDefinitionForm from "./McpDefinitionForm.svelte";
-  import type { PeerGrant } from "../../server/src/agent-grants.js";
-  import type { ApprovalRequest } from "../../server/src/approval-store.js";
-  import type { ApprovalRule } from "../../server/src/approval-rules.js";
+  import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
+  import type { ApprovalRequest } from "../../server/src/approvals/approval-store.js";
+  import type { ApprovalRule } from "../../server/src/approvals/approval-rules.js";
   import type { MemoryEntry } from "../../server/src/host-memories.js";
   import Schedules from "./Schedules.svelte";
   import { scheduleText } from "./labels.js";

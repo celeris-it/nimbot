@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
-import { DELEGATION_LIMITS, openTaskStore } from "./tasks/task-queue.js";
-import { createBotTasks } from "./tasks/bot-tasks.js";
+import { DELEGATION_LIMITS, openTaskStore } from "../tasks/task-queue.js";
+import { createBotTasks } from "../tasks/bot-tasks.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -76,7 +76,7 @@ it("rejects conflicting invocations, invalid briefs, self-targets and unauthoriz
     { brief: "" },
     { brief: "x".repeat(DELEGATION_LIMITS.brief + 1) },
     { invocationId: "invalid" },
-    { targetAgentId: "../agent" },
+    { targetAgentId: "../../agent" },
   ])
     expect(() =>
       f.store.stageDelegation({ ...f.input, ...change }, () => true),

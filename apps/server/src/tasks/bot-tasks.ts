@@ -8,18 +8,18 @@ import {
   createApprovalGate,
   type GateAction,
   type ApprovalGate,
-} from "../approval-gate.js";
+} from "../approvals/approval-gate.js";
 import {
   createApprovalRelay,
   type ApprovalForward,
-} from "../approval-relay.js";
-import { createDelegatedHostApprovals } from "../delegated-host-approvals.js";
-import { createDelegationDelivery } from "../delegation-delivery.js";
+} from "../approvals/approval-relay.js";
+import { createDelegatedHostApprovals } from "../delegation/delegated-host-approvals.js";
+import { createDelegationDelivery } from "../delegation/delegation-delivery.js";
 import type { openNotificationStore } from "../notifications/notification-store.js";
 import type { NotificationResult } from "../notifications/notifications.js";
 import { createTelegramNotifications } from "../telegram/telegram-notifications.js";
-import type { ApprovalRules } from "../approval-rules.js";
-import type { ApprovalStore } from "../approval-store.js";
+import type { ApprovalRules } from "../approvals/approval-rules.js";
+import type { ApprovalStore } from "../approvals/approval-store.js";
 import {
   createDiscordApprovals,
   type DiscordApprovalInteraction,
@@ -32,7 +32,7 @@ import {
 } from "./tool-dispatch.js";
 import { InlineKeyboard, type Bot, type InputFile } from "grammy";
 import type { BotAccess } from "../agents/agent-access.js";
-import { createApprovalBook } from "../approvals.js";
+import { createApprovalBook } from "../approvals/approvals.js";
 import { sendTaskOutcome } from "../telegram/bot.js";
 import {
   HostTaskError,

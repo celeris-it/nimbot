@@ -99,7 +99,7 @@ export interface PanelDeps {
   };
   peers?: {
     grants: Pick<
-      import("./agent-grants.js").AgentGrants,
+      import("./peers/agent-grants.js").AgentGrants,
       "grant" | "revoke" | "list"
     >;
     /** Other agents with the same configured owner, for the target picker. */
@@ -107,10 +107,13 @@ export interface PanelDeps {
   };
   approvals?: {
     rules: Pick<
-      import("./approval-rules.js").ApprovalRules,
+      import("./approvals/approval-rules.js").ApprovalRules,
       "create" | "revoke" | "list"
     >;
-    history: Pick<import("./approval-store.js").ApprovalStore, "listByAgent">;
+    history: Pick<
+      import("./approvals/approval-store.js").ApprovalStore,
+      "listByAgent"
+    >;
   };
   delegations?: {
     store: Pick<

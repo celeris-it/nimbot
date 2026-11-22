@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { ApprovalRequest } from "../../server/src/approval-store.js";
-  import type { ApprovalRule } from "../../server/src/approval-rules.js";
+  import type { ApprovalRequest } from "../../server/src/approvals/approval-store.js";
+  import type { ApprovalRule } from "../../server/src/approvals/approval-rules.js";
   let {
     agent,
     history,

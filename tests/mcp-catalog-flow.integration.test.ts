@@ -23,8 +23,8 @@ import {
   type RoutedTask,
 } from "../apps/server/src/tasks/task-queue.js";
 import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
-import { openApprovalStore } from "../apps/server/src/approval-store.js";
-import { openApprovalRules } from "../apps/server/src/approval-rules.js";
+import { openApprovalStore } from "../apps/server/src/approvals/approval-store.js";
+import { openApprovalRules } from "../apps/server/src/approvals/approval-rules.js";
 import { openMcpCatalog } from "../apps/server/src/mcp-catalog.js";
 import { openMcpCredentials } from "../apps/server/src/mcp-credentials.js";
 import { createMcpExecution } from "../apps/server/src/mcp-execution.js";

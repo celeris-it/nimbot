@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { openAgentGrants } from "./agent-grants.js";
+import { openAgentGrants } from "./peers/agent-grants.js";
 import { createPanel } from "./panel.js";
 import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";

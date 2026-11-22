@@ -12,19 +12,19 @@ import type {
 import { createHostApi } from "../apps/agent-host/src/http.js";
 import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-store.js";
 import { createTaskRunner } from "../apps/agent-host/src/tasks.js";
-import { openAgentGrants } from "../apps/server/src/agent-grants.js";
-import { openAgentNotes } from "../apps/server/src/agent-notes.js";
+import { openAgentGrants } from "../apps/server/src/peers/agent-grants.js";
+import { openAgentNotes } from "../apps/server/src/peers/agent-notes.js";
 import { createAgentTaskServices } from "../apps/server/src/tasks/agent-task-services.js";
-import { openApprovalRules } from "../apps/server/src/approval-rules.js";
-import { openApprovalStore } from "../apps/server/src/approval-store.js";
-import { createDelegationExecution } from "../apps/server/src/delegation-execution.js";
+import { openApprovalRules } from "../apps/server/src/approvals/approval-rules.js";
+import { openApprovalStore } from "../apps/server/src/approvals/approval-store.js";
+import { createDelegationExecution } from "../apps/server/src/delegation/delegation-execution.js";
 import {
   createHostTasks,
   createHostApprovals,
   createHostCancellation,
 } from "../apps/server/src/host/host-tasks.js";
 import { openNotificationStore } from "../apps/server/src/notifications/notification-store.js";
-import { createPeerTools } from "../apps/server/src/peer-tools.js";
+import { createPeerTools } from "../apps/server/src/peers/peer-tools.js";
 import {
   openTaskStore,
   type RoutedTask,
