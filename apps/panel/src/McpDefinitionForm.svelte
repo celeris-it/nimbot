@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
-  import type { McpDiscoveryResult } from "../../server/src/panel-contracts.js";
+  import type { McpDiscoveryResult } from "../../server/src/panel/panel-contracts.js";
   import type { McpDiscoveredTool } from "../../server/src/mcp/mcp-discovery.js";
   import type {
     McpDefinition,

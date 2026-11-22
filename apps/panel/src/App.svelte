@@ -15,7 +15,7 @@
     Schedule,
     ScheduleRunNowResult,
     ProviderSettings as ProviderSettingsState,
-  } from "../../server/src/panel-contracts.js";
+  } from "../../server/src/panel/panel-contracts.js";
   import { ApiError, post, request } from "./api.js";
   import Dashboard from "./Dashboard.svelte";
   import { Icon } from "./components/index.js";

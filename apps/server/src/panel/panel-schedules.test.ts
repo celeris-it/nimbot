@@ -11,9 +11,9 @@ import {
   SCHEDULE_LIMITS,
   type Schedule,
   type ScheduleOrigin,
-} from "./schedules/schedule-store.js";
-import { createScheduler } from "./schedules/scheduler.js";
-import { openTaskStore } from "./tasks/task-queue.js";
+} from "../schedules/schedule-store.js";
+import { createScheduler } from "../schedules/scheduler.js";
+import { openTaskStore } from "../tasks/task-queue.js";
 
 const START = Date.parse("2027-01-01T08:00:00Z");
 const MINUTE = 60_000;

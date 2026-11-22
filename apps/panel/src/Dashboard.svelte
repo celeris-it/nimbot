@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AgentSummary } from "../../server/src/panel-contracts.js";
+  import type { AgentSummary } from "../../server/src/panel/panel-contracts.js";
   import {
     botLabel,
     botAccessLabels,

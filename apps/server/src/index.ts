@@ -70,8 +70,8 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getHostStatus } from "./host/agent-host.js";
 import { serve } from "@hono/node-server";
-import { createPanel } from "./panel.js";
-import { readPanelConfig } from "./panel-config.js";
+import { createPanel } from "./panel/panel.js";
+import { readPanelConfig } from "./panel/panel-config.js";
 import { readTaskTimeoutSeconds, taskWaitMs } from "./tasks/task-timeout.js";
 
 async function main(): Promise<void> {

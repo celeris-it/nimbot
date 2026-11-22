@@ -11,7 +11,7 @@
     Schedule,
     ScheduleList,
     ScheduleSettings,
-  } from "../../server/src/panel-contracts.js";
+  } from "../../server/src/panel/panel-contracts.js";
   import {
     scheduleText as text,
     scheduleKinds,

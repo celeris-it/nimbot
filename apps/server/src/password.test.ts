@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import ts from "typescript";
-import { verifyPassword } from "./panel-auth.js";
+import { verifyPassword } from "./panel/panel-auth.js";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -15,11 +15,12 @@ afterEach(async () => {
 async function helper() {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-password-"));
   dirs.push(dir);
-  for (const name of ["password", "panel-auth"]) {
-    const source = await readFile(
-      new URL(`./${name}.ts`, import.meta.url),
-      "utf8",
-    );
+  const sources = {
+    password: "./password.ts",
+    "panel-auth": "./panel/panel-auth.ts",
+  };
+  for (const [name, path] of Object.entries(sources)) {
+    const source = await readFile(new URL(path, import.meta.url), "utf8");
     const compiled = ts.transpileModule(source, {
       compilerOptions: {
         module: ts.ModuleKind.ESNext,
@@ -28,7 +29,7 @@ async function helper() {
     }).outputText;
     await writeFile(
       join(dir, `${name}.mjs`),
-      compiled.replace('"./panel-auth.js"', '"./panel-auth.mjs"'),
+      compiled.replace('"./panel/panel-auth.js"', '"./panel-auth.mjs"'),
     );
   }
   return join(dir, "password.mjs");

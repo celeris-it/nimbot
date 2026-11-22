@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { PanelConfig } from "./panel-config.js";
+import type { PanelConfig } from "./panel/panel-config.js";
 
 export function readServerMode(
   env: NodeJS.ProcessEnv,

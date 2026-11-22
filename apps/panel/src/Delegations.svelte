@@ -2,7 +2,7 @@
   import type {
     DelegationHistory,
     DelegationHistoryEntry,
-  } from "../../server/src/panel-contracts.js";
+  } from "../../server/src/panel/panel-contracts.js";
 
   let {
     agent,

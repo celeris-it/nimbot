@@ -2,8 +2,8 @@ import { expect, it, vi } from "vitest";
 import { createPanel } from "./panel.js";
 import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";
-import { providers } from "./providers/provider-contracts.js";
-import { HostProviderError } from "./providers/host-providers.js";
+import { providers } from "../providers/provider-contracts.js";
+import { HostProviderError } from "../providers/host-providers.js";
 
 it("protects global provider operations with zero agents", async () => {
   const config = readPanelConfig({

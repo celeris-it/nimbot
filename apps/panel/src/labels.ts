@@ -2,7 +2,7 @@ import type {
   AgentSummary,
   Schedule,
   ScheduleRun,
-} from "../../server/src/panel-contracts.js";
+} from "../../server/src/panel/panel-contracts.js";
 import { nextRun } from "../../server/src/schedules/schedule-time.js";
 
 export const scheduleText = {

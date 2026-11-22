@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
-import { hashPassword } from "../apps/server/src/panel-auth.js";
+import { hashPassword } from "../apps/server/src/panel/panel-auth.js";
 
 const execute = promisify(execFile);
 const image = process.env.NIMBOT_TEST_APPLICATION_IMAGE;

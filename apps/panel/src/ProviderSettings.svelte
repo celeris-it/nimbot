@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { StatusBadge } from "./components/index.js";
-  import type { ProviderSettings } from "../../server/src/panel-contracts.js";
+  import type { ProviderSettings } from "../../server/src/panel/panel-contracts.js";
   let {
     settings,
     busy,

@@ -1,9 +1,9 @@
-import type { ProviderCheck } from "./providers/provider-contracts.js";
-import { HostProviderError } from "./providers/host-providers.js";
-import type { createAgentUsage } from "./providers/agent-usage.js";
-import { modelReference } from "./providers/usage-contracts.js";
+import type { ProviderCheck } from "../providers/provider-contracts.js";
+import { HostProviderError } from "../providers/host-providers.js";
+import type { createAgentUsage } from "../providers/agent-usage.js";
+import { modelReference } from "../providers/usage-contracts.js";
 import { z } from "zod";
-import { HostMemoryError } from "./memory/host-memories.js";
+import { HostMemoryError } from "../memory/host-memories.js";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -12,7 +12,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { verifyPassword } from "./panel-auth.js";
-import type { HostStatus } from "./host/agent-host.js";
+import type { HostStatus } from "../host/agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 import type {
   AgentDetail,
@@ -27,10 +27,10 @@ import {
   type Schedule,
   type ScheduleInput,
   type ScheduleStore,
-} from "./schedules/schedule-store.js";
-import { validateCadence } from "./schedules/schedule-time.js";
-import type { ScheduleRunNowResult } from "./schedules/scheduler.js";
-import { isProviderId } from "./providers/provider-contracts.js";
+} from "../schedules/schedule-store.js";
+import { validateCadence } from "../schedules/schedule-time.js";
+import type { ScheduleRunNowResult } from "../schedules/scheduler.js";
+import { isProviderId } from "../providers/provider-contracts.js";
 import { parseForm, validated } from "./validate.js";
 import {
   approvalRuleForm,
@@ -50,7 +50,7 @@ import {
   tokenForm,
   telegramConfigureForm,
 } from "./panel-schemas.js";
-import { createMcpPanel, type McpPanelDeps } from "./mcp/mcp-panel.js";
+import { createMcpPanel, type McpPanelDeps } from "../mcp/mcp-panel.js";
 
 export interface RegisteredAgentSettings {
   get(id: string): { name: string; instructions: string } | undefined;
@@ -92,7 +92,7 @@ export interface PanelDeps {
   };
   providers?: Omit<
     ReturnType<
-      typeof import("./providers/shared-providers.js").createSharedProviders
+      typeof import("../providers/shared-providers.js").createSharedProviders
     >,
     "checks" | "close"
   >;
@@ -101,7 +101,7 @@ export interface PanelDeps {
   };
   peers?: {
     grants: Pick<
-      import("./peers/agent-grants.js").AgentGrants,
+      import("../peers/agent-grants.js").AgentGrants,
       "grant" | "revoke" | "list"
     >;
     /** Other agents with the same configured owner, for the target picker. */
@@ -109,17 +109,17 @@ export interface PanelDeps {
   };
   approvals?: {
     rules: Pick<
-      import("./approvals/approval-rules.js").ApprovalRules,
+      import("../approvals/approval-rules.js").ApprovalRules,
       "create" | "revoke" | "list"
     >;
     history: Pick<
-      import("./approvals/approval-store.js").ApprovalStore,
+      import("../approvals/approval-store.js").ApprovalStore,
       "listByAgent"
     >;
   };
   delegations?: {
     store: Pick<
-      import("./tasks/task-queue.js").TaskStore,
+      import("../tasks/task-queue.js").TaskStore,
       "listDelegations" | "getDelegation"
     >;
     cancel(sourceAgentId: string, id: string): Promise<boolean>;
@@ -129,7 +129,7 @@ export interface PanelDeps {
     set(id: string, enabled: boolean): boolean;
   };
   memories?: ReturnType<
-    typeof import("./memory/host-memories.js").createHostMemories
+    typeof import("../memory/host-memories.js").createHostMemories
   >;
   discord?: {
     status?(
@@ -148,11 +148,11 @@ export interface PanelDeps {
       id: string,
       requestId: string,
     ): Promise<
-      import("./notifications/notification-store.js").NotificationRecord
+      import("../notifications/notification-store.js").NotificationRecord
     >;
   };
   registerAgent?: (
-    input: import("./telegram/agent-registration.js").AgentRegistrationInput,
+    input: import("../telegram/agent-registration.js").AgentRegistrationInput,
   ) => Promise<{ agentId: string; provisioning: string }>;
   connectTelegram?: (
     id: string,
@@ -164,10 +164,10 @@ export interface PanelDeps {
         name: string;
         botUsername: string | null;
         provisioning: string;
-        botConnection?: import("./telegram/registered-bots.js").RegisteredBotState;
-        setupAccess?: import("./agents/agent-access.js").AgentSetupAccess;
+        botConnection?: import("../telegram/registered-bots.js").RegisteredBotState;
+        setupAccess?: import("../agents/agent-access.js").AgentSetupAccess;
         process?: {
-          state: import("./processes/agent-process-manager.js").ProcessStatus;
+          state: import("../processes/agent-process-manager.js").ProcessStatus;
           desiredState?: "running" | "stopped";
         };
       }
@@ -179,7 +179,7 @@ export interface PanelDeps {
 
 const ttl = 8 * 60 * 60 * 1000;
 const cookieName = "nimbot_session";
-const panelDist = new URL("../../panel/dist/", import.meta.url);
+const panelDist = new URL("../../../panel/dist/", import.meta.url);
 
 export function createPanel(
   config: PanelConfig,

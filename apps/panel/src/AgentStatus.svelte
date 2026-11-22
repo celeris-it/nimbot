@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AgentDetail } from "../../server/src/panel-contracts.js";
+  import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   import { providers } from "../../server/src/providers/provider-contracts.js";
   import DiscordSettings from "./DiscordSettings.svelte";
   import {

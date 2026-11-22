@@ -3,22 +3,22 @@ import type {
   Schedule,
   ScheduleRun,
   SCHEDULE_LIMITS,
-} from "./schedules/schedule-store.js";
-import type { ScheduleCadence } from "./schedules/schedule-time.js";
-export type { Schedule, ScheduleRun } from "./schedules/schedule-store.js";
-export type { ScheduleRunNowResult } from "./schedules/scheduler.js";
+} from "../schedules/schedule-store.js";
+import type { ScheduleCadence } from "../schedules/schedule-time.js";
+export type { Schedule, ScheduleRun } from "../schedules/schedule-store.js";
+export type { ScheduleRunNowResult } from "../schedules/scheduler.js";
 export type {
   ProviderSettings,
   DeviceLogin,
-} from "./providers/provider-contracts.js";
-export type { DelegationHistoryEntry } from "./tasks/task-queue.js";
+} from "../providers/provider-contracts.js";
+export type { DelegationHistoryEntry } from "../tasks/task-queue.js";
 export type DelegationHistory = ReturnType<
-  import("./tasks/task-queue.js").TaskStore["listDelegations"]
+  import("../tasks/task-queue.js").TaskStore["listDelegations"]
 >;
-export type { McpDefinition } from "./mcp/mcp-catalog.js";
-export type { McpDiscoveryResult } from "./mcp/mcp-discovery.js";
+export type { McpDefinition } from "../mcp/mcp-catalog.js";
+export type { McpDiscoveryResult } from "../mcp/mcp-discovery.js";
 export type McpDefinitionSummary = Pick<
-  import("./mcp/mcp-catalog.js").McpDefinition,
+  import("../mcp/mcp-catalog.js").McpDefinition,
   "id" | "label" | "enabled" | "revision" | "blockedTools"
 >;
 export interface McpAgentDefinition extends McpDefinitionSummary {
@@ -76,7 +76,7 @@ export interface AgentDetail extends AgentSummary {
   settings?: { name: string; instructions: string };
   /** Present when the memory tools can be switched for this agent. */
   memoryEnabled?: boolean;
-  providerChecks?: import("./providers/provider-contracts.js").ProviderCheck[];
+  providerChecks?: import("../providers/provider-contracts.js").ProviderCheck[];
   hostState?: "ready" | "busy" | "unavailable";
   capabilities: {
     edit: boolean;

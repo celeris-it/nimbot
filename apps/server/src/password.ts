@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
-import { hashPassword } from "./panel-auth.js";
+import { hashPassword } from "./panel/panel-auth.js";
 
 const minPasswordLength = 8;
 const maxPasswordLength = 256;

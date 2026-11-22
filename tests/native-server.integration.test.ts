@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { hashPassword } from "../apps/server/src/panel-auth.js";
+import { hashPassword } from "../apps/server/src/panel/panel-auth.js";
 
 /** Run after pnpm build: NIMBOT_TEST_NATIVE_BUILD=1 pnpm test tests/native-server.integration.test.ts */
 it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(

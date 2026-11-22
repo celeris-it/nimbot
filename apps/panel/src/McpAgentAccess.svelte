@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { McpAgentDefinition } from "../../server/src/panel-contracts.js";
+  import type { McpAgentDefinition } from "../../server/src/panel/panel-contracts.js";
   let {
     agent,
     definitions,

@@ -23,8 +23,8 @@ import { createScheduler } from "../../apps/server/dist/schedules/scheduler.js";
 import { HostProviderError } from "../../apps/server/dist/providers/host-providers.js";
 import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/index.mjs";
 import { Hono } from "../../apps/server/node_modules/hono/dist/index.js";
-import { createPanel } from "../../apps/server/dist/panel.js";
-import { hashPassword } from "../../apps/server/dist/panel-auth.js";
+import { createPanel } from "../../apps/server/dist/panel/panel.js";
+import { hashPassword } from "../../apps/server/dist/panel/panel-auth.js";
 import { providers } from "../../apps/server/dist/providers/provider-contracts.js";
 
 const agents = new Map();

@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
-import { createPanel } from "../panel.js";
-import { hashPassword } from "../panel-auth.js";
-import { readPanelConfig } from "../panel-config.js";
+import { createPanel } from "../panel/panel.js";
+import { hashPassword } from "../panel/panel-auth.js";
+import { readPanelConfig } from "../panel/panel-config.js";
 import { createHostMemories, HostMemoryError } from "./host-memories.js";
 
 const host = { url: "http://agent-a:3001", token: "x".repeat(32) };

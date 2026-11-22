@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { AgentDetail } from "../../server/src/panel-contracts.js";
+  import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   let {
     agent,
     busy,
