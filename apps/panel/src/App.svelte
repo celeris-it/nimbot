@@ -493,7 +493,7 @@
     if (!agent) return;
     if (kind === "test") {
       await mutate<
-        import("../../server/src/notification-store.js").NotificationRecord
+        import("../../server/src/notifications/notification-store.js").NotificationRecord
       >(
         `/api/agents/${encodeURIComponent(agent.id)}/discord/test`,
         fields,

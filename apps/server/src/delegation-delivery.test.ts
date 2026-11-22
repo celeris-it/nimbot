@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createAgentTaskServices } from "./tasks/agent-task-services.js";
 import { openAgentGrants } from "./agent-grants.js";
 import { createDiscordNotifications } from "./discord/discord-notifications.js";
-import { openNotificationStore } from "./notification-store.js";
+import { openNotificationStore } from "./notifications/notification-store.js";
 import { log } from "./logger.js";
 import { openTaskStore, type TaskOutcome } from "./tasks/task-queue.js";
 

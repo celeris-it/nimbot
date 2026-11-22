@@ -14,13 +14,13 @@ import { getHostStatus } from "../apps/server/src/host/agent-host.js";
 import { openAgentRegistry } from "../apps/server/src/agents/agent-registry.js";
 import { createBot } from "../apps/server/src/telegram/bot.js";
 import { openChatBinding } from "../apps/server/src/telegram/chat-binding.js";
-import { createDurableNotifications } from "../apps/server/src/durable-notifications.js";
+import { createDurableNotifications } from "../apps/server/src/notifications/durable-notifications.js";
 import {
   createHostApprovals,
   createHostTasks,
 } from "../apps/server/src/host/host-tasks.js";
-import { openNotificationStore } from "../apps/server/src/notification-store.js";
-import { createNotifications } from "../apps/server/src/notifications.js";
+import { openNotificationStore } from "../apps/server/src/notifications/notification-store.js";
+import { createNotifications } from "../apps/server/src/notifications/notifications.js";
 import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 import {
   createScheduleAdmission,

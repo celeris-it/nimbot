@@ -4,11 +4,11 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { expect, it, vi } from "vitest";
 import { openAgentRegistry } from "../apps/server/src/agents/agent-registry.js";
-import { openOperationalAlertStore } from "../apps/server/src/operational-alert-store.js";
-import { createOperationalAlerts } from "../apps/server/src/operational-alerts.js";
-import { openNotificationStore } from "../apps/server/src/notification-store.js";
-import { createDurableNotifications } from "../apps/server/src/durable-notifications.js";
-import { createNotifications } from "../apps/server/src/notifications.js";
+import { openOperationalAlertStore } from "../apps/server/src/notifications/operational-alert-store.js";
+import { createOperationalAlerts } from "../apps/server/src/notifications/operational-alerts.js";
+import { openNotificationStore } from "../apps/server/src/notifications/notification-store.js";
+import { createDurableNotifications } from "../apps/server/src/notifications/durable-notifications.js";
+import { createNotifications } from "../apps/server/src/notifications/notifications.js";
 import { createTelegramNotifications } from "../apps/server/src/telegram/telegram-notifications.js";
 import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 

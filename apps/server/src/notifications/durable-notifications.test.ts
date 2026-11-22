@@ -8,7 +8,7 @@ import {
   createNotifications,
   type NotificationResult,
 } from "./notifications.js";
-import { createLogger } from "./logger.js";
+import { createLogger } from "../logger.js";
 
 it("persists before sending and deduplicates concurrent requests per agent", async () => {
   const store = openNotificationStore(":memory:");

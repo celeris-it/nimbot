@@ -140,7 +140,9 @@ export interface PanelDeps {
     test?(
       id: string,
       requestId: string,
-    ): Promise<import("./notification-store.js").NotificationRecord>;
+    ): Promise<
+      import("./notifications/notification-store.js").NotificationRecord
+    >;
   };
   registerAgent?: (
     input: import("./telegram/agent-registration.js").AgentRegistrationInput,

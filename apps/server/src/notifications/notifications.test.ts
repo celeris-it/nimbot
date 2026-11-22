@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { GrammyError } from "grammy";
 import { createNotifications } from "./notifications.js";
-import { createTelegramNotifications } from "./telegram/telegram-notifications.js";
+import { createTelegramNotifications } from "../telegram/telegram-notifications.js";
 
 it("does not fall back to another channel or send empty text", async () => {
   const send = vi.fn();

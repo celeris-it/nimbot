@@ -39,11 +39,11 @@ import type {
 } from "./tasks/task-queue.js";
 import { openDiscordInbox } from "./discord/discord-inbox.js";
 import { createRegisteredDiscord } from "./discord/registered-discord.js";
-import { openOperationalAlertStore } from "./operational-alert-store.js";
-import { createOperationalAlerts } from "./operational-alerts.js";
-import { openNotificationStore } from "./notification-store.js";
-import { createDurableNotifications } from "./durable-notifications.js";
-import { createNotifications } from "./notifications.js";
+import { openOperationalAlertStore } from "./notifications/operational-alert-store.js";
+import { createOperationalAlerts } from "./notifications/operational-alerts.js";
+import { openNotificationStore } from "./notifications/notification-store.js";
+import { createDurableNotifications } from "./notifications/durable-notifications.js";
+import { createNotifications } from "./notifications/notifications.js";
 import { createDiscordNotifications } from "./discord/discord-notifications.js";
 import { log } from "./logger.js";
 import { createRegisteredBots } from "./telegram/registered-bots.js";

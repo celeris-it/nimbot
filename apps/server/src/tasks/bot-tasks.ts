@@ -15,8 +15,8 @@ import {
 } from "../approval-relay.js";
 import { createDelegatedHostApprovals } from "../delegated-host-approvals.js";
 import { createDelegationDelivery } from "../delegation-delivery.js";
-import type { openNotificationStore } from "../notification-store.js";
-import type { NotificationResult } from "../notifications.js";
+import type { openNotificationStore } from "../notifications/notification-store.js";
+import type { NotificationResult } from "../notifications/notifications.js";
 import { createTelegramNotifications } from "../telegram/telegram-notifications.js";
 import type { ApprovalRules } from "../approval-rules.js";
 import type { ApprovalStore } from "../approval-store.js";

@@ -7,7 +7,7 @@ import type {
   NotificationResult,
 } from "./notifications.js";
 import { createNotifications } from "./notifications.js";
-import { log as defaultLog, type Logger } from "./logger.js";
+import { log as defaultLog, type Logger } from "../logger.js";
 
 /** Persist intent before invoking an adapter. Duplicate requests observe state without sending. */
 export function createDurableNotifications(

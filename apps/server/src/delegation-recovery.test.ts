@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createAgentTaskServices } from "./tasks/agent-task-services.js";
 import type { createBotTasks } from "./tasks/bot-tasks.js";
 import { createDelegationExecution } from "./delegation-execution.js";
-import { openNotificationStore } from "./notification-store.js";
+import { openNotificationStore } from "./notifications/notification-store.js";
 import { openTaskStore } from "./tasks/task-queue.js";
 
 const cleanups: (() => Promise<void>)[] = [];

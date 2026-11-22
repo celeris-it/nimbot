@@ -23,7 +23,7 @@ import {
   createHostApprovals,
   createHostCancellation,
 } from "../apps/server/src/host/host-tasks.js";
-import { openNotificationStore } from "../apps/server/src/notification-store.js";
+import { openNotificationStore } from "../apps/server/src/notifications/notification-store.js";
 import { createPeerTools } from "../apps/server/src/peer-tools.js";
 import {
   openTaskStore,

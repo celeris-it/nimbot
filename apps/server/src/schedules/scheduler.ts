@@ -1,6 +1,6 @@
 import { createAgentAccess } from "../agents/agent-access.js";
-import type { NotificationResult } from "../notifications.js";
-import type { createDurableNotifications } from "../durable-notifications.js";
+import type { NotificationResult } from "../notifications/notifications.js";
+import type { createDurableNotifications } from "../notifications/durable-notifications.js";
 import type { openAgentRegistry } from "../agents/agent-registry.js";
 import {
   getHostStatus,
