@@ -21,12 +21,12 @@ import {
 } from "../apps/server/src/host/host-tasks.js";
 import { openNotificationStore } from "../apps/server/src/notification-store.js";
 import { createNotifications } from "../apps/server/src/notifications.js";
-import { openScheduleStore } from "../apps/server/src/schedule-store.js";
+import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 import {
   createScheduleAdmission,
   createScheduleSkipNotifier,
   createScheduler,
-} from "../apps/server/src/scheduler.js";
+} from "../apps/server/src/schedules/scheduler.js";
 import { openTaskStore } from "../apps/server/src/tasks/task-queue.js";
 
 const START = Date.parse("2027-01-01T08:00:00Z");

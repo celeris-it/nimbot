@@ -2,14 +2,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createLogger } from "./logger.js";
+import { createLogger } from "../logger.js";
 import {
   openScheduleStore,
   type ScheduleInput,
   type ScheduleOrigin,
 } from "./schedule-store.js";
 import { createScheduler } from "./scheduler.js";
-import { openTaskStore } from "./tasks/task-queue.js";
+import { openTaskStore } from "../tasks/task-queue.js";
 
 const START = Date.parse("2027-01-01T08:00:00Z");
 const MINUTE = 60_000;

@@ -5,7 +5,7 @@ import { openAgentProcessStore } from "./processes/agent-process-store.js";
 import { openProcessHostCredentials } from "./processes/process-host-credentials.js";
 import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
 import { createDiscordAttachments } from "./discord/discord-attachments.js";
-import { formatScheduleList } from "./chat-schedules.js";
+import { formatScheduleList } from "./schedules/chat-schedules.js";
 import { taskOutcomeText } from "./telegram/bot.js";
 import { createTelegramAttachments } from "./telegram/telegram-attachments.js";
 import { createAgentTaskServices } from "./tasks/agent-task-services.js";
@@ -49,12 +49,12 @@ import { log } from "./logger.js";
 import { createRegisteredBots } from "./telegram/registered-bots.js";
 import { createAgentAccess } from "./agents/agent-access.js";
 import { openTaskStore } from "./tasks/task-queue.js";
-import { openScheduleStore } from "./schedule-store.js";
+import { openScheduleStore } from "./schedules/schedule-store.js";
 import {
   createScheduleAdmission,
   createScheduleSkipNotifier,
   createScheduler,
-} from "./scheduler.js";
+} from "./schedules/scheduler.js";
 import { openBotSecrets } from "./telegram/bot-secret.js";
 import { openDiscordSecrets } from "./discord/discord-secret.js";
 import { openMcpCatalog } from "./mcp-catalog.js";

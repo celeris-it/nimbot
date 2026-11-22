@@ -1,5 +1,5 @@
 import type { openAgentRegistry } from "./agent-registry.js";
-import type { ScheduleStore } from "../schedule-store.js";
+import type { ScheduleStore } from "../schedules/schedule-store.js";
 
 /**
  * Deletes an agent from the panel: stops its bot polling, removes its runtime

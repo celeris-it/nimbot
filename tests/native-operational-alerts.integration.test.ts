@@ -10,7 +10,7 @@ import { openNotificationStore } from "../apps/server/src/notification-store.js"
 import { createDurableNotifications } from "../apps/server/src/durable-notifications.js";
 import { createNotifications } from "../apps/server/src/notifications.js";
 import { createTelegramNotifications } from "../apps/server/src/telegram/telegram-notifications.js";
-import { openScheduleStore } from "../apps/server/src/schedule-store.js";
+import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 
 it("monitors native Host, provider and schedule failures without Docker state or duplicate delivery", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nimbot-native-alerts-"));

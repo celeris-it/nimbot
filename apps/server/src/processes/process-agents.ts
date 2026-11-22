@@ -3,7 +3,7 @@ import type { openAgentRegistry } from "../agents/agent-registry.js";
 import type { openAgentProcessStore } from "./agent-process-store.js";
 import type { openBotSecrets } from "../telegram/bot-secret.js";
 import type { openProcessHostCredentials } from "./process-host-credentials.js";
-import type { ScheduleStore } from "../schedule-store.js";
+import type { ScheduleStore } from "../schedules/schedule-store.js";
 import { createAgentProcessManager } from "./agent-process-manager.js";
 import { agentProcessDirectories } from "./agent-process-config.js";
 import {

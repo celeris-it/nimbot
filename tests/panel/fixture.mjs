@@ -10,7 +10,7 @@ import {
   openAgentUsage,
 } from "../../apps/server/dist/agent-usage.js";
 import { openTaskStore } from "../../apps/server/dist/tasks/task-queue.js";
-import { openScheduleStore } from "../../apps/server/dist/schedule-store.js";
+import { openScheduleStore } from "../../apps/server/dist/schedules/schedule-store.js";
 import { openMcpCatalog } from "../../apps/server/dist/mcp-catalog.js";
 import { openMcpCredentials } from "../../apps/server/dist/mcp-credentials.js";
 import { openAgentGrants } from "../../apps/server/dist/agent-grants.js";
@@ -19,7 +19,7 @@ import { openApprovalStore } from "../../apps/server/dist/approval-store.js";
 import { createHostMemories } from "../../apps/server/dist/host-memories.js";
 import { openMemoryStore } from "../../apps/agent-host/dist/memory-store.js";
 import { createHostApi } from "../../apps/agent-host/dist/http.js";
-import { createScheduler } from "../../apps/server/dist/scheduler.js";
+import { createScheduler } from "../../apps/server/dist/schedules/scheduler.js";
 import { HostProviderError } from "../../apps/server/dist/host-providers.js";
 import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/index.mjs";
 import { Hono } from "../../apps/server/node_modules/hono/dist/index.js";

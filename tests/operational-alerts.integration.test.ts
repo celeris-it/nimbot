@@ -9,7 +9,7 @@ import { createNotifications } from "../apps/server/src/notifications.js";
 import { openOperationalAlertStore } from "../apps/server/src/operational-alert-store.js";
 import { createOperationalAlerts } from "../apps/server/src/operational-alerts.js";
 import type { ProviderCheck } from "../apps/server/src/provider-contracts.js";
-import { openScheduleStore } from "../apps/server/src/schedule-store.js";
+import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 import {
   openTaskStore,
   type TaskStatus,

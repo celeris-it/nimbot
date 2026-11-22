@@ -10,8 +10,11 @@ import { splitTelegramText } from "./telegram-text.js";
 import type { TaskOutcome } from "../tasks/task-queue.js";
 import { Bot, type Api } from "grammy";
 import type { BotAccess } from "../agents/agent-access.js";
-import { formatScheduleList, type ListedSchedule } from "../chat-schedules.js";
-import type { TelegramScheduleOrigin } from "../schedule-store.js";
+import {
+  formatScheduleList,
+  type ListedSchedule,
+} from "../schedules/chat-schedules.js";
+import type { TelegramScheduleOrigin } from "../schedules/schedule-store.js";
 
 const failureMessages = {
   attachment_unavailable:

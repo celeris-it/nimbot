@@ -50,7 +50,7 @@ import {
 } from "./task-queue.js";
 import type { ModelAdmission, TaskUsage } from "../usage-contracts.js";
 import type { createDiscordAttachments } from "../discord/discord-attachments.js";
-import { createChatSchedules } from "../chat-schedules.js";
+import { createChatSchedules } from "../schedules/chat-schedules.js";
 import { splitTelegramText } from "../telegram/telegram-text.js";
 
 /** One persistent queue and Host runner per agent; callbacks return to the saved origin. */

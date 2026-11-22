@@ -7,7 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openTaskStore } from "../tasks/task-queue.js";
-import { openScheduleStore } from "../schedule-store.js";
+import { openScheduleStore } from "../schedules/schedule-store.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

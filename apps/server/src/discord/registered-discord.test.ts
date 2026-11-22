@@ -146,7 +146,7 @@ it("dispatches persisted Discord-only messages and cancels a scheduled run from 
     await import("../tasks/agent-task-services.js");
   const { openTaskStore } = await import("../tasks/task-queue.js");
   const { HostTaskError } = await import("../host/host-tasks.js");
-  const { openScheduleStore } = await import("../schedule-store.js");
+  const { openScheduleStore } = await import("../schedules/schedule-store.js");
   const f = await fixture();
   const store = openTaskStore(f.path);
   const scheduleStore = openScheduleStore(f.path);

@@ -27,9 +27,9 @@ import {
   type Schedule,
   type ScheduleInput,
   type ScheduleStore,
-} from "./schedule-store.js";
-import { validateCadence } from "./schedule-time.js";
-import type { ScheduleRunNowResult } from "./scheduler.js";
+} from "./schedules/schedule-store.js";
+import { validateCadence } from "./schedules/schedule-time.js";
+import type { ScheduleRunNowResult } from "./schedules/scheduler.js";
 import { isProviderId } from "./provider-contracts.js";
 import { parseForm, validated } from "./validate.js";
 import {

@@ -5,7 +5,7 @@ import { log } from "./logger.js";
 import type { openNotificationStore } from "./notification-store.js";
 import type { openOperationalAlertStore } from "./operational-alert-store.js";
 import { providers, type ProviderCheck } from "./provider-contracts.js";
-import type { Schedule, ScheduleStore } from "./schedule-store.js";
+import type { Schedule, ScheduleStore } from "./schedules/schedule-store.js";
 import type { TaskStore } from "./tasks/task-queue.js";
 
 const intervalMs = 30_000;

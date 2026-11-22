@@ -3,7 +3,7 @@ import type {
   Schedule,
   ScheduleRun,
 } from "../../server/src/panel-contracts.js";
-import { nextRun } from "../../server/src/schedule-time.js";
+import { nextRun } from "../../server/src/schedules/schedule-time.js";
 
 export const scheduleText = {
   title: (name: string) => `Schedules for ${name}`,

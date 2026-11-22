@@ -10,7 +10,7 @@ import { createBot } from "./bot.js";
 import { createHostApprovals, createHostTasks } from "../host/host-tasks.js";
 import { createBotTasks } from "../tasks/bot-tasks.js";
 import type { TaskStore } from "../tasks/task-queue.js";
-import type { ScheduleStore } from "../schedule-store.js";
+import type { ScheduleStore } from "../schedules/schedule-store.js";
 import { getHostStatus } from "../host/agent-host.js";
 import { withAgentInstructions } from "../agents/agent-instructions.js";
 import { DEFAULT_RETRY_DELAYS_MS, retryTransient } from "../retry.js";

@@ -8,8 +8,8 @@ import {
   validateTimeZone,
   type ScheduleCadence,
 } from "./schedule-time.js";
-import { isDiscordId } from "./discord/discord-identity.js";
-import type { DiscordConversation, TaskStatus } from "./tasks/task-queue.js";
+import { isDiscordId } from "../discord/discord-identity.js";
+import type { DiscordConversation, TaskStatus } from "../tasks/task-queue.js";
 
 export const SCHEDULE_LIMITS = {
   maxPerAgent: 20,

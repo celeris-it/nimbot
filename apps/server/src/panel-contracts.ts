@@ -3,10 +3,10 @@ import type {
   Schedule,
   ScheduleRun,
   SCHEDULE_LIMITS,
-} from "./schedule-store.js";
-import type { ScheduleCadence } from "./schedule-time.js";
-export type { Schedule, ScheduleRun } from "./schedule-store.js";
-export type { ScheduleRunNowResult } from "./scheduler.js";
+} from "./schedules/schedule-store.js";
+import type { ScheduleCadence } from "./schedules/schedule-time.js";
+export type { Schedule, ScheduleRun } from "./schedules/schedule-store.js";
+export type { ScheduleRunNowResult } from "./schedules/scheduler.js";
 export type { ProviderSettings, DeviceLogin } from "./provider-contracts.js";
 export type { DelegationHistoryEntry } from "./tasks/task-queue.js";
 export type DelegationHistory = ReturnType<

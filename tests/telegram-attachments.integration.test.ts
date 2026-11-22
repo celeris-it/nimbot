@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { openScheduleStore } from "../apps/server/src/schedule-store.js";
+import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 import { openNotificationStore } from "../apps/server/src/notification-store.js";
 import {
   mkdir,

@@ -22,7 +22,7 @@ import {
   openTaskStore,
   type RoutedTask,
 } from "../apps/server/src/tasks/task-queue.js";
-import { openScheduleStore } from "../apps/server/src/schedule-store.js";
+import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 import { openApprovalStore } from "../apps/server/src/approval-store.js";
 import { openApprovalRules } from "../apps/server/src/approval-rules.js";
 import { openMcpCatalog } from "../apps/server/src/mcp-catalog.js";

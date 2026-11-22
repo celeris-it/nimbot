@@ -5,7 +5,7 @@
     nextRuns,
     validateTimeZone,
     parseCronExpression,
-  } from "../../server/src/schedule-time.js";
+  } from "../../server/src/schedules/schedule-time.js";
   import type {
     AgentDetail,
     Schedule,

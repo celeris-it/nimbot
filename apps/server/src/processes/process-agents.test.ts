@@ -22,8 +22,8 @@ import { openChatBinding } from "../telegram/chat-binding.js";
 import { createRegisteredBots } from "../telegram/registered-bots.js";
 import { createBot } from "../telegram/bot.js";
 import { openTaskStore } from "../tasks/task-queue.js";
-import { openScheduleStore } from "../schedule-store.js";
-import { createScheduleAdmission } from "../scheduler.js";
+import { openScheduleStore } from "../schedules/schedule-store.js";
+import { createScheduleAdmission } from "../schedules/scheduler.js";
 
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {

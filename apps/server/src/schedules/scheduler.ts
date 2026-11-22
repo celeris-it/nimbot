@@ -1,13 +1,13 @@
-import { createAgentAccess } from "./agents/agent-access.js";
-import type { NotificationResult } from "./notifications.js";
-import type { createDurableNotifications } from "./durable-notifications.js";
-import type { openAgentRegistry } from "./agents/agent-registry.js";
+import { createAgentAccess } from "../agents/agent-access.js";
+import type { NotificationResult } from "../notifications.js";
+import type { createDurableNotifications } from "../durable-notifications.js";
+import type { openAgentRegistry } from "../agents/agent-registry.js";
 import {
   getHostStatus,
   type AgentHostConfig,
   type HostStatus,
-} from "./host/agent-host.js";
-import { log as defaultLog, type Logger } from "./logger.js";
+} from "../host/agent-host.js";
+import { log as defaultLog, type Logger } from "../logger.js";
 import type {
   Schedule,
   FireResult,

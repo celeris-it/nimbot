@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { openAgentProcessStore } from "./processes/agent-process-store.js";
+import { openAgentProcessStore } from "../processes/agent-process-store.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { openAgentRegistry } from "./agents/agent-registry.js";
-import { openChatBinding } from "./telegram/chat-binding.js";
-import type { AgentHostConfig, HostStatus } from "./host/agent-host.js";
+import { openAgentRegistry } from "../agents/agent-registry.js";
+import { openChatBinding } from "../telegram/chat-binding.js";
+import type { AgentHostConfig, HostStatus } from "../host/agent-host.js";
 import type { Schedule } from "./schedule-store.js";
 import { createScheduleAdmission } from "./scheduler.js";
 
