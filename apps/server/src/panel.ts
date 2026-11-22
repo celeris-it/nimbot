@@ -50,7 +50,7 @@ import {
   tokenForm,
   telegramConfigureForm,
 } from "./panel-schemas.js";
-import { createMcpPanel, type McpPanelDeps } from "./mcp-panel.js";
+import { createMcpPanel, type McpPanelDeps } from "./mcp/mcp-panel.js";
 
 export interface RegisteredAgentSettings {
   get(id: string): { name: string; instructions: string } | undefined;

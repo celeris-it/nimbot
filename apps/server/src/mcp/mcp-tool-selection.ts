@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { McpCatalog, McpCatalogTool } from "./mcp-catalog.js";
-import type { RemoteToolDefinition } from "./tasks/task-capabilities.js";
+import type { RemoteToolDefinition } from "../tasks/task-capabilities.js";
 import { compileMcpArguments } from "./mcp-arguments.js";
 
 interface SelectedTool {

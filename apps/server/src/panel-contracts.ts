@@ -15,10 +15,10 @@ export type { DelegationHistoryEntry } from "./tasks/task-queue.js";
 export type DelegationHistory = ReturnType<
   import("./tasks/task-queue.js").TaskStore["listDelegations"]
 >;
-export type { McpDefinition } from "./mcp-catalog.js";
-export type { McpDiscoveryResult } from "./mcp-discovery.js";
+export type { McpDefinition } from "./mcp/mcp-catalog.js";
+export type { McpDiscoveryResult } from "./mcp/mcp-discovery.js";
 export type McpDefinitionSummary = Pick<
-  import("./mcp-catalog.js").McpDefinition,
+  import("./mcp/mcp-catalog.js").McpDefinition,
   "id" | "label" | "enabled" | "revision" | "blockedTools"
 >;
 export interface McpAgentDefinition extends McpDefinitionSummary {

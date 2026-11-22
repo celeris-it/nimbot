@@ -2,12 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { openMcpCatalog, type McpDefinition } from "./mcp-catalog.js";
-import { openMcpCredentials } from "./mcp-credentials.js";
+import { openMcpCatalog, type McpDefinition } from "./mcp/mcp-catalog.js";
+import { openMcpCredentials } from "./mcp/mcp-credentials.js";
 import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";
 import { createPanel } from "./panel.js";
-import type { createMcpDiscovery } from "./mcp-discovery.js";
+import type { createMcpDiscovery } from "./mcp/mcp-discovery.js";
 
 const draft = {
   label: "Workspace docs",

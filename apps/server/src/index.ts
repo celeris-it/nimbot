@@ -57,11 +57,11 @@ import {
 } from "./schedules/scheduler.js";
 import { openBotSecrets } from "./telegram/bot-secret.js";
 import { openDiscordSecrets } from "./discord/discord-secret.js";
-import { openMcpCatalog } from "./mcp-catalog.js";
-import { openMcpCredentials } from "./mcp-credentials.js";
-import { createMcpDiscovery } from "./mcp-discovery.js";
-import { createMcpExecution } from "./mcp-execution.js";
-import { createMcpTools } from "./mcp-tools.js";
+import { openMcpCatalog } from "./mcp/mcp-catalog.js";
+import { openMcpCredentials } from "./mcp/mcp-credentials.js";
+import { createMcpDiscovery } from "./mcp/mcp-discovery.js";
+import { createMcpExecution } from "./mcp/mcp-execution.js";
+import { createMcpTools } from "./mcp/mcp-tools.js";
 import { createDiscordConfiguration } from "./discord/discord-configuration.js";
 import { createBotTokenUpdate } from "./telegram/bot-token-update.js";
 import { createTelegramLink } from "./telegram/agent-registration.js";

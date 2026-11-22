@@ -25,10 +25,10 @@ import {
 import { openScheduleStore } from "../apps/server/src/schedules/schedule-store.js";
 import { openApprovalStore } from "../apps/server/src/approvals/approval-store.js";
 import { openApprovalRules } from "../apps/server/src/approvals/approval-rules.js";
-import { openMcpCatalog } from "../apps/server/src/mcp-catalog.js";
-import { openMcpCredentials } from "../apps/server/src/mcp-credentials.js";
-import { createMcpExecution } from "../apps/server/src/mcp-execution.js";
-import { createMcpTools, mcpTarget } from "../apps/server/src/mcp-tools.js";
+import { openMcpCatalog } from "../apps/server/src/mcp/mcp-catalog.js";
+import { openMcpCredentials } from "../apps/server/src/mcp/mcp-credentials.js";
+import { createMcpExecution } from "../apps/server/src/mcp/mcp-execution.js";
+import { createMcpTools, mcpTarget } from "../apps/server/src/mcp/mcp-tools.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

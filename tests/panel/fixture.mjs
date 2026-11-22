@@ -11,8 +11,8 @@ import {
 } from "../../apps/server/dist/providers/agent-usage.js";
 import { openTaskStore } from "../../apps/server/dist/tasks/task-queue.js";
 import { openScheduleStore } from "../../apps/server/dist/schedules/schedule-store.js";
-import { openMcpCatalog } from "../../apps/server/dist/mcp-catalog.js";
-import { openMcpCredentials } from "../../apps/server/dist/mcp-credentials.js";
+import { openMcpCatalog } from "../../apps/server/dist/mcp/mcp-catalog.js";
+import { openMcpCredentials } from "../../apps/server/dist/mcp/mcp-credentials.js";
 import { openAgentGrants } from "../../apps/server/dist/peers/agent-grants.js";
 import { openApprovalRules } from "../../apps/server/dist/approvals/approval-rules.js";
 import { openApprovalStore } from "../../apps/server/dist/approvals/approval-store.js";

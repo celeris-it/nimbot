@@ -3,15 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { createApprovalGate } from "./approvals/approval-gate.js";
-import { openApprovalStore } from "./approvals/approval-store.js";
-import { openApprovalRules } from "./approvals/approval-rules.js";
+import { createApprovalGate } from "../approvals/approval-gate.js";
+import { openApprovalStore } from "../approvals/approval-store.js";
+import { openApprovalRules } from "../approvals/approval-rules.js";
 import { openMcpCatalog } from "./mcp-catalog.js";
 import { createMcpTools, mcpActionType, mcpTarget } from "./mcp-tools.js";
 import type { createMcpExecution } from "./mcp-execution.js";
-import { createTaskCapabilities } from "./tasks/task-capabilities.js";
-import { createToolDispatcher } from "./tasks/tool-dispatch.js";
-import { openTaskStore, type RoutedTask } from "./tasks/task-queue.js";
+import { createTaskCapabilities } from "../tasks/task-capabilities.js";
+import { createToolDispatcher } from "../tasks/tool-dispatch.js";
+import { openTaskStore, type RoutedTask } from "../tasks/task-queue.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
