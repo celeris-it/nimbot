@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isDiscordId } from "./discord-identity.js";
+import { isDiscordId } from "./discord/discord-identity.js";
 import { isApiKey } from "./provider-contracts.js";
 
 /** Form field schemas for the panel API. Each route supplies its own error message. */

@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { isDiscordId } from "../discord-identity.js";
+import { isDiscordId } from "../discord/discord-identity.js";
 import { prepareStateSchema } from "../../../../scripts/state-schema.mjs";
 
 export interface DiscordConnection {

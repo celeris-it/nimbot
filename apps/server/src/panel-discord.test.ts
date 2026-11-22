@@ -6,8 +6,8 @@ import { createPanel } from "./panel.js";
 import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";
 import { openAgentRegistry } from "./agents/agent-registry.js";
-import { openDiscordSecrets } from "./discord-secret.js";
-import { createDiscordConfiguration } from "./discord-configuration.js";
+import { openDiscordSecrets } from "./discord/discord-secret.js";
+import { createDiscordConfiguration } from "./discord/discord-configuration.js";
 
 it("protects Discord configuration, isolates agents, and never returns credentials", async () => {
   const dir = await mkdtemp(join(tmpdir(), "panel-discord-"));

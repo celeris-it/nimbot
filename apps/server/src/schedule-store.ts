@@ -8,7 +8,7 @@ import {
   validateTimeZone,
   type ScheduleCadence,
 } from "./schedule-time.js";
-import { isDiscordId } from "./discord-identity.js";
+import { isDiscordId } from "./discord/discord-identity.js";
 import type { DiscordConversation, TaskStatus } from "./task-queue.js";
 
 export const SCHEDULE_LIMITS = {

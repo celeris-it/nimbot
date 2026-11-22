@@ -1,5 +1,5 @@
-import type { createBotTasks } from "./bot-tasks.js";
-import type { openAgentRegistry } from "./agents/agent-registry.js";
+import type { createBotTasks } from "../bot-tasks.js";
+import type { openAgentRegistry } from "../agents/agent-registry.js";
 import type { openDiscordSecrets } from "./discord-secret.js";
 import type { openDiscordInbox } from "./discord-inbox.js";
 import { createDiscordGateway } from "./discord-gateway.js";

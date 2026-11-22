@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 import { acknowledgeDiscordApproval } from "./discord-interactions.js";
 import { createDiscordNotifications } from "./discord-notifications.js";
 import type { DiscordApprovalInteraction } from "./discord-approvals.js";
-import type { DiscordQueuedTask } from "./task-queue.js";
+import type { DiscordQueuedTask } from "../task-queue.js";
 
 const interaction: DiscordApprovalInteraction = {
   id: "123",
@@ -130,7 +130,7 @@ it("handles rejected, uncertain, and malformed interaction acknowledgments witho
   expect(await acknowledgeDiscordApproval(interaction, request)).toBe(false);
   expect(
     await acknowledgeDiscordApproval(
-      { ...interaction, token: "../escape" },
+      { ...interaction, token: "../../escape" },
       request,
     ),
   ).toBe(false);

@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { createDiscordApprovals } from "./discord-approvals.js";
-import type { DiscordQueuedTask } from "./task-queue.js";
+import type { DiscordQueuedTask } from "../task-queue.js";
 const task: DiscordQueuedTask = {
   id: "queued",
   agentId: "a",

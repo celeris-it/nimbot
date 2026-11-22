@@ -281,7 +281,7 @@ it("admits attachment-only DMs with sanitized metadata and no CDN URL", () => {
       attachments: [
         {
           id: "1",
-          filename: "../file.txt",
+          filename: "../../file.txt",
           size: 5,
           url: "https://example.com",
         },

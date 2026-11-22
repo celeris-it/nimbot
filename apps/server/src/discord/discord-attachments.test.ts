@@ -2,17 +2,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { createBotTasks } from "./bot-tasks.js";
+import { createBotTasks } from "../bot-tasks.js";
 import {
   createDiscordAttachments,
   discordAttachmentInput,
 } from "./discord-attachments.js";
 import { createDiscordNotifications } from "./discord-notifications.js";
-import { openTaskStore } from "./task-queue.js";
+import { openTaskStore } from "../task-queue.js";
 import {
   ATTACHMENT_LIMIT,
   ATTACHMENT_OPERATION,
-} from "./telegram/telegram-attachments.js";
+} from "../telegram/telegram-attachments.js";
 
 const dm = {
   platform: "discord",
@@ -21,7 +21,7 @@ const dm = {
   channelId: "33",
 } as const;
 const host = { url: "http://host:3001", token: "host-token" };
-const file = { id: "44", filename: "../input.txt", size: 4 };
+const file = { id: "44", filename: "../../input.txt", size: 4 };
 const document = discordAttachmentInput({ attachments: [file] })!;
 
 function fixture() {

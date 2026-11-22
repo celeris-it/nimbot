@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import type { DiscordQueuedTask } from "./task-queue.js";
-import type { HostApproval } from "./host/host-tasks.js";
+import type { DiscordQueuedTask } from "../task-queue.js";
+import type { HostApproval } from "../host/host-tasks.js";
 
 export interface DiscordApprovalInteraction {
   id: string;

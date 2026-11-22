@@ -2,7 +2,7 @@ import { mkdtemp, rm, stat, readdir, readFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { openAgentRegistry } from "./agents/agent-registry.js";
+import { openAgentRegistry } from "../agents/agent-registry.js";
 import { openDiscordSecrets } from "./discord-secret.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
 import { verifyDiscordBot, isDiscordId } from "./discord-identity.js";
@@ -99,7 +99,7 @@ it("rejects insecure secret files and path traversal", async () => {
   try {
     const secrets = await openDiscordSecrets(dir);
     const ref = await secrets.save("secret");
-    await expect(secrets.read("../other")).rejects.toThrow(
+    await expect(secrets.read("../../other")).rejects.toThrow(
       "Invalid credential reference",
     );
     await chmod(join(dir, ref.slice(5)), 0o644);

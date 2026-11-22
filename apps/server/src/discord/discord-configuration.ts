@@ -1,4 +1,4 @@
-import type { openAgentRegistry } from "./agents/agent-registry.js";
+import type { openAgentRegistry } from "../agents/agent-registry.js";
 import type { openDiscordSecrets } from "./discord-secret.js";
 import { isDiscordId, verifyDiscordBot } from "./discord-identity.js";
 import type { DiscordNotificationTarget } from "./discord-notifications.js";

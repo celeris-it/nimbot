@@ -4,7 +4,7 @@ import { createProcessAgents } from "./processes/process-agents.js";
 import { openAgentProcessStore } from "./processes/agent-process-store.js";
 import { openProcessHostCredentials } from "./processes/process-host-credentials.js";
 import { prepareStateSchema } from "../../../scripts/state-schema.mjs";
-import { createDiscordAttachments } from "./discord-attachments.js";
+import { createDiscordAttachments } from "./discord/discord-attachments.js";
 import { formatScheduleList } from "./chat-schedules.js";
 import { taskOutcomeText } from "./telegram/bot.js";
 import { createTelegramAttachments } from "./telegram/telegram-attachments.js";
@@ -37,14 +37,14 @@ import type {
   DiscordQueuedTask,
   RoutedTask,
 } from "./task-queue.js";
-import { openDiscordInbox } from "./discord-inbox.js";
-import { createRegisteredDiscord } from "./registered-discord.js";
+import { openDiscordInbox } from "./discord/discord-inbox.js";
+import { createRegisteredDiscord } from "./discord/registered-discord.js";
 import { openOperationalAlertStore } from "./operational-alert-store.js";
 import { createOperationalAlerts } from "./operational-alerts.js";
 import { openNotificationStore } from "./notification-store.js";
 import { createDurableNotifications } from "./durable-notifications.js";
 import { createNotifications } from "./notifications.js";
-import { createDiscordNotifications } from "./discord-notifications.js";
+import { createDiscordNotifications } from "./discord/discord-notifications.js";
 import { log } from "./logger.js";
 import { createRegisteredBots } from "./telegram/registered-bots.js";
 import { createAgentAccess } from "./agents/agent-access.js";
@@ -56,13 +56,13 @@ import {
   createScheduler,
 } from "./scheduler.js";
 import { openBotSecrets } from "./telegram/bot-secret.js";
-import { openDiscordSecrets } from "./discord-secret.js";
+import { openDiscordSecrets } from "./discord/discord-secret.js";
 import { openMcpCatalog } from "./mcp-catalog.js";
 import { openMcpCredentials } from "./mcp-credentials.js";
 import { createMcpDiscovery } from "./mcp-discovery.js";
 import { createMcpExecution } from "./mcp-execution.js";
 import { createMcpTools } from "./mcp-tools.js";
-import { createDiscordConfiguration } from "./discord-configuration.js";
+import { createDiscordConfiguration } from "./discord/discord-configuration.js";
 import { createBotTokenUpdate } from "./telegram/bot-token-update.js";
 import { createTelegramLink } from "./telegram/agent-registration.js";
 import { openAgentRegistry } from "./agents/agent-registry.js";

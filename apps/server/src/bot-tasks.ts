@@ -20,8 +20,8 @@ import type { ApprovalStore } from "./approval-store.js";
 import {
   createDiscordApprovals,
   type DiscordApprovalInteraction,
-} from "./discord-approvals.js";
-import { acknowledgeDiscordApproval } from "./discord-interactions.js";
+} from "./discord/discord-approvals.js";
+import { acknowledgeDiscordApproval } from "./discord/discord-interactions.js";
 import { createTaskCapabilities } from "./task-capabilities.js";
 import {
   createToolDispatcher,
@@ -46,7 +46,7 @@ import {
   type TaskStore,
 } from "./task-queue.js";
 import type { ModelAdmission, TaskUsage } from "./usage-contracts.js";
-import type { createDiscordAttachments } from "./discord-attachments.js";
+import type { createDiscordAttachments } from "./discord/discord-attachments.js";
 import { createChatSchedules } from "./chat-schedules.js";
 import { splitTelegramText } from "./telegram/telegram-text.js";
 

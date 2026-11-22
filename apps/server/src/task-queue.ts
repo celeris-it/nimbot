@@ -1,9 +1,9 @@
 import type {
   DiscordAttachmentInput,
   DiscordDocument,
-} from "./discord-attachments.js";
+} from "./discord/discord-attachments.js";
 import type { TelegramDocument } from "./telegram/telegram-attachments.js";
-import { isDiscordId } from "./discord-identity.js";
+import { isDiscordId } from "./discord/discord-identity.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { HostModelAdmissionExpired, HostTaskError } from "./host/host-tasks.js";

@@ -1,12 +1,12 @@
-import type { AgentHostConfig } from "./host/agent-host.js";
+import type { AgentHostConfig } from "../host/agent-host.js";
 import { isDiscordId } from "./discord-identity.js";
 import type { DiscordNotificationTarget } from "./discord-notifications.js";
 import {
   ATTACHMENT_LIMIT,
   attachmentName,
   createWorkspaceAttachments,
-} from "./telegram/telegram-attachments.js";
-import type { DiscordQueuedTask } from "./task-queue.js";
+} from "../telegram/telegram-attachments.js";
+import type { DiscordQueuedTask } from "../task-queue.js";
 
 export interface DiscordDocument {
   id: string;
