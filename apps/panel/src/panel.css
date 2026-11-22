@@ -35,7 +35,8 @@
   --color-warning-content: #392400;
   --color-error: #ffa8b1;
   --color-error-content: #400c18;
-  --radius-panel: 1.75rem;
+  --radius-panel: 1.25rem;
+  --radius-control: 1rem;
   --color-muted: #b5bdcb;
   --color-field-border: #798498;
 }
@@ -134,7 +135,7 @@ header {
   justify-self: start;
   gap: 0.25rem;
   padding: 0.3rem;
-  border-radius: 1.2rem;
+  border-radius: var(--radius-panel);
   background: var(--color-base-100);
   color: var(--color-base-content);
   border: 1px solid var(--color-base-300);
@@ -150,7 +151,7 @@ header {
   align-items: center;
   gap: 0.65rem;
   padding: 0.55rem 0.75rem;
-  border-radius: 0.85rem;
+  border-radius: var(--radius-control);
   text-decoration: none;
   font-size: 0.75rem;
   font-weight: 700;
@@ -245,7 +246,7 @@ header {
   flex-wrap: nowrap;
   padding: 0.35rem;
   border: 1px solid var(--color-base-300);
-  border-radius: 1.15rem;
+  border-radius: var(--radius-panel);
   background: var(--color-base-100);
   color: var(--color-base-content);
   box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 25%);
@@ -602,14 +603,14 @@ small,
 }
 .panel-input,
 .panel-textarea {
-  @apply w-full min-w-0 rounded-[0.9rem] border border-field-border bg-base-200 text-base-content;
+  @apply w-full min-w-0 rounded-(--radius-control) border border-field-border bg-base-200 text-base-content;
   padding: 0.85rem 1rem;
 }
 .panel-input {
   @apply min-h-12;
 }
 .panel-select {
-  @apply min-h-12 w-full max-w-full rounded-[0.9rem] border border-field-border bg-base-200 px-4 text-base-content;
+  @apply min-h-12 w-full max-w-full rounded-(--radius-control) border border-field-border bg-base-200 px-4 text-base-content;
 }
 .panel-alert {
   @apply rounded-panel border border-base-300 bg-base-200 p-4 text-base-content;
@@ -746,7 +747,7 @@ small,
   color: var(--color-base-content);
   background: var(--color-base-200);
   border: 1px solid var(--color-base-300);
-  border-radius: 1.5rem;
+  border-radius: var(--radius-panel);
   padding: 1.35rem;
   min-width: 0;
 }
@@ -794,7 +795,7 @@ small,
   gap: 0.65rem;
   padding: 0.85rem;
   background: var(--color-base-100);
-  border-radius: 0.9rem;
+  border-radius: var(--radius-control);
   font-size: 0.75rem;
   color: var(--color-muted);
   min-width: 0;
@@ -870,11 +871,11 @@ small,
   height: 60px;
   background: var(--color-base-200);
   border: 1px solid var(--color-base-300);
-  border-radius: 1.25rem;
+  border-radius: var(--radius-control);
   margin-bottom: 0.5rem;
 }
 .table-panel {
-  @apply mt-5 min-w-0 overflow-hidden rounded-2xl border border-base-300 bg-base-100 text-base-content;
+  @apply mt-5 min-w-0 overflow-hidden rounded-panel border border-base-300 bg-base-100 text-base-content;
 }
 .table-heading {
   @apply flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3;
@@ -982,7 +983,7 @@ form :is(button, a).panel-button {
   justify-self: start;
 }
 form .panel-textarea {
-  border-radius: 1rem;
+  border-radius: var(--radius-control);
   min-height: 180px;
   resize: vertical;
 }
@@ -1046,7 +1047,7 @@ section[aria-label="Sign in"] .panel-button {
   padding: 1rem;
   background: var(--color-base-100);
   border: 1px solid var(--color-error);
-  border-radius: 1rem;
+  border-radius: var(--radius-control);
   margin-bottom: 1rem;
 }
 main > p[role="status"] {
@@ -1078,7 +1079,7 @@ main:focus {
   background: var(--color-primary);
   color: var(--color-primary-content);
   padding: 0.75rem 1rem;
-  border-radius: 1rem;
+  border-radius: var(--radius-control);
 }
 #skip:focus {
   top: 1rem;
@@ -1259,7 +1260,7 @@ main:focus {
     display: none;
   }
   .fleet-filters {
-    border-radius: 1.2rem;
+    border-radius: var(--radius-panel);
     width: 100%;
     gap: 0.15rem;
   }
