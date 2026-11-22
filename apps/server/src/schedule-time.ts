@@ -4,11 +4,110 @@ export type ScheduleCadence =
   | { kind: "once"; date: string; time: string }
   | { kind: "daily"; time: string }
   | { kind: "weekly"; weekdays: number[]; time: string }
-  | { kind: "interval"; minutes: number; anchor: number };
+  | { kind: "interval"; minutes: number; anchor: number }
+  | { kind: "cron"; expression: string };
 
 export const MIN_SCHEDULE_INTERVAL_MINUTES = 15;
+export const MAX_CRON_EXPRESSION_LENGTH = 100;
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
+
+const cronMacros = new Map([
+  ["@yearly", "0 0 1 1 *"],
+  ["@annually", "0 0 1 1 *"],
+  ["@monthly", "0 0 1 * *"],
+  ["@weekly", "0 0 * * 0"],
+  ["@daily", "0 0 * * *"],
+  ["@midnight", "0 0 * * *"],
+  ["@hourly", "0 * * * *"],
+]);
+const cronMonths = "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split(" ");
+const cronWeekdays = "SUN MON TUE WED THU FRI SAT".split(" ");
+
+function parseCronField(
+  field: string,
+  name: string,
+  min: number,
+  max: number,
+  names: string[] = [],
+): number[] {
+  const error = (message: string) =>
+    new Error(`Cron ${name} field: ${message}`);
+  const parseValue = (token: string) => {
+    const index = names.indexOf(token);
+    if (index >= 0) return index + min;
+    if (!/^\d+$/.test(token)) throw error(`Invalid value "${token}".`);
+    const value = Number(token);
+    if (value < min || value > max)
+      throw error(`${token} is outside ${min}-${max}.`);
+    return value;
+  };
+  const values = new Set<number>();
+  for (const item of field.split(",")) {
+    const match = /^(\*|[A-Z0-9]+)(?:-([A-Z0-9]+))?(?:\/(\d+))?$/.exec(item);
+    if (!match || (match[1] === "*" && match[2]))
+      throw error(`Invalid item "${item}".`);
+    const [, start, end, stride] = match;
+    if (stride !== undefined && start !== "*" && end === undefined)
+      throw error("Steps require a range or *.");
+    const step = stride === undefined ? 1 : Number(stride);
+    if (!Number.isSafeInteger(step) || step < 1)
+      throw error("Step must be a positive whole number.");
+    const first = start === "*" ? min : parseValue(start!);
+    const last = start === "*" ? max : end ? parseValue(end) : first;
+    if (last < first) throw error("Range must start at or before its end.");
+    for (let value = first; value <= last; value += step)
+      values.add(name === "day of week" && value === 7 ? 0 : value);
+  }
+  return [...values].sort((a, b) => a - b);
+}
+
+export function parseCronExpression(input: string) {
+  if (input.length > MAX_CRON_EXPRESSION_LENGTH)
+    throw new Error(
+      `Cron expression must be at most ${MAX_CRON_EXPRESSION_LENGTH} characters.`,
+    );
+  const normalized = input.trim().replace(/\s+/g, " ").toUpperCase();
+  const macro = normalized.toLowerCase();
+  const expanded = cronMacros.get(macro);
+  const expression = expanded ? macro : normalized;
+  const fields = (expanded ?? expression).split(" ");
+  if (fields.length !== 5)
+    throw new Error(
+      "Cron expression must have five fields or use a supported macro.",
+    );
+  const [minute, hour, dom, month, dow] = fields as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  const minutes = parseCronField(minute, "minute", 0, 59);
+  const hours = parseCronField(hour, "hour", 0, 23);
+  const daysOfMonth = parseCronField(dom, "day of month", 1, 31);
+  const months = parseCronField(month, "month", 1, 12, cronMonths);
+  const daysOfWeek = parseCronField(dow, "day of week", 0, 7, cronWeekdays);
+  if (
+    minutes.some(
+      (value, index) =>
+        (minutes[index + 1] ?? minutes[0]! + 60) - value <
+        MIN_SCHEDULE_INTERVAL_MINUTES,
+    )
+  ) {
+    throw new Error("Cron minutes must be at least 15 minutes apart.");
+  }
+  return {
+    expression,
+    minutes,
+    hours,
+    daysOfMonth,
+    months,
+    daysOfWeek,
+    domRestricted: dom !== "*",
+    dowRestricted: dow !== "*",
+  };
+}
 
 function formatter(timeZone: string) {
   // Intl also accepts numeric offsets on newer Node versions. Schedules require
@@ -50,6 +149,14 @@ function parseCadence(input: unknown): ScheduleCadence {
     throw new Error("Cadence must be an object.");
   }
   const value = input as Record<string, unknown>;
+  if (value.kind === "cron") {
+    if (typeof value.expression !== "string")
+      throw new Error("Cron expression must be text.");
+    return {
+      kind: "cron",
+      expression: parseCronExpression(value.expression).expression,
+    };
+  }
   if (value.kind === "webhook") return { kind: "webhook" };
   if (value.kind === "interval") {
     if (
@@ -175,6 +282,36 @@ function resolveLocal(format: Intl.DateTimeFormat, target: number): number {
   throw new Error("Unable to resolve schedule local time.");
 }
 
+function nextCronRun(
+  cron: ReturnType<typeof parseCronExpression>,
+  format: Intl.DateTimeFormat,
+  after: number,
+): number | undefined {
+  const local = localMinute(format, after);
+  const firstDay = Math.floor(local / DAY) * DAY;
+  // Eight years covers the gap between leap days at non-leap centuries.
+  for (let offset = 0; offset <= 8 * 366; offset++) {
+    const day = firstDay + offset * DAY;
+    const date = new Date(day);
+    if (!cron.months.includes(date.getUTCMonth() + 1)) continue;
+    const domMatches = cron.daysOfMonth.includes(date.getUTCDate());
+    const dowMatches = cron.daysOfWeek.includes(date.getUTCDay());
+    const dayMatches =
+      cron.domRestricted && cron.dowRestricted
+        ? domMatches || dowMatches
+        : domMatches && dowMatches;
+    if (!dayMatches) continue;
+    for (const hour of cron.hours) {
+      for (const minute of cron.minutes) {
+        const target = day + (hour * 60 + minute) * MINUTE;
+        if (target <= local) continue;
+        const occurrence = resolveLocal(format, target);
+        if (occurrence > after) return occurrence;
+      }
+    }
+  }
+}
+
 /** Return a UTC timestamp strictly after `after`, or undefined when finished. */
 export function nextRun(
   input: ScheduleCadence,
@@ -200,6 +337,8 @@ export function nextRun(
     );
     return occurrence > after ? occurrence : undefined;
   }
+  if (cadence.kind === "cron")
+    return nextCronRun(parseCronExpression(cadence.expression), format, after);
   const local = localMinute(format, after);
   const date = Math.floor(local / DAY) * DAY;
   const [hour, minute] = cadence.time.split(":").map(Number) as [
@@ -221,4 +360,20 @@ export function nextRun(
     if (occurrence > after) return occurrence;
   }
   throw new Error("Unable to find the next schedule occurrence.");
+}
+
+export function nextRuns(
+  cadence: ScheduleCadence,
+  timeZone: string,
+  after: number,
+  count: number,
+): number[] {
+  const runs: number[] = [];
+  for (let index = 0; index < Math.min(5, Math.floor(count)); index++) {
+    const run = nextRun(cadence, timeZone, after);
+    if (run === undefined) break;
+    runs.push(run);
+    after = run;
+  }
+  return runs;
 }

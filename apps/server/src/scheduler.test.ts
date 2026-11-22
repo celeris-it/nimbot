@@ -444,3 +444,32 @@ it("routes timed, manual and webhook runs to the saved Discord DM without a chat
     outcome: "skipped_not_ready",
   });
 });
+
+it("admits each cron occurrence within the lateness window and skips its downtime backlog", async () => {
+  const schedule = f.store.create({
+    ...input,
+    cadence: { kind: "cron", expression: "*/15 * * * *" },
+  });
+  const due = schedule.nextRunAt!;
+  const scheduler = f.scheduler({
+    kick: async (agentId) => {
+      const task = f.tasks.claimNextTask(agentId)!;
+      f.tasks.finish(task.id, "completed");
+    },
+  });
+  for (const at of [
+    due + 10 * MINUTE,
+    due + DAY + 2 * MINUTE,
+    due + DAY + 15 * MINUTE,
+  ]) {
+    vi.setSystemTime(at);
+    await scheduler.tick();
+    await scheduler.tick();
+  }
+  expect(f.store.recentRuns(schedule.id, 20)).toMatchObject([
+    { scheduledFor: due + DAY + 15 * MINUTE, outcome: "enqueued" },
+    { scheduledFor: due + 15 * MINUTE, outcome: "missed", taskId: null },
+    { scheduledFor: due, outcome: "enqueued" },
+  ]);
+  expect(f.store.get(schedule.id)?.nextRunAt).toBe(due + DAY + 30 * MINUTE);
+});

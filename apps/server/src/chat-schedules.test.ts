@@ -231,3 +231,30 @@ it("confirms a Discord proposal once from the same owner, DM and message", async
   expect(service.answer(key(), true, discord, "44")).toContain("expired");
   expect(store.listByAgent("dev")).toHaveLength(1);
 });
+
+it("validates cron, previews four local runs and saves only on confirmation", async () => {
+  expect(
+    await propose({ kind: "cron", expression: "*/5 * * * *" }),
+  ).toMatchObject({
+    status: "invalid",
+    message: "Cron minutes must be at least 15 minutes apart.",
+  });
+  expect(send).not.toHaveBeenCalled();
+  const cadence = { kind: "cron", expression: "0 9 * * mon-fri" };
+  expect(await propose(cadence)).toMatchObject({
+    status: "awaiting_confirmation",
+  });
+  const preview = send.mock.lastCall![1];
+  expect(preview).toContain("Cron 0 9 * * MON-FRI (UTC)");
+  expect(preview.match(/9:00 AM \(UTC\)/g)).toHaveLength(4);
+  expect(store.listByAgent("dev")).toEqual([]);
+  expect(service.answer(key(), true, origin)).toContain(
+    'Schedule "Review" created.',
+  );
+  expect(store.listByAgent("dev")).toMatchObject([
+    {
+      cadence: { ...cadence, expression: "0 9 * * MON-FRI" },
+      nextRunAt: now + 60 * MINUTE,
+    },
+  ]);
+});

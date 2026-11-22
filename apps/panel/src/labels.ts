@@ -72,6 +72,9 @@ export const scheduleText = {
     "Regenerate this webhook token? The previous token will stop working immediately.",
   webhookHelp:
     "Send a POST request with Authorization: Bearer TOKEN. Keep the token private. Optional body: application/json, up to 16 KiB. Limit: five requests per minute. Requests received while a run is in progress are queued, up to 20 unfinished runs.",
+  cronHelp:
+    "Five fields in the schedule time zone: minute hour day-of-month month day-of-week. Minutes must be at least 15 minutes apart.",
+  cronNextRuns: "Next runs",
   webhookError: "Could not load webhook details.",
   saved: "Schedule saved.",
   removed: "Schedule deleted. Already queued or running tasks are kept.",
@@ -94,6 +97,7 @@ export const scheduleKinds = {
   daily: "Daily",
   weekly: "Weekly",
   interval: "Interval",
+  cron: "Cron expression",
   webhook: "Webhook",
 };
 export const scheduleWeekdays = [
@@ -117,6 +121,8 @@ export function scheduleCadenceLabel(cadence: Schedule["cadence"]) {
       return `Every ${cadence.weekdays.map((day) => scheduleWeekdays[day]).join(", ")} at ${cadence.time}`;
     case "interval":
       return `Every ${cadence.minutes} minutes`;
+    case "cron":
+      return `Cron ${cadence.expression}`;
   }
 }
 export function scheduleTimeLabel(at: number, timeZone: string) {

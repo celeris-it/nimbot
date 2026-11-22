@@ -19,7 +19,7 @@ export function createScheduleToolDefinitions() {
       operation: "schedule.propose",
       name: "schedule_propose",
       description:
-        "Propose one schedule only when the owner requests future or recurring work. Read schedule_context first and use its timeZone. Ask the owner to update the panel if they want a different zone. Clarify missing or ambiguous timing or task details. Provide a short name and standalone prompt. For reminders, ask the agent to notify the owner at run time. On awaiting_confirmation, tell the owner to use Confirm or Cancel in this chat. Confirm saves delivery to this chat's channel.",
+        "Propose one schedule for future or recurring work the owner requests. Read schedule_context first and use its timeZone. Ask the owner to change zones in the panel. Clarify timing and task details. Prefer once, daily, weekly, or interval before cron. Use a short name and standalone prompt. For reminders, tell the agent to notify the owner at run time. On awaiting_confirmation, tell the owner to use Confirm or Cancel in this chat. Confirm saves delivery to this chat.",
       inputSchema: {
         type: "object",
         properties: {
@@ -64,6 +64,14 @@ export function createScheduleToolDefinitions() {
                   minutes: { type: "integer", minimum: 15 },
                 },
                 required: ["kind", "minutes"],
+                additionalProperties: false,
+              },
+              {
+                properties: {
+                  kind: { const: "cron" },
+                  expression: { type: "string", maxLength: 100 },
+                },
+                required: ["kind", "expression"],
                 additionalProperties: false,
               },
             ],

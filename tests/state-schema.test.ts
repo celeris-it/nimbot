@@ -105,7 +105,7 @@ it("migrates subprocess state with saved Telegram and Discord connections to opt
   );
   prepareStateSchema(path, "server-process");
   prepareStateSchema(path, "server-process");
-  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 2 });
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 3 });
   expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   expect(
     read(path, "SELECT owner_id, bot_id, credential_ref FROM agents"),
@@ -204,3 +204,42 @@ it.each([0, 1])(
     expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   },
 );
+
+it("upgrades subprocess v2 schedules and run history to the fresh v3 schema", () => {
+  const kind = "server-process";
+  const v2 = readFileSync(
+    new URL("../scripts/state-schema/server-process-v2.sql", import.meta.url),
+    "utf8",
+  );
+  const migrated = fixture(
+    kind,
+    `
+    ${legacy(kind)}
+    ${v2}
+    PRAGMA application_id = 0x4e494d50;
+    PRAGMA user_version = 2;
+    INSERT INTO schedules (id, agent_id, name, prompt, cadence_kind, local_time,
+      timezone, enabled, next_run_at, created_at, updated_at, delivery_channel)
+      VALUES ('s', 'a', 'Saved', 'Prompt', 'daily', '09:00',
+        'UTC', 1, 200, 1, 2, 'discord');
+    INSERT INTO schedule_runs (id, schedule_id, agent_id, scheduled_for, outcome, created_at)
+      VALUES ('r', 's', 'a', 100, 'missed', 110);
+  `,
+  );
+  const fresh = fixture(kind);
+  const schedule = read(migrated, "SELECT * FROM schedules");
+  const run = read(migrated, "SELECT * FROM schedule_runs");
+  for (const path of [migrated, fresh]) {
+    prepareStateSchema(path, kind);
+    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 3 });
+    expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
+  }
+  expect(read(migrated, "SELECT * FROM schedules")).toEqual({
+    ...schedule,
+    cron_expression: null,
+  });
+  expect(read(migrated, "SELECT * FROM schedule_runs")).toEqual(run);
+  const ddl =
+    "SELECT group_concat(sql, '\\n') AS ddl FROM (SELECT sql FROM sqlite_schema ORDER BY name)";
+  expect(read(migrated, ddl)).toEqual(read(fresh, ddl));
+});

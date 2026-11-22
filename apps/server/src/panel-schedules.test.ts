@@ -234,44 +234,57 @@ it.each([
   },
 );
 
-it("edits settings, pauses, resumes without replaying missed dates, and removes history", async () => {
-  const schedule = await f.create();
-  const path = `${base}/${schedule.id}`;
-  expect(
-    (
-      await f.post(path, {
-        ...fields,
-        name: "Changed",
-        prompt: "New prompt",
-        timeZone: "Asia/Tokyo",
-        cadence: JSON.stringify({ kind: "daily", time: "20:00" }),
-      })
-    ).status,
-  ).toBe(200);
-  expect(f.store.get(schedule.id)).toMatchObject({
-    name: "Changed",
-    prompt: "New prompt",
-    timeZone: "Asia/Tokyo",
-    nextRunAt: Date.parse("2027-01-01T11:00:00Z"),
-  });
-  expect((await f.post(`${path}/pause`)).status).toBe(200);
-  expect(f.store.get(schedule.id)).toMatchObject({
-    enabled: false,
-    nextRunAt: null,
-  });
-  f.clock.now += 4 * 60 * MINUTE;
-  expect((await f.post(`${path}/resume`)).status).toBe(200);
-  expect(f.store.get(schedule.id)?.nextRunAt).toBe(
-    Date.parse("2027-01-02T11:00:00Z"),
-  );
-  await f.post(`${path}/run`);
-  expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(1);
-  expect(await (await f.post(`${path}/remove`)).json()).toEqual({
-    removed: true,
-  });
-  expect(f.store.get(schedule.id)).toBeUndefined();
-  expect(f.store.recentRuns(schedule.id, 20)).toEqual([]);
-});
+it.each([
+  { kind: "daily", time: "09:00" },
+  { kind: "cron", expression: "0 9 * * *" },
+])(
+  "edits %j, pauses, resumes without replaying missed dates, and removes history",
+  async (cadence) => {
+    const schedule = await f.create("a", {
+      ...fields,
+      cadence: JSON.stringify(cadence),
+    });
+    const path = `${base}/${schedule.id}`;
+    expect(
+      (
+        await f.post(path, {
+          ...fields,
+          name: "Changed",
+          prompt: "New prompt",
+          timeZone: "Asia/Tokyo",
+          cadence: JSON.stringify(
+            cadence.kind === "cron"
+              ? { kind: "cron", expression: "0 20 * * *" }
+              : { kind: "daily", time: "20:00" },
+          ),
+        })
+      ).status,
+    ).toBe(200);
+    expect(f.store.get(schedule.id)).toMatchObject({
+      name: "Changed",
+      prompt: "New prompt",
+      timeZone: "Asia/Tokyo",
+      nextRunAt: Date.parse("2027-01-01T11:00:00Z"),
+    });
+    expect((await f.post(`${path}/pause`)).status).toBe(200);
+    expect(f.store.get(schedule.id)).toMatchObject({
+      enabled: false,
+      nextRunAt: null,
+    });
+    f.clock.now += 4 * 60 * MINUTE;
+    expect((await f.post(`${path}/resume`)).status).toBe(200);
+    expect(f.store.get(schedule.id)?.nextRunAt).toBe(
+      Date.parse("2027-01-02T11:00:00Z"),
+    );
+    await f.post(`${path}/run`);
+    expect(f.store.recentRuns(schedule.id, 20)).toHaveLength(1);
+    expect(await (await f.post(`${path}/remove`)).json()).toEqual({
+      removed: true,
+    });
+    expect(f.store.get(schedule.id)).toBeUndefined();
+    expect(f.store.recentRuns(schedule.id, 20)).toEqual([]);
+  },
+);
 
 it.each(["", "/pause", "/resume", "/remove", "/run"])(
   "returns 404 for foreign or unknown schedules on action %s",
@@ -695,4 +708,27 @@ it("accepts Discord delivery and preserves it on edits from older API clients", 
     (await f.post(path, { ...fields, deliveryChannel: "invalid" })).status,
   ).toBe(400);
   expect(f.store.get(schedule.id)?.deliveryChannel).toBe("discord");
+});
+
+it("exposes cron limits, validates cron and saves normalized expressions", async () => {
+  expect(await (await f.get()).json()).toMatchObject({
+    limits: { maxCronExpressionLength: 100 },
+  });
+  const schedule = await f.create("a", {
+    ...fields,
+    cadence: JSON.stringify({ kind: "cron", expression: " 0 9 * * mon-fri " }),
+  });
+  expect(schedule.cadence).toEqual({
+    kind: "cron",
+    expression: "0 9 * * MON-FRI",
+  });
+  expect(schedule.nextRunAt).toBe(START + 60 * MINUTE);
+  const response = await f.post(base, {
+    ...fields,
+    cadence: JSON.stringify({ kind: "cron", expression: "0 24 * * *" }),
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({
+    error: "Cron hour field: 24 is outside 0-23.",
+  });
 });

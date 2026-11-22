@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { nextRuns } from "./schedule-time.js";
 import type { ServerToolHandler } from "./tool-dispatch.js";
 import type { RoutedTask } from "./task-queue.js";
 import {
@@ -41,6 +42,10 @@ const proposal = z.strictObject({
       weekdays: z.array(z.number()).max(7),
     }),
     z.strictObject({ kind: z.literal("interval"), minutes: z.number() }),
+    z.strictObject({
+      kind: z.literal("cron"),
+      expression: z.string().max(SCHEDULE_LIMITS.maxCronExpressionLength),
+    }),
   ]),
 });
 
@@ -53,7 +58,7 @@ function formatRun(at: number, timeZone: string) {
   return `${date} (${timeZone})`;
 }
 
-function describeCadence(cadence: ScheduleInput["cadence"]) {
+function describeCadence(cadence: ScheduleInput["cadence"], timeZone: string) {
   switch (cadence.kind) {
     case "once":
       return `Once on ${cadence.date} at ${cadence.time}`;
@@ -63,6 +68,8 @@ function describeCadence(cadence: ScheduleInput["cadence"]) {
       return `Every ${cadence.weekdays.map((day) => weekdays[day]).join(", ")} at ${cadence.time}`;
     case "interval":
       return `Every ${cadence.minutes} minutes`;
+    case "cron":
+      return `Cron ${cadence.expression} (${timeZone})`;
     case "webhook":
       return "On webhook request";
   }
@@ -195,11 +202,18 @@ export function createChatSchedules(config: {
             cadence.kind === "interval"
               ? `${cadence.minutes} minutes after confirmation`
               : formatRun(next!, timeZone);
+          const additionalRuns =
+            data.cadence.kind === "cron"
+              ? nextRuns(data.cadence, timeZone, next!, 3).map((run) =>
+                  formatRun(run, timeZone),
+                )
+              : [];
           const text = [
             `Create schedule "${data.name}"?`,
-            `Frequency: ${describeCadence(data.cadence)}`,
+            `Frequency: ${describeCadence(data.cadence, timeZone)}`,
             `Time zone: ${timeZone}`,
             `First run: ${firstRun}`,
+            ...(additionalRuns.length ? ["Next runs:", ...additionalRuns] : []),
             `\nTask:\n${data.prompt}`,
           ].join("\n");
           signal.throwIfAborted();

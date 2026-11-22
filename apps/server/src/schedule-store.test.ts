@@ -149,6 +149,7 @@ it("enforces the per-agent limit even for paused schedules and frees capacity on
     maxNameLength: 60,
     maxPromptLength: 4000,
     minIntervalMinutes: 15,
+    maxCronExpressionLength: 100,
   });
   for (let i = 0; i < 20; i++) f.store.create(input);
   const first = f.store.listByAgent("a")[0]!;
@@ -717,5 +718,43 @@ it("queues webhook runs behind unfinished work while manual runs still skip", ()
   expect(f.store.runNow(schedule, "enqueued", origin)).toMatchObject({
     recorded: true,
     run: { outcome: "skipped_overlap", taskId: null },
+  });
+});
+
+it("round-trips cron, recalculates on resume, and enforces the cadence shape", () => {
+  const cron = { kind: "cron", expression: "0,30 9 * * *" } as const;
+  const schedule = f.store.create({ ...input, cadence: cron });
+  expect(schedule.nextRunAt).toBe(START + 60 * MINUTE);
+  f.restart();
+  expect(f.store.get(schedule.id)).toEqual(schedule);
+  expect(f.store.setEnabled(schedule.id, false)?.nextRunAt).toBeNull();
+  f.clock.now = START + 75 * MINUTE;
+  expect(f.store.setEnabled(schedule.id, true)?.nextRunAt).toBe(
+    START + 90 * MINUTE,
+  );
+  const updateColumn = (
+    column: "cron_expression" | "local_time",
+    value: string | null,
+  ) =>
+    f.db
+      .prepare(`UPDATE schedules SET ${column} = ? WHERE id = ?`)
+      .run(value, schedule.id);
+  expect(() => updateColumn("cron_expression", null)).toThrow(
+    /CHECK constraint/,
+  );
+  expect(() => updateColumn("local_time", "09:00")).toThrow(/CHECK constraint/);
+  expect(f.store.update(schedule.id, input)?.cadence).toEqual(input.cadence);
+  expect(f.db.prepare("SELECT cron_expression FROM schedules").get()).toEqual({
+    cron_expression: null,
+  });
+  expect(() => updateColumn("cron_expression", cron.expression)).toThrow(
+    /CHECK constraint/,
+  );
+  const edited = { kind: "cron", expression: "0 10 * * *" } as const;
+  expect(
+    f.store.update(schedule.id, { ...input, cadence: edited })?.cadence,
+  ).toEqual(edited);
+  expect(f.db.prepare("SELECT local_time FROM schedules").get()).toEqual({
+    local_time: null,
   });
 });

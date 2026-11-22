@@ -481,7 +481,9 @@ export function createPanel(
               ? ["kind", "date", "time"]
               : kind === "weekly"
                 ? ["kind", "weekdays", "time"]
-                : ["kind", "time"];
+                : kind === "cron"
+                  ? ["kind", "expression"]
+                  : ["kind", "time"];
       if (Object.keys(cadence).some((key) => !keys.includes(key)))
         throw new ScheduleValidationError("Unknown cadence field.");
       if (kind === "interval") cadence = { ...cadence, anchor: now() };

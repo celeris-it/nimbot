@@ -1,7 +1,11 @@
 <script lang="ts">
   import { request, post } from "./api.js";
   import { tick } from "svelte";
-  import { validateTimeZone } from "../../server/src/schedule-time.js";
+  import {
+    nextRuns,
+    validateTimeZone,
+    parseCronExpression,
+  } from "../../server/src/schedule-time.js";
   import type {
     AgentDetail,
     Schedule,
@@ -66,6 +70,8 @@
   let time = $state("09:00");
   let weekdays = $state<number[]>([]);
   let minutes = $state<number | undefined>(15);
+  let expression = $state("");
+  let cronTouched = $state(false);
   let timeZone = $state("");
   let deliveryChannel = $state<ScheduleSettings["deliveryChannel"]>("telegram");
   const channelLabel = { telegram: "Telegram", discord: "Discord" };
@@ -74,6 +80,29 @@
   let localError = $state("");
   let invalid = $state<"weekdays" | "zone" | undefined>();
   let atLimit = $derived(data.schedules.length >= data.limits.maxPerAgent);
+
+  const cronPreview = $derived.by(() => {
+    if (!formVisible || kind !== "cron") return {};
+    try {
+      parseCronExpression(expression);
+    } catch (error) {
+      return { error: (error as Error).message };
+    }
+    try {
+      validateTimeZone(timeZone);
+    } catch {
+      return {};
+    }
+    const runs = nextRuns(
+      { kind: "cron", expression },
+      timeZone,
+      Date.now(),
+      5,
+    );
+    return runs.length
+      ? { runs }
+      : { error: "Schedule must have an occurrence in the future." };
+  });
 
   $effect(() => {
     if (invalid === "weekdays" && (kind !== "weekly" || weekdays.length > 0)) {
@@ -104,6 +133,9 @@
       schedule?.cadence.kind === "interval"
         ? schedule.cadence.minutes
         : data.limits.minIntervalMinutes;
+    expression =
+      schedule?.cadence.kind === "cron" ? schedule.cadence.expression : "";
+    cronTouched = false;
     deliveryChannel =
       schedule?.deliveryChannel ??
       (data.discordOwnerLinked && !data.ownerLinked ? "discord" : "telegram");
@@ -149,6 +181,12 @@
       document.getElementById("schedule-form-error")?.focus();
       return;
     }
+    if (kind === "cron" && cronPreview.error) {
+      cronTouched = true;
+      await tick();
+      document.getElementById("schedule-cron")?.focus();
+      return;
+    }
     const cadence: ScheduleSettings["cadence"] =
       kind === "webhook"
         ? { kind }
@@ -158,7 +196,9 @@
             ? { kind, weekdays: [...weekdays], time }
             : kind === "interval"
               ? { kind, minutes: minutes ?? 0 }
-              : { kind, time };
+              : kind === "cron"
+                ? { kind, expression }
+                : { kind, time };
     if (
       await save(
         {
@@ -277,7 +317,25 @@
             />
             <p id="schedule-date-help">{text.dateHelp}</p>
           {/if}
-          {#if kind !== "interval" && kind !== "webhook"}
+          {#if kind === "cron"}
+            <label for="schedule-cron">{scheduleKinds.cron}</label>
+            <input
+              class="input font-mono"
+              id="schedule-cron"
+              required
+              maxlength={data.limits.maxCronExpressionLength}
+              autocomplete="off"
+              spellcheck={false}
+              aria-describedby="schedule-cron-help schedule-cron-error"
+              aria-invalid={cronTouched && Boolean(cronPreview.error)}
+              onblur={() => (cronTouched = true)}
+              bind:value={expression}
+            />
+            <p id="schedule-cron-help">{text.cronHelp}</p>
+            <p id="schedule-cron-error" role="alert">
+              {cronTouched ? (cronPreview.error ?? "") : ""}
+            </p>
+          {:else if kind !== "interval" && kind !== "webhook"}
             <label for="schedule-time">{text.time}</label>
             <input
               class="input"
@@ -332,6 +390,16 @@
             />
             <p id="schedule-zone-help">{text.zoneHelp}</p>
           {:else}<p>{text.webhookFormHelp}</p>{/if}
+          {#if cronPreview.runs}
+            <section aria-labelledby="schedule-cron-preview">
+              <h3 id="schedule-cron-preview">{text.cronNextRuns}</h3>
+              <ul>
+                {#each cronPreview.runs as run (run)}
+                  <li>{scheduleTimeLabel(run, timeZone)}</li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
           <div data-ui="schedule-actions">
             <button class="btn" type="submit"
               >{busy ? text.saving : editId ? text.save : text.create}</button

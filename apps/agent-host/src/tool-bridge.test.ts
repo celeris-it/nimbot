@@ -97,7 +97,25 @@ it("registers scheduling and attachment tools together for owner chat tasks", as
     result: {
       tools: [
         { name: "schedule_context" },
-        { name: "schedule_propose" },
+        {
+          name: "schedule_propose",
+          inputSchema: {
+            properties: {
+              cadence: {
+                oneOf: expect.arrayContaining([
+                  {
+                    properties: {
+                      kind: { const: "cron" },
+                      expression: { type: "string", maxLength: 100 },
+                    },
+                    required: ["kind", "expression"],
+                    additionalProperties: false,
+                  },
+                ]),
+              },
+            },
+          },
+        },
         { name: "attach_file" },
       ],
     },

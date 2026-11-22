@@ -222,6 +222,7 @@ their own time zone.
 | Daily | The same local time each day |
 | Weekly | The same local time on one or more selected weekdays |
 | Interval | Every N minutes, anchored to creation time across pauses, edits, and restarts |
+| Cron | A five-field cron expression evaluated in the schedule time zone |
 | Webhook | On an authenticated POST request; no timed occurrence |
 
 Limits are 20 schedules per agent, an interval of at least 15 minutes, a name of
@@ -230,12 +231,25 @@ by daylight saving runs at the next valid instant; a repeated time runs only at
 its first occurrence. Intervals use elapsed minutes. These are fixed rules, with
 no scheduler-specific environment variables.
 
+Cron expressions accept up to 100 characters. The fields are minute (0–59),
+hour (0–23), day of month (1–31), month (1–12), and day of week (0–7, with
+Sunday as 0 or 7). Use `*`, values, ranges, comma-separated lists, or steps on
+wildcards and ranges. Month names `JAN`–`DEC` and weekday names `SUN`–`SAT`
+are case-insensitive. The supported shortcuts are `@yearly`, `@annually`,
+`@monthly`, `@weekly`, `@daily`, `@midnight`, and `@hourly`. When both day
+fields are restricted, either one can match. The minute values must be at least
+15 minutes apart, including the gap across the hour boundary. Cron follows the
+daylight-saving rules above, and runs that fall into the same skipped interval
+collapse to one run at the next valid instant. The panel previews up to five
+runs and chat confirmations show the first and up to three more.
+
 The same operations are available under the authenticated
 `/api/agents/:id/schedules` API. Mutations use POST. Schedule settings are form
 fields `name`, `prompt`, `timeZone`, and `cadence` (a JSON object with its kind and
 matching fields). The optional `deliveryChannel` field accepts `telegram` or
 `discord`. Omitting it on edit preserves the saved channel. The server assigns
-interval anchors.
+interval anchors. For a weekday schedule at 9 a.m., send
+`cadence={"kind":"cron","expression":"0 9 * * 1-5"}`.
 Read or change the global zone with `GET` or `POST /api/settings/schedules`.
 The POST accepts the `timeZone` form field.
 
@@ -574,7 +588,7 @@ The following ideas are deferred, not supported features or delivery commitments
 - **Messaging:** WhatsApp, Slack, shared agents, groups/topics, photo and media messages, voice messages, management bots, and Telegram Managed Bots provisioning.
 - **Nimbot messaging app:** a dedicated messaging app with [Matrix](https://matrix.org/) connectivity.
 - **Agent capabilities:** multi-hop orchestration, shared memory and workspaces, richer memory retrieval, external MCP OAuth, arbitrary MCP stdio commands, and a tool marketplace.
-- **Scheduled automation:** cron expressions, additional event triggers, and chained automations.
+- **Scheduled automation:** additional event triggers, and chained automations.
 - **User experience:** advanced dashboards and analytics, web chat, richer configuration, templates, browser terminals, workspace browsing, conversation search, and additional panel accounts.
 - **Operations:** multi-server and distributed execution, advanced monitoring, automated backups, image management, alternative runtimes, and stronger isolation.
 - **Managed hosting:** a separate paid offering; hosted accounts, billing, subscriptions, public registration, public multi-tenant hosting, organizations, marketplaces, and automatic external infrastructure provisioning remain outside the self-hosted product's current scope.

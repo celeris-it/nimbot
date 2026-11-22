@@ -1,6 +1,7 @@
 import { randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import {
+  MAX_CRON_EXPRESSION_LENGTH,
   MIN_SCHEDULE_INTERVAL_MINUTES,
   nextRun,
   validateCadence,
@@ -15,6 +16,7 @@ export const SCHEDULE_LIMITS = {
   maxNameLength: 60,
   maxPromptLength: 4000,
   minIntervalMinutes: MIN_SCHEDULE_INTERVAL_MINUTES,
+  maxCronExpressionLength: MAX_CRON_EXPRESSION_LENGTH,
 } as const;
 const RUN_HISTORY_LIMIT = 20;
 const WEBHOOK_REQUESTS_PER_MINUTE = 5;
@@ -101,11 +103,12 @@ export function openScheduleStore(
         agent_id TEXT NOT NULL,
         name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 60),
         prompt TEXT NOT NULL CHECK(length(prompt) BETWEEN 1 AND 4000),
-        cadence_kind TEXT NOT NULL CHECK(cadence_kind IN ('once', 'daily', 'weekly', 'interval', 'webhook')),
+        cadence_kind TEXT NOT NULL CHECK(cadence_kind IN ('once', 'daily', 'weekly', 'interval', 'webhook', 'cron')),
         local_date TEXT,
         local_time TEXT,
         weekdays TEXT,
         interval_minutes INTEGER,
+        cron_expression TEXT,
         timezone TEXT NOT NULL,
         delivery_channel TEXT NOT NULL DEFAULT 'telegram' CHECK(delivery_channel IN ('telegram', 'discord')),
         webhook_token TEXT,
@@ -114,11 +117,12 @@ export function openScheduleStore(
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         CHECK ((enabled = 0 AND next_run_at IS NULL) OR (enabled = 1 AND (next_run_at IS NOT NULL OR cadence_kind = 'webhook'))),
-        CHECK ((cadence_kind = 'once' AND local_date IS NOT NULL AND local_time IS NOT NULL AND weekdays IS NULL AND interval_minutes IS NULL)
-          OR (cadence_kind = 'daily' AND local_date IS NULL AND local_time IS NOT NULL AND weekdays IS NULL AND interval_minutes IS NULL)
-          OR (cadence_kind = 'weekly' AND local_date IS NULL AND local_time IS NOT NULL AND weekdays IS NOT NULL AND interval_minutes IS NULL)
-          OR (cadence_kind = 'webhook' AND local_date IS NULL AND local_time IS NULL AND weekdays IS NULL AND interval_minutes IS NULL)
-          OR (cadence_kind = 'interval' AND local_date IS NULL AND local_time IS NULL AND weekdays IS NULL AND interval_minutes IS NOT NULL AND interval_minutes >= 15))
+        CHECK ((cadence_kind = 'once' AND local_date IS NOT NULL AND local_time IS NOT NULL AND weekdays IS NULL AND interval_minutes IS NULL AND cron_expression IS NULL)
+          OR (cadence_kind = 'daily' AND local_date IS NULL AND local_time IS NOT NULL AND weekdays IS NULL AND interval_minutes IS NULL AND cron_expression IS NULL)
+          OR (cadence_kind = 'weekly' AND local_date IS NULL AND local_time IS NOT NULL AND weekdays IS NOT NULL AND interval_minutes IS NULL AND cron_expression IS NULL)
+          OR (cadence_kind = 'webhook' AND local_date IS NULL AND local_time IS NULL AND weekdays IS NULL AND interval_minutes IS NULL AND cron_expression IS NULL)
+          OR (cadence_kind = 'interval' AND local_date IS NULL AND local_time IS NULL AND weekdays IS NULL AND interval_minutes IS NOT NULL AND interval_minutes >= 15 AND cron_expression IS NULL)
+          OR (cadence_kind = 'cron' AND cron_expression IS NOT NULL AND local_date IS NULL AND local_time IS NULL AND weekdays IS NULL AND interval_minutes IS NULL))
       );
       CREATE INDEX IF NOT EXISTS schedules_due ON schedules (enabled, next_run_at);
       CREATE INDEX IF NOT EXISTS schedules_agent ON schedules (agent_id);
@@ -149,25 +153,27 @@ export function openScheduleStore(
     const cadence: ScheduleCadence =
       kind === "webhook"
         ? { kind }
-        : kind === "interval"
-          ? {
-              kind,
-              minutes: Number(row.interval_minutes),
-              anchor: Number(row.created_at),
-            }
-          : kind === "once"
+        : kind === "cron"
+          ? { kind, expression: String(row.cron_expression) }
+          : kind === "interval"
             ? {
                 kind,
-                date: String(row.local_date),
-                time: String(row.local_time),
+                minutes: Number(row.interval_minutes),
+                anchor: Number(row.created_at),
               }
-            : kind === "weekly"
+            : kind === "once"
               ? {
                   kind,
-                  weekdays: JSON.parse(String(row.weekdays)) as number[],
+                  date: String(row.local_date),
                   time: String(row.local_time),
                 }
-              : { kind, time: String(row.local_time) };
+              : kind === "weekly"
+                ? {
+                    kind,
+                    weekdays: JSON.parse(String(row.weekdays)) as number[],
+                    time: String(row.local_time),
+                  }
+                : { kind, time: String(row.local_time) };
     return {
       id: String(row.id),
       agentId: String(row.agent_id),
@@ -254,6 +260,7 @@ export function openScheduleStore(
       "time" in cadence ? cadence.time : null,
       cadence.kind === "weekly" ? JSON.stringify(cadence.weekdays) : null,
       cadence.kind === "interval" ? cadence.minutes : null,
+      cadence.kind === "cron" ? cadence.expression : null,
     ];
   }
   function recentRuns(scheduleId: string, limit: number): ScheduleRun[] {
@@ -479,8 +486,8 @@ export function openScheduleStore(
         db.prepare(
           `INSERT INTO schedules
           (id, agent_id, name, prompt, cadence_kind, local_date, local_time, weekdays,
-            interval_minutes, timezone, enabled, next_run_at, created_at, updated_at, webhook_token, delivery_channel)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+            interval_minutes, cron_expression, timezone, enabled, next_run_at, created_at, updated_at, webhook_token, delivery_channel)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
         ).run(
           id,
           input.agentId,
@@ -510,7 +517,7 @@ export function openScheduleStore(
           : null;
         db.prepare(
           `UPDATE schedules SET name = ?, prompt = ?, cadence_kind = ?,
-          local_date = ?, local_time = ?, weekdays = ?, interval_minutes = ?,
+          local_date = ?, local_time = ?, weekdays = ?, interval_minutes = ?, cron_expression = ?,
           timezone = ?, next_run_at = ?, updated_at = ?, webhook_token = ?, delivery_channel = ? WHERE id = ?`,
         ).run(
           data.name,

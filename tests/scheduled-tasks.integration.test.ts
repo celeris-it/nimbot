@@ -76,7 +76,7 @@ async function fixture(
             name: "Review invoices",
             prompt: "Remind the owner to review invoices.",
             timeZone: local.timeZone,
-            cadence: { kind: "weekly", weekdays: [1], time: "09:00" },
+            cadence: { kind: "cron", expression: "0 9 * * mon" },
           },
           randomUUID(),
           signal,
@@ -343,7 +343,7 @@ it("fires through the Host API without tool access, sends only the named final r
   }
 });
 
-it("proposes a Telegram schedule, creates it once on owner confirmation, lists it, and delivers the due result", async () => {
+it("proposes a Telegram cron schedule, creates it once on owner confirmation, lists it, and delivers the due result", async () => {
   const f = await fixture("create-from-chat");
   try {
     f.schedules.setDefaultTimeZone("America/Argentina/Catamarca");
@@ -361,7 +361,8 @@ it("proposes a Telegram schedule, creates it once on owner confirmation, lists i
     });
     await f.tasks.idle();
     const preview = f.sent.find(({ markup }) => markup);
-    expect(preview?.text).toContain("Every Monday at 09:00");
+    expect(preview?.text).toContain("Cron 0 9 * * MON");
+    expect(preview?.text).toContain("Next runs:");
     expect(preview?.text).toContain("America/Argentina/Catamarca");
     expect(preview?.text).toContain("Remind the owner to review invoices.");
     const keyboard = preview?.markup as {

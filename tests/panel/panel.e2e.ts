@@ -1947,3 +1947,49 @@ for (const deploymentMode of ["native", "docker"] as const)
       ).toBe(true);
     }
   });
+
+test("creates and edits cron schedules with local previews and inline errors", async ({
+  page,
+}) => {
+  await openSchedules(page);
+  await scheduleDraft(page, "Weekday cron");
+  const activation = page.getByLabel("Activation", { exact: true });
+  await activation.selectOption("cron");
+  await page.getByLabel("Time zone", { exact: true }).fill("UTC");
+  const expression = page.getByRole("textbox", {
+    name: "Cron expression",
+    exact: true,
+  });
+  await expect(expression).toHaveAttribute("maxlength", "100");
+  await expression.fill("0 9 * * mon-fri");
+  await activation.selectOption("daily");
+  await activation.selectOption("cron");
+  await expect(expression).toHaveValue("0 9 * * mon-fri");
+  const preview = page.getByRole("region", { name: "Next runs" });
+  await expect(preview.getByRole("listitem")).toHaveCount(5);
+  await expect(preview.getByRole("listitem").first()).toContainText(
+    "9:00 AM (UTC)",
+  );
+  await page
+    .getByRole("button", { name: "Create schedule", exact: true })
+    .click();
+  const card = page.getByRole("region", { name: "Weekday cron", exact: true });
+  await expect(card).toContainText("Cron 0 9 * * MON-FRI");
+  await card.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(expression).toHaveValue("0 9 * * MON-FRI");
+  await expression.fill("*/5 * * * *");
+  await expression.press("Tab");
+  await expect(expression).toHaveAttribute("aria-invalid", "true");
+  await expect(
+    page.getByText("Cron minutes must be at least 15 minutes apart.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(preview).toHaveCount(0);
+  await expression.fill("30 9 * * MON-FRI");
+  await expect(expression).toHaveAttribute("aria-invalid", "false");
+  await page
+    .getByRole("button", { name: "Save schedule", exact: true })
+    .click();
+  await expect(card).toContainText("Cron 30 9 * * MON-FRI");
+});
