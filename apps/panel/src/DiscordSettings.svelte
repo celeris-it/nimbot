@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Icon } from "./components/index.js";
+  import { Icon, PasswordField, TextField } from "./components/index.js";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   let {
     agent,
@@ -100,13 +100,12 @@
   {/if}
   <form onsubmit={save} aria-busy={busy} aria-describedby="form-error">
     <label for="discord-owner">Owner's Discord user ID</label>
-    <input
-      class="panel-input"
+    <TextField
       id="discord-owner"
       name="ownerId"
       inputmode="numeric"
       pattern={"[1-9][0-9]{0,19}"}
-      maxlength="20"
+      maxlength={20}
       required
       bind:value={ownerId}
       aria-describedby="discord-owner-help"
@@ -117,13 +116,11 @@
       you direct messages.
     </p>
     <label for="discord-token">Discord bot token</label>
-    <input
-      class="panel-input"
+    <PasswordField
       id="discord-token"
       name="token"
-      type="password"
       autocomplete="off"
-      maxlength="256"
+      maxlength={256}
       required
       bind:value={token}
       aria-describedby="discord-token-help"
@@ -151,8 +148,7 @@
     </p>
     <form onsubmit={remove} aria-busy={busy} aria-describedby="form-error">
       <label for="discord-confirm">Type {agent.id} to confirm removal</label>
-      <input
-        class="panel-input"
+      <TextField
         id="discord-confirm"
         name="confirm"
         autocomplete="off"

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   import { providers } from "../../server/src/providers/provider-contracts.js";
-  import { Icon } from "./components/index.js";
+  import { Icon, PasswordField, TextField } from "./components/index.js";
   import DiscordSettings from "./DiscordSettings.svelte";
   import {
     processLabels,
@@ -169,8 +169,7 @@
           aria-busy={busy}
         >
           <label for="telegram-owner">Owner's Telegram ID</label>
-          <input
-            class="panel-input"
+          <TextField
             id="telegram-owner"
             inputmode="numeric"
             pattern="[1-9][0-9]*"
@@ -178,11 +177,9 @@
             bind:value={telegramOwner}
           />
           <label for="telegram-token">Telegram bot token</label>
-          <input
-            class="panel-input"
+          <PasswordField
             id="telegram-token"
-            type="password"
-            maxlength="256"
+            maxlength={256}
             autocomplete="off"
             required
             bind:value={telegramToken}

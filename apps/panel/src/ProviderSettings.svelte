@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { StatusBadge } from "./components/index.js";
+  import { PasswordField, StatusBadge } from "./components/index.js";
   import type { ProviderSettings } from "../../server/src/panel/panel-contracts.js";
   let {
     settings,
@@ -153,15 +153,13 @@
                 <label for={`key-${provider.id}`}>{provider.name} API key</label
                 >
                 <div class="key-actions">
-                  <input
-                    class="panel-input"
+                  <PasswordField
                     id={`key-${provider.id}`}
                     name="key"
-                    type="password"
                     autocomplete="new-password"
                     spellcheck="false"
                     required
-                    maxlength="4096"
+                    maxlength={4096}
                     bind:value={keys[provider.id]}
                     disabled={blocked}
                   />
@@ -354,7 +352,7 @@
     align-items: end;
     gap: 0.5rem;
   }
-  .key-actions input {
+  .key-actions > :global([data-ui="field-group"]) {
     flex: 1 1 13rem;
   }
   .device-settings {

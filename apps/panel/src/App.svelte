@@ -18,7 +18,12 @@
   } from "../../server/src/panel/panel-contracts.js";
   import { ApiError, post, request } from "./api.js";
   import Dashboard from "./Dashboard.svelte";
-  import { Icon } from "./components/index.js";
+  import {
+    Checkbox,
+    Icon,
+    PasswordField,
+    TextField,
+  } from "./components/index.js";
   import type { IconName } from "./components/icons.js";
   import AgentForm from "./AgentForm.svelte";
   import AgentStatus from "./AgentStatus.svelte";
@@ -1108,15 +1113,13 @@
         <div class="panel-card">
           <form onsubmit={login} aria-describedby="form-error" aria-busy={busy}>
             <label for="password">Administrator password</label>
-            <input
-              class="panel-input"
+            <PasswordField
               aria-invalid={error ? "true" : undefined}
               id="password"
               name="password"
-              type="password"
               autocomplete="current-password"
               required
-              maxlength="256"
+              maxlength={256}
               aria-describedby="password-help form-error"
               bind:value={password}
             />
@@ -1164,9 +1167,8 @@
         }}
       >
         <label for="schedule-default-zone">Schedule time zone</label>
-        <input
+        <TextField
           id="schedule-default-zone"
-          class="panel-input"
           aria-describedby="schedule-default-zone-help"
           bind:value={scheduleTimeZone}
           required
@@ -1367,14 +1369,10 @@
           aria-describedby="form-error"
           aria-busy={busy}
         >
-          <label
-            ><input
-              class="panel-checkbox"
-              type="checkbox"
-              bind:checked={deleteData}
-            />
-            Also permanently delete the agent data directory and AI conversation history,
-            including its workspace, task history and browser profile.</label
+          <Checkbox bind:checked={deleteData}
+            >Also permanently delete the agent data directory and AI
+            conversation history, including its workspace, task history and
+            browser profile.</Checkbox
           >
           <div class="button-row">
             <button

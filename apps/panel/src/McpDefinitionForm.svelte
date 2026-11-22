@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Checkbox, Select, Switch, TextField } from "./components/index.js";
   import { tick, untrack } from "svelte";
   import type { McpDiscoveryResult } from "../../server/src/panel/panel-contracts.js";
   import type { McpDiscoveredTool } from "../../server/src/mcp/mcp-discovery.js";
@@ -134,20 +135,18 @@
     </p>
   {/if}
   <label for="integration-label">Integration name</label>
-  <input
-    class="panel-input"
+  <TextField
     id="integration-label"
     bind:value={label}
-    maxlength="96"
+    maxlength={96}
     required
   />
   <label for="integration-endpoint">HTTPS endpoint</label>
-  <input
-    class="panel-input"
+  <TextField
     id="integration-endpoint"
     type="url"
     bind:value={endpoint}
-    maxlength="2048"
+    maxlength={2048}
     required
     aria-describedby="mcp-endpoint-help"
   />
@@ -155,24 +154,17 @@
     Use an endpoint you trust. Changing it removes current agent grants and
     credentials.
   </p>
-  <label
-    ><input class="panel-checkbox" type="checkbox" bind:checked={enabled} /> Enable
-    integration</label
-  >
+  <Switch bind:checked={enabled}>Enable integration</Switch>
 
   {#if definition}
     <h2>Connection test</h2>
     <label for="mcp-discovery-credential">Connection credential</label>
-    <select
-      class="panel-select"
-      id="mcp-discovery-credential"
-      bind:value={credentialAgent}
-    >
+    <Select id="mcp-discovery-credential" bind:value={credentialAgent}>
       <option value="">No credential</option>
       {#each discoveryAgents as agent (agent.id)}
         <option value={agent.id}>{agent.name} ({agent.id})</option>
       {/each}
-    </select>
+    </Select>
     {#if endpointChanged}<p>
         Save the endpoint before testing the connection.
       </p>{/if}
@@ -222,24 +214,22 @@
     <fieldset class="panel-card">
       <legend>{tool.name || "New tool"}</legend>
       <label for={`mcp-tool-name-${tool.id}`}>Tool name</label>
-      <input
-        class="panel-input"
+      <TextField
         id={`mcp-tool-name-${tool.id}`}
         bind:value={tool.name}
         oninput={() => (tool.reviewed = false)}
-        maxlength="128"
+        maxlength={128}
         required
       />
       <label for={`mcp-tool-access-${tool.id}`}>Access</label>
-      <select
-        class="panel-select"
+      <Select
         id={`mcp-tool-access-${tool.id}`}
         bind:value={tool.access}
         onchange={() => (tool.reviewed = false)}
       >
         <option value="write">Write or unknown</option>
         <option value="read">Read only</option>
-      </select>
+      </Select>
       <label for={`mcp-tool-schema-${tool.id}`}>Argument schema (JSON)</label>
       <textarea
         class="panel-textarea"
@@ -247,22 +237,18 @@
         bind:value={tool.schema}
         oninput={() => (tool.reviewed = false)}
         rows="6"
-        maxlength="16384"
+        maxlength={16384}
         required></textarea>
       {#if definition?.blockedTools?.includes(tool.name)}
         <p id={`mcp-tool-review-help-${tool.id}`}>
           Disabled pending review. Test the connection to retrieve the current
           schema, then review the schema and access above.
         </p>
-        <label
-          ><input
-            class="panel-checkbox"
-            type="checkbox"
-            bind:checked={tool.reviewed}
-            disabled={busy}
-            aria-describedby={`mcp-tool-review-help-${tool.id}`}
-          />
-          I reviewed the schema and access for {tool.name}</label
+        <Checkbox
+          bind:checked={tool.reviewed}
+          disabled={busy}
+          aria-describedby={`mcp-tool-review-help-${tool.id}`}
+          >I reviewed the schema and access for {tool.name}</Checkbox
         >
       {/if}
       <button

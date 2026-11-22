@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PasswordField } from "./components/index.js";
   import type { McpAgentDefinition } from "../../server/src/panel/panel-contracts.js";
   let {
     definitions,
@@ -66,12 +67,10 @@
             onsubmit={(event) => save(event, definition)}
           >
             <label for={`credential-${definition.id}`}>Bearer credential</label>
-            <input
-              class="panel-input"
+            <PasswordField
               id={`credential-${definition.id}`}
-              type="password"
               bind:value={tokens[definition.id]}
-              maxlength="4096"
+              maxlength={4096}
               autocomplete="new-password"
               required
             />

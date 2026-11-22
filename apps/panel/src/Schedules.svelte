@@ -1,4 +1,10 @@
 <script lang="ts">
+  import {
+    Checkbox,
+    NumberStepper,
+    Select,
+    TextField,
+  } from "./components/index.js";
   import { request, post } from "./api.js";
   import { tick } from "svelte";
   import {
@@ -268,8 +274,7 @@
         <p id="schedule-form-error" role="alert" tabindex="-1">{localError}</p>
         <fieldset class="schedule-fields" disabled={busy}>
           <label for="schedule-name">{text.name}</label>
-          <input
-            class="panel-input"
+          <TextField
             id="schedule-name"
             name="name"
             required
@@ -288,29 +293,24 @@
             bind:value={prompt}></textarea>
           <p id="schedule-prompt-help">{text.promptHelp}</p>
           <label for="schedule-delivery">Delivery channel</label>
-          <select
-            class="panel-select"
-            id="schedule-delivery"
-            bind:value={deliveryChannel}
-          >
+          <Select id="schedule-delivery" bind:value={deliveryChannel}>
             <option value="telegram">Telegram</option>
             <option value="discord">Discord</option>
-          </select>
+          </Select>
           {#if !linked(deliveryChannel)}
             <p role="status" data-ui="schedule-warning">
               Link the {channelLabel[deliveryChannel]} owner chat to run this schedule.
             </p>
           {/if}
           <label for="schedule-kind">{text.kind}</label>
-          <select class="panel-select" id="schedule-kind" bind:value={kind}>
+          <Select id="schedule-kind" bind:value={kind}>
             {#each Object.entries(scheduleKinds) as [value, label] (value)}<option
                 {value}>{label}</option
               >{/each}
-          </select>
+          </Select>
           {#if kind === "once"}
             <label for="schedule-date">{text.date}</label>
-            <input
-              class="panel-input"
+            <TextField
               id="schedule-date"
               type="date"
               required
@@ -321,8 +321,8 @@
           {/if}
           {#if kind === "cron"}
             <label for="schedule-cron">{scheduleKinds.cron}</label>
-            <input
-              class="panel-input font-mono"
+            <TextField
+              class="font-mono"
               id="schedule-cron"
               required
               maxlength={data.limits.maxCronExpressionLength}
@@ -339,8 +339,7 @@
             </p>
           {:else if kind !== "interval" && kind !== "webhook"}
             <label for="schedule-time">{text.time}</label>
-            <input
-              class="panel-input"
+            <TextField
               id="schedule-time"
               type="time"
               required
@@ -350,15 +349,14 @@
             <p id="schedule-time-help">{text.dstHelp}</p>
           {:else if kind === "interval"}
             <label for="schedule-minutes">{text.minutes}</label>
-            <input
-              class="panel-input"
+            <NumberStepper
               id="schedule-minutes"
-              type="number"
               min={data.limits.minIntervalMinutes}
               step="1"
               required
               bind:value={minutes}
               aria-describedby="schedule-interval-help"
+              unit="min"
             />
             <p id="schedule-interval-help">
               {text.intervalHelp(data.limits.minIntervalMinutes)}
@@ -371,22 +369,17 @@
             >
               <legend class="py-2 font-semibold">{text.weekdays}</legend>
               <div data-ui="schedule-weekdays">
-                {#each scheduleWeekdays as day, index (day)}<label
-                    ><input
-                      class="panel-checkbox"
-                      type="checkbox"
-                      aria-invalid={invalid === "weekdays"}
-                      value={index}
-                      bind:group={weekdays}
-                    />{day}</label
+                {#each scheduleWeekdays as day, index (day)}<Checkbox
+                    aria-invalid={invalid === "weekdays"}
+                    value={index}
+                    bind:group={weekdays}>{day}</Checkbox
                   >{/each}
               </div>
             </fieldset>
           {/if}
           {#if kind !== "webhook"}
             <label for="schedule-zone">{text.zone}</label>
-            <input
-              class="panel-input"
+            <TextField
               id="schedule-zone"
               required
               bind:value={timeZone}
@@ -478,16 +471,14 @@
         >
         {#if webhook?.id === schedule.id}
           <label for={`webhook-url-${schedule.id}`}>{text.webhookUrl}</label>
-          <input
-            class="panel-input"
+          <TextField
             id={`webhook-url-${schedule.id}`}
             readonly
             value={webhook.url}
           />
           <label for={`webhook-token-${schedule.id}`}>{text.webhookToken}</label
           >
-          <input
-            class="panel-input"
+          <TextField
             id={`webhook-token-${schedule.id}`}
             readonly
             value={webhook.token}
@@ -569,13 +560,10 @@
     flex-wrap: wrap;
     gap: 0.5rem 1rem;
   }
-  [data-ui="schedule-weekdays"] label {
+  [data-ui="schedule-weekdays"] :global(label) {
     display: inline-flex;
     align-items: center;
     min-height: 44px;
-  }
-  .panel-input {
-    min-width: 0;
   }
   dl {
     grid-template-columns: minmax(0, 6rem) minmax(0, 1fr);

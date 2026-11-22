@@ -2,6 +2,7 @@
   import { icons, type IconName } from "./icons.js";
 
   const sizes = {
+    12: "text-[12px]",
     14: "text-[14px]",
     15: "text-[15px]",
     16: "text-[16px]",

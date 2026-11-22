@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Select } from "./components/index.js";
   import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
   let {
     agent,
@@ -69,23 +70,19 @@
       <form onsubmit={submit} aria-describedby="form-error" aria-busy={busy}>
         <label>
           Target agent
-          <select
-            class="panel-select block w-full"
-            bind:value={target}
-            required
-          >
+          <Select bind:value={target} required>
             <option value="" disabled>Choose an agent</option>
             {#each data.candidates as candidate (candidate.id)}
               <option value={candidate.id}>{candidate.name}</option>
             {/each}
-          </select>
+          </Select>
         </label>
         <label>
           Permission
-          <select class="panel-select block w-full" bind:value={permission}>
+          <Select bind:value={permission}>
             <option value="note">Send notes</option>
             <option value="delegate">Delegate tasks</option>
-          </select>
+          </Select>
         </label>
         <button
           class="panel-button panel-button-primary"

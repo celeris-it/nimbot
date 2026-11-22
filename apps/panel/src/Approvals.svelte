@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Select, TextField } from "./components/index.js";
   import type { ApprovalRequest } from "../../server/src/approvals/approval-store.js";
   import type { ApprovalRule } from "../../server/src/approvals/approval-rules.js";
   let {
@@ -71,26 +72,30 @@
 
 <form onsubmit={submit}>
   <label
-    >Capability <input
+    >Capability <TextField
       bind:value={actionType}
       required
-      maxlength="64"
+      maxlength={64}
       placeholder="mcp.docs.write"
     /></label
   >
   <label
-    >Exact target <input bind:value={target} required maxlength="300" /></label
+    >Exact target <TextField
+      bind:value={target}
+      required
+      maxlength={300}
+    /></label
   >
   <label>
     Rule
-    <select class="panel-select" bind:value={effect}>
+    <Select bind:value={effect}>
       <option value="ask">Ask each time</option>
       <option value="deny">Deny</option>
       <option value="allow">Always allow (read-only only)</option>
-    </select>
+    </Select>
   </label>
   <label
-    >Expires after (days, optional) <input
+    >Expires after (days, optional) <TextField
       bind:value={ttlDays}
       inputmode="numeric"
       pattern="[0-9]*"

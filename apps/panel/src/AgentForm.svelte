@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PasswordField, TextField } from "./components/index.js";
   import { untrack } from "svelte";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   let {
@@ -50,11 +51,10 @@
   <form onsubmit={send} aria-describedby="form-error" aria-busy={busy}>
     {#if mode !== "token"}
       <label for="name">Name</label>
-      <input
-        class="panel-input"
+      <TextField
         id="name"
         name="name"
-        maxlength="128"
+        maxlength={128}
         required
         bind:value={name}
       />
@@ -64,7 +64,7 @@
         id="instructions"
         name="instructions"
         rows="8"
-        maxlength="4000"
+        maxlength={4000}
         aria-describedby="instructions-help"
         bind:value={instructions}></textarea>
       <p id="instructions-help">
@@ -74,13 +74,11 @@
     {/if}
     {#if mode === "token"}
       <label for="token">New Telegram token</label>
-      <input
-        class="panel-input"
-        type="password"
+      <PasswordField
         id="token"
         name="token"
         required
-        maxlength="256"
+        maxlength={256}
         autocomplete="off"
         aria-describedby="token-help"
         bind:value={token}

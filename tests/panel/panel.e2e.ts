@@ -61,6 +61,18 @@ test("shows a wrong password beside the field and returns focus to it", async ({
   await expect(password).toHaveValue("");
 });
 
+test("reveals and hides a password field on request", async ({ page }) => {
+  await page.goto("/login");
+  const password = page.getByLabel("Administrator password");
+  await password.fill("panel-test-password");
+  await expect(password).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Show value" }).click();
+  await expect(password).toHaveAttribute("type", "text");
+  await expect(password).toHaveValue("panel-test-password");
+  await page.getByRole("button", { name: "Hide value" }).click();
+  await expect(password).toHaveAttribute("type", "password");
+});
+
 test("separates the destructive action and explains unavailable memory", async ({
   page,
 }) => {
@@ -371,7 +383,7 @@ test("edits the MCP catalog and manages an agent's grant and write-only credenti
   ).toBeFocused();
   await page.getByLabel("Integration name").fill("Workspace docs");
   await page.getByLabel("HTTPS endpoint").fill("https://docs.example.test/mcp");
-  await page.getByLabel("Enable integration").check();
+  await page.getByRole("switch", { name: "Enable integration" }).check();
   await page.getByRole("button", { name: "Add tool" }).click();
   await page.getByLabel("Tool name").fill("search");
   await page.getByLabel("Access", { exact: true }).selectOption("read");
@@ -747,6 +759,20 @@ test("creates, edits, pauses, resumes, runs and deletes schedules with confirmat
   ).toBeVisible();
 });
 
+test("steps the schedule interval within its minimum", async ({ page }) => {
+  await openSchedules(page);
+  await scheduleDraft(page, "Stepper schedule");
+  await page.getByLabel("Activation", { exact: true }).selectOption("interval");
+  const minutes = page.getByLabel("Interval in minutes");
+  await minutes.fill("30");
+  await page.getByRole("button", { name: "Increase" }).click();
+  await expect(minutes).toHaveValue("31");
+  const min = await minutes.getAttribute("min");
+  await minutes.fill(min ?? "1");
+  await page.getByRole("button", { name: "Decrease" }).click();
+  await expect(minutes).toHaveValue(min ?? "1");
+});
+
 test("edits the global schedule time zone and prefills new schedules", async ({
   page,
 }) => {
@@ -942,6 +968,10 @@ test("manages global API keys with keyboard navigation and blank secret fields",
     openai.getByText("Not configured", { exact: true }),
   ).toBeVisible();
   await key.fill("private-first");
+  await page.keyboard.press("Tab");
+  await expect(
+    openai.getByRole("button", { name: "Show value" }),
+  ).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(
     openai.getByRole("button", { name: "Save API key" }),
