@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { createBot } from "../apps/server/src/bot.js";
+import { createBot } from "../apps/server/src/telegram/bot.js";
 import { expect, it, vi } from "vitest";
 import { createHostApi } from "../apps/agent-host/src/http.js";
 import { openTaskStore as openHostStore } from "../apps/agent-host/src/task-store.js";

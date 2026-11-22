@@ -2,7 +2,7 @@ import { GrammyError } from "grammy";
 import type {
   NotificationAdapter,
   NotificationResult,
-} from "./notifications.js";
+} from "../notifications.js";
 import { splitTelegramText } from "./telegram-text.js";
 
 export interface TelegramNotificationTarget {

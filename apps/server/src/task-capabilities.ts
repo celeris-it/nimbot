@@ -1,4 +1,4 @@
-import { ATTACHMENT_OPERATION } from "./telegram-attachments.js";
+import { ATTACHMENT_OPERATION } from "./telegram/telegram-attachments.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { RoutedTask, TaskStore } from "./task-queue.js";
 

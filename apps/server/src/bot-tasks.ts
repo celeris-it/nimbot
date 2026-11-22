@@ -3,7 +3,7 @@ import {
   ATTACHMENT_OPERATION,
   type createTelegramAttachments,
   type WorkspaceFile,
-} from "./telegram-attachments.js";
+} from "./telegram/telegram-attachments.js";
 import {
   createApprovalGate,
   type GateAction,
@@ -14,7 +14,7 @@ import { createDelegatedHostApprovals } from "./delegated-host-approvals.js";
 import { createDelegationDelivery } from "./delegation-delivery.js";
 import type { openNotificationStore } from "./notification-store.js";
 import type { NotificationResult } from "./notifications.js";
-import { createTelegramNotifications } from "./telegram-notifications.js";
+import { createTelegramNotifications } from "./telegram/telegram-notifications.js";
 import type { ApprovalRules } from "./approval-rules.js";
 import type { ApprovalStore } from "./approval-store.js";
 import {
@@ -30,7 +30,7 @@ import {
 import { InlineKeyboard, type Bot, type InputFile } from "grammy";
 import type { BotAccess } from "./agents/agent-access.js";
 import { createApprovalBook } from "./approvals.js";
-import { sendTaskOutcome } from "./bot.js";
+import { sendTaskOutcome } from "./telegram/bot.js";
 import {
   HostTaskError,
   type HostApproval,
@@ -48,7 +48,7 @@ import {
 import type { ModelAdmission, TaskUsage } from "./usage-contracts.js";
 import type { createDiscordAttachments } from "./discord-attachments.js";
 import { createChatSchedules } from "./chat-schedules.js";
-import { splitTelegramText } from "./telegram-text.js";
+import { splitTelegramText } from "./telegram/telegram-text.js";
 
 /** One persistent queue and Host runner per agent; callbacks return to the saved origin. */
 export function createBotTasks(config: {

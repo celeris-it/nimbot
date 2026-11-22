@@ -12,8 +12,8 @@ import { createAgentAccess } from "../apps/server/src/agents/agent-access.js";
 import { createAgentTaskServices } from "../apps/server/src/agent-task-services.js";
 import { getHostStatus } from "../apps/server/src/host/agent-host.js";
 import { openAgentRegistry } from "../apps/server/src/agents/agent-registry.js";
-import { createBot } from "../apps/server/src/bot.js";
-import { openChatBinding } from "../apps/server/src/chat-binding.js";
+import { createBot } from "../apps/server/src/telegram/bot.js";
+import { openChatBinding } from "../apps/server/src/telegram/chat-binding.js";
 import { createDurableNotifications } from "../apps/server/src/durable-notifications.js";
 import {
   createHostApprovals,

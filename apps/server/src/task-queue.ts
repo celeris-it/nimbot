@@ -2,7 +2,7 @@ import type {
   DiscordAttachmentInput,
   DiscordDocument,
 } from "./discord-attachments.js";
-import type { TelegramDocument } from "./telegram-attachments.js";
+import type { TelegramDocument } from "./telegram/telegram-attachments.js";
 import { isDiscordId } from "./discord-identity.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";

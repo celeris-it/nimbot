@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { Bot } from "grammy";
-import type { openAgentRegistry } from "./agents/agent-registry.js";
+import type { openAgentRegistry } from "../agents/agent-registry.js";
 import type { openBotSecrets } from "./bot-secret.js";
 
 export type AgentSetupStatus = "pending" | "provisioning" | "ready" | "failed";

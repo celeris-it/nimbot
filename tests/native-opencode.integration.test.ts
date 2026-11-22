@@ -18,7 +18,7 @@ import { expect, it } from "vitest";
 import { openAgentRegistry } from "../apps/server/src/agents/agent-registry.js";
 import { openAgentProcessStore } from "../apps/server/src/processes/agent-process-store.js";
 import { openProcessHostCredentials } from "../apps/server/src/processes/process-host-credentials.js";
-import { openBotSecrets } from "../apps/server/src/bot-secret.js";
+import { openBotSecrets } from "../apps/server/src/telegram/bot-secret.js";
 import { createProcessAgents } from "../apps/server/src/processes/process-agents.js";
 import { agentProcessDirectories } from "../apps/server/src/processes/agent-process-config.js";
 import { prepareSharedEngine } from "../apps/server/src/shared-engine-state.js";

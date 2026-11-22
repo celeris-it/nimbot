@@ -14,7 +14,7 @@ import {
   openTaskStore,
   type TaskStatus,
 } from "../apps/server/src/task-queue.js";
-import { createTelegramNotifications } from "../apps/server/src/telegram-notifications.js";
+import { createTelegramNotifications } from "../apps/server/src/telegram/telegram-notifications.js";
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "nimbot-operational-alerts-"));

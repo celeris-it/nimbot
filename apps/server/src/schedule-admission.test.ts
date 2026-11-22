@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { openAgentRegistry } from "./agents/agent-registry.js";
-import { openChatBinding } from "./chat-binding.js";
+import { openChatBinding } from "./telegram/chat-binding.js";
 import type { AgentHostConfig, HostStatus } from "./host/agent-host.js";
 import type { Schedule } from "./schedule-store.js";
 import { createScheduleAdmission } from "./scheduler.js";

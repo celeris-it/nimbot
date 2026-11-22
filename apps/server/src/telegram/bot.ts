@@ -3,15 +3,15 @@ import {
   attachmentName,
   type TelegramDocument,
 } from "./telegram-attachments.js";
-import { log } from "./logger.js";
-import type { HostStatus } from "./host/agent-host.js";
+import { log } from "../logger.js";
+import type { HostStatus } from "../host/agent-host.js";
 import type { ChatBinding } from "./chat-binding.js";
 import { splitTelegramText } from "./telegram-text.js";
-import type { TaskOutcome } from "./task-queue.js";
+import type { TaskOutcome } from "../task-queue.js";
 import { Bot, type Api } from "grammy";
-import type { BotAccess } from "./agents/agent-access.js";
-import { formatScheduleList, type ListedSchedule } from "./chat-schedules.js";
-import type { TelegramScheduleOrigin } from "./schedule-store.js";
+import type { BotAccess } from "../agents/agent-access.js";
+import { formatScheduleList, type ListedSchedule } from "../chat-schedules.js";
+import type { TelegramScheduleOrigin } from "../schedule-store.js";
 
 const failureMessages = {
   attachment_unavailable:

@@ -2,7 +2,7 @@ import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it, vi } from "vitest";
-import { openAgentRegistry } from "./agents/agent-registry.js";
+import { openAgentRegistry } from "../agents/agent-registry.js";
 import { openBotSecrets } from "./bot-secret.js";
 import {
   createAgentRegistration,

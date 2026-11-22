@@ -12,7 +12,7 @@ import { openTaskStore } from "./task-queue.js";
 import {
   ATTACHMENT_LIMIT,
   ATTACHMENT_OPERATION,
-} from "./telegram-attachments.js";
+} from "./telegram/telegram-attachments.js";
 
 const dm = {
   platform: "discord",

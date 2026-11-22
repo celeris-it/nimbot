@@ -5,7 +5,7 @@ import {
   ATTACHMENT_LIMIT,
   attachmentName,
   createWorkspaceAttachments,
-} from "./telegram-attachments.js";
+} from "./telegram/telegram-attachments.js";
 import type { DiscordQueuedTask } from "./task-queue.js";
 
 export interface DiscordDocument {

@@ -1,4 +1,4 @@
-import type { WorkspaceFile } from "./telegram-attachments.js";
+import type { WorkspaceFile } from "./telegram/telegram-attachments.js";
 import type { DiscordDestination } from "./task-queue.js";
 import type { NotificationResult } from "./notifications.js";
 import { isDiscordId as snowflake } from "./discord-identity.js";

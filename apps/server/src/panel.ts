@@ -143,7 +143,7 @@ export interface PanelDeps {
     ): Promise<import("./notification-store.js").NotificationRecord>;
   };
   registerAgent?: (
-    input: import("./agent-registration.js").AgentRegistrationInput,
+    input: import("./telegram/agent-registration.js").AgentRegistrationInput,
   ) => Promise<{ agentId: string; provisioning: string }>;
   connectTelegram?: (
     id: string,
@@ -155,7 +155,7 @@ export interface PanelDeps {
         name: string;
         botUsername: string | null;
         provisioning: string;
-        botConnection?: import("./registered-bots.js").RegisteredBotState;
+        botConnection?: import("./telegram/registered-bots.js").RegisteredBotState;
         setupAccess?: import("./agents/agent-access.js").AgentSetupAccess;
         process?: {
           state: import("./processes/agent-process-manager.js").ProcessStatus;

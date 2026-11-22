@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { openAgentRegistry } from "./agent-registry.js";
-import { openChatBinding } from "../chat-binding.js";
+import { openChatBinding } from "../telegram/chat-binding.js";
 import { createAgentAccess } from "./agent-access.js";
 
 /** There is no production API that changes an owner; tests edit the row directly. */
