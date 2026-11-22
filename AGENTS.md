@@ -35,6 +35,8 @@ Monorepo layout:
 - `infrastructure/docker/` — Dockerfiles
 - `tests/` — integration and end-to-end tests
 
+When a source directory becomes crowded enough that related files are hard to find, group them into subdirectories by feature or responsibility. Keep tests with the code they cover and use existing feature directories when they fit.
+
 ## Commands
 
 - `pnpm install` — install dependencies
