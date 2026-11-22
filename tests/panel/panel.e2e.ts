@@ -93,30 +93,130 @@ test("selects an agent model and shows its published quota in the panel", async 
   await expect(
     page.getByRole("heading", { name: "Model and usage for Developer" }),
   ).toBeFocused();
-  const model = page.getByLabel("Model for new turns");
-  await expect(model).toHaveValue("automatic");
-  await model.selectOption({ label: "Fixture model (opencode/fixture/model)" });
+  const model = page.getByRole("button", { name: /Model for new turns/ });
+  const search = page.getByRole("combobox", { name: "Search models" });
+  const fixture = page.getByRole("option", {
+    name: "Fixture model fixture/model",
+  });
+  await expect(model).toContainText("Automatic");
+  await model.press("Enter");
+  await expect(search).toBeFocused();
+  await expect(page.getByRole("option", { name: "Automatic" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await search.press("ArrowDown");
+  await expect(search).toHaveAttribute(
+    "aria-activedescendant",
+    (await fixture.getAttribute("id"))!,
+  );
+  await search.press("Enter");
+  await expect(model).toBeFocused();
+  await expect(model).toContainText("Fixture model");
+  await page.reload();
+  await expect(model).toContainText("Automatic");
+
+  await model.click();
+  await search.fill("FIXTURE");
+  await fixture.click();
   await page.getByRole("button", { name: "Save model" }).click();
   await expect(
     page.getByRole("status").filter({ hasText: "Model saved for new turns." }),
   ).toBeVisible();
   await page.reload();
-  await expect(model).toHaveValue(
-    JSON.stringify(["opencode", "fixture/model"]),
-  );
+  await expect(model).toContainText("Fixture model");
   await expect(page.getByText("Queue paused for quota")).toBeVisible({
     timeout: 12_000,
   });
   await expect(
     page.getByText("Console monthly", { exact: true }),
   ).toBeVisible();
-  await model.selectOption("automatic");
+  await model.click();
+  await expect(fixture).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("option", { name: "Automatic" }).click();
   await page.getByRole("button", { name: "Save model" }).click();
   await expect(
     page.getByRole("status").filter({ hasText: "Model saved for new turns." }),
   ).toBeVisible();
   await page.reload();
-  await expect(model).toHaveValue("automatic");
+  await expect(model).toContainText("Automatic");
+});
+
+test("filters models and keeps an unavailable saved model visible", async ({
+  page,
+}) => {
+  await login(page);
+  let audioName = "Studio";
+  await page.route("**/api/agents/dev/models", (route) =>
+    route.fulfill({
+      json: {
+        selected: { providerId: "retired", modelId: "retired-model" },
+        catalogAvailable: true,
+        models: [
+          { providerId: "openai", modelId: "vision-v1", name: "Studio" },
+          {
+            providerId: "openrouter",
+            modelId: "vendor/audio-v1",
+            name: audioName,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/agents/dev/usage");
+  const model = page.getByRole("button", { name: /Model for new turns/ });
+  const save = page.getByRole("button", { name: "Save model" });
+  const search = page.getByRole("combobox", { name: "Search models" });
+  const results = page.getByRole("listbox", { name: "Models" });
+  await expect(model).toContainText("retired/retired-model (Unavailable)");
+  await expect(save).toBeDisabled();
+
+  for (const width of [1280, 375, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await model.click();
+    await expect(results).toBeInViewport();
+    const bounds = (await results.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+    await search.press("Escape");
+    await expect(model).toBeFocused();
+  }
+
+  await model.click();
+  await search.fill("  sTuDiO  ");
+  await expect(results.getByRole("option")).toHaveCount(2);
+  await search.fill("VISION-V1");
+  await expect(results.getByRole("option")).toHaveAccessibleName(
+    "Studio vision-v1",
+  );
+  await search.fill("openrouter");
+  await expect(
+    results.getByRole("group", { name: "openrouter" }),
+  ).toBeVisible();
+  await expect(results.getByRole("option")).toHaveCount(1);
+  await search.fill("unknown");
+  await expect(
+    page.getByRole("status").filter({ hasText: "No matching models" }),
+  ).toBeVisible();
+  await search.press("Enter");
+  await expect(model).toContainText("Unavailable");
+  await expect(search).toBeFocused();
+  await page.mouse.click(4, 4);
+  await expect(search).toBeHidden();
+
+  await model.click();
+  await search.fill("audio-v1");
+  await search.press("Enter");
+  await expect(model).toContainText("Studio");
+  await expect(save).toBeEnabled();
+  await model.click();
+  await search.press("Tab");
+  await expect(save).toBeFocused();
+  await expect(results).toBeHidden();
+  audioName = "Audio Studio";
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(model).toContainText("Audio Studio");
+  await expect(save).toBeEnabled();
 });
 
 test("explains why queued tasks are waiting after an OpenCode startup failure", async ({

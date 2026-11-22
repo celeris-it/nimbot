@@ -1,5 +1,6 @@
 <script lang="ts">
   import { DataTable, StatusBadge } from "./components/index.js";
+  import ModelPicker from "./components/ModelPicker.svelte";
   import type {
     AgentModels,
     AgentUsage,
@@ -26,14 +27,22 @@
   } = $props();
 
   let base = $derived(`/agents/${encodeURIComponent(agent.id)}`);
-  let selected = $derived(catalog?.selected ?? null);
-  const key = (model: ModelReference) =>
-    JSON.stringify([model.providerId, model.modelId]);
-  let savedValue = $derived(selected ? key(selected) : "automatic");
-  let selection = $derived(savedValue);
-  let listed = $derived(
-    !selected || catalog?.models.some((model) => key(model) === key(selected!)),
+  let savedProviderId = $derived(catalog?.selected?.providerId);
+  let savedModelId = $derived(catalog?.selected?.modelId);
+  // Model and usage refreshes the catalog while an administrator is editing.
+  let selection = $derived(
+    savedProviderId && savedModelId
+      ? { providerId: savedProviderId, modelId: savedModelId }
+      : null,
   );
+  let selectedModel = $derived(
+    catalog?.models.find(
+      (model) =>
+        model.providerId === selection?.providerId &&
+        model.modelId === selection.modelId,
+    ),
+  );
+  let canSave = $derived(selection === null || !!selectedModel);
   const number = new Intl.NumberFormat();
   const usd = new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -105,14 +114,13 @@
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
-    const value = new FormData(form).get("model");
-    if (value === "automatic") void save(null);
-    else {
-      const model = catalog?.models.find((entry) => key(entry) === value);
-      if (model)
-        void save({ providerId: model.providerId, modelId: model.modelId });
-    }
+    if (busy) return;
+    if (selection === null) void save(null);
+    else if (selectedModel)
+      void save({
+        providerId: selectedModel.providerId,
+        modelId: selectedModel.modelId,
+      });
   }
 </script>
 
@@ -128,30 +136,15 @@
   <h2 id="model-heading">Model</h2>
   {#if catalog}
     <form onsubmit={submit} aria-busy={busy}>
-      <label for="agent-model">Model for new turns</label>
-      <select
-        class="panel-select"
-        id="agent-model"
-        name="model"
+      <ModelPicker
+        models={catalog.models}
         bind:value={selection}
         disabled={busy}
-      >
-        <option value="automatic">Automatic</option>
-        {#if selected && !listed}
-          <option value={key(selected)} disabled
-            >{selected.providerId}/{selected.modelId} (unavailable)</option
-          >
-        {/if}
-        {#each catalog.models as model (key(model))}
-          <option value={key(model)}
-            >{model.name} ({model.providerId}/{model.modelId})</option
-          >
-        {/each}
-      </select>
+      />
       <button
         class="panel-button panel-button-primary"
         type="submit"
-        disabled={busy}>Save model</button
+        disabled={busy || !canSave}>Save model</button
       >
     </form>
     {#if !catalog.catalogAvailable}
