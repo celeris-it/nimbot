@@ -90,6 +90,117 @@ test("explains why queued tasks are waiting after an OpenCode startup failure", 
   await expect(page.getByText("2 queued", { exact: true })).toBeVisible();
 });
 
+test("keeps usage history readable and keyboard-scrollable on narrow screens", async ({
+  page,
+}) => {
+  await login(page);
+  const startedAt = Date.UTC(2026, 10, 22, 18);
+  const totals = {
+    tokens: 1500,
+    costUsd: 0.0123,
+    tasks: 2,
+    missingCost: 1,
+    incomplete: 1,
+  };
+  await page.route("**/api/agents/dev/usage*", (route) => {
+    const older = new URL(route.request().url()).searchParams.has("before");
+    return route.fulfill({
+      json: {
+        quota: null,
+        queued: 0,
+        today: totals,
+        month: totals,
+        next: older ? null : startedAt,
+        tasks: older
+          ? []
+          : [
+              {
+                id: "completed",
+                startedAt,
+                status: "completed",
+                origin: "schedule",
+                scheduleName: "Nightly workspace summary",
+                usage: {
+                  model: {
+                    providerId: "opencode",
+                    modelId: "model-" + "x".repeat(120),
+                  },
+                  tokens: {
+                    input: 1000,
+                    output: 400,
+                    reasoning: 100,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                  },
+                  costUsd: 0.0123,
+                  state: "partial",
+                },
+              },
+              {
+                id: "failed",
+                startedAt,
+                status: "failed",
+                origin: "telegram",
+                scheduleName: null,
+                usage: null,
+              },
+            ],
+      },
+    });
+  });
+  await page.setViewportSize({ width: 1280, height: 840 });
+  await page.goto("/agents/dev/usage");
+  const table = page.getByRole("table", { name: "Task usage history" });
+  const scrollRegion = page.getByRole("region", {
+    name: "Task usage history",
+    exact: true,
+  });
+  const scrollHint = page.getByText("Scroll horizontally to see all columns.");
+  await expect(table.getByRole("row")).toHaveCount(3);
+  await expect(scrollHint).toBeHidden();
+  await expect(
+    table.getByRole("columnheader", { name: "Reported cost (USD)" }),
+  ).toHaveCSS("text-align", "right");
+  await expect(table.getByRole("cell", { name: /1,500/ })).toHaveCSS(
+    "text-align",
+    "right",
+  );
+  const partial = table.getByRole("row", { name: /Completed/ });
+  await expect(partial.getByText("Partial usage")).toBeVisible();
+  await expect(partial.getByText("Nightly workspace summary")).toBeVisible();
+  const failed = table.getByRole("row", { name: /Failed/ });
+  await expect(failed.getByText("Unavailable", { exact: true })).toHaveCount(3);
+  const history = page.locator(".table-panel");
+  await history.screenshot({
+    path: test.info().outputPath("usage-desktop.png"),
+  });
+
+  for (const width of [375, 320]) {
+    await page.setViewportSize({ width, height: 840 });
+    await expect(scrollHint).toBeVisible();
+    await expect(scrollRegion).toHaveAttribute("tabindex", "0");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBe(width);
+    expect(await partial.evaluate((row) => row.offsetHeight)).toBeLessThan(180);
+  }
+  await history.screenshot({
+    path: test.info().outputPath("usage-mobile.png"),
+  });
+  await scrollRegion.focus();
+  await expect(scrollRegion).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("ArrowRight");
+  await expect
+    .poll(() => scrollRegion.evaluate((element) => element.scrollLeft))
+    .toBeGreaterThan(0);
+  await page.keyboard.press("Tab");
+  const older = page.getByRole("link", { name: "Older tasks" });
+  await expect(older).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("No model tasks on this page.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Newest tasks" })).toBeVisible();
+});
+
 test("edits the MCP catalog and manages an agent's grant and write-only credential", async ({
   page,
 }) => {
@@ -696,7 +807,23 @@ test("manages global API keys with keyboard navigation and blank secret fields",
   await page.goto("/agents/research/providers");
   await expect(page).toHaveURL(/\/providers$/);
   await expect(openai.getByText("Configured — API key")).toBeVisible();
-  await openai.getByRole("button", { name: "Disconnect provider" }).click();
+  const disconnect = openai.getByRole("button", {
+    name: "Disconnect provider",
+  });
+  const confirmation = page.getByRole("dialog", { name: "Disconnect OpenAI?" });
+  await disconnect.click();
+  await expect(
+    confirmation.getByRole("button", { name: "Keep connected" }),
+  ).toBeFocused();
+  await expect(confirmation).toContainText("for all agents");
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeHidden();
+  await expect(disconnect).toBeFocused();
+  await expect(openai.getByText("Configured — API key")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await confirmation
+    .getByRole("button", { name: "Disconnect provider" })
+    .click();
   await expect(
     openai.getByText("Not configured", { exact: true }),
   ).toBeVisible();
@@ -718,6 +845,18 @@ test("completes device login and recovers its pending state after reload", async
   ).toHaveAttribute("href", "https://auth.openai.com/codex/device");
   await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
   await expect(page.getByLabel("OpenAI API key")).toBeDisabled();
+  for (const width of [1280, 375, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(width);
+    if (width !== 375)
+      await page
+        .getByRole("region", { name: "OpenAI", exact: true })
+        .screenshot({
+          path: test.info().outputPath(`provider-authorization-${width}.png`),
+        });
+  }
   await page.reload();
   await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
   await request.post("/__test/providers/completed");
@@ -1134,11 +1273,9 @@ test("moves between agent pages with an expandable main navigation", async ({
         "aria-expanded",
         String(expanded),
       );
-      expect(
-        await page.evaluate(
-          () => document.documentElement.scrollWidth <= innerWidth,
-        ),
-      ).toBe(true);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+        .toBeLessThanOrEqual(width);
       const bounds = await agents.boundingBox();
       expect(bounds?.width).toBeGreaterThanOrEqual(44);
       expect(bounds?.height).toBeGreaterThanOrEqual(44);
@@ -1364,11 +1501,11 @@ test("keeps forms within mobile widths and retains readable theme contrast", asy
   await expect(page.getByLabel("Name", { exact: true })).toBeVisible();
   for (const width of [320, 375]) {
     await page.setViewportSize({ width, height: 800 });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-    ).toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth), {
+        message: `page fits after navigation reflows at ${width}px`,
+      })
+      .toBeLessThanOrEqual(width);
   }
   const ratios = await page.evaluate(() => {
     function rgb(color: string) {

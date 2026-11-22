@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { DataTable, StatusBadge } from "./components/index.js";
   import type {
     AgentModels,
     AgentUsage,
@@ -74,6 +75,32 @@
     delegated: "Delegation",
     schedule: "Schedule",
     webhook: "Webhook",
+  };
+
+  const historyColumns = [
+    { label: "Started" },
+    { label: "Status" },
+    { label: "Origin" },
+    { label: "Model" },
+    { label: "Tokens", numeric: true },
+    { label: "Reported cost (USD)", numeric: true },
+  ];
+  const historyDate = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+  });
+  const historyTime = new Intl.DateTimeFormat(undefined, {
+    timeStyle: "medium",
+  });
+  const historyStatus: Record<
+    string,
+    { label: string; tone: "neutral" | "good" | "warning" | "danger" }
+  > = {
+    completed: { label: "Completed", tone: "good" },
+    failed: { label: "Failed", tone: "danger" },
+    interrupted: { label: "Interrupted", tone: "warning" },
+    cancelled: { label: "Cancelled", tone: "neutral" },
+    running: { label: "Running", tone: "neutral" },
+    queued: { label: "Queued", tone: "neutral" },
   };
 
   function submit(event: SubmitEvent) {
@@ -203,77 +230,92 @@
         </div>
       {/each}
     </div>
-    {#if data.tasks.length}
-      <div class="history">
-        <table class="panel-table">
-          <caption>Task usage history</caption>
-          <thead>
-            <tr
-              ><th scope="col">Started</th><th scope="col">Origin</th><th
-                scope="col">Model</th
-              ><th scope="col">Status</th><th scope="col">Tokens</th><th
-                scope="col">Reported cost (USD)</th
-              ></tr
-            >
-          </thead>
-          <tbody>
-            {#each data.tasks as task (task.id)}
-              {@const usage = task.usage}
-              <tr>
-                <td
-                  ><time datetime={new Date(task.startedAt).toISOString()}
-                    >{time(task.startedAt)}</time
-                  ></td
-                >
-                <td
-                  >{origins[task.origin] ?? task.origin}{task.scheduleName
-                    ? ` · ${task.scheduleName}`
-                    : ""}</td
-                >
-                <td
-                  >{usage
-                    ? `${usage.model.providerId}/${usage.model.modelId}`
-                    : "—"}</td
-                >
-                <td class="status-cell"
-                  >{task.status}{#if usage?.state === "partial"}
-                    · Partial usage{/if}</td
-                >
-                <td>
-                  {#if usage?.tokens}
-                    {number.format(
-                      Object.values(usage.tokens).reduce(
-                        (sum, value) => sum + value,
-                        0,
-                      ),
-                    )}
-                    <small
-                      >In {number.format(usage.tokens.input)} · Out {number.format(
-                        usage.tokens.output,
-                      )}</small
-                    >
-                  {:else}—{/if}
-                </td>
-                <td>{money(usage?.costUsd ?? null)}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {:else}
-      <p role="status">No model tasks on this page.</p>
-    {/if}
-    {#if before || data.next}
+    {#snippet historyPages()}
       <nav class="actions" aria-label="Usage history pages">
         {#if before}<a class="panel-button" href={`${base}/usage`}
             >Newest tasks</a
           >{/if}
-        {#if data.next}<a
+        {#if data?.next}<a
             class="panel-button"
             href={`${base}/usage?before=${data.next}`}>Older tasks</a
           >{/if}
       </nav>
-    {/if}
+    {/snippet}
+    <DataTable
+      caption="Task usage history"
+      columns={historyColumns}
+      rows={data.tasks}
+      rowKey={(task) => task.id}
+      empty="No model tasks on this page."
+      footer={before || data.next ? historyPages : undefined}
+    >
+      {#snippet row(task)}
+        {@const usage = task.usage}
+        {@const status = historyStatus[task.status]}
+        <td>
+          <time
+            class="whitespace-nowrap tabular-nums"
+            datetime={new Date(task.startedAt).toISOString()}
+          >
+            <span class="font-semibold"
+              >{historyDate.format(task.startedAt)}</span
+            >
+            <small class="history-detail"
+              >{historyTime.format(task.startedAt)}</small
+            >
+          </time>
+        </td>
+        <td>
+          <StatusBadge
+            label={status?.label ?? task.status}
+            tone={status?.tone}
+          />
+          {#if usage?.state === "partial"}<small class="history-detail"
+              >Partial usage</small
+            >{/if}
+        </td>
+        <td class="usage-origin">
+          {origins[task.origin] ?? task.origin}
+          {#if task.scheduleName}<small class="history-detail wrap-anywhere"
+              >{task.scheduleName}</small
+            >{/if}
+        </td>
+        <td class="usage-model">
+          {#if usage}
+            <span class="model-id">{usage.model.modelId}</span>
+            <small class="history-detail model-id"
+              >{usage.model.providerId}</small
+            >
+          {:else}
+            <span class="text-muted">Unavailable</span>
+          {/if}
+        </td>
+        <td data-numeric>
+          {#if usage?.tokens}
+            <span class="font-semibold"
+              >{number.format(
+                Object.values(usage.tokens).reduce(
+                  (sum, value) => sum + value,
+                  0,
+                ),
+              )}</span
+            >
+            <small class="history-detail">
+              In {number.format(usage.tokens.input)} · Out {number.format(
+                usage.tokens.output,
+              )}
+            </small>
+          {:else}
+            <span class="text-muted">Unavailable</span>
+          {/if}
+        </td>
+        <td data-numeric>
+          <span class={usage?.costUsd == null ? "text-muted" : "font-semibold"}>
+            {money(usage?.costUsd ?? null)}
+          </span>
+        </td>
+      {/snippet}
+    </DataTable>
   {:else}
     <p role="status">Usage history unavailable. Refresh to try again.</p>
   {/if}
@@ -295,28 +337,21 @@
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
     gap: 0.75rem;
   }
-  .history {
-    overflow-x: auto;
-    margin-top: 1rem;
-  }
-  caption {
-    text-align: left;
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-  }
-  th,
-  td {
-    vertical-align: top;
-  }
-  td,
-  dd {
-    font-variant-numeric: tabular-nums;
-  }
-  small {
+  .history-detail {
     display: block;
+    margin-top: 0.2rem;
+    color: var(--color-muted);
+    font-size: 0.75rem;
   }
-  .status-cell::first-letter {
-    text-transform: uppercase;
+  .usage-origin {
+    min-width: 10rem;
+  }
+  .usage-model {
+    min-width: 16rem;
+  }
+  .model-id {
+    font-family: var(--font-mono);
+    word-break: break-all;
   }
   .windows {
     margin: 0;
@@ -334,6 +369,7 @@
   }
   dd {
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
     margin: 0;
   }
 </style>
