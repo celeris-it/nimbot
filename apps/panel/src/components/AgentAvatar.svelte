@@ -17,21 +17,19 @@
   );
 </script>
 
-<div class="agent-avatar" data-small={small} aria-hidden="true">
-  <div>
-    {#if !loaded}<span>{initials}</span>{/if}
-    {#if !failed}
-      <img
-        src={`/api/agents/${encodeURIComponent(agentId)}/avatar`}
-        alt=""
-        class="size-full rounded-full object-cover"
-        hidden={!loaded}
-        onload={() => (loaded = true)}
-        onerror={() => {
-          loaded = false;
-          failed = true;
-        }}
-      />
-    {/if}
-  </div>
-</div>
+<span class="agent-avatar" data-small={small} aria-hidden="true">
+  {#if !loaded}<span>{initials}</span>{/if}
+  {#if !failed}
+    <img
+      src={`/api/agents/${encodeURIComponent(agentId)}/avatar`}
+      alt=""
+      class="size-full rounded-full object-cover"
+      hidden={!loaded}
+      onload={() => (loaded = true)}
+      onerror={() => {
+        loaded = false;
+        failed = true;
+      }}
+    />
+  {/if}
+</span>

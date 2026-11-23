@@ -36,18 +36,7 @@
 
 <div data-ui="usage-trend" role="img" aria-label={caption}>
   <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-    <defs>
-      <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
-        <stop
-          offset="0"
-          stop-color="var(--color-primary)"
-          stop-opacity="0.35"
-        />
-        <stop offset="1" stop-color="var(--color-primary)" stop-opacity="0" />
-      </linearGradient>
-    </defs>
     {#if before.length}<path d={curve(before)} data-line="previous" />{/if}
-    <path d={`${line} L${width},${height} L0,${height} Z`} data-line="area" />
     <path d={line} data-line="current" />
   </svg>
   <span

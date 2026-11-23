@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AgentSummary } from "../../server/src/panel/panel-contracts.js";
-  import { Icon, SearchField } from "./components/index.js";
+  import { AgentAvatar, Icon, SearchField } from "./components/index.js";
 
   let {
     agents,
@@ -25,6 +25,7 @@
   let switcher: HTMLDetailsElement;
   let summary: HTMLElement;
   let search: HTMLFormElement;
+  let switcherOpened = $state(false);
   let searching = $state(false);
   let showResults = $derived(searching && query.trim().length > 0);
   const href = (id: string, view: string) =>
@@ -74,8 +75,11 @@
           href={href(item.id, view)}
           aria-current={current?.id === item.id ? "true" : undefined}
         >
-          <span>{item.name}</span>
-          <small>{item.botUsername ? `@${item.botUsername}` : item.id}</small>
+          <AgentAvatar agentId={item.id} name={item.name} small />
+          <span>
+            {item.name}
+            <small>{item.botUsername ? `@${item.botUsername}` : item.id}</small>
+          </span>
         </a>
       </li>
     {/each}
@@ -96,29 +100,6 @@
 {/snippet}
 
 <div data-ui="agent-header">
-  <details
-    data-ui="agent-switcher"
-    bind:this={switcher}
-    ontoggle={() => {
-      if (switcher.open) refresh();
-    }}
-  >
-    <summary
-      bind:this={summary}
-      aria-label={current ? `Switch agent, ${current.name}` : "Switch agent"}
-    >
-      <span>{current?.name ?? "Switch agent"}</span>
-      <Icon name="chevron" size={16} />
-    </summary>
-    <div data-ui="agent-header-popover">
-      {#if agents.length}
-        {@render agentLinks(agents, section)}
-      {:else}
-        {@render directoryStatus("No agents yet.")}
-      {/if}
-    </div>
-  </details>
-
   <form
     data-ui="agent-header-search"
     bind:this={search}
@@ -153,4 +134,39 @@
       </div>
     {/if}
   </form>
+
+  <details
+    data-ui="agent-switcher"
+    bind:this={switcher}
+    ontoggle={() => {
+      if (switcher.open) {
+        switcherOpened = true;
+        refresh();
+      }
+    }}
+  >
+    <summary
+      bind:this={summary}
+      aria-label={current ? `Switch agent, ${current.name}` : "Switch agent"}
+    >
+      {#if current}
+        {#key current.id}
+          <AgentAvatar agentId={current.id} name={current.name} small />
+        {/key}
+      {/if}
+      <span data-ui="agent-switcher-name"
+        >{current?.name ?? "Switch agent"}</span
+      >
+      <Icon name="chevron" size={16} />
+    </summary>
+    {#if switcherOpened}
+      <div data-ui="agent-header-popover">
+        {#if agents.length}
+          {@render agentLinks(agents, section)}
+        {:else}
+          {@render directoryStatus("No agents yet.")}
+        {/if}
+      </div>
+    {/if}
+  </details>
 </div>

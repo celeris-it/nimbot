@@ -9,7 +9,12 @@
   let peak = $derived(Math.max(...bars.map((bar) => bar.value), 0));
 </script>
 
-<div data-ui="usage-bars" role="img" aria-label={caption}>
+<div
+  data-ui="usage-bars"
+  data-dense={bars.length > 10 || undefined}
+  role="img"
+  aria-label={caption}
+>
   {#each bars as bar, index (bar.key)}
     <div data-ui="usage-bar" title={bar.title}>
       <div data-ui="usage-bar-track">

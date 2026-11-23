@@ -1,8 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 
-const cardGlow = /^radial-gradient\(circle.*radial-gradient.*linear-gradient/;
-
 async function login(page: Page) {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
@@ -54,7 +52,7 @@ test("renders the Nimbot logo on sign-in and in the desktop sidebar", async ({
     .toBeGreaterThan(0);
 });
 
-test("shows agent avatars in the Dashboard and falls back to initials", async ({
+test("shows bot avatars in the dashboard and agent directory with initials as a fallback", async ({
   page,
 }) => {
   const path = "**/api/agents/dev/avatar";
@@ -75,13 +73,38 @@ test("shows agent avatars in the Dashboard and falls back to initials", async ({
   await expect(images).toHaveCount(2);
   await expect(images.first()).toBeVisible();
   await expect(preview.locator("img")).toBeVisible();
+
+  const switcher = page.getByLabel("Switch agent", { exact: true });
+  await switcher.press("Enter");
+  const option = page
+    .locator('[data-ui="agent-switcher"]')
+    .getByRole("link", { name: /^Developer/ });
+  await expect(option.locator("img")).toBeVisible();
+  await option.click();
+  const current = page.getByLabel("Switch agent, Developer");
+  await expect(current.locator("img")).toBeVisible();
+
   await page.setViewportSize({ width: 375, height: 800 });
-  await expect(preview.locator("img")).toBeVisible();
+  await expect(current.locator("img")).toBeVisible();
+  const search = page.getByRole("searchbox", { name: "Search agents" });
+  await search.fill("developer");
+  await expect(
+    page
+      .getByRole("region", { name: "Matching agents" })
+      .getByRole("link", { name: /^Developer/ })
+      .locator("img"),
+  ).toBeVisible();
+
   await page.unroute(path);
   await page.route(path, (route) => route.fulfill({ status: 503 }));
   await page.reload();
+  await expect(current.locator(".agent-avatar img")).toHaveCount(0);
+  await expect(current.locator(".agent-avatar")).toHaveText("D");
+  await page.goto("/");
   await expect(preview.locator("span")).toHaveText("D");
   await expect(preview.locator("img")).toHaveCount(0);
+  await switcher.press("Enter");
+  await expect(option.locator(".agent-avatar")).toHaveText("D");
 });
 
 test("recovers an uncertain sign-in using the session", async ({ page }) => {
@@ -560,16 +583,16 @@ test("sets up an MCP example with one save after reviewing a discovered tool", a
   const cards = examples.getByRole("listitem");
   await expect(cards).toHaveCount(23);
   for (const card of await cards.all())
-    await expect(card).toHaveCSS("background-image", cardGlow);
-  const cardColors = () =>
-    cards.evaluateAll((items) =>
-      items.map((card) => getComputedStyle(card).backgroundImage),
-    );
-  const colors = await cardColors();
-  expect(new Set(colors).size).toBe(colors.length);
+    await expect(card).toHaveCSS("background-image", "none");
+  const pageCard = page.locator("[data-page-card]");
+  await expect(
+    pageCard.getByRole("heading", { name: "MCP catalog" }),
+  ).toBeVisible();
+  await expect(
+    pageCard.getByRole("searchbox", { name: "Search agents" }),
+  ).toBeVisible();
   await page.reload();
   await expect(cards).toHaveCount(23);
-  expect(await cardColors()).toEqual(colors);
   for (const width of [320, 375, 1280]) {
     await page.setViewportSize({ width, height: 800 });
     expect(
@@ -1212,6 +1235,39 @@ test("reflows the schedule list and form at desktop and narrow mobile widths", a
   }
 });
 
+test("groups the provider settings and agent directory inside the page card", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await openProviders(page);
+  const card = page.locator("[data-page-card]");
+  const switcher = card.getByLabel("Switch agent", { exact: true });
+  const search = card.getByRole("searchbox", { name: "Search agents" });
+  const title = card.getByRole("heading", { name: "AI providers" });
+  await expect(page.getByRole("banner")).toHaveCount(0);
+  await expect(card).toHaveCSS("background-image", /^radial-gradient\(circle/);
+  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
+  expect((await card.boundingBox())?.y).toBe((await sidebar.boundingBox())?.y);
+  const forms = card.locator(".panel-card");
+  await expect(forms).toHaveCount(5);
+  for (const form of await forms.all())
+    await expect(form).toHaveCSS("background-image", "none");
+
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const titleBox = (await title.boundingBox())!;
+    expect((await switcher.boundingBox())!.y).toBeLessThan(titleBox.y);
+    expect((await search.boundingBox())!.y).toBeLessThan(titleBox.y);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    await page.screenshot({
+      path: info.outputPath(`providers-${width}.png`),
+      fullPage: true,
+    });
+  }
+});
+
 test("manages global API keys with keyboard navigation and blank secret fields", async ({
   page,
   request,
@@ -1820,8 +1876,10 @@ test("uses Material screen gutters and navigation modes at the width boundaries"
     const contentStart = width < 840 ? gutter : gutter + 160 + paneGap;
     await expect(shell).toHaveCSS("margin-inline-start", `${contentStart}px`);
     await expect(shell).toHaveCSS("margin-inline-end", `${gutter}px`);
-    await expect(banner).toHaveCSS("width", `${width}px`);
-    await expect(banner).toHaveCSS("padding-inline-start", `${contentStart}px`);
+    if (width < 840) {
+      await expect(banner).toHaveCSS("width", `${width}px`);
+      await expect(banner).toHaveCSS("padding-inline-start", `${gutter}px`);
+    } else await expect(banner).toHaveCount(0);
 
     if (width < 600) {
       await expect(mainNav).toHaveCount(0);
@@ -1831,19 +1889,34 @@ test("uses Material screen gutters and navigation modes at the width boundaries"
       await expect(menu).toHaveCount(0);
     }
 
-    const [navBox, shellBox, agentBox, mainBox] = await Promise.all(
-      [mainNav, shell, agentNav, main].map((element) => element.boundingBox()),
-    );
-    if (!navBox || !shellBox || !agentBox || !mainBox)
+    const card = page.locator("[data-page-card]");
+    const directory = card.locator('[data-ui="agent-header"]');
+    const [navBox, shellBox, cardBox, directoryBox, agentBox, mainBox] =
+      await Promise.all(
+        [mainNav, shell, card, directory, agentNav, main].map((element) =>
+          element.boundingBox(),
+        ),
+      );
+    if (
+      !navBox ||
+      !shellBox ||
+      !cardBox ||
+      !directoryBox ||
+      !agentBox ||
+      !mainBox
+    )
       throw new Error("Expected visible panel panes");
     expect(shellBox.x).toBeCloseTo(contentStart);
     expect(shellBox.x + shellBox.width).toBeCloseTo(width - gutter);
     if (width < 840) {
-      expect(agentBox.y - (navBox.y + navBox.height)).toBeCloseTo(paneGap);
+      expect(cardBox.y - (navBox.y + navBox.height)).toBeCloseTo(paneGap);
+      expect(agentBox.y - (directoryBox.y + directoryBox.height)).toBeCloseTo(
+        paneGap,
+      );
       expect(mainBox.y - (agentBox.y + agentBox.height)).toBeCloseTo(paneGap);
       await expect(agentNav.locator("summary")).toBeVisible();
     } else {
-      expect(mainBox.x - (navBox.x + navBox.width)).toBeCloseTo(paneGap);
+      expect(cardBox.x - (navBox.x + navBox.width)).toBeCloseTo(paneGap);
       expect(agentBox.x - (mainBox.x + mainBox.width)).toBeCloseTo(paneGap);
       await expect(agentNav.locator("summary")).toBeHidden();
     }
@@ -1921,8 +1994,7 @@ test("keeps dashboard body copy readable on a wide screen", async ({
 }) => {
   await page.setViewportSize({ width: 1920, height: 920 });
   await login(page);
-  const main = page.getByRole("main");
-  await expect(main).toHaveCSS("width", "1200px");
+  await expect(page.locator("[data-page-card]")).toHaveCSS("width", "1200px");
   const copy = page.getByText(/^Costs are the amounts reported/);
   await expect(copy).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
@@ -1980,9 +2052,7 @@ test("mirrors panel rails, popovers, and the switch in RTL", async ({
   ]);
   if (!switcherBox || !popoverBox)
     throw new Error("Expected an open agent switcher");
-  expect(popoverBox.x + popoverBox.width).toBeCloseTo(
-    switcherBox.x + switcherBox.width,
-  );
+  expect(popoverBox.x).toBeCloseTo(switcherBox.x);
   await switcher.press("Escape");
   await expect(popover).toBeHidden();
 
@@ -2104,15 +2174,19 @@ test("moves between agent pages with an expandable main navigation", async ({
   }
 });
 
-test("aligns the desktop header with the centered page layout", async ({
+test("aligns the agent directory and sections inside the desktop page card", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1920, height: 900 });
   await login(page);
-  const banner = page.getByRole("banner");
-  const directory = banner.locator('[data-ui="agent-header"]');
-  await expect(banner.getByRole("button", { name: "Sign out" })).toHaveCount(0);
-  const layout = page.locator('[data-ui="page-layout"]');
+  await page.goto("/agents/dev/setup");
+  await expect(page.getByRole("banner")).toHaveCount(0);
+  const layout = page.locator("[data-page-card]");
+  const directory = layout.locator('[data-ui="agent-header"]');
+  await expect(
+    layout.getByRole("navigation", { name: "Agent navigation" }),
+  ).toBeVisible();
+  await expect(layout.getByRole("main")).toBeVisible();
   const sidebar = page.getByRole("navigation", { name: "Main navigation" });
 
   for (const [direction, expanded] of [
@@ -2132,8 +2206,8 @@ test("aligns the desktop header with the centered page layout", async ({
     if (!directoryBox || !layoutBox)
       throw new Error("Expected visible header and page content");
     expect(layoutBox.width).toBe(1200);
-    expect(directoryBox.width).toBeCloseTo(layoutBox.width);
-    expect(directoryBox.x).toBeCloseTo(layoutBox.x);
+    expect(directoryBox.width).toBeCloseTo(layoutBox.width - 50);
+    expect(directoryBox.x).toBeCloseTo(layoutBox.x + 25);
   }
 });
 
@@ -2144,7 +2218,7 @@ test("switches agents from a deep link and searches from the header", async ({
   await request.post("/__test/agent/research");
   await login(page);
   await page.goto("/agents/dev/access");
-  const header = page.getByRole("banner");
+  const header = page.locator('[data-ui="agent-header"]');
   const switcher = header.getByLabel("Switch agent, Developer");
   const research = header.getByRole("link", { name: /^Researcher/ });
   await switcher.focus();
@@ -2379,8 +2453,8 @@ test("organizes agent overview sections in rows and stacks their contents on pho
   await expect(
     overview.getByRole("region", { name: /connection/i }),
   ).toHaveCount(0);
-  await expect(panel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(panel).toHaveCSS("border-width", "0px");
+  await expect(panel).toHaveCSS("background-image", /^radial-gradient\(circle/);
+  await expect(panel).toHaveCSS("border-width", "1px");
   await expect(host).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(host.locator(".panel-card")).toHaveCSS(
     "background-image",
@@ -2567,6 +2641,8 @@ test("follows system appearance and remembers explicit theme choices", async ({
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto("/login");
   await expect(page.getByLabel("Administrator password")).toBeVisible();
+  const card = page.locator("[data-page-card]");
+  await expect(card).toHaveCount(0);
   await expect(root).toHaveAttribute("data-theme", "light");
   await expect(root).toHaveCSS("color-scheme", "light");
   await expect(page.locator("body")).toHaveCSS(
@@ -2580,8 +2656,12 @@ test("follows system appearance and remembers explicit theme choices", async ({
 
   await login(page);
   await page.goto("/settings");
-  const appearance = page.getByRole("combobox", { name: "Appearance" });
-  const timeZone = page.getByLabel("Schedule time zone");
+  await expect(card.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(
+    card.getByRole("searchbox", { name: "Search agents" }),
+  ).toBeVisible();
+  const appearance = card.getByRole("combobox", { name: "Appearance" });
+  const timeZone = card.getByLabel("Schedule time zone");
   await expect(appearance).toHaveValue("system");
   await expect(timeZone).not.toHaveValue("");
   await expect
@@ -2707,16 +2787,13 @@ for (const theme of ["dark", "light"] as const) {
           root.getPropertyValue(background),
         );
       const palette = [
-        ...[
-          "--glow-blue",
-          "--glow-teal",
-          "--glow-amber",
-          "--glow-violet",
-        ].flatMap((background) => [
-          { foreground: "--color-base-content", background, minimum: 4.5 },
-          { foreground: "--color-muted", background, minimum: 4.5 },
-          { foreground: "--color-primary", background, minimum: 3 },
-        ]),
+        ...["--glow-blue", "--glow-teal", "--glow-violet"].flatMap(
+          (background) => [
+            { foreground: "--color-base-content", background, minimum: 4.5 },
+            { foreground: "--color-muted", background, minimum: 4.5 },
+            { foreground: "--color-primary", background, minimum: 3 },
+          ],
+        ),
         ...["--chart-green", "--chart-amber", "--chart-magenta"].map(
           (foreground) => ({
             foreground,
@@ -2908,7 +2985,20 @@ test("renders the reference-inspired dashboard across screen sizes without exter
     route.fulfill({
       json:
         new URL(route.request().url()).searchParams.get("days") === "30"
-          ? { days: [], models: [], quotas: [], hourly: [], missingCost: 0 }
+          ? {
+              days: Array.from({ length: 30 }, (_, index) => ({
+                day: new Date(Date.UTC(2026, 10, index + 1))
+                  .toISOString()
+                  .slice(0, 10),
+                costUsd: 0,
+                tokens: 0,
+                tasks: 0,
+              })),
+              models: [],
+              quotas: [],
+              hourly: [],
+              missingCost: 0,
+            }
           : dashboardUsage,
     }),
   );
@@ -2984,33 +3074,45 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   ).toBe(true);
   const models = page.getByRole("region", { name: "Models" });
   await expect(models.getByText("fixture", { exact: true })).toBeVisible();
-  await expect(models).toHaveCSS("background-image", "none");
-  await expect(page.getByRole("region", { name: "Quota left" })).toHaveCSS(
-    "background-image",
-    "none",
+  const dashboard = page.locator("[data-page-card]");
+  const switcher = dashboard.getByLabel("Switch agent", { exact: true });
+  const search = dashboard.getByRole("searchbox", { name: "Search agents" });
+  await expect(switcher).toBeVisible();
+  await expect(search).toBeVisible();
+  await expect(page.getByRole("banner")).toHaveCount(0);
+  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
+  expect((await dashboard.boundingBox())?.y).toBe(
+    (await sidebar.boundingBox())?.y,
   );
-  for (const [name, glow] of [
-    ["Usage", "blue"],
-    ["Last 24 hours", "teal"],
-  ] as const) {
-    const card = page.getByRole("region", { name });
-    await expect(card).toHaveAttribute("data-glow", glow);
-    await expect(card).toHaveCSS(
-      "background-image",
-      /radial-gradient.*linear-gradient/,
-    );
-  }
-  const fleet = page
+  await search.focus();
+  await page.keyboard.press("Tab");
+  await expect(switcher).toBeFocused();
+  await page.keyboard.press("Enter");
+  const destination = dashboard.getByRole("link", { name: /^Developer/ });
+  await expect(destination).toBeInViewport();
+  await destination.focus();
+  await page.keyboard.press("Escape");
+  await expect(destination).toBeHidden();
+  await expect(switcher).toBeFocused();
+
+  const fleet = dashboard
     .getByRole("heading", { name: /Agent workspaces/ })
     .locator('xpath=ancestor::section[@data-ui="surface"]');
-  await expect(fleet).toHaveAttribute("data-glow", "amber");
-  await expect(fleet).toHaveCSS("background-image", cardGlow);
-  await expect(
+  const plainSurfaces = [
+    ...["Usage", "Models", "Quota left", "Last 24 hours"].map((name) =>
+      dashboard.getByRole("region", { name, exact: true }),
+    ),
+    fleet,
     fleet.getByRole("article", { name: "Selected agent" }),
-  ).toHaveCSS("background-image", "none");
-  await expect(
-    fleet.getByRole("button", { name: "Select Developer" }),
-  ).toHaveCSS("background-image", "none");
+  ];
+  await expect(dashboard.locator('[data-line="current"]')).toHaveCSS(
+    "filter",
+    "none",
+  );
+  await expect(dashboard.locator('[data-ui="trend-dot"]')).toHaveCSS(
+    "box-shadow",
+    "none",
+  );
 
   const range = page.getByRole("group", { name: "Usage range" });
   for (const state of ["populated", "empty"]) {
@@ -3029,8 +3131,23 @@ test("renders the reference-inspired dashboard across screen sizes without exter
     for (const theme of ["dark", "light"] as const) {
       await page.emulateMedia({ colorScheme: theme });
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await expect(dashboard).toHaveCSS(
+        "background-image",
+        /^radial-gradient\(circle.*radial-gradient\(45% 55% at 0% 30%,.*radial-gradient\(45% 55% at 100% 25%,.*radial-gradient\(50% 50% at 65% 75%,/,
+      );
+      for (const surface of plainSurfaces) {
+        await expect(surface).toHaveCSS("background-image", "none");
+        await expect(surface).toHaveCSS("box-shadow", "none");
+      }
       for (const width of [1440, 768, 375, 320]) {
         await page.setViewportSize({ width, height: 1000 });
+        const title = dashboard.getByRole("heading", { name: "Your agents." });
+        const titleBox = (await title.boundingBox())!;
+        const switcherBox = (await switcher.boundingBox())!;
+        const searchBox = (await search.boundingBox())!;
+        expect(switcherBox.y).toBeLessThan(titleBox.y);
+        if (width === 320) expect(searchBox.y).toBeLessThan(switcherBox.y);
+        else expect(searchBox.x + searchBox.width).toBeLessThan(switcherBox.x);
         await expect
           .poll(
             () => page.evaluate(() => document.documentElement.scrollWidth),
@@ -3039,9 +3156,24 @@ test("renders the reference-inspired dashboard across screen sizes without exter
             },
           )
           .toBeLessThanOrEqual(width);
+        if (state === "empty") {
+          const bars = dashboard
+            .getByRole("img", {
+              name: /reported cost per day for the last 30 days/i,
+            })
+            .locator('[data-ui="usage-bar-track"]');
+          await expect(bars).toHaveCount(30);
+          expect((await bars.last().boundingBox())?.width).toBeGreaterThan(4);
+        }
         await expect(
           page.getByRole("link", { name: "Manage", exact: true }),
         ).toBeVisible();
+        if (width === 320 && state === "populated") {
+          await switcher.click();
+          await destination.click({ trial: true });
+          await page.keyboard.press("Escape");
+          await expect(switcher).toBeFocused();
+        }
         const prefix = theme === "light" ? "dashboard-light" : "dashboard";
         await page.screenshot({
           path: info.outputPath(`${prefix}-${state}-${width}.png`),

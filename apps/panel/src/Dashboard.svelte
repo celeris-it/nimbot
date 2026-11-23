@@ -191,7 +191,6 @@
 
 <div data-ui="overview-grid">
   <Surface
-    glow="blue"
     title="Usage"
     description="Reported model cost per day across all agents (UTC)."
   >
@@ -312,7 +311,6 @@
     {/if}
   </Surface>
   <Surface
-    glow="teal"
     title="Last 24 hours"
     description="Cumulative reported cost by hour, compared with the 24 hours before."
   >
@@ -344,7 +342,7 @@
   </div>
 </div>
 
-<Surface tone="muted" glow="amber">
+<Surface tone="muted">
   <div data-ui="workspace-heading">
     <h2>
       Agent workspaces <span>{filtered.length}</span>

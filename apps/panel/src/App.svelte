@@ -167,6 +167,7 @@
     ).filter((link) => link.available),
   );
   let desktopSidebar = $derived(rail && session && path !== "/login");
+  let pageCard = $derived(!!session && path !== "/login");
   let agentLinks = $derived(
     (
       [
@@ -211,7 +212,7 @@
   );
   $effect(() => {
     if (!session || path === "/" || path === "/login") return;
-    // Refresh the header's directory independently of the selected agent view.
+    // Refresh the agent directory independently of the selected page.
     void directoryAttempt;
     const current = new AbortController();
     directoryLoading = true;
@@ -800,13 +801,6 @@
       },
     );
   }
-  function mcpExampleHue(id: string) {
-    // FNV-1a keeps the color tied to the example even if the catalog is reordered.
-    let hash = 2166136261;
-    for (const character of id)
-      hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-    return ((hash >>> 0) / 2 ** 32) * 360;
-  }
 
   async function saveMcp(
     settings: Pick<
@@ -1142,22 +1136,24 @@
     </span>
   </button>
 {/snippet}
-<header>
-  {#if !desktopSidebar}{@render wordmark()}{/if}
-  {#if session && path !== "/login"}
-    {#key path}
-      <AgentHeader
-        agents={status.agents}
-        matches={matchingAgents}
-        current={currentAgent}
-        section={switchSection}
-        loading={path === "/" ? !loaded : directoryLoading}
-        unavailable={path === "/" ? !!updateError : directoryUnavailable}
-        refresh={refreshAgentDirectory}
-        bind:query={agentQuery}
-      />
-    {/key}
-    {#if !desktopSidebar}
+{#snippet agentDirectory()}
+  {#key path}
+    <AgentHeader
+      agents={status.agents}
+      matches={matchingAgents}
+      current={currentAgent}
+      section={switchSection}
+      loading={path === "/" ? !loaded : directoryLoading}
+      unavailable={path === "/" ? !!updateError : directoryUnavailable}
+      refresh={refreshAgentDirectory}
+      bind:query={agentQuery}
+    />
+  {/key}
+{/snippet}
+{#if !desktopSidebar}
+  <header>
+    {@render wordmark()}
+    {#if pageCard}
       <div data-ui="header-actions">
         {#if compact}<button
             class="panel-button panel-button-ghost"
@@ -1172,11 +1168,11 @@
           >{/if}
         {@render signOut(false)}
       </div>
-    {/if}
-  {:else}<span data-ui="installation"
-      ><Icon name="shield" size={15} /> SELF-HOSTED & PRIVATE</span
-    >{/if}
-</header>
+    {:else}<span data-ui="installation"
+        ><Icon name="shield" size={15} /> SELF-HOSTED & PRIVATE</span
+      >{/if}
+  </header>
+{/if}
 <div data-ui="panel-shell">
   {#if session && path !== "/login" && (!compact || menuOpen)}
     <nav
@@ -1221,7 +1217,8 @@
       </div>
     </nav>
   {/if}
-  <div data-ui="page-layout">
+  <div data-ui="page-layout" data-page-card={pageCard ? "" : undefined}>
+    {#if pageCard}{@render agentDirectory()}{/if}
     {#if !missing && agent && route}
       {#key path}<AgentNavigation
           links={agentLinks}
@@ -1387,11 +1384,7 @@
           <h2 id="mcp-examples-heading">Examples</h2>
           <ul class="grid gap-4 sm:grid-cols-3">
             {#each mcpExamples as example (example.id)}
-              <li
-                class="panel-card"
-                data-glow="mcp-example"
-                style:--mcp-glow-hue={mcpExampleHue(example.id)}
-              >
+              <li class="panel-card">
                 <h3>{example.label}</h3>
                 <p class="grow">{example.description}</p>
                 <a
