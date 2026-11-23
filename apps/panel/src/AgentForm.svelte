@@ -35,7 +35,7 @@
   <h1 tabindex="-1">Create agent.</h1>
   <p>Connect Telegram or Discord from Channels after creating the agent.</p>
 {:else if mode === "settings"}
-  <h1 tabindex="-1">Edit agent.</h1>
+  <h1 id="agent-settings" tabindex="-1">Edit agent.</h1>
   <p>
     Changes apply to upcoming tasks. The name is local to Nimbot; it does not
     change the bot's profile on Telegram.

@@ -39,7 +39,7 @@
 <div class="settings-section-list">
   <section aria-labelledby="approval-rules-heading">
     <div class="settings-section-description">
-      <h2 id="approval-rules-heading" class="card-title">
+      <h2 id="approval-rules-heading" tabindex="-1" class="card-title">
         <Icon name="shield" size={20} />Rules
       </h2>
       <p>

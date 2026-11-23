@@ -233,7 +233,7 @@
   }
 </script>
 
-<h1 tabindex="-1">{text.title(agent.name)}</h1>
+<h1 id="agent-schedules" tabindex="-1">{text.title(agent.name)}</h1>
 <div data-ui="schedules">
   {#if webhookError}<p role="alert">{webhookError}</p>{/if}
   <p id="schedule-costs">{text.costs}</p>

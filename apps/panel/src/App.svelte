@@ -43,6 +43,7 @@
   import AgentChannels from "./AgentChannels.svelte";
   import AgentStatus from "./AgentStatus.svelte";
   import AgentHeader from "./AgentHeader.svelte";
+  import { configurationOptions } from "./option-search.js";
   import AgentNavigation from "./AgentNavigation.svelte";
   import ProviderSettings from "./ProviderSettings.svelte";
   import AgentUsageView from "./AgentUsage.svelte";
@@ -68,20 +69,13 @@
   const { initialAppearance }: { initialAppearance: Appearance } = $props();
   let appearance = $state(untrack(() => initialAppearance));
   let path = $state(location.pathname);
+  let pageSearch = location.search;
   let session = $state<PanelSession>();
   let status = $state<PanelStatus>({ agents: [] });
-  let agentQuery = $state("");
+  let optionQuery = $state("");
   let directoryLoading = $state(false);
   let directoryUnavailable = $state(false);
   let directoryAttempt = $state(0);
-  let matchingAgents = $derived.by(() => {
-    const query = agentQuery.trim().toLowerCase().replace(/^@/, "");
-    return status.agents.filter((item) =>
-      `${item.name} ${item.botUsername ?? ""} ${item.id}`
-        .toLowerCase()
-        .includes(query),
-    );
-  });
   let agent = $state<AgentDetail>();
   let providerSettings = $state<ProviderSettingsState>();
   let agentModels = $state<AgentModels>();
@@ -117,6 +111,9 @@
   let loaded = $state(false);
   let contentAvailable = $state(false);
   let missing = $state(false);
+  let options = $derived(
+    configurationOptions(session?.capabilities, status.agents),
+  );
   let busy = $state(false);
   let error = $state("");
   let updateError = $state("");
@@ -299,9 +296,19 @@
       // Storage can be unavailable; the choice then lasts for this visit only.
     }
   }
-  async function focusHeading() {
+  async function focusDestination(fallback = true) {
+    const url = location.href;
     await tick();
-    document.querySelector<HTMLElement>("h1")?.focus();
+    if (location.href !== url) return;
+    const main = document.getElementById("main");
+    if (!main) return;
+    const target = document.getElementById(location.hash.slice(1));
+    if (target && target !== main && main.contains(target)) {
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: "center" });
+    } else if (fallback) {
+      main.querySelector("h1")?.focus();
+    }
   }
   function usageCursor(search: string) {
     const value = Number(new URLSearchParams(search).get("before"));
@@ -319,7 +326,8 @@
     else history.pushState(null, "", next);
     const url = new URL(next, location.origin);
     path = url.pathname;
-    agentQuery = "";
+    pageSearch = url.search;
+    optionQuery = "";
     directoryLoading = false;
     directoryUnavailable = false;
     delegationPage = delegationPageOf(url.search);
@@ -575,7 +583,7 @@
       updateError = "";
       contentAvailable = true;
       loaded = true;
-      if (initial) void focusHeading();
+      if (initial) void focusDestination();
     } catch (cause) {
       if (current.signal.aborted) return;
       if (cause instanceof ApiError && cause.status === 401) {
@@ -1033,9 +1041,21 @@
     )
       return;
     const url = new URL(link.href);
-    if (url.origin !== location.origin || url.hash) return;
+    if (
+      url.origin !== location.origin ||
+      (url.hash && !link.hasAttribute("data-option-link"))
+    )
+      return;
     event.preventDefault();
-    if (!busy) navigate(url.pathname + url.search);
+    if (busy) return;
+    const next = url.pathname + url.search + url.hash;
+    if (url.hash && url.pathname === path && url.search === pageSearch) {
+      if (url.hash !== location.hash) history.pushState(null, "", next);
+      optionQuery = "";
+      if (loaded) void focusDestination();
+    } else {
+      navigate(next);
+    }
   }
   onMount(() => {
     const compactWidth = window.matchMedia("(width < 600px)");
@@ -1054,7 +1074,13 @@
     systemAppearance.addEventListener("change", syncAppearance);
     syncAppearance();
     document.addEventListener("click", click);
-    const pop = () => navigate(location.pathname + location.search, true);
+    const pop = () => {
+      if (location.pathname === path && location.search === pageSearch) {
+        if (loaded && location.hash) void focusDestination(false);
+      } else {
+        navigate(location.pathname + location.search + location.hash, true);
+      }
+    };
     const visible = () => {
       if (document.hidden) {
         controller?.abort();
@@ -1141,13 +1167,13 @@
   {#key path}
     <AgentHeader
       agents={status.agents}
-      matches={matchingAgents}
+      {options}
       current={currentAgent}
       section={switchSection}
       loading={path === "/" ? !loaded : directoryLoading}
       unavailable={path === "/" ? !!updateError : directoryUnavailable}
       refresh={refreshAgentDirectory}
-      bind:query={agentQuery}
+      bind:query={optionQuery}
     />
   {/key}
 {/snippet}
@@ -1286,8 +1312,6 @@
       {:else if path === "/"}
         <Dashboard
           agents={status.agents}
-          {matchingAgents}
-          clearSearch={() => (agentQuery = "")}
           canCreate={session?.capabilities.createAgent ?? false}
           refresh={() => load()}
         />
@@ -1356,7 +1380,7 @@
       {:else if path === "/agents/new"}
         {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
       {:else if path === "/mcp"}
-        <h1 tabindex="-1">MCP catalog</h1>
+        <h1 id="mcp-catalog" tabindex="-1">MCP catalog</h1>
         <ActionButton variant="primary" href="/mcp/new"
           >Add integration</ActionButton
         >

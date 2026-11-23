@@ -17,6 +17,7 @@ import type { PanelConfig } from "./panel-config.js";
 import type {
   AgentDetail,
   PanelSession,
+  PanelStatus,
   ScheduleList,
 } from "./panel-contracts.js";
 import {
@@ -1230,9 +1231,20 @@ export function createPanel(
     c.json({
       agents: (listAgentIds?.() ?? []).flatMap((id) => {
         const setup = getAgentSetup?.(id);
-        return setup ? [{ id, ...setup }] : [];
+        if (!setup) return [];
+        return [
+          {
+            id,
+            ...setup,
+            optionCapabilities: {
+              edit: !!agentSettings?.get(id),
+              discord: !!deps.discord,
+              memoryTools: !!deps.memoryAccess,
+            },
+          },
+        ];
       }),
-    }),
+    } satisfies PanelStatus),
   );
   const adapters: Array<
     [string, (id: string) => string, (id: string) => string]

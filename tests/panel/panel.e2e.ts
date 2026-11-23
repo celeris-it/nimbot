@@ -86,15 +86,6 @@ test("shows bot avatars in the dashboard and agent directory with initials as a 
 
   await page.setViewportSize({ width: 375, height: 800 });
   await expect(current.locator("img")).toBeVisible();
-  const search = page.getByRole("searchbox", { name: "Search agents" });
-  await search.fill("developer");
-  await expect(
-    page
-      .getByRole("region", { name: "Matching agents" })
-      .getByRole("link", { name: /^Developer/ })
-      .locator("img"),
-  ).toBeVisible();
-
   await page.unroute(path);
   await page.route(path, (route) => route.fulfill({ status: 503 }));
   await page.reload();
@@ -589,7 +580,7 @@ test("sets up an MCP example with one save after reviewing a discovered tool", a
     pageCard.getByRole("heading", { name: "MCP catalog" }),
   ).toBeVisible();
   await expect(
-    pageCard.getByRole("searchbox", { name: "Search agents" }),
+    pageCard.getByRole("searchbox", { name: "Search options" }),
   ).toBeVisible();
   await page.reload();
   await expect(cards).toHaveCount(23);
@@ -1249,7 +1240,7 @@ test("groups the provider settings and agent directory inside the page card", as
   await openProviders(page);
   const card = page.locator("[data-page-card]");
   const switcher = card.getByLabel("Switch agent", { exact: true });
-  const search = card.getByRole("searchbox", { name: "Search agents" });
+  const search = card.getByRole("searchbox", { name: "Search options" });
   const title = card.getByRole("heading", { name: "AI providers" });
   await expect(page.getByRole("banner")).toHaveCount(0);
   await expect(card).toHaveCSS("background-image", /^radial-gradient\(circle/);
@@ -2226,10 +2217,7 @@ test("aligns the agent directory and sections inside the desktop page card", asy
   }
 });
 
-test("switches agents from a deep link and searches from the header", async ({
-  page,
-  request,
-}) => {
+test("switches agents from a deep link", async ({ page, request }) => {
   await request.post("/__test/agent/research");
   await login(page);
   await page.goto("/agents/dev/access");
@@ -2247,30 +2235,203 @@ test("switches agents from a deep link and searches from the header", async ({
   await research.click();
   await expect(page).toHaveURL("/agents/research/access");
   await expect(header.getByLabel("Switch agent, Researcher")).toBeVisible();
+});
 
+test("searches configuration options and opens the exact section", async ({
+  page,
+}, info) => {
   await page.setViewportSize({ width: 320, height: 800 });
-  const search = header.getByRole("searchbox", { name: "Search agents" });
-  await search.fill("no-such-agent");
-  const results = header.getByRole("region", { name: "Matching agents" });
-  await expect(results.getByRole("status")).toHaveText("No matching agents.");
-  await search.fill("@DEVELOPER_BOT");
-  const developer = results.getByRole("link", { name: /^Developer/ });
-  await expect(developer).toHaveAttribute("href", "/agents/dev/setup");
+  await login(page);
+  const search = page.getByRole("searchbox", { name: "Search options" });
+  const results = page.getByRole("region", { name: "Matching options" });
+  await search.fill("no matching setting");
+  await expect(results.getByRole("status")).toHaveText("No matching options.");
+  await search.fill("  ThEmE  ");
+  const appearance = results.getByRole("link", { name: /Appearance/ });
+  await expect(appearance).toHaveAttribute(
+    "href",
+    "/settings#panel-appearance",
+  );
+  await expect(
+    page.getByRole("button", { name: "Select Developer" }),
+  ).toBeAttached();
+  await search.press("ArrowDown");
+  await expect(appearance).toBeFocused();
+  await appearance.press("Escape");
+  await expect(results).toBeHidden();
+  await expect(search).toBeFocused();
+  await search.fill("appearance");
+  await search.press("Tab");
+  await expect(appearance).toBeFocused();
+  await appearance.press("Shift+Tab");
+  await expect(search).toBeFocused();
+  await search.press("Enter");
+  await expect(page).toHaveURL("/settings#panel-appearance");
+  const appearanceControl = page.getByRole("combobox", { name: "Appearance" });
+  await expect(appearanceControl).toBeFocused();
+  await expect(search).toHaveValue("");
+
+  const zone = page.getByLabel("Schedule time zone");
+  await zone.fill("Europe/Paris");
+  await search.fill("TIME   ZONE");
+  await results.getByRole("link", { name: /Schedule time zone/ }).click();
+  await expect(page).toHaveURL("/settings#schedule-default-zone");
+  await expect(zone).toBeFocused();
+  await expect(zone).toHaveValue("Europe/Paris");
+  await page.goBack();
+  await expect(appearanceControl).toBeFocused();
+  await page.goForward();
+  await expect(zone).toBeFocused();
+  await page.goBack();
+  await page.goBack();
+  await expect(page).toHaveURL("/");
+
+  await search.fill("aNtHrOpIc");
+  await results.getByRole("link", { name: /Anthropic/ }).click();
+  await expect(page).toHaveURL("/providers#provider-anthropic");
+  await expect(page.getByRole("heading", { name: "Anthropic" })).toBeFocused();
+
+  await page.goto("/agents/dev/setup");
+  await search.fill("channels");
+  const telegram = results
+    .getByRole("group", { name: "Developer", exact: true })
+    .getByRole("link", { name: "Telegram connection", exact: true });
+  await expect(telegram).toHaveAttribute(
+    "href",
+    "/agents/dev/channels#telegram-connection",
+  );
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(320);
-  await page.keyboard.press("ArrowDown");
-  await expect(developer).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(results).toBeHidden();
-  await expect(search).toBeFocused();
-  await search.fill("dev");
+  await page.screenshot({ path: info.outputPath("option-search-320.png") });
+  await telegram.click();
+  await expect(page).toHaveURL("/agents/dev/channels#telegram-connection");
+  const heading = page.getByRole("heading", { name: "Telegram connection" });
+  await expect(heading).toBeFocused();
+  await expect(heading).toBeInViewport();
+  await page.reload();
+  await expect(heading).toBeFocused();
+  await expect(heading).toBeInViewport();
+});
+
+test("groups global option search by agent and opens either Telegram section", async ({
+  page,
+  request,
+}, info) => {
+  await request.post("/__test/agent/research");
+  await page.setViewportSize({ width: 320, height: 800 });
+  await login(page);
+  const detailRequests: string[] = [];
+  page.on("request", (sent) => {
+    const { pathname } = new URL(sent.url());
+    if (/^\/api\/agents\/[^/]+$/.test(pathname)) detailRequests.push(pathname);
+  });
+  const search = page.getByRole("searchbox", { name: "Search options" });
+  const results = page.getByRole("region", { name: "Matching options" });
+  const groups = results.getByRole("group");
+  const telegram = (agent: string) =>
+    results
+      .getByRole("group", { name: agent, exact: true })
+      .getByRole("link", { name: "Telegram connection", exact: true });
+
+  await search.fill("mcp");
+  await expect(groups).toHaveCount(3);
+  await expect(groups.first()).toHaveAttribute("aria-label", "Installation");
+  await search.fill("telegram");
+  await expect(groups).toHaveCount(2);
+  await expect(groups.nth(0)).toHaveAttribute("aria-label", "Developer");
+  await expect(groups.nth(1)).toHaveAttribute("aria-label", "Researcher");
+  for (const [name, id] of [
+    ["Developer", "dev"],
+    ["Researcher", "research"],
+  ] as const) {
+    await expect(telegram(name)).toHaveAttribute(
+      "href",
+      `/agents/${id}/channels#telegram-connection`,
+    );
+  }
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(320);
+  await page.screenshot({
+    path: info.outputPath("grouped-option-search-320.png"),
+  });
+  await search.press("ArrowDown");
+  await expect(telegram("Developer")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(telegram("Researcher")).toBeFocused();
+  expect(detailRequests).toEqual([]);
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL("/agents/dev/setup");
+  await expect(page).toHaveURL("/agents/research/channels#telegram-connection");
+  const heading = page.getByRole("heading", {
+    name: "Telegram connection",
+    exact: true,
+  });
+  await expect(heading).toBeFocused();
+
+  await search.fill("developer telegram");
+  await expect(groups).toHaveCount(1);
+  await telegram("Developer").click();
+  await expect(page).toHaveURL("/agents/dev/channels#telegram-connection");
+  await expect(heading).toBeFocused();
+  expect(detailRequests).toContain("/api/agents/research");
+  expect(detailRequests).toContain("/api/agents/dev");
+
+  await request.post("/__test/agent/research-copy");
+  await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Developer", exact: true }),
+    page.getByRole("heading", { name: "Your agents." }),
   ).toBeFocused();
-  await expect(search).toHaveValue("");
+  await search.fill("researcher telegram");
+  await expect(groups).toHaveCount(2);
+  await expect(telegram("Researcher (research)")).toBeVisible();
+  await expect(telegram("Researcher (research-copy)")).toBeVisible();
+});
+
+test("keeps available search results while the agent directory loads or fails", async ({
+  page,
+}) => {
+  await login(page);
+  let releaseDirectory!: () => void;
+  const initialDirectory = new Promise<void>((resolve) => {
+    releaseDirectory = resolve;
+  });
+  let failDirectory = true;
+  await page.route("**/api/status", async (route) => {
+    await initialDirectory;
+    if (failDirectory) await route.fulfill({ status: 503 });
+    else await route.continue();
+  });
+  await page.goto("/providers");
+  const heading = page.getByRole("heading", {
+    name: "AI providers",
+    exact: true,
+  });
+  await expect(heading).toBeFocused();
+  const search = page.getByRole("searchbox", { name: "Search options" });
+  const results = page.getByRole("region", { name: "Matching options" });
+  const status = results.getByRole("status");
+  const retry = results.getByRole("button", { name: "Retry loading agents" });
+  await search.fill("appearance");
+  const appearance = results.getByRole("link", { name: /Appearance/ });
+  await expect(status).toHaveText("Loading agents…");
+  await expect(appearance).toBeVisible();
+  releaseDirectory();
+  await expect(status).toHaveText("Could not load the latest agent list.");
+  await expect(appearance).toBeVisible();
+
+  await search.fill("telegram");
+  failDirectory = false;
+  await retry.click();
+  const telegram = results.getByRole("link", { name: "Telegram connection" });
+  await expect(telegram).toBeVisible();
+  await expect(search).toBeFocused();
+
+  await heading.focus();
+  failDirectory = true;
+  await search.focus();
+  await expect(status).toHaveText("Could not load the latest agent list.");
+  await expect(telegram).toBeVisible();
 });
 
 test("keeps capability-gated links out of both navigation bars", async ({
@@ -2300,6 +2461,24 @@ test("keeps capability-gated links out of both navigation bars", async ({
       json: { ...agent, capabilities: { ...agent.capabilities, edit: false } },
     });
   });
+  await page.route("**/api/status", async (route) => {
+    const response = await route.fetch();
+    const status = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...status,
+        agents: status.agents.map((agent: { id: string }) => ({
+          ...agent,
+          optionCapabilities: {
+            edit: false,
+            discord: false,
+            memoryTools: false,
+          },
+        })),
+      },
+    });
+  });
   await page.goto("/agents/dev/setup");
   const mainNav = page.getByRole("navigation", { name: "Main navigation" });
   await expect(
@@ -2312,6 +2491,26 @@ test("keeps capability-gated links out of both navigation bars", async ({
   await expect(
     agentNav.getByText("Agent settings", { exact: true }),
   ).toHaveCount(0);
+  const search = page.getByRole("searchbox", { name: "Search options" });
+  const results = page.getByRole("region", { name: "Matching options" });
+  for (const query of [
+    "appearance",
+    "agent settings",
+    "mcp",
+    "OpenAI",
+    "discord",
+    "memory tools",
+  ]) {
+    await search.fill(query);
+    await expect(results.getByRole("status")).toHaveText(
+      "No matching options.",
+    );
+  }
+  await search.fill("peer access");
+  await expect(
+    results.getByRole("link", { name: /Other agents/ }),
+  ).toHaveAttribute("href", "/agents/dev/access#peer-access");
+  await search.press("Escape");
   let mcpRequests = 0;
   page.on("request", (request) => {
     if (new URL(request.url()).pathname === "/api/agents/dev/mcp")
@@ -2673,7 +2872,7 @@ test("follows system appearance and remembers explicit theme choices", async ({
   await page.goto("/settings");
   await expect(card.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(
-    card.getByRole("searchbox", { name: "Search agents" }),
+    card.getByRole("searchbox", { name: "Search options" }),
   ).toBeVisible();
   const appearance = card.getByRole("combobox", { name: "Appearance" });
   const timeZone = card.getByLabel("Schedule time zone");
@@ -3091,7 +3290,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   await expect(models.getByText("fixture", { exact: true })).toBeVisible();
   const dashboard = page.locator("[data-page-card]");
   const switcher = dashboard.getByLabel("Switch agent", { exact: true });
-  const search = dashboard.getByRole("searchbox", { name: "Search agents" });
+  const search = dashboard.getByRole("searchbox", { name: "Search options" });
   await expect(switcher).toBeVisible();
   await expect(search).toBeVisible();
   await expect(page.getByRole("banner")).toHaveCount(0);

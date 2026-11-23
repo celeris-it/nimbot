@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AgentSummary } from "../../server/src/panel/panel-contracts.js";
+  import { matchingOptions, type ConfigurationGroup } from "./option-search.js";
   import {
     ActionButton,
     AgentAvatar,
@@ -9,7 +10,7 @@
 
   let {
     agents,
-    matches,
+    options,
     current,
     section,
     loading,
@@ -18,7 +19,7 @@
     query = $bindable(""),
   }: {
     agents: AgentSummary[];
-    matches: AgentSummary[];
+    options: ConfigurationGroup[];
     current: AgentSummary | undefined;
     section: string;
     loading: boolean;
@@ -33,13 +34,14 @@
   let switcherOpened = $state(false);
   let searching = $state(false);
   let showResults = $derived(searching && query.trim().length > 0);
+  let matches = $derived(matchingOptions(options, query));
   const href = (id: string, view: string) =>
     `/agents/${encodeURIComponent(id)}/${view}`;
 
   function dismissOutside(event: Event) {
-    if (!(event.target instanceof Node)) return;
-    if (!switcher.contains(event.target)) switcher.open = false;
-    if (!search.contains(event.target)) searching = false;
+    const path = event.composedPath();
+    if (!path.includes(switcher)) switcher.open = false;
+    if (!path.includes(search)) searching = false;
   }
 
   function handleKeys(event: KeyboardEvent) {
@@ -109,19 +111,19 @@
     data-ui="agent-header-search"
     bind:this={search}
     role="search"
-    aria-label="Agents"
+    aria-label="Configuration options"
     onsubmit={(event) => {
       event.preventDefault();
       if (showResults) search.querySelector("a")?.click();
     }}
   >
     <SearchField
-      label="Search agents"
-      placeholder="Search agents"
+      label="Search options"
+      placeholder="Search options"
       bind:value={query}
       onfocus={() => {
+        if (!searching && !unavailable) refresh();
         searching = true;
-        refresh();
       }}
       oninput={() => (searching = true)}
     />
@@ -129,12 +131,43 @@
       <div
         data-ui="agent-header-popover"
         role="region"
-        aria-label="Matching agents"
+        aria-label="Matching options"
       >
-        {#if matches.length}
-          {@render agentLinks(matches, "setup")}
-        {:else}
-          {@render directoryStatus("No matching agents.")}
+        {#each matches as group (group.key)}
+          <div
+            data-ui="option-search-group"
+            role="group"
+            aria-label={group.label}
+          >
+            <p>{group.label}</p>
+            <ul class="panel-menu">
+              {#each group.options as option (option.href)}
+                <li>
+                  <a href={option.href} data-option-link>
+                    <Icon name="settings" size={16} />
+                    <span>
+                      {option.label}
+                      {#if option.context}<small>{option.context}</small>{/if}
+                    </span>
+                  </a>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/each}
+        {#if loading}
+          <p role="status">Loading agents…</p>
+        {:else if unavailable}
+          <p role="status">Could not load the latest agent list.</p>
+          <ActionButton
+            type="button"
+            onclick={() => {
+              search.querySelector("input")?.focus();
+              refresh();
+            }}>Retry loading agents</ActionButton
+          >
+        {:else if !matches.length}
+          <p role="status">No matching options.</p>
         {/if}
       </div>
     {/if}

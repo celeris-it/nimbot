@@ -516,6 +516,17 @@ svg {
   padding: 8px;
   color: var(--color-muted);
 }
+[data-ui="option-search-group"] + [data-ui="option-search-group"] {
+  margin-block-start: 8px;
+  border-block-start: 1px solid var(--color-base-300);
+}
+[data-ui="option-search-group"] > p {
+  padding: 4px 8px;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 [data-ui="installation"] {
   display: flex;
   align-items: center;

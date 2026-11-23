@@ -41,10 +41,10 @@ let passwordHash: string;
 beforeAll(async () => {
   passwordHash = await hashPassword(password);
 });
-function setup() {
+function setup(deps: PanelDeps = {}) {
   let clock = 1000;
   const config = readPanelConfig({ PANEL_PASSWORD_HASH: passwordHash });
-  const app = createPanelPositional(config, undefined, () => clock);
+  const app = createPanel(config, deps, () => clock);
   const post = (path: string, body = "", cookie = "", origin = config.origin) =>
     app.request(path, {
       method: "POST",
@@ -76,6 +76,53 @@ function setup() {
 }
 
 describe("panel access", () => {
+  it("lists option availability without reading agent hosts or returning instructions", async () => {
+    const hostStatus = vi.fn();
+    const { app, login } = setup({
+      listAgentIds: () => ["editable", "read-only", "deleted"],
+      getAgentSetup: (id) =>
+        id === "deleted"
+          ? undefined
+          : { name: id, botUsername: null, provisioning: "ready" },
+      agentSettings: {
+        get: (id) =>
+          id === "editable"
+            ? { name: id, instructions: "private instructions" }
+            : undefined,
+        save: vi.fn(),
+        hostStatus,
+      },
+      memoryAccess: { get: () => false, set: vi.fn() },
+    });
+    const { cookie } = await login();
+    const response = await app.request("/api/status", {
+      headers: { Cookie: cookie },
+    });
+    expect(await response.json()).toEqual({
+      agents: [
+        {
+          id: "editable",
+          name: "editable",
+          botUsername: null,
+          provisioning: "ready",
+          optionCapabilities: { edit: true, discord: false, memoryTools: true },
+        },
+        {
+          id: "read-only",
+          name: "read-only",
+          botUsername: null,
+          provisioning: "ready",
+          optionCapabilities: {
+            edit: false,
+            discord: false,
+            memoryTools: true,
+          },
+        },
+      ],
+    });
+    expect(hostStatus).not.toHaveBeenCalled();
+  });
+
   it("protects the page and API while serving the login and local assets", async () => {
     const { app } = setup();
     expect((await app.request("/")).headers.get("location")).toBe("/login");

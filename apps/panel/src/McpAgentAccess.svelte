@@ -29,7 +29,7 @@
 
 <section aria-labelledby="mcp-access">
   <div class="settings-section-description">
-    <h2 id="mcp-access" class="card-title">
+    <h2 id="mcp-access" tabindex="-1" class="card-title">
       <Icon name="plug" size={20} />MCP integrations
     </h2>
   </div>

@@ -147,7 +147,7 @@
 <div class="settings-section-list">
   <section aria-labelledby="model-heading">
     <div class="settings-section-description">
-      <h2 id="model-heading" class="card-title">
+      <h2 id="model-heading" tabindex="-1" class="card-title">
         <Icon name="cpu" size={20} />Model
       </h2>
     </div>

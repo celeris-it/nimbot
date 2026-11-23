@@ -12,6 +12,7 @@
     EmptyState,
     FilterGroup,
     Icon,
+    SearchField,
     StatusBadge,
     Surface,
     UsageChart,
@@ -25,18 +26,15 @@
 
   let {
     agents,
-    matchingAgents,
-    clearSearch,
     canCreate,
     refresh,
   }: {
     agents: AgentSummary[];
-    matchingAgents: AgentSummary[];
-    clearSearch: () => void;
     canCreate: boolean;
     refresh: () => void;
   } = $props();
   let filter = $state("all");
+  let agentQuery = $state("");
   let selectedId = $state("");
   const attention = (item: AgentSummary) =>
     item.process?.state === "failed" ||
@@ -156,15 +154,18 @@
   );
   let shareTotal = $derived(slices.reduce((sum, item) => sum + item.value, 0));
   let needsAttention = $derived(agents.filter(attention).length);
-  let filtered = $derived(
-    matchingAgents.filter(
-      (item) =>
+  let filtered = $derived.by(() => {
+    const query = agentQuery.trim().toLowerCase().replace(/^@/, "");
+    return agents.filter((item) => {
+      const matchesFilter =
         filter === "all" ||
         (filter === "ready"
           ? item.process?.state === "running"
-          : attention(item)),
-    ),
-  );
+          : attention(item));
+      const searchable = `${item.name} ${item.botUsername ?? ""} ${item.id}`;
+      return matchesFilter && searchable.toLowerCase().includes(query);
+    });
+  });
   // Selection is a local preview only; it never changes Telegram routing.
   let selected = $derived(
     filtered.find((item) => item.id === selectedId) ?? filtered[0],
@@ -364,6 +365,13 @@
       ]}
     />
   </div>
+  <div class="mb-4 w-full max-w-xs">
+    <SearchField
+      label="Search agents"
+      placeholder="Search agents"
+      bind:value={agentQuery}
+    />
+  </div>
   {#if agents.length === 0}
     <EmptyState
       title="A workspace for your next idea."
@@ -379,7 +387,7 @@
     >
       {#snippet actions()}<ActionButton
           onclick={() => {
-            clearSearch();
+            agentQuery = "";
             filter = "all";
           }}>Clear filters</ActionButton
         >{/snippet}

@@ -49,7 +49,12 @@
 <div class="settings-section-list" data-ui="agent-channels">
   <section aria-label="Telegram connection">
     <div class="settings-section-description max-w-[72ch]">
-      <h2 class="card-title" data-brand="telegram">
+      <h2
+        id="telegram-connection"
+        tabindex="-1"
+        class="card-title"
+        data-brand="telegram"
+      >
         <Icon name="telegram" size={20} />Telegram connection
       </h2>
       {#if agent.capabilities.connectTelegram}

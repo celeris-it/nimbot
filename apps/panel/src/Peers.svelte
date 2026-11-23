@@ -32,7 +32,7 @@
 
 <section aria-labelledby="peer-access">
   <div class="settings-section-description">
-    <h2 id="peer-access" class="card-title">
+    <h2 id="peer-access" tabindex="-1" class="card-title">
       <Icon name="delegate" size={20} />Other agents
     </h2>
     <p>

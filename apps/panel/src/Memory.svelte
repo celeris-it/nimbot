@@ -31,7 +31,7 @@
   copies.
 </p>
 {#if enabled !== undefined}
-  <p>
+  <p id="memory-tools" tabindex="-1">
     Memory tools are <strong>{enabled ? "on" : "off"}</strong> for chat tasks of this
     agent. Scheduled and webhook tasks never get them.
   </p>

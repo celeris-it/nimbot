@@ -97,6 +97,13 @@ export interface AgentDetail extends AgentSummary {
     delete: boolean;
   };
 }
+export interface AgentDirectoryEntry extends AgentSummary {
+  optionCapabilities: {
+    edit: boolean;
+    discord: boolean;
+    memoryTools: boolean;
+  };
+}
 export interface PanelStatus {
-  agents: AgentSummary[];
+  agents: AgentDirectoryEntry[];
 }

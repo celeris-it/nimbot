@@ -45,7 +45,12 @@
 
 <section aria-label="Discord connection">
   <div class="settings-section-description max-w-[72ch]">
-    <h2 class="card-title" data-brand="discord">
+    <h2
+      id="discord-connection"
+      tabindex="-1"
+      class="card-title"
+      data-brand="discord"
+    >
       <Icon name="discord" size={20} />Discord connection
     </h2>
     {#if agent.discord?.connection}

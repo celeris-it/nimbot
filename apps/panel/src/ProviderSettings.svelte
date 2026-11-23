@@ -88,7 +88,7 @@
 
 <div class="provider-page">
   <div class="provider-heading">
-    <h1 tabindex="-1">AI providers</h1>
+    <h1 id="ai-providers" tabindex="-1">AI providers</h1>
     <p id="provider-help">
       All agents share these connections. Choose each agent’s model on its Model
       and usage page.
@@ -131,7 +131,7 @@
                 : "Not configured"}
         <section aria-labelledby={`provider-${provider.id}`}>
           <div class="settings-section-description provider-identity">
-            <h2 id={`provider-${provider.id}`} class="card-title">
+            <h2 id={`provider-${provider.id}`} tabindex="-1" class="card-title">
               <Icon name={provider.id} size={20} />{provider.name}
             </h2>
             <StatusBadge
