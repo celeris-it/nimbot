@@ -1240,13 +1240,29 @@ test("edits the global schedule time zone and prefills new schedules", async ({
   await openSchedules(page);
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  const zone = page.getByLabel("Schedule time zone");
+  const zone = page.getByRole("textbox", { name: "Schedule time zone" });
   await expect(zone).toHaveCSS("height", "44px");
-  await expect(page.getByLabel("Appearance")).toHaveCSS("height", "44px");
+  await expect(page.getByRole("combobox", { name: "Appearance" })).toHaveCSS(
+    "height",
+    "44px",
+  );
   await expect(zone).toHaveValue("UTC");
+  const save = page.getByRole("button", { name: "Save time zone" });
+  const form = page.locator("form").filter({ has: zone });
+  await zone.fill("Not/A_Time_Zone");
+  await save.click();
+  await expect(form.getByRole("alert")).toHaveText(
+    "Time zone must be a valid IANA time zone name.",
+  );
+  await expect(zone).toBeFocused();
+  await expect(zone).toHaveAttribute("aria-invalid", "true");
+  await expect(zone).toHaveAccessibleDescription(/valid IANA time zone name/);
+  await expect(zone).toHaveValue("Not/A_Time_Zone");
   await zone.fill("Europe/Madrid");
-  await page.getByRole("button", { name: "Save settings" }).click();
-  await expect(page.getByRole("status")).toContainText(
+  await expect(form.getByRole("alert")).toHaveCount(0);
+  await expect(zone).not.toHaveAttribute("aria-invalid");
+  await zone.press("Enter");
+  await expect(form.getByRole("status")).toHaveText(
     "Schedule time zone saved.",
   );
   await page.reload();
@@ -1256,6 +1272,70 @@ test("edits the global schedule time zone and prefills new schedules", async ({
   await expect(page.getByLabel("Time zone", { exact: true })).toHaveValue(
     "Europe/Madrid",
   );
+});
+
+test("aligns Settings controls without overflow across viewport sizes", async ({
+  page,
+}, info) => {
+  await login(page);
+  await page.goto("/settings");
+  const appearance = page.getByRole("combobox", { name: "Appearance" });
+  const zone = page.getByRole("textbox", { name: "Schedule time zone" });
+  const save = page.getByRole("button", { name: "Save time zone" });
+  await expect(appearance).toBeVisible();
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      colorScheme,
+    );
+    for (const width of [320, 375, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+        .toBeLessThanOrEqual(width);
+      const alignment = await zone.evaluate((input, wide) => {
+        const appearanceBox = document
+          .getElementById("panel-appearance")
+          ?.getBoundingClientRect();
+        const zoneBox = input.getBoundingClientRect();
+        const saveBox = input
+          .closest("form")
+          ?.querySelector('button[type="submit"]')
+          ?.getBoundingClientRect();
+        const descriptionBox = input
+          .closest("section")
+          ?.querySelector(".settings-section-description")
+          ?.getBoundingClientRect();
+        return {
+          fieldsAlign:
+            appearanceBox?.x === zoneBox.x &&
+            appearanceBox.width === zoneBox.width,
+          buttonAligns:
+            saveBox?.x === zoneBox.x && saveBox.width < zoneBox.width,
+          descriptionFits:
+            descriptionBox !== undefined &&
+            (wide
+              ? descriptionBox.right < zoneBox.left
+              : descriptionBox.bottom < zoneBox.top),
+        };
+      }, width >= 1280);
+      expect(alignment).toEqual({
+        fieldsAlign: true,
+        buttonAligns: true,
+        descriptionFits: true,
+      });
+      await page.screenshot({
+        path: info.outputPath(`settings-${colorScheme}-${width}.png`),
+      });
+    }
+    await appearance.focus();
+    await appearance.press("Tab");
+    await expect(zone).toBeFocused();
+    await expect(zone).toHaveCSS("outline-style", "solid");
+    await zone.press("Tab");
+    await expect(save).toBeFocused();
+  }
 });
 
 for (const kind of ["once", "interval"] as const) {
@@ -2498,7 +2578,7 @@ test("searches configuration options and opens the exact section", async ({
   await expect(appearanceControl).toBeFocused();
   await expect(search).toHaveValue("");
 
-  const zone = page.getByLabel("Schedule time zone");
+  const zone = page.getByRole("textbox", { name: "Schedule time zone" });
   await zone.fill("Europe/Paris");
   await search.fill("TIME   ZONE");
   await results.getByRole("link", { name: /Schedule time zone/ }).click();
@@ -3121,7 +3201,7 @@ test("follows system appearance and remembers explicit theme choices", async ({
     card.getByRole("searchbox", { name: "Search options" }),
   ).toBeVisible();
   const appearance = card.getByRole("combobox", { name: "Appearance" });
-  const timeZone = card.getByLabel("Schedule time zone");
+  const timeZone = card.getByRole("textbox", { name: "Schedule time zone" });
   await expect(appearance).toHaveValue("system");
   await expect(timeZone).not.toHaveValue("");
   await expect

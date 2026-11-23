@@ -84,6 +84,7 @@
   let usageBefore = $state(usageCursor(location.search));
   let schedules = $state<ScheduleList>();
   let scheduleTimeZone = $state("");
+  let scheduleTimeZoneError = $state("");
   let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
   let memoryPage = $state(1);
   let delegations = $state<DelegationHistory>();
@@ -356,6 +357,7 @@
     providerSettingsError = "";
     schedules = undefined;
     scheduleTimeZone = "";
+    scheduleTimeZoneError = "";
     loaded = false;
     contentAvailable = false;
     missing = false;
@@ -1265,7 +1267,7 @@
       {#if path !== "/login"}<p id="form-error" role="alert" tabindex="-1">
           {error}
         </p>{/if}
-      {#if notice}<p role="status">{notice}</p>{/if}
+      {#if notice && path !== "/settings"}<p role="status">{notice}</p>{/if}
       {#if updateError}<p role="status">{updateError}</p>
         <ActionButton onclick={() => load()}
           >Retry loading {viewLabel}</ActionButton
@@ -1317,59 +1319,101 @@
         />
       {:else if path === "/settings"}
         <h1 tabindex="-1">Settings</h1>
-        <div class="panel-card">
-          <label for="panel-appearance">Appearance</label>
-          <Select
-            id="panel-appearance"
-            value={appearance}
-            onchange={(event) => {
-              const value = event.currentTarget.value;
-              if (isAppearance(value)) {
-                appearance = value;
-                saveAppearance(value);
-              }
-            }}
-          >
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </Select>
+        <div class="settings-section-list">
+          <section aria-labelledby="panel-appearance-heading">
+            <div class="settings-section-description">
+              <h2 id="panel-appearance-heading" class="card-title">
+                <Icon name="settings" size={20} />
+                <label for="panel-appearance">Appearance</label>
+              </h2>
+              <p id="panel-appearance-help">
+                Changes apply immediately in this browser.
+              </p>
+            </div>
+            <div class="panel-card settings-card">
+              <Select
+                id="panel-appearance"
+                aria-describedby="panel-appearance-help"
+                value={appearance}
+                onchange={(event) => {
+                  const value = event.currentTarget.value;
+                  if (isAppearance(value)) {
+                    appearance = value;
+                    saveAppearance(value);
+                  }
+                }}
+              >
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </Select>
+            </div>
+          </section>
+          <section aria-labelledby="schedule-default-zone-heading">
+            <div class="settings-section-description">
+              <h2 id="schedule-default-zone-heading" class="card-title">
+                <Icon name="clock" size={20} />
+                <label for="schedule-default-zone">Schedule time zone</label>
+              </h2>
+              <p id="schedule-default-zone-help">
+                Enter an IANA time zone such as America/New_York or UTC. This
+                applies to new schedules created in Telegram and prefills the
+                schedule form in the panel.
+              </p>
+            </div>
+            <form
+              class="panel-card settings-card"
+              aria-busy={busy}
+              aria-describedby="form-error"
+              onsubmit={(event) => {
+                event.preventDefault();
+                if (busy) return;
+                scheduleTimeZoneError = "";
+                void mutate<ScheduleDefaults>(
+                  "/api/settings/schedules",
+                  { timeZone: scheduleTimeZone },
+                  (result) => {
+                    scheduleTimeZone = result.timeZone;
+                    notice = "Schedule time zone saved.";
+                  },
+                  (cause) => {
+                    if (cause.status !== 400) return false;
+                    scheduleTimeZoneError = cause.message;
+                    void tick().then(() => {
+                      document.getElementById("schedule-default-zone")?.focus();
+                    });
+                    return true;
+                  },
+                );
+              }}
+            >
+              <TextField
+                id="schedule-default-zone"
+                aria-describedby={scheduleTimeZoneError
+                  ? "schedule-default-zone-help schedule-default-zone-error"
+                  : "schedule-default-zone-help"}
+                aria-invalid={scheduleTimeZoneError ? "true" : undefined}
+                bind:value={scheduleTimeZone}
+                oninput={() => {
+                  scheduleTimeZoneError = "";
+                  notice = "";
+                }}
+                required
+                disabled={busy}
+                spellcheck="false"
+              />
+              {#if scheduleTimeZoneError}
+                <p id="schedule-default-zone-error" role="alert">
+                  {scheduleTimeZoneError}
+                </p>
+              {/if}
+              <ActionButton type="submit" variant="primary" disabled={busy}
+                >{busy ? "Saving…" : "Save time zone"}</ActionButton
+              >
+              <p class="settings-save-status" role="status">{notice}</p>
+            </form>
+          </section>
         </div>
-        <form
-          class="panel-card"
-          aria-busy={busy}
-          aria-describedby="form-error"
-          onsubmit={(event) => {
-            event.preventDefault();
-            void mutate<ScheduleDefaults>(
-              "/api/settings/schedules",
-              { timeZone: scheduleTimeZone },
-              (result) => {
-                scheduleTimeZone = result.timeZone;
-                notice = "Schedule time zone saved.";
-              },
-            );
-          }}
-        >
-          <label for="schedule-default-zone">Schedule time zone</label>
-          <TextField
-            id="schedule-default-zone"
-            aria-describedby="schedule-default-zone-help"
-            bind:value={scheduleTimeZone}
-            required
-            disabled={busy}
-            spellcheck="false"
-            placeholder="America/New_York"
-          />
-          <p id="schedule-default-zone-help">
-            Use an IANA time zone such as America/New_York or UTC. It applies to
-            new schedules in Telegram and prefills the schedule form in the
-            panel.
-          </p>
-          <ActionButton type="submit" variant="primary" disabled={busy}
-            >Save settings</ActionButton
-          >
-        </form>
       {:else if path === "/providers"}
         <ProviderSettings
           settings={providerSettings}

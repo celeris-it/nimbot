@@ -1866,6 +1866,22 @@ li[data-slice="4"] {
 [data-page="detail"] > form {
   inline-size: min(100%, 42rem);
 }
+.settings-card .panel-button {
+  width: fit-content;
+}
+.settings-card :is(.panel-input, .panel-select):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.settings-card [role="alert"] {
+  color: var(--color-error);
+}
+.settings-card .settings-save-status {
+  color: var(--color-primary);
+}
+.settings-save-status:empty {
+  position: absolute;
+}
 
 form {
   display: grid;
