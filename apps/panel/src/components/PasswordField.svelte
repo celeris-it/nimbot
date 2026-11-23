@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ActionButton from "./ActionButton.svelte";
   import type { HTMLInputAttributes } from "svelte/elements";
   import Icon from "./Icon.svelte";
   let {
@@ -17,13 +18,14 @@
     {disabled}
     type={visible ? "text" : "password"}
     bind:value
-  /><button
+  /><ActionButton
+    variant="plain"
     type="button"
     data-ui="field-action"
     aria-label={visible ? "Hide value" : "Show value"}
     aria-pressed={visible}
     {disabled}
     onclick={() => (visible = !visible)}
-    ><Icon name={visible ? "eyeOff" : "eye"} size={17} /></button
+    ><Icon name={visible ? "eyeOff" : "eye"} size={17} /></ActionButton
   >
 </div>

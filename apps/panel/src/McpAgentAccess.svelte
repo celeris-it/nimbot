@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Icon, PasswordField } from "./components/index.js";
+  import { ActionButton, Icon, PasswordField } from "./components/index.js";
   import type { McpAgentDefinition } from "../../server/src/panel/panel-contracts.js";
   let {
     definitions,
@@ -34,11 +34,11 @@
     </h2>
   </div>
   <div class="panel-card">
-    <a class="panel-button self-start" href="/mcp">MCP catalog</a>
+    <ActionButton class="self-start" href="/mcp">MCP catalog</ActionButton>
     {#if !definitions}
       <p role="status">MCP integrations unavailable.</p>
-      <button class="panel-button self-start" onclick={refresh}
-        >Retry loading MCP integrations</button
+      <ActionButton class="self-start" onclick={refresh}
+        ><Icon name="refresh" size={16} />Retry loading MCP integrations</ActionButton
       >
     {:else if definitions.length === 0}
       <p>No integrations in the catalog.</p>
@@ -81,36 +81,31 @@
                 autocomplete="new-password"
                 required
               />
-              <button
-                class="panel-button panel-button-primary"
-                disabled={busy}
-                type="submit"
+              <ActionButton variant="primary" disabled={busy} type="submit"
                 >{definition.hasCredential
                   ? "Replace credential"
-                  : "Save credential"}</button
+                  : "Save credential"}</ActionButton
               >
             </form>
             {#if definition.hasCredential}
-              <button
-                class="panel-button"
+              <ActionButton
                 disabled={busy}
                 onclick={() => action(definition, "credential", null)}
-                >Remove credential</button
+                >Remove credential</ActionButton
               >
             {/if}
-            <button
-              class="panel-button"
+            <ActionButton
               disabled={busy}
               onclick={() => {
                 delete tokens[definition.id];
                 return action(definition, "revoke");
-              }}>Revoke access</button
+              }}>Revoke access</ActionButton
             >
           {:else}
-            <button
-              class="panel-button"
+            <ActionButton
               disabled={busy}
-              onclick={() => action(definition, "grant")}>Grant access</button
+              onclick={() => action(definition, "grant")}
+              >Grant access</ActionButton
             >
           {/if}
         </section>

@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { Icon, PasswordField, StatusBadge } from "./components/index.js";
+  import {
+    ActionButton,
+    Icon,
+    PasswordField,
+    StatusBadge,
+  } from "./components/index.js";
   import type { ProviderSettings } from "../../server/src/panel/panel-contracts.js";
   let {
     settings,
@@ -93,8 +98,8 @@
   {#if !settings}
     <div class="panel-card provider-notice">
       <p role="status">Provider settings unavailable. Refresh to try again.</p>
-      <button class="panel-button" onclick={refresh}
-        >Refresh provider settings</button
+      <ActionButton onclick={refresh}
+        ><Icon name="refresh" size={16} />Refresh provider settings</ActionButton
       >
     </div>
   {:else}
@@ -162,13 +167,14 @@
                     bind:value={keys[provider.id]}
                     disabled={blocked}
                   />
-                  <button
-                    class="panel-button panel-button-primary"
+                  <ActionButton
+                    variant="primary"
                     type="submit"
                     disabled={blocked}
                   >
+                    <Icon name="key" size={16} />
                     {provider.method ? "Replace with API key" : "Save API key"}
-                  </button>
+                  </ActionButton>
                 </div>
               </form>
             {/if}
@@ -182,9 +188,8 @@
                       ? "Connect a workspace to use its models, Console budgets and Go allowance."
                       : "A successful ChatGPT sign-in replaces the shared OpenAI credential. Failed or cancelled attempts keep it."}
                   </p>
-                  <button
-                    class="panel-button"
-                    class:panel-button-primary={consoleProvider}
+                  <ActionButton
+                    variant={consoleProvider ? "primary" : "default"}
                     disabled={blocked}
                     onclick={() => {
                       interrupted = false;
@@ -193,7 +198,7 @@
                     }}
                     >{consoleProvider
                       ? "Sign in to OpenCode Console"
-                      : "Sign in with ChatGPT"}</button
+                      : "Sign in with ChatGPT"}</ActionButton
                   >
                 {/if}
                 {#if login}
@@ -241,18 +246,15 @@
                       </p>
                       <div class="device-code">
                         <code>{login.code}</code>
-                        <button class="panel-button" onclick={copy}
-                          >Copy code</button
-                        >
+                        <ActionButton onclick={copy}>Copy code</ActionButton>
                       </div>
                       <p aria-live="polite" class:sr-only={!copied}>{copied}</p>
                     {/if}
                     {#if waiting}
-                      <button
-                        class="panel-button"
+                      <ActionButton
                         disabled={busy}
                         onclick={() => action(provider.id, "cancel", login.id)}
-                        >Cancel device login</button
+                        >Cancel device login</ActionButton
                       >
                     {/if}
                   </div>
@@ -262,13 +264,12 @@
 
             {#if provider.method}
               <div class="provider-disconnect">
-                <button
-                  class="panel-button"
+                <ActionButton
                   disabled={blocked}
                   onclick={() => requestDisconnect(provider)}
                 >
                   Disconnect provider
-                </button>
+                </ActionButton>
               </div>
             {/if}
           </div>
@@ -291,13 +292,11 @@
     provider may be unable to run model tasks until it is reconnected.
   </p>
   <div class="dialog-actions">
-    <button class="panel-button" onclick={() => disconnectDialog.close()}
-      >Keep connected</button
+    <ActionButton onclick={() => disconnectDialog.close()}
+      >Keep connected</ActionButton
     >
-    <button
-      class="panel-button panel-button-danger"
-      disabled={blocked}
-      onclick={disconnect}>Disconnect provider</button
+    <ActionButton variant="danger" disabled={blocked} onclick={disconnect}
+      >Disconnect provider</ActionButton
     >
   </div>
 </dialog>
@@ -378,7 +377,6 @@
     overflow-wrap: anywhere;
     user-select: all;
   }
-  .provider-disconnect button,
   .provider-notice {
     align-items: start;
     gap: 16px;

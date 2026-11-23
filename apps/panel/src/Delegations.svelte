@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ActionButton from "./components/ActionButton.svelte";
   import type {
     DelegationHistory,
     DelegationHistoryEntry,
@@ -41,10 +42,10 @@
 </script>
 
 <h1 tabindex="-1">Delegations from {agent.name}</h1>
-<button class="panel-button" disabled={busy} onclick={refresh}
-  >Refresh delegations</button
+<ActionButton disabled={busy} onclick={refresh}
+  >Refresh delegations</ActionButton
 >
-<a class="panel-button" href={`${base}/setup`}>Back to agent</a>
+<ActionButton href={`${base}/setup`}>Back to agent</ActionButton>
 {#if !data}
   <p role="status">Delegation history is unavailable. Refresh to try again.</p>
 {:else if data.delegations.length === 0}
@@ -65,10 +66,8 @@
         <p class="brief">{entry.briefPreview}</p>
         {#if reason}<p>{reason}</p>{/if}
         {#if entry.canCancel}
-          <button
-            class="panel-button"
-            disabled={busy}
-            onclick={() => cancel(entry.id)}>Cancel child</button
+          <ActionButton disabled={busy} onclick={() => cancel(entry.id)}
+            >Cancel child</ActionButton
           >
         {/if}
       </li>
@@ -78,14 +77,14 @@
 {#if page > 1 || data?.hasMore}
   <nav aria-label="Delegation pages">
     {#if page > 1}
-      <a class="panel-button" href={`${base}/delegations?page=${page - 1}`}
-        >Previous</a
+      <ActionButton href={`${base}/delegations?page=${page - 1}`}
+        >Previous</ActionButton
       >
     {/if}
     <span>Page {page}</span>
     {#if data?.hasMore && page < 1000}
-      <a class="panel-button" href={`${base}/delegations?page=${page + 1}`}
-        >Next</a
+      <ActionButton href={`${base}/delegations?page=${page + 1}`}
+        >Next</ActionButton
       >
     {/if}
   </nav>

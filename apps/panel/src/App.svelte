@@ -31,6 +31,7 @@
   } from "./appearance.js";
   import Dashboard from "./Dashboard.svelte";
   import {
+    ActionButton,
     Checkbox,
     Icon,
     PasswordField,
@@ -1120,8 +1121,8 @@
   </li>
 {/snippet}
 {#snippet signOut(inSidebar: boolean)}
-  <button
-    class="panel-button panel-button-ghost"
+  <ActionButton
+    variant="ghost"
     type="button"
     aria-label="Sign out"
     disabled={busy}
@@ -1134,7 +1135,7 @@
     >
       Sign out
     </span>
-  </button>
+  </ActionButton>
 {/snippet}
 {#snippet agentDirectory()}
   {#key path}
@@ -1155,8 +1156,8 @@
     {@render wordmark()}
     {#if pageCard}
       <div data-ui="header-actions">
-        {#if compact}<button
-            class="panel-button panel-button-ghost"
+        {#if compact}<ActionButton
+            variant="ghost"
             type="button"
             aria-expanded={menuOpen}
             aria-controls="main-navigation-links"
@@ -1164,7 +1165,7 @@
             ><Icon
               name={menuOpen ? "collapsePanel" : "expandPanel"}
               size={16}
-            /> Menu</button
+            /> Menu</ActionButton
           >{/if}
         {@render signOut(false)}
       </div>
@@ -1182,8 +1183,8 @@
     >
       {#if desktopSidebar}
         {@render wordmark()}
-        <button
-          class="panel-button panel-button-ghost"
+        <ActionButton
+          variant="ghost"
           type="button"
           aria-label={navigationExpanded ? "Hide labels" : "Show labels"}
           aria-expanded={navigationExpanded}
@@ -1192,7 +1193,7 @@
         >
           <Icon name={navigationExpanded ? "collapsePanel" : "expandPanel"} />
           {#if navigationExpanded}<span>Hide labels</span>{/if}
-        </button>{/if}
+        </ActionButton>{/if}
       <div id="main-navigation-links">
         <ul class="panel-menu">
           {#each mainLinks as link (link.href)}
@@ -1240,8 +1241,8 @@
         </p>{/if}
       {#if notice}<p role="status">{notice}</p>{/if}
       {#if updateError}<p role="status">{updateError}</p>
-        <button class="panel-button" onclick={() => load()}
-          >Retry loading {viewLabel}</button
+        <ActionButton onclick={() => load()}
+          >Retry loading {viewLabel}</ActionButton
         >{/if}
       {#if path === "/login"}
         <section aria-label="Sign in">
@@ -1269,8 +1270,8 @@
                 Use the password configured on your server.
               </p>
               <p id="form-error" role="alert" tabindex="-1">{error}</p>
-              <button class="panel-button" type="submit" disabled={busy}
-                >{busy ? "Signing in…" : "Sign in to the panel"}</button
+              <ActionButton variant="primary" type="submit" disabled={busy}
+                >{busy ? "Signing in…" : "Sign in to the panel"}</ActionButton
               >
             </form>
           </div>
@@ -1278,10 +1279,10 @@
       {:else if !loaded}<p role="status">Loading…</p>
       {:else if missing}<h1 tabindex="-1">Page not found.</h1>
         <p>This agent or action is no longer available.</p>
-        <a class="panel-button" href="/">All agents</a>
+        <ActionButton href="/">All agents</ActionButton>
       {:else if !contentAvailable}
         <h1 tabindex="-1">Status unavailable.</h1>
-        <a class="panel-button" href="/">All agents</a>
+        <ActionButton href="/">All agents</ActionButton>
       {:else if path === "/"}
         <Dashboard
           agents={status.agents}
@@ -1341,10 +1342,8 @@
             new schedules in Telegram and prefills the schedule form in the
             panel.
           </p>
-          <button
-            type="submit"
-            class="panel-button panel-button-primary"
-            disabled={busy}>Save settings</button
+          <ActionButton type="submit" variant="primary" disabled={busy}
+            >Save settings</ActionButton
           >
         </form>
       {:else if path === "/providers"}
@@ -1358,8 +1357,8 @@
         {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
       {:else if path === "/mcp"}
         <h1 tabindex="-1">MCP catalog</h1>
-        <a class="panel-button panel-button-primary" href="/mcp/new"
-          >Add integration</a
+        <ActionButton variant="primary" href="/mcp/new"
+          >Add integration</ActionButton
         >
         {#if mcpDefinitions.length === 0}
           <p>No integrations in the catalog.</p>
@@ -1387,10 +1386,10 @@
               <li class="panel-card">
                 <h3>{example.label}</h3>
                 <p class="grow">{example.description}</p>
-                <a
-                  class="panel-button self-start"
+                <ActionButton
+                  class="self-start"
                   href={`/mcp/new?example=${encodeURIComponent(example.id)}`}
-                  aria-label={`Set up ${example.label}`}>Set up</a
+                  aria-label={`Set up ${example.label}`}>Set up</ActionButton
                 >
               </li>
             {/each}
@@ -1404,7 +1403,7 @@
               ? `Set up ${mcpExample.label}`
               : "Add MCP integration"}
         </h1>
-        <a class="panel-button" href="/mcp">Back to catalog</a>
+        <ActionButton href="/mcp">Back to catalog</ActionButton>
         {#key path + (mcpDefinition?.revision ?? mcpExample?.id ?? "")}
           <McpDefinitionForm
             definition={mcpDefinition}
@@ -1530,8 +1529,8 @@
             conversation history are kept.
           </p>
           <div class="button-row">
-            <button
-              class={`panel-button ${route[2] === "process/restart" ? "panel-button-primary" : "panel-button-danger"}`}
+            <ActionButton
+              variant={route[2] === "process/restart" ? "primary" : "danger"}
               disabled={busy}
               onclick={() =>
                 action(route?.[2] === "process/restart" ? "restart" : "stop")}
@@ -1539,11 +1538,12 @@
                 ? "Working…"
                 : route[2] === "process/restart"
                   ? "Confirm restart"
-                  : "Confirm stop"}</button
+                  : "Confirm stop"}</ActionButton
             >
-            <a
-              class="panel-button panel-button-ghost"
-              href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
+            <ActionButton
+              variant="ghost"
+              href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+              >Cancel</ActionButton
             >
           </div>
         {:else if route[2] === "delete"}
@@ -1572,18 +1572,16 @@
               browser profile.</Checkbox
             >
             <div class="button-row">
-              <button
-                class="panel-button panel-button-danger"
-                type="submit"
-                disabled={busy}
+              <ActionButton variant="danger" type="submit" disabled={busy}
                 >{busy
                   ? "Deleting…"
                   : deleteData
                     ? "Delete agent and its data"
-                    : "Delete agent, keep its data"}</button
-              ><a
-                class="panel-button panel-button-ghost"
-                href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
+                    : "Delete agent, keep its data"}</ActionButton
+              ><ActionButton
+                variant="ghost"
+                href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+                >Cancel</ActionButton
               >
             </div>
           </form>

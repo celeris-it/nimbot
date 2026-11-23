@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ActionButton from "./ActionButton.svelte";
   import type { HTMLInputAttributes } from "svelte/elements";
   import Icon from "./Icon.svelte";
   let {
@@ -21,18 +22,21 @@
 
 <div class="panel-input" data-ui="field-group" data-variant="stepper">
   <span data-ui="stepper-buttons"
-    ><button
+    ><ActionButton
+      variant="plain"
       type="button"
-      tabindex="-1"
+      tabindex={-1}
       aria-label="Increase"
       {disabled}
-      onclick={() => step(1)}><Icon name="chevronUp" size={12} /></button
-    ><button
+      onclick={() => step(1)}><Icon name="chevronUp" size={12} /></ActionButton
+    ><ActionButton
+      variant="plain"
       type="button"
-      tabindex="-1"
+      tabindex={-1}
       aria-label="Decrease"
       {disabled}
-      onclick={() => step(-1)}><Icon name="chevronDown" size={12} /></button
+      onclick={() => step(-1)}
+      ><Icon name="chevronDown" size={12} /></ActionButton
     ></span
   ><input
     {...rest}

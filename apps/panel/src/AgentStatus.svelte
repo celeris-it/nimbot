@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   import { providers } from "../../server/src/providers/provider-contracts.js";
-  import { Icon } from "./components/index.js";
+  import { ActionButton, Icon } from "./components/index.js";
   import { processLabels } from "./labels.js";
   let {
     agent,
@@ -43,9 +43,9 @@
 </script>
 
 <h1 class="sr-only" tabindex="-1">{agent.name}</h1>
-<a class="panel-button" href={`${base}/channels`}>
+<ActionButton href={`${base}/channels`}>
   <Icon name="link" size={16} />Manage channels
-</a>
+</ActionButton>
 <div class="settings-section-list" data-ui="agent-overview">
   <section aria-labelledby="agent-host-heading">
     <div class="settings-section-description">
@@ -82,26 +82,26 @@
         <dd>{agent.id}</dd>
       </dl>
       <div class="button-row">
-        {#if agent.process && agent.capabilities.process?.start}<button
-            class="panel-button panel-button-primary"
+        {#if agent.process && agent.capabilities.process?.start}<ActionButton
+            variant="primary"
             disabled={busy}
             onclick={() => action("start")}
             ><Icon name="play" size={16} />{busy
               ? "Starting…"
-              : "Start agent"}</button
+              : "Start agent"}</ActionButton
           >{/if}
-        {#if agent.process && agent.capabilities.process?.stop}<a
-            class="panel-button panel-button-danger"
+        {#if agent.process && agent.capabilities.process?.stop}<ActionButton
+            variant="danger"
             href={`${base}/process/stop`}
-            ><Icon name="stop" size={16} />Stop agent…</a
+            ><Icon name="stop" size={16} />Stop agent…</ActionButton
           >{/if}
-        {#if agent.process && agent.capabilities.process?.restart}<a
-            class="panel-button panel-button-warning"
+        {#if agent.process && agent.capabilities.process?.restart}<ActionButton
+            variant="warning"
             href={`${base}/process/restart`}
-            ><Icon name="restart" size={16} />Restart agent…</a
+            ><Icon name="restart" size={16} />Restart agent…</ActionButton
           >{/if}
-        <button class="panel-button panel-button-info" onclick={refresh}
-          ><Icon name="refresh" size={16} />Refresh status</button
+        <ActionButton variant="info" onclick={refresh}
+          ><Icon name="refresh" size={16} />Refresh status</ActionButton
         >
       </div>
     </div>
@@ -151,8 +151,8 @@
         </p>
       </div>
       <div class="panel-card" data-tone="danger">
-        <a class="panel-button panel-button-danger" href={`${base}/delete`}
-          ><Icon name="trash" size={16} />Delete agent…</a
+        <ActionButton variant="danger" href={`${base}/delete`}
+          ><Icon name="trash" size={16} />Delete agent…</ActionButton
         >
       </div>
     </section>

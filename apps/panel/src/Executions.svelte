@@ -4,7 +4,7 @@
     ExecutionEntry,
     ExecutionPage,
   } from "../../server/src/panel/panel-contracts.js";
-  import { DataTable, StatusBadge } from "./components/index.js";
+  import { ActionButton, DataTable, StatusBadge } from "./components/index.js";
 
   let {
     agentId,
@@ -121,17 +121,16 @@
   <td>{duration(entry)}</td>
   <td>{entry.finishedAt === null ? "—" : deliveries[entry.delivery]}</td>
   <td>
-    <a
-      class="panel-button"
+    <ActionButton
       href={href(before, entry.id)}
-      aria-label={`View execution ${entry.id}`}>View</a
+      aria-label={`View execution ${entry.id}`}>View</ActionButton
     >
   </td>
 {/snippet}
 
 {#if selected}
   <h1 tabindex="-1">Execution details</h1>
-  <a class="panel-button" href={href(before)}>Back to executions</a>
+  <ActionButton href={href(before)}>Back to executions</ActionButton>
   {#if detail}
     <dl class="panel-card grid grid-cols-2 gap-3 sm:grid-cols-3">
       <div>
@@ -231,11 +230,12 @@
             aria-label="Execution history pages"
             class="flex flex-wrap gap-2"
           >
-            {#if before}<a class="panel-button" href={base}>Latest executions</a
+            {#if before}<ActionButton href={base}
+                >Latest executions</ActionButton
               >{/if}
             {#if data?.nextCursor}
-              <a class="panel-button" href={href(data.nextCursor)}
-                >Older executions</a
+              <ActionButton href={href(data.nextCursor)}
+                >Older executions</ActionButton
               >
             {/if}
           </nav>

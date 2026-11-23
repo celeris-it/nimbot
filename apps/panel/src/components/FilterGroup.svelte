@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ActionButton from "./ActionButton.svelte";
   let {
     label,
     options,
@@ -11,12 +12,13 @@
 </script>
 
 <div class="fleet-filters" role="group" aria-label={label}>
-  {#each options as option (option.value)}<button
+  {#each options as option (option.value)}<ActionButton
+      variant="plain"
       type="button"
       class="fleet-filter"
       aria-pressed={value === option.value}
       onclick={() => (value = option.value)}
       >{option.label}{#if option.count !== undefined}<span>{option.count}</span
-        >{/if}</button
+        >{/if}</ActionButton
     >{/each}
 </div>

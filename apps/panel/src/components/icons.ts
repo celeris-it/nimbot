@@ -48,6 +48,8 @@ export const icons = {
   send: "icon-[lucide--send]",
   trash: "icon-[lucide--trash-2]",
   play: "icon-[lucide--play]",
+  pause: "icon-[lucide--pause]",
+  edit: "icon-[lucide--pencil]",
   stop: "icon-[lucide--square]",
   restart: "icon-[lucide--rotate-cw]",
   link: "icon-[lucide--link]",

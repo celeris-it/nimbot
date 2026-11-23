@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { Icon, DataTable, StatusBadge } from "./components/index.js";
+  import {
+    ActionButton,
+    Icon,
+    DataTable,
+    StatusBadge,
+  } from "./components/index.js";
   import ModelPicker from "./components/ModelPicker.svelte";
   import Select from "./components/Select.svelte";
   import type {
@@ -134,10 +139,9 @@
 
 <h1 tabindex="-1">Model and usage for {agent.name}</h1>
 <nav class="actions" aria-label="Agent actions">
-  <a class="panel-button" href={`${base}/setup`}>Back to agent</a>
-  <a class="panel-button" href="/providers">AI providers</a>
-  <button class="panel-button" onclick={refresh} disabled={busy}>Refresh</button
-  >
+  <ActionButton href={`${base}/setup`}>Back to agent</ActionButton>
+  <ActionButton href="/providers">AI providers</ActionButton>
+  <ActionButton onclick={refresh} disabled={busy}>Refresh</ActionButton>
 </nav>
 
 <div class="settings-section-list">
@@ -278,12 +282,11 @@
     </div>
     {#snippet historyPages()}
       <nav class="actions" aria-label="Usage history pages">
-        {#if before}<a class="panel-button" href={`${base}/usage`}
-            >Newest tasks</a
+        {#if before}<ActionButton href={`${base}/usage`}
+            >Newest tasks</ActionButton
           >{/if}
-        {#if data?.next}<a
-            class="panel-button"
-            href={`${base}/usage?before=${data.next}`}>Older tasks</a
+        {#if data?.next}<ActionButton href={`${base}/usage?before=${data.next}`}
+            >Older tasks</ActionButton
           >{/if}
       </nav>
     {/snippet}

@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { PasswordField, TextField } from "./components/index.js";
+  import {
+    ActionButton,
+    PasswordField,
+    TextField,
+  } from "./components/index.js";
   import { untrack } from "svelte";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   let {
@@ -88,20 +92,17 @@
         again if the operation fails.
       </p>
     {/if}
-    <button
-      class="panel-button panel-button-primary"
-      type="submit"
-      disabled={busy}
+    <ActionButton variant="primary" type="submit" disabled={busy}
       >{busy
         ? "Saving…"
         : mode === "new"
           ? "Create agent"
           : mode === "token"
             ? "Save token"
-            : "Save changes"}</button
+            : "Save changes"}</ActionButton
     >
-    <a
-      class="panel-button panel-button-ghost"
+    <ActionButton
+      variant="ghost"
       href={agent
         ? `/agents/${encodeURIComponent(agent.id)}/${mode === "token" ? "channels" : "setup"}`
         : "/"}
@@ -109,7 +110,7 @@
         ? "Cancel"
         : mode === "token"
           ? "Back to channels"
-          : "Back to agent"}</a
+          : "Back to agent"}</ActionButton
     >
   </form>
 </section>

@@ -1,6 +1,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Icon, PasswordField, TextField } from "./components/index.js";
+  import {
+    ActionButton,
+    Icon,
+    PasswordField,
+    TextField,
+  } from "./components/index.js";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   let {
     agent,
@@ -156,18 +161,12 @@
         owner. Reply in the private chat to link it to Nimbot. Up to five new
         notification attempts per minute are allowed.
       </p>
-      <button
-        class="panel-button"
-        disabled={busy}
-        onclick={() => testDelivery(true)}
-        ><Icon name="send" size={16} />Send Discord test</button
+      <ActionButton disabled={busy} onclick={() => testDelivery(true)}
+        ><Icon name="send" size={16} />Send Discord test</ActionButton
       >
       {#if requestId}
-        <button
-          class="panel-button"
-          disabled={busy}
-          onclick={() => testDelivery(false)}
-          ><Icon name="refresh" size={16} />Check last test status</button
+        <ActionButton disabled={busy} onclick={() => testDelivery(false)}
+          ><Icon name="refresh" size={16} />Check last test status</ActionButton
         >
         <p>
           Checking reuses the last request and does not send it again. A new
@@ -203,15 +202,12 @@
       <p id="discord-token-help">
         The token is stored privately. Enter it again if saving fails.
       </p>
-      <button
-        class="panel-button panel-button-primary"
-        type="submit"
-        disabled={busy}
+      <ActionButton variant="primary" type="submit" disabled={busy}
         ><Icon name="link" size={16} />{busy
           ? "Saving…"
           : agent.discord?.connection
             ? "Replace Discord connection"
-            : "Connect Discord"}</button
+            : "Connect Discord"}</ActionButton
       >
     </form>
     {#if agent.discord?.connection}
@@ -229,11 +225,8 @@
           required
           bind:value={confirmation}
         />
-        <button
-          class="panel-button"
-          type="submit"
-          disabled={busy || confirmation !== agent.id}
-          ><Icon name="trash" size={16} />Remove Discord connection</button
+        <ActionButton type="submit" disabled={busy || confirmation !== agent.id}
+          ><Icon name="trash" size={16} />Remove Discord connection</ActionButton
         >
       </form>
     {/if}

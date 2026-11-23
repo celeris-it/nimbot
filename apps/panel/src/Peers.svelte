@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Icon, Select } from "./components/index.js";
+  import { ActionButton, Icon, Select } from "./components/index.js";
   import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
   let {
     agent,
@@ -44,8 +44,8 @@
   <div class="panel-card">
     {#if !data}
       <p role="status">Agent access unavailable.</p>
-      <button class="panel-button self-start" onclick={refresh}
-        >Retry loading agent access</button
+      <ActionButton class="self-start" onclick={refresh}
+        ><Icon name="refresh" size={16} />Retry loading agent access</ActionButton
       >
     {:else}
       {#if data.grants.length === 0}
@@ -56,12 +56,11 @@
             <li>
               {label[item.permission]} →
               <strong>{name(item.targetAgentId)}</strong>
-              <button
-                class="panel-button"
+              <ActionButton
                 disabled={busy}
                 aria-label={`Revoke ${label[item.permission]} to ${name(item.targetAgentId)}`}
                 onclick={() => revoke(item.targetAgentId, item.permission)}
-                >Revoke</button
+                >Revoke</ActionButton
               >
             </li>
           {/each}
@@ -89,9 +88,10 @@
               <option value="delegate">Delegate tasks</option>
             </Select>
           </label>
-          <button
-            class="panel-button panel-button-primary"
-            disabled={busy || !target}>Add grant</button
+          <ActionButton
+            type="submit"
+            variant="primary"
+            disabled={busy || !target}>Add grant</ActionButton
           >
         </form>
       {/if}

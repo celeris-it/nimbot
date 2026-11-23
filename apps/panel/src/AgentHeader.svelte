@@ -1,6 +1,11 @@
 <script lang="ts">
   import type { AgentSummary } from "../../server/src/panel/panel-contracts.js";
-  import { AgentAvatar, Icon, SearchField } from "./components/index.js";
+  import {
+    ActionButton,
+    AgentAvatar,
+    Icon,
+    SearchField,
+  } from "./components/index.js";
 
   let {
     agents,
@@ -91,8 +96,8 @@
     <p role="status">Loading agents…</p>
   {:else if unavailable}
     <p role="status">Agent list unavailable.</p>
-    <button class="panel-button" type="button" onclick={refresh}
-      >Retry loading agents</button
+    <ActionButton type="button" onclick={refresh}
+      >Retry loading agents</ActionButton
     >
   {:else}
     <p role="status">{empty}</p>

@@ -649,31 +649,52 @@ small,
   @apply border-transparent bg-transparent;
 }
 .panel-button-danger {
-  border-color: var(--color-error);
-  color: var(--color-error);
-}
-.panel-button-danger:hover {
-  background-color: var(--color-error);
-  border-color: var(--color-error);
-  color: var(--color-error-content);
+  --action-color: var(--color-error);
+  --action-content: var(--color-error-content);
 }
 .panel-button-warning {
-  border-color: var(--color-warning);
-  color: var(--color-warning);
-}
-.panel-button-warning:hover {
-  background-color: var(--color-warning);
-  border-color: var(--color-warning);
-  color: var(--color-warning-content);
+  --action-color: var(--color-warning);
+  --action-content: var(--color-warning-content);
 }
 .panel-button-info {
-  border-color: var(--color-info);
-  color: var(--color-info);
+  --action-color: var(--color-info);
+  --action-content: var(--color-info-content);
 }
-.panel-button-info:hover {
-  background-color: var(--color-info);
-  border-color: var(--color-info);
-  color: var(--color-info-content);
+:is(.panel-button-danger, .panel-button-warning, .panel-button-info) {
+  border-color: var(--action-color);
+  color: var(--action-color);
+}
+:is(.panel-button-danger, .panel-button-warning, .panel-button-info):hover {
+  background-color: var(--action-color);
+  border-color: var(--action-color);
+  color: var(--action-content);
+}
+.panel-card
+  :is(.panel-button-danger, .panel-button-warning, .panel-button-info) {
+  background-color: color-mix(
+    in srgb,
+    var(--action-color) 12%,
+    var(--color-base-100)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--action-color) 28%,
+    var(--color-base-100)
+  );
+}
+.panel-card
+  :is(.panel-button-danger, .panel-button-warning, .panel-button-info):hover {
+  background-color: color-mix(
+    in srgb,
+    var(--action-color) 20%,
+    var(--color-base-100)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--action-color) 42%,
+    var(--color-base-100)
+  );
+  color: var(--action-color);
 }
 .button-row {
   display: flex;
@@ -1781,7 +1802,7 @@ li[data-slice="4"] {
   font-size: 0.75rem;
 }
 [data-ui="preview-actions"] .panel-button:last-child {
-  background: var(--color-neutral);
+  background-color: var(--color-neutral);
   color: var(--color-neutral-content);
 }
 [data-ui="dashboard-footer"] {
@@ -1959,9 +1980,6 @@ section[aria-label="Sign in"] .panel-card {
 }
 section[aria-label="Sign in"] .panel-button {
   width: 100%;
-  background: var(--color-primary);
-  color: var(--color-primary-content);
-  border-color: var(--color-primary);
 }
 #form-error:empty {
   display: none;

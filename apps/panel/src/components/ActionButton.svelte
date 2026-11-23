@@ -1,46 +1,98 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import type {
+    HTMLAnchorAttributes,
+    HTMLAttributes,
+    HTMLButtonAttributes,
+  } from "svelte/elements";
   import Icon from "./Icon.svelte";
   import type { IconName } from "./icons.js";
+
+  const variants = {
+    default: undefined,
+    primary: "panel-button-primary",
+    danger: "panel-button-danger",
+    warning: "panel-button-warning",
+    info: "panel-button-info",
+    ghost: "panel-button-ghost",
+    plain: undefined,
+  } as const;
+
+  type Props = HTMLAttributes<HTMLElement> &
+    Pick<HTMLAnchorAttributes, "href" | "target" | "rel" | "download"> &
+    Pick<
+      HTMLButtonAttributes,
+      "type" | "disabled" | "form" | "name" | "value"
+    > & {
+      children?: Snippet;
+      variant?: keyof typeof variants;
+      icon?: IconName;
+      iconOnly?: boolean;
+      element?: HTMLButtonElement;
+    };
+
   let {
     children,
     href,
+    target,
+    rel,
+    download,
     onclick,
-    disabled = false,
-    primary = false,
+    disabled,
+    variant = "default",
     icon,
+    iconOnly,
     type = "button",
-  }: {
-    children: Snippet;
-    href?: string;
-    onclick?: (event: MouseEvent) => void;
-    disabled?: boolean;
-    primary?: boolean;
-    icon?: IconName;
-    type?: "button" | "submit";
-  } = $props();
+    form,
+    name,
+    value,
+    class: className,
+    tabindex,
+    "aria-disabled": ariaDisabled,
+    element = $bindable(),
+    ...rest
+  }: Props = $props();
+
+  let classes = $derived([
+    variant !== "plain" && "panel-button",
+    variants[variant],
+    iconOnly && "panel-button-icon",
+    className,
+  ]);
 </script>
 
-{#if href}
+{#snippet content()}
+  {#if icon}<Icon name={icon} />{/if}
+  {@render children?.()}
+{/snippet}
+
+{#if href != null}
   <a
-    class="panel-button"
-    class:panel-button-primary={primary}
+    {...rest}
+    class={classes}
     {href}
-    aria-disabled={disabled || undefined}
-    tabindex={disabled ? -1 : undefined}
+    {target}
+    {rel}
+    {download}
+    aria-disabled={disabled || ariaDisabled}
+    tabindex={disabled ? -1 : tabindex}
     onclick={(event) => {
       if (disabled) event.preventDefault();
       else onclick?.(event);
-    }}
-    >{#if icon}<Icon name={icon} />{/if}{@render children()}</a
+    }}>{@render content()}</a
   >
 {:else}
   <button
-    class="panel-button"
-    class:panel-button-primary={primary}
+    {...rest}
+    class={classes}
+    bind:this={element}
     {type}
     {disabled}
-    {onclick}
-    >{#if icon}<Icon name={icon} />{/if}{@render children()}</button
+    {form}
+    {name}
+    {value}
+    {tabindex}
+    aria-disabled={ariaDisabled}
+    {onclick}>{@render content()}</button
   >
 {/if}

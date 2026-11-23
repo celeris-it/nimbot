@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Icon, Select, TextField } from "./components/index.js";
+  import { ActionButton, Icon, Select, TextField } from "./components/index.js";
   import type { ApprovalRequest } from "../../server/src/approvals/approval-store.js";
   import type { ApprovalRule } from "../../server/src/approvals/approval-rules.js";
   let {
@@ -65,11 +65,10 @@
               {:else if rule.expiresAt}· {active(rule) ? "expires" : "expired"}
                 {date(rule.expiresAt)}{/if}
               {#if active(rule)}
-                <button
-                  class="panel-button"
+                <ActionButton
                   disabled={busy}
                   aria-label={`Revoke rule for ${rule.actionType} on ${rule.target}`}
-                  onclick={() => revokeRule(rule.id)}>Revoke</button
+                  onclick={() => revokeRule(rule.id)}>Revoke</ActionButton
                 >
               {/if}
             </li>
@@ -108,8 +107,8 @@
             pattern="[0-9]*"
           /></label
         >
-        <button class="panel-button panel-button-primary" disabled={busy}
-          >Add rule</button
+        <ActionButton type="submit" variant="primary" disabled={busy}
+          >Add rule</ActionButton
         >
       </form>
     </div>
@@ -138,8 +137,8 @@
     {/each}
   </ul>
 {/if}
-<a class="panel-button" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-  >Back to agent</a
+<ActionButton href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+  >Back to agent</ActionButton
 >
 
 <style>

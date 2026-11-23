@@ -1,6 +1,11 @@
 <script lang="ts">
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
-  import { Icon, PasswordField, TextField } from "./components/index.js";
+  import {
+    ActionButton,
+    Icon,
+    PasswordField,
+    TextField,
+  } from "./components/index.js";
   import DiscordSettings from "./DiscordSettings.svelte";
   import {
     botLabel,
@@ -38,9 +43,9 @@
 </script>
 
 <h1 tabindex="-1">Channels for {agent.name}</h1>
-<button class="panel-button" disabled={busy} onclick={refresh}>
+<ActionButton disabled={busy} onclick={refresh}>
   <Icon name="refresh" size={16} />Refresh channel status
-</button>
+</ActionButton>
 <div class="settings-section-list" data-ui="agent-channels">
   <section aria-label="Telegram connection">
     <div class="settings-section-description max-w-[72ch]">
@@ -101,13 +106,10 @@
             required
             bind:value={telegramToken}
           />
-          <button
-            class="panel-button panel-button-primary"
-            type="submit"
-            disabled={busy}
+          <ActionButton variant="primary" type="submit" disabled={busy}
             ><Icon name="link" size={16} />{busy
               ? "Saving…"
-              : "Connect Telegram"}</button
+              : "Connect Telegram"}</ActionButton
           >
         </form>
       {:else if agent.botUsername}
@@ -133,8 +135,8 @@
           </p>
         {/if}
         {#if agent.capabilities.replaceToken}<div class="button-row">
-            <a class="panel-button" href={`${base}/token`}
-              ><Icon name="key" size={16} />Replace bot token</a
+            <ActionButton href={`${base}/token`}
+              ><Icon name="key" size={16} />Replace bot token</ActionButton
             >
           </div>{/if}
       {:else}

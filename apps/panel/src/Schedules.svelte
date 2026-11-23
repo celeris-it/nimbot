@@ -1,6 +1,8 @@
 <script lang="ts">
   import {
+    ActionButton,
     Checkbox,
+    Icon,
     NumberStepper,
     Select,
     TextField,
@@ -242,20 +244,18 @@
     </p>
   {/if}
   <div data-ui="schedule-actions">
-    <a
-      class="panel-button"
-      href={`/agents/${encodeURIComponent(agent.id)}/setup`}>{text.back}</a
+    <ActionButton href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+      >{text.back}</ActionButton
     >
-    <button
-      class="panel-button panel-button-primary"
+    <ActionButton
+      variant="primary"
       id="new-schedule"
       disabled={busy || atLimit}
       onclick={() => openForm()}
       aria-describedby={atLimit ? "schedule-limit" : undefined}
-      >{text.new}</button
+      >{text.new}</ActionButton
     >
-    <button class="panel-button" disabled={busy} onclick={refresh}
-      >{text.refresh}</button
+    <ActionButton disabled={busy} onclick={refresh}>{text.refresh}</ActionButton
     >
   </div>
   <p data-ui="muted">
@@ -399,11 +399,15 @@
             </section>
           {/if}
           <div data-ui="schedule-actions">
-            <button class="panel-button panel-button-primary" type="submit"
-              >{busy ? text.saving : editId ? text.save : text.create}</button
+            <ActionButton variant="primary" type="submit"
+              >{busy
+                ? text.saving
+                : editId
+                  ? text.save
+                  : text.create}</ActionButton
             >
-            <button class="panel-button" type="button" onclick={closeForm}
-              >{text.cancel}</button
+            <ActionButton type="button" onclick={closeForm}
+              >{text.cancel}</ActionButton
             >
           </div>
         </fieldset>
@@ -440,34 +444,30 @@
         </dd>
       </dl>
       <div data-ui="schedule-actions">
-        <button
-          class="panel-button"
+        <ActionButton
           disabled={busy}
           onclick={() =>
             action(schedule.id, schedule.enabled ? "pause" : "resume")}
-          >{schedule.enabled ? text.pause : text.resume}</button
+          ><Icon
+            name={schedule.enabled ? "pause" : "play"}
+            size={16}
+          />{schedule.enabled ? text.pause : text.resume}</ActionButton
         >
-        <button
-          class="panel-button"
-          disabled={busy}
-          onclick={() => action(schedule.id, "run")}>{text.run}</button
+        <ActionButton disabled={busy} onclick={() => action(schedule.id, "run")}
+          ><Icon name="play" size={16} />{text.run}</ActionButton
         >
-        <button
-          class="panel-button"
-          disabled={busy}
-          onclick={() => openForm(schedule)}>{text.edit}</button
+        <ActionButton disabled={busy} onclick={() => openForm(schedule)}
+          ><Icon name="edit" size={16} />{text.edit}</ActionButton
         >
-        <button
-          class="panel-button"
-          disabled={busy}
-          onclick={() => remove(schedule)}>{text.remove}</button
+        <ActionButton disabled={busy} onclick={() => remove(schedule)}
+          ><Icon name="trash" size={16} />{text.remove}</ActionButton
         >
       </div>
       {#if schedule.cadence.kind === "webhook"}
-        <button
-          class="panel-button"
+        <ActionButton
           disabled={busy || webhookBusy}
-          onclick={() => loadWebhook(schedule.id)}>{text.webhookShow}</button
+          onclick={() => loadWebhook(schedule.id)}
+          >{text.webhookShow}</ActionButton
         >
         {#if webhook?.id === schedule.id}
           <label for={`webhook-url-${schedule.id}`}>{text.webhookUrl}</label>
@@ -485,17 +485,15 @@
           />
           <p>{text.webhookHelp}</p>
           <div data-ui="schedule-actions">
-            <button
-              class="panel-button"
+            <ActionButton
               disabled={busy || webhookBusy}
               onclick={() => loadWebhook(schedule.id, true)}
-              >{text.webhookRotate}</button
+              >{text.webhookRotate}</ActionButton
             >
-            <button
-              class="panel-button"
+            <ActionButton
               onclick={() => {
                 webhook = undefined;
-              }}>{text.webhookHide}</button
+              }}>{text.webhookHide}</ActionButton
             >
           </div>
         {/if}

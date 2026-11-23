@@ -1209,6 +1209,10 @@ test("reflows the schedule list and form at desktop and narrow mobile widths", a
   page,
 }, info) => {
   await openSchedules(page);
+  await expect(page.locator("#new-schedule")).toHaveCSS(
+    "background-image",
+    "none",
+  );
   await scheduleDraft(page, "A".repeat(60));
   await page
     .getByLabel("Time zone", { exact: true })
@@ -1217,6 +1221,9 @@ test("reflows the schedule list and form at desktop and narrow mobile widths", a
     .getByRole("button", { name: "Create schedule", exact: true })
     .click();
   const card = page.getByRole("region", { name: "A".repeat(60), exact: true });
+  await expect(
+    card.getByRole("button", { name: "Edit", exact: true }),
+  ).toHaveCSS("background-image", "none");
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   for (const width of [1280, 375, 320]) {
     await page.setViewportSize({ width, height: 900 });
@@ -1252,6 +1259,13 @@ test("groups the provider settings and agent directory inside the page card", as
   await expect(forms).toHaveCount(5);
   for (const form of await forms.all())
     await expect(form).toHaveCSS("background-image", "none");
+  const keyButtons = card.getByRole("button", { name: "Save API key" });
+  expect(await keyButtons.count()).toBeGreaterThan(0);
+  for (const button of await keyButtons.all()) {
+    await expect(button).toHaveCSS("background-color", "rgb(91, 156, 255)");
+    await expect(button).toHaveCSS("background-image", "none");
+    await expect(button.locator('[data-ui="icon"]')).toBeVisible();
+  }
 
   for (const width of [1440, 320]) {
     await page.setViewportSize({ width, height: 1000 });
@@ -1326,6 +1340,7 @@ test("manages global API keys with keyboard navigation and blank secret fields",
   });
   const confirmation = page.getByRole("dialog", { name: "Disconnect OpenAI?" });
   await page.setViewportSize({ width: 320, height: 800 });
+  await expect(disconnect).toHaveCSS("align-items", "center");
   await disconnect.click();
   await expect(confirmation).toBeInViewport();
   const dialogBox = (await confirmation.boundingBox())!;
@@ -3456,17 +3471,19 @@ for (const deploymentMode of ["native", "docker"] as const)
     await expect(
       page.getByRole("button", { name: "Start agent", exact: true }),
     ).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Stop agent…" })).toHaveCSS(
-      "border-color",
-      "rgb(255, 168, 177)",
-    );
-    await expect(page.getByRole("link", { name: "Restart agent…" })).toHaveCSS(
-      "border-color",
-      "rgb(255, 207, 136)",
-    );
-    await expect(
-      page.getByRole("button", { name: "Refresh status" }),
-    ).toHaveCSS("border-color", "rgb(186, 207, 253)");
+    const stop = page.getByRole("link", { name: "Stop agent…" });
+    const restart = page.getByRole("link", { name: "Restart agent…" });
+    const refresh = page.getByRole("button", { name: "Refresh status" });
+    for (const [control, color] of [
+      [stop, "rgb(255, 168, 177)"],
+      [restart, "rgb(255, 207, 136)"],
+      [refresh, "rgb(186, 207, 253)"],
+    ] as const) {
+      await expect(control).toHaveCSS("color", color);
+      await expect(control).toHaveCSS("background-color", /^color\(srgb /);
+      await expect(control).toHaveCSS("background-image", "none");
+      await expect(control).toHaveCSS("box-shadow", "none");
+    }
     await page.getByRole("link", { name: "Restart agent…" }).click();
     await expect(
       page.getByRole("heading", { name: "Restart Developer?" }),

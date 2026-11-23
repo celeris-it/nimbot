@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { Checkbox, Select, Switch, TextField } from "./components/index.js";
+  import {
+    ActionButton,
+    Checkbox,
+    Select,
+    Switch,
+    TextField,
+  } from "./components/index.js";
   import { onMount, tick, untrack } from "svelte";
   import type {
     McpDiscoveryResult,
@@ -210,11 +216,10 @@
     {#if endpointChanged}<p>
         Save the endpoint before testing the connection.
       </p>{/if}
-    <button
-      class="panel-button"
+    <ActionButton
       type="button"
       disabled={busy || endpointChanged}
-      onclick={testConnection}>Test connection</button
+      onclick={testConnection}>Test connection</ActionButton
     >
   {/if}
   {#if example && checkingExample}
@@ -233,8 +238,7 @@
             {#each discovery.tools as tool (tool.name)}
               <li>
                 <code>{tool.name}</code>
-                <button
-                  class="panel-button"
+                <ActionButton
                   type="button"
                   disabled={busy ||
                     (tools.length >= 32 &&
@@ -244,7 +248,7 @@
                   {tools.some(({ name }) => name === tool.name)
                     ? "Review schema"
                     : "Review tool"}
-                </button>
+                </ActionButton>
               </li>
             {/each}
           </ul>
@@ -259,11 +263,10 @@
     {/if}
   {/if}
   {#if example && discovery && (discovery.status !== "connected" || !discovery.tools.length)}
-    <button
-      class="panel-button"
+    <ActionButton
       type="button"
       disabled={checkingExample}
-      onclick={testExampleConnection}>Retry connection</button
+      onclick={testExampleConnection}>Retry connection</ActionButton
     >
   {/if}
 
@@ -312,29 +315,25 @@
           >I reviewed the schema and access for {tool.name}</Checkbox
         >
       {/if}
-      <button
-        class="panel-button"
+      <ActionButton
         type="button"
         disabled={busy}
         onclick={() => (tools = tools.filter((item) => item.id !== tool.id))}
-        >Remove tool</button
+        >Remove tool</ActionButton
       >
     </fieldset>
   {/each}
   {#if parseError}<p role="alert">{parseError}</p>{/if}
   <div class="actions">
     {#if !example}
-      <button
-        class="panel-button"
+      <ActionButton
         type="button"
         disabled={busy || tools.length >= 32}
-        onclick={addTool}>Add tool</button
+        onclick={addTool}>Add tool</ActionButton
       >
     {/if}
-    <button
-      class="panel-button panel-button-primary"
-      type="submit"
-      disabled={saveDisabled}>Save integration</button
+    <ActionButton variant="primary" type="submit" disabled={saveDisabled}
+      >Save integration</ActionButton
     >
   </div>
 </form>

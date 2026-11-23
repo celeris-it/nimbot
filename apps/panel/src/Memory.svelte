@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ActionButton from "./components/ActionButton.svelte";
   import type { MemoryEntry } from "../../server/src/memory/host-memories.js";
   let {
     agent,
@@ -34,11 +35,8 @@
     Memory tools are <strong>{enabled ? "on" : "off"}</strong> for chat tasks of this
     agent. Scheduled and webhook tasks never get them.
   </p>
-  <button
-    class="panel-button"
-    disabled={busy}
-    onclick={() => setEnabled(!enabled)}
-    >{enabled ? "Turn memory off" : "Turn memory on"}</button
+  <ActionButton disabled={busy} onclick={() => setEnabled(!enabled)}
+    >{enabled ? "Turn memory off" : "Turn memory on"}</ActionButton
   >
 {/if}
 {#if !memories}
@@ -48,7 +46,7 @@
       >Open Overview to start it</a
     >, then refresh.
   </p>
-  <button class="panel-button" onclick={() => go(page)}>Refresh memory</button>
+  <ActionButton onclick={() => go(page)}>Refresh memory</ActionButton>
 {:else if memories.memories.length === 0}
   <p role="status">No saved notes{page > 1 ? " on this page" : ""}.</p>
 {:else}
@@ -62,28 +60,25 @@
           {/if}Updated {date(memory.updatedAt)}{#if memory.expiresAt}
             · Expires {date(memory.expiresAt)}{/if}
         </p>
-        <button
-          class="panel-button panel-button-danger"
+        <ActionButton
+          variant="danger"
           disabled={busy}
           aria-label={`Delete note ${memory.title}`}
-          onclick={() => remove(memory.id)}>Delete</button
+          onclick={() => remove(memory.id)}>Delete</ActionButton
         >
       </li>
     {/each}
   </ul>
 {/if}
 {#if memories}<nav aria-label="Memory pages">
-    <button
-      class="panel-button"
-      disabled={busy || page <= 1}
-      onclick={() => go(page - 1)}>Previous</button
+    <ActionButton disabled={busy || page <= 1} onclick={() => go(page - 1)}
+      >Previous</ActionButton
     >
-    <button
-      class="panel-button"
+    <ActionButton
       disabled={busy || !memories?.hasMore}
-      onclick={() => go(page + 1)}>Next</button
+      onclick={() => go(page + 1)}>Next</ActionButton
     >
   </nav>{/if}
-<a class="panel-button" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-  >Back to agent</a
+<ActionButton href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+  >Back to agent</ActionButton
 >

@@ -179,12 +179,15 @@
     <h1 tabindex="-1">Your agents.</h1>
   </div>
   <div data-ui="heading-actions">
-    <button
-      class="panel-button panel-button-icon panel-button-ghost"
+    <ActionButton
+      variant="ghost"
+      iconOnly
       aria-label="Refresh status"
-      onclick={refresh}><Icon name="refresh" /></button
-    >{#if canCreate}<ActionButton primary href="/agents/new" icon="plus"
-        >Create agent</ActionButton
+      onclick={refresh}><Icon name="refresh" /></ActionButton
+    >{#if canCreate}<ActionButton
+        variant="primary"
+        href="/agents/new"
+        icon="plus">Create agent</ActionButton
       >{/if}
   </div>
 </div>
@@ -374,19 +377,19 @@
       description="Try another name, bot username, or filter."
       icon="search"
     >
-      {#snippet actions()}<button
-          class="panel-button"
+      {#snippet actions()}<ActionButton
           onclick={() => {
             clearSearch();
             filter = "all";
-          }}>Clear filters</button
+          }}>Clear filters</ActionButton
         >{/snippet}
     </EmptyState>
   {:else}
     <div data-ui="fleet-layout">
       <div data-ui="agent-list" role="group" aria-label="Agent workspaces">
         {#each filtered as item (item.id)}
-          <button
+          <ActionButton
+            variant="plain"
             type="button"
             data-ui="agent-row"
             aria-label={`Select ${item.name}`}
@@ -401,7 +404,7 @@
               label={setupLabel(item)}
               tone={attention(item) ? "warning" : "neutral"}
             /><Icon name="chevron" size={14} />
-          </button>
+          </ActionButton>
         {/each}
       </div>
       <article data-ui="agent-preview" aria-label="Selected agent">

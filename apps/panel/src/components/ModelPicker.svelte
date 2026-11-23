@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ActionButton from "./ActionButton.svelte";
   import { tick } from "svelte";
   import type {
     AgentModels,
@@ -34,7 +35,7 @@
     searchText: "automatic",
   };
   let root: HTMLDivElement;
-  let trigger: HTMLButtonElement;
+  let trigger = $state<HTMLButtonElement>();
   let search = $state<HTMLInputElement>();
   let list = $state<HTMLDivElement>();
   let open = $state(false);
@@ -87,11 +88,11 @@
 
   function close(restoreFocus = false) {
     open = false;
-    if (restoreFocus) trigger.focus();
+    if (restoreFocus) trigger?.focus();
   }
 
   async function toggle() {
-    if (disabled) return;
+    if (disabled || !trigger) return;
     if (open) {
       close();
       return;
@@ -178,14 +179,14 @@
 <svelte:window onpointerdown={dismissOutside} />
 
 {#snippet optionRow(option: Option)}
-  <button
+  <ActionButton
+    variant="plain"
     type="button"
     role="option"
     id={option.id}
-    tabindex="-1"
+    tabindex={-1}
     aria-selected={matches(option.model, value)}
-    class="option"
-    class:active={active?.id === option.id}
+    class={["option", { active: active?.id === option.id }]}
     onmousedown={(event) => event.preventDefault()}
     onclick={() => choose(option)}
   >
@@ -199,17 +200,18 @@
     {#if matches(option.model, value)}
       <span class="check"><Icon name="check" size={17} /></span>
     {/if}
-  </button>
+  </ActionButton>
 {/snippet}
 
 <div class="picker" bind:this={root} onfocusout={dismissOnFocusOut}>
   <label id={`${id}-label`} for={`${id}-trigger`}>Model for new turns</label>
   <div class="anchor">
-    <button
+    <ActionButton
+      variant="plain"
       type="button"
       id={`${id}-trigger`}
       class="panel-input trigger"
-      bind:this={trigger}
+      bind:element={trigger}
       aria-labelledby={`${id}-label ${id}-value`}
       aria-expanded={open}
       aria-controls={open ? `${id}-popover` : undefined}
@@ -231,8 +233,10 @@
           {automatic.label}
         {/if}
       </span>
-      <span class="chevron"><Icon name="chevron" size={16} /></span>
-    </button>
+      <span class="chevron" class:expanded={open}
+        ><Icon name="chevron" size={16} /></span
+      >
+    </ActionButton>
     {#if open}
       <div class="popover" class:above id={`${id}-popover`}>
         <div class="search">
@@ -257,7 +261,7 @@
           id={`${id}-list`}
           class="results"
           role="listbox"
-          tabindex="-1"
+          tabindex={-1}
           aria-label="Models"
           bind:this={list}
         >
@@ -291,7 +295,7 @@
   .anchor {
     position: relative;
   }
-  .trigger {
+  .anchor > :global(.trigger) {
     width: 100%;
     display: flex;
     align-items: center;
@@ -307,7 +311,7 @@
     color: var(--color-muted);
     transform: rotate(90deg);
   }
-  .trigger[aria-expanded="true"] .chevron {
+  .chevron.expanded {
     transform: rotate(-90deg);
   }
   .popover {
@@ -371,7 +375,7 @@
     font-size: 0.72rem;
     font-weight: 700;
   }
-  .option {
+  .results :global(.option) {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -381,14 +385,14 @@
     border-radius: 0.55rem;
     text-align: start;
   }
-  .option:hover,
-  .option.active {
+  .results :global(.option:hover),
+  .results :global(.option.active) {
     background: var(--color-neutral);
   }
-  .option[aria-selected="true"] {
+  .results :global(.option[aria-selected="true"]) {
     background: var(--color-base-100);
   }
-  .option.active {
+  .results :global(.option.active) {
     outline: 1px solid var(--color-primary);
     outline-offset: -1px;
   }
