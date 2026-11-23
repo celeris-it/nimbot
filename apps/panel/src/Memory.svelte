@@ -8,11 +8,7 @@
     busy,
     remove,
     go,
-    enabled,
-    setEnabled,
   }: {
-    enabled: boolean | undefined;
-    setEnabled: (enabled: boolean) => Promise<void>;
     agent: { id: string; name: string };
     memories: { memories: MemoryEntry[]; hasMore: boolean } | undefined;
     page: number;
@@ -41,26 +37,6 @@
 </div>
 
 <div class="settings-section-list">
-  {#if enabled !== undefined}
-    <section aria-labelledby="memory-tools">
-      <div class="settings-section-description">
-        <h2 id="memory-tools" tabindex="-1" class="card-title">Memory tools</h2>
-        <p>
-          Available for chat tasks. Scheduled and webhook tasks have no memory
-          tools.
-        </p>
-      </div>
-      <div class="panel-card">
-        <p>Memory tools are <strong>{enabled ? "on" : "off"}</strong>.</p>
-        <ActionButton
-          variant={enabled ? "default" : "primary"}
-          disabled={busy}
-          onclick={() => setEnabled(!enabled)}
-          >{enabled ? "Turn memory off" : "Turn memory on"}</ActionButton
-        >
-      </div>
-    </section>
-  {/if}
   <section aria-labelledby="memory-notes">
     <div class="settings-section-description">
       <h2

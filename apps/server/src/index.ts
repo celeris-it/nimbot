@@ -29,7 +29,7 @@ import { openAgentNotes } from "./peers/agent-notes.js";
 import { createPeerTools } from "./peers/peer-tools.js";
 import { createDelegationExecution } from "./delegation/delegation-execution.js";
 import { openApprovalRules } from "./approvals/approval-rules.js";
-import { MEMORY_OPERATIONS } from "./memory/memory-operations.js";
+import { memoryOperationsForTask } from "./memory/memory-operations.js";
 import type {
   ChatTask,
   DiscordConversation,
@@ -334,7 +334,7 @@ async function main(): Promise<void> {
         toolPolicy: {
           canExecute: (task) => task.agentId === id && canReach(task),
           allowedOperations: (task) => [
-            ...(registry.getMemoryEnabled(id) ? MEMORY_OPERATIONS : []),
+            ...memoryOperationsForTask(task),
             ...peerTools.operations(task),
           ],
           remoteTools: mcpTools.descriptors,
@@ -601,10 +601,6 @@ async function main(): Promise<void> {
               : [];
           });
       },
-    },
-    memoryAccess: {
-      get: (id) => registry.getMemoryEnabled(id),
-      set: (id, enabled) => registry.setMemoryEnabled(id, enabled),
     },
     memories: hosts ? createHostMemories((id) => hosts!.read(id)) : undefined,
     discord: {

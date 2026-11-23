@@ -92,7 +92,6 @@ describe("panel access", () => {
         save: vi.fn(),
         hostStatus,
       },
-      memoryAccess: { get: () => false, set: vi.fn() },
     });
     const { cookie } = await login();
     const response = await app.request("/api/status", {
@@ -105,7 +104,7 @@ describe("panel access", () => {
           name: "editable",
           botUsername: null,
           provisioning: "ready",
-          optionCapabilities: { edit: true, discord: false, memoryTools: true },
+          optionCapabilities: { edit: true, discord: false },
         },
         {
           id: "read-only",
@@ -115,12 +114,28 @@ describe("panel access", () => {
           optionCapabilities: {
             edit: false,
             discord: false,
-            memoryTools: true,
           },
         },
       ],
     });
     expect(hostStatus).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a route to switch an agent's memory off", async () => {
+    const { post, login } = setup({
+      getAgentSetup: (id) => ({
+        name: id,
+        botUsername: null,
+        provisioning: "ready",
+      }),
+    });
+    const { cookie } = await login();
+    const response = await post(
+      "/api/agents/agent/memory-access",
+      "enabled=false",
+      cookie,
+    );
+    expect(response.status).toBe(404);
   });
 
   it("protects the page and API while serving the login and local assets", async () => {

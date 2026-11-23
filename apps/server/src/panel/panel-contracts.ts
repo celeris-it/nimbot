@@ -85,8 +85,6 @@ export interface AgentDetail extends AgentSummary {
     connection: { botId: string; botUsername: string; ownerId: string } | null;
   };
   settings?: { name: string; instructions: string };
-  /** Present when the memory tools can be switched for this agent. */
-  memoryEnabled?: boolean;
   providerChecks?: import("../providers/provider-contracts.js").ProviderCheck[];
   hostState?: "ready" | "busy" | "unavailable";
   capabilities: {
@@ -105,7 +103,6 @@ export interface AgentDirectoryEntry extends AgentSummary {
   optionCapabilities: {
     edit: boolean;
     discord: boolean;
-    memoryTools: boolean;
   };
 }
 export interface PanelStatus {

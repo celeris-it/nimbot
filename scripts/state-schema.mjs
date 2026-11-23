@@ -18,6 +18,10 @@ export const taskExecutionSchema = readFileSync(
   new URL("./state-schema/server-process-v4.sql", import.meta.url),
   "utf8",
 );
+const serverProcessV5 = readFileSync(
+  new URL("./state-schema/server-process-v5.sql", import.meta.url),
+  "utf8",
+);
 function migrateReferencedTable(db, sql) {
   db.exec(sql);
   if (db.prepare("PRAGMA foreign_key_check").get())
@@ -25,7 +29,7 @@ function migrateReferencedTable(db, sql) {
 }
 const definitions = {
   "server-process": {
-    version: 4,
+    version: 5,
     applicationId: 0x4e494d50,
     get current() {
       return [
@@ -33,6 +37,7 @@ const definitions = {
         serverProcessV2,
         serverProcessV3,
         taskExecutionSchema,
+        serverProcessV5,
       ].join("\n");
     },
     migrations: {
@@ -44,6 +49,9 @@ const definitions = {
       },
       4(db) {
         db.exec(taskExecutionSchema);
+      },
+      5(db) {
+        db.exec(serverProcessV5);
       },
     },
   },

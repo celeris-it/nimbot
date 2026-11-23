@@ -105,7 +105,7 @@ it("migrates subprocess state with saved Telegram and Discord connections to opt
   );
   prepareStateSchema(path, "server-process");
   prepareStateSchema(path, "server-process");
-  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 4 });
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 5 });
   expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   expect(
     read(path, "SELECT owner_id, bot_id, credential_ref FROM agents"),
@@ -231,7 +231,7 @@ it("upgrades subprocess v2 schedules and run history to the fresh v3 schema", ()
   const run = read(migrated, "SELECT * FROM schedule_runs");
   for (const path of [migrated, fresh]) {
     prepareStateSchema(path, kind);
-    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 4 });
+    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 5 });
     expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   }
   expect(read(migrated, "SELECT * FROM schedules")).toEqual({
@@ -268,8 +268,67 @@ it("migrates version 3 task history without changing execution identity or infer
   );
   const previous = read(path, "SELECT * FROM tasks");
   prepareStateSchema(path, kind);
-  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 4 });
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 5 });
   expect(read(path, "SELECT * FROM tasks")).toEqual(previous);
   expect(read(path, "SELECT * FROM task_execution_details")).toBeUndefined();
   expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
+});
+
+it("retires the memory switch in fresh and upgraded Server state while preserving saved notes", () => {
+  const kind = "server-process";
+  const version4 = [2, 3, 4]
+    .map((version) =>
+      readFileSync(
+        new URL(
+          `../scripts/state-schema/server-process-v${version}.sql`,
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    )
+    .join("\n");
+  const existing = fixture(
+    kind,
+    `
+    ${legacy(kind)}
+    ${version4}
+    PRAGMA application_id = 0x4e494d50;
+    PRAGMA user_version = 4;
+    INSERT INTO agents (id, name) VALUES ('a', 'Off'), ('b', 'Unset');
+    INSERT INTO agent_memory_access (agent_id, enabled) VALUES ('a', 0);
+    `,
+  );
+  const memory = fixture(
+    "memory",
+    `
+    ${legacy("memory")}
+    PRAGMA user_version = 1;
+    INSERT INTO memories (id, title, content, tags, created_at, updated_at)
+      VALUES ('m', 'Saved note', 'Details', '[]', 1, 1);
+    `,
+  );
+
+  for (const path of [existing, fixture(kind)]) {
+    prepareStateSchema(path, kind);
+    prepareStateSchema(path, kind);
+    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 5 });
+    expect(
+      read(
+        path,
+        "SELECT name FROM sqlite_schema WHERE name = 'agent_memory_access'",
+      ),
+    ).toBeUndefined();
+    expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
+  }
+  expect(read(existing, "SELECT name FROM agents WHERE id = 'a'")).toEqual({
+    name: "Off",
+  });
+  expect(read(existing, "SELECT name FROM agents WHERE id = 'b'")).toEqual({
+    name: "Unset",
+  });
+  prepareStateSchema(memory, "memory");
+  expect(read(memory, "SELECT title, content FROM memories")).toEqual({
+    title: "Saved note",
+    content: "Details",
+  });
 });

@@ -961,19 +961,6 @@
       },
     );
   }
-  async function setMemoryEnabled(enabled: boolean) {
-    if (!agent) return;
-    await mutate(
-      `/api/agents/${encodeURIComponent(agent.id)}/memory-access`,
-      { enabled: String(enabled) },
-      () => {
-        notice = enabled
-          ? "Memory tools turned on for this agent's chat tasks."
-          : "Memory tools turned off.";
-        void load();
-      },
-    );
-  }
   async function deleteMemory(id: string) {
     if (!agent) return;
     await mutate(
@@ -1516,8 +1503,6 @@
               page={memoryPage}
               {busy}
               remove={deleteMemory}
-              enabled={agent.memoryEnabled}
-              setEnabled={setMemoryEnabled}
               go={(next) => {
                 memoryPage = next;
                 void load();

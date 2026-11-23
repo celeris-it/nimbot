@@ -42,7 +42,6 @@ import {
   discordConfigureForm,
   discordTestForm,
   loginAttemptParams,
-  memoryAccessForm,
   peerGrantForm,
   scheduleForm,
   providerKeyForm,
@@ -127,10 +126,6 @@ export interface PanelDeps {
       "listDelegations" | "getDelegation"
     >;
     cancel(sourceAgentId: string, id: string): Promise<boolean>;
-  };
-  memoryAccess?: {
-    get(id: string): boolean;
-    set(id: string, enabled: boolean): boolean;
   };
   memories?: ReturnType<
     typeof import("../memory/host-memories.js").createHostMemories
@@ -882,22 +877,6 @@ export function createPanel(
       ? c.json({ revoked: true })
       : c.json({ error: "Rule not found." }, 404),
   );
-  app.post("/api/agents/:id/memory-access", async (c) => {
-    const id = c.req.param("id");
-    if (!getAgentSetup?.(id)) return c.json({ error: "Agent not found." }, 404);
-    if (!deps.memoryAccess)
-      return c.json({ error: "Memory settings unavailable." }, 503);
-    const form = await parseForm(
-      c,
-      memoryAccessForm,
-      "Invalid memory setting.",
-    );
-    if (form.response) return form.response;
-    const enabled = form.data.enabled === "true";
-    if (!deps.memoryAccess.set(id, enabled))
-      return c.json({ error: "Agent not found." }, 404);
-    return c.json({ enabled });
-  });
   app.use("/api/agents/:id/memories", async (c, next) => {
     if (!getAgentSetup?.(c.req.param("id")!))
       return c.json({ error: "Agent not found." }, 404);
@@ -971,9 +950,6 @@ export function createPanel(
       id,
       ...setup,
       settings,
-      ...(deps.memoryAccess
-        ? { memoryEnabled: deps.memoryAccess.get(id) }
-        : {}),
       discord: deps.discord
         ? {
             conversation: deps.discord.status?.(id),
@@ -1250,7 +1226,6 @@ export function createPanel(
             optionCapabilities: {
               edit: !!agentSettings?.get(id),
               discord: !!deps.discord,
-              memoryTools: !!deps.memoryAccess,
             },
           },
         ];

@@ -23,10 +23,6 @@ export const approvalRuleForm = z.object({
     .pipe(z.number().int().min(1).max(365).optional()),
 });
 
-export const memoryAccessForm = z.object({
-  enabled: z.enum(["true", "false"]),
-});
-
 export const settingsForm = z.object({
   name: z.string().trim().min(1).max(128),
   instructions: z.string().max(4000),

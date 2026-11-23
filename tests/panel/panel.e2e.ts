@@ -865,6 +865,9 @@ test("manages peer grants, reads approval history and deletes private memory", a
     page.getByRole("heading", { name: "Research notes" }),
   ).toBeVisible();
   await expect(page.getByText("Primary source verified")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Turn memory (on|off)/ }),
+  ).toHaveCount(0);
   const deleteNote = page.getByRole("button", {
     name: "Delete note Research notes",
   });
@@ -891,16 +894,6 @@ test("opens agent settings and schedule help with the keyboard", async ({
 }, info) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await login(page);
-  await page.goto("/agents/dev/memory");
-  const tools = page.getByRole("region", { name: "Memory tools", exact: true });
-  const enable = tools.getByRole("button", { name: "Turn memory on" });
-  await enable.press("Enter");
-  await expect(
-    tools.getByRole("button", { name: "Turn memory off" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("navigation", { name: "Memory pages" }),
-  ).toHaveCount(0);
 
   const ruleAgent = randomUUID();
   expect((await request.post(`/__test/agent/${ruleAgent}`)).ok()).toBe(true);
@@ -2569,7 +2562,6 @@ test("keeps capability-gated links out of both navigation bars", async ({
           optionCapabilities: {
             edit: false,
             discord: false,
-            memoryTools: false,
           },
         })),
       },
@@ -2602,6 +2594,13 @@ test("keeps capability-gated links out of both navigation bars", async ({
       "No matching options.",
     );
   }
+  await search.fill("saved notes");
+  const notes = results.locator('a[href="/agents/dev/memory#memory-notes"]');
+  await expect(notes).toHaveText("Saved notes");
+  await notes.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Saved notes" }),
+  ).toBeFocused();
   await search.fill("peer access");
   await expect(
     results.getByRole("link", { name: /Other agents/ }),
@@ -2665,7 +2664,7 @@ test("shares the split layout across agent configuration sections", async ({
     ["access", ["Other agents", "MCP integrations"]],
     ["usage", ["Model", "OpenCode quota"]],
     ["approvals", ["Rules", "Decision history"]],
-    ["memory", ["Memory tools", "Saved notes"]],
+    ["memory", ["Saved notes"]],
   ] as const) {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(`/agents/dev/${path}`);

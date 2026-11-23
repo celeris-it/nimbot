@@ -117,13 +117,7 @@ export function configurationOptions(
       "usage#model-heading",
       "model selection reasoning effort",
     );
-    if (agent.optionCapabilities?.memoryTools) {
-      addAgentOption(
-        "Memory tools",
-        "memory#memory-tools",
-        "notes enable disable",
-      );
-    }
+    addAgentOption("Saved notes", "memory#memory-notes", "memory");
     addAgentOption(
       "Approval rules",
       "approvals#approval-rules-heading",
