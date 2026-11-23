@@ -109,8 +109,8 @@ when separation is required. Never mount the Docker socket into the application.
 ## Create your first agent
 
 1. Sign in to the panel, choose **Create agent**, and enter its name and optional instructions.
-2. Wait for its Agent Host to start. If startup fails, choose **Start agent** on the setup page.
-3. On the setup page, connect either or both messaging platforms.
+2. Wait for its Agent Host to start. If startup fails, choose **Start agent** on **Overview**.
+3. Open **Channels** and connect either or both messaging platforms.
    - **Telegram:** Use `/newbot` in `@BotFather` to create a bot. Under **Telegram connection**, enter your numeric Telegram user ID and the bot token, then choose **Connect Telegram**.
    - **Discord:** Create a bot in the Discord Developer Portal. Copy your user ID with Discord Developer Mode enabled. Under **Discord connection**, enter that ID and the bot token, then choose **Connect Discord**.
 4. Choose **AI providers** in the sidebar. You can connect providers before creating an agent. Save an API key for OpenAI, Anthropic, Google, or OpenRouter. For OpenAI, you can instead choose **Sign in with ChatGPT**, open the displayed OpenAI link, and enter the device code there. Enable device code login in your ChatGPT account security settings or workspace permissions if required. To connect a Console workspace for Console budgets or the Go allowance, choose **Sign in to OpenCode Console** and complete authorization using the displayed link and code. Wait for the panel to confirm completion. The panel shows connection status after saving. All agents share the saved connections.

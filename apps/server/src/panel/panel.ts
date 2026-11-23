@@ -1222,6 +1222,7 @@ export function createPanel(
   app.get("/agents/new", (c) => (registerAgent ? entry(c) : c.notFound()));
   for (const suffix of [
     "setup",
+    "channels",
     "usage",
     "memory",
     "approvals",

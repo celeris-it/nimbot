@@ -37,14 +37,14 @@ named data volume; deleting that volume is a separate, explicit purge. See
 [installation and removal](docs/INSTALL.md) for commands. See [operations](docs/OPERATIONS.md) for complete-volume backups, recovery and
 manual revision updates. This release has no automated upgrade or import path.
 
-Fresh installations start with zero agents. Sign in to the panel and create an agent with a name and optional instructions. Nimbot starts its Agent Host and opens the setup page, where you can connect a Telegram or Discord bot. Open **AI providers** in the sidebar to save an API key for OpenAI, Anthropic, Google, or OpenRouter, sign in to OpenAI with a ChatGPT device code, or connect an OpenCode Console workspace. All agents use these shared provider connections. Send the connected bot a private message from its configured owner account to link the chat and begin. See [Create your first agent](docs/INSTALL.md#create-your-first-agent) for the setup steps.
+Fresh installations start with zero agents. Sign in to the panel and create an agent with a name and optional instructions. Nimbot starts its Agent Host and opens **Overview**. Open **Channels** to connect a Telegram or Discord bot. Open **AI providers** in the sidebar to save an API key for OpenAI, Anthropic, Google, or OpenRouter, sign in to OpenAI with a ChatGPT device code, or connect an OpenCode Console workspace. All agents use these shared provider connections. Send the connected bot a private message from its configured owner account to link the chat and begin. See [Create your first agent](docs/INSTALL.md#create-your-first-agent) for the setup steps.
 
 No Telegram or per-agent environment variables are required. `.env` contains administrator authentication and trusted deployment settings; internal Agent Host credentials are generated automatically.
 
 ## Features
 
 - Create, list, configure, start, stop, restart, and delete agents through an authenticated web panel.
-- Give each agent a dedicated Agent Host and persistent workspace. Connect Telegram, Discord, or both from the setup page after creating the agent.
+- Give each agent a dedicated Agent Host and persistent workspace. Connect Telegram, Discord, or both from **Channels** after creating the agent.
 - Each connected platform uses its own bot and owner-bound private chat. Both platforms share the agent’s workspace, AI context, and durable task queue.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.
 - Queue tasks durably, report progress, request owner approvals, and return results through the originating bot and chat.
@@ -149,7 +149,7 @@ process lifecycle operations; neither requires access to the Docker daemon.
 
 Deletion requires explicit confirmation and keeps agent data unless purge is
 separately selected. If Telegram is connected, deletion stops polling and removes
-the local Telegram chat binding and credentials. Remove a Discord connection from setup before
+the local Telegram chat binding and credentials. Remove a Discord connection from **Channels** before
 deleting its agent. Deleting the Telegram bot identity is a separate action in BotFather.
 
 Explicitly deleting agent data removes its workspace, OpenCode session history, and Host task state, including private memory and the tool outbox. Shared provider connections belong to the installation. Approval history, delegation records, peer notes, and the MCP catalog live in the separate Server database. Deleting an agent also revokes its MCP grants and retires its stored MCP credentials. Backups can still contain copies of deleted data.

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Select, TextField } from "./components/index.js";
+  import { Icon, Select, TextField } from "./components/index.js";
   import type { ApprovalRequest } from "../../server/src/approvals/approval-store.js";
   import type { ApprovalRule } from "../../server/src/approvals/approval-rules.js";
   let {
@@ -36,75 +36,85 @@
 </script>
 
 <h1 tabindex="-1">Approvals for {agent.name}</h1>
-<p>
-  Rules apply to one capability and one exact target of this agent. By default
-  every write asks each time. An explicit <strong>Deny</strong> always wins.
-  <strong>Always allow</strong> is only accepted for actions Nimbot itself can verify
-  as read-only.
-</p>
+<div class="settings-section-list">
+  <section aria-labelledby="approval-rules-heading">
+    <div class="settings-section-description">
+      <h2 id="approval-rules-heading" class="card-title">
+        <Icon name="shield" size={20} />Rules
+      </h2>
+      <p>
+        Rules apply to one capability and one exact target of this agent. By
+        default every write asks each time. An explicit <strong>Deny</strong>
+        always wins.
+        <strong>Always allow</strong> is only accepted for actions Nimbot itself can
+        verify as read-only.
+      </p>
+    </div>
+    <div class="panel-card">
+      {#if !rules}
+        <p role="status">Rules unavailable. Refresh to try again.</p>
+      {:else if rules.rules.length === 0}
+        <p role="status">No rules. Every action asks each time.</p>
+      {:else}
+        <ul class="rules-list">
+          {#each rules.rules as rule (rule.id)}
+            <li>
+              <strong>{rule.effect}</strong>
+              {rule.actionType} on <code>{rule.target}</code>
+              {#if rule.revokedAt}· revoked {date(rule.revokedAt)}
+              {:else if rule.expiresAt}· {active(rule) ? "expires" : "expired"}
+                {date(rule.expiresAt)}{/if}
+              {#if active(rule)}
+                <button
+                  class="panel-button"
+                  disabled={busy}
+                  aria-label={`Revoke rule for ${rule.actionType} on ${rule.target}`}
+                  onclick={() => revokeRule(rule.id)}>Revoke</button
+                >
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
 
-<h2>Rules</h2>
-{#if !rules}
-  <p role="status">Rules unavailable. Refresh to try again.</p>
-{:else if rules.rules.length === 0}
-  <p role="status">No rules. Every action asks each time.</p>
-{:else}
-  <ul>
-    {#each rules.rules as rule (rule.id)}
-      <li>
-        <strong>{rule.effect}</strong>
-        {rule.actionType} on <code>{rule.target}</code>
-        {#if rule.revokedAt}· revoked {date(rule.revokedAt)}
-        {:else if rule.expiresAt}· {active(rule) ? "expires" : "expired"}
-          {date(rule.expiresAt)}{/if}
-        {#if active(rule)}
-          <button
-            class="panel-button"
-            disabled={busy}
-            aria-label={`Revoke rule for ${rule.actionType} on ${rule.target}`}
-            onclick={() => revokeRule(rule.id)}>Revoke</button
-          >
-        {/if}
-      </li>
-    {/each}
-  </ul>
-{/if}
-
-<form onsubmit={submit}>
-  <label
-    >Capability <TextField
-      bind:value={actionType}
-      required
-      maxlength={64}
-      placeholder="mcp.docs.write"
-    /></label
-  >
-  <label
-    >Exact target <TextField
-      bind:value={target}
-      required
-      maxlength={300}
-    /></label
-  >
-  <label>
-    Rule
-    <Select bind:value={effect}>
-      <option value="ask">Ask each time</option>
-      <option value="deny">Deny</option>
-      <option value="allow">Always allow (read-only only)</option>
-    </Select>
-  </label>
-  <label
-    >Expires after (days, optional) <TextField
-      bind:value={ttlDays}
-      inputmode="numeric"
-      pattern="[0-9]*"
-    /></label
-  >
-  <button class="panel-button panel-button-primary" disabled={busy}
-    >Add rule</button
-  >
-</form>
+      <form onsubmit={submit}>
+        <label
+          >Capability <TextField
+            bind:value={actionType}
+            required
+            maxlength={64}
+            placeholder="mcp.docs.write"
+          /></label
+        >
+        <label
+          >Exact target <TextField
+            bind:value={target}
+            required
+            maxlength={300}
+          /></label
+        >
+        <label>
+          Rule
+          <Select bind:value={effect}>
+            <option value="ask">Ask each time</option>
+            <option value="deny">Deny</option>
+            <option value="allow">Always allow (read-only only)</option>
+          </Select>
+        </label>
+        <label
+          >Expires after (days, optional) <TextField
+            bind:value={ttlDays}
+            inputmode="numeric"
+            pattern="[0-9]*"
+          /></label
+        >
+        <button class="panel-button panel-button-primary" disabled={busy}
+          >Add rule</button
+        >
+      </form>
+    </div>
+  </section>
+</div>
 
 <h2>Decision history</h2>
 {#if !history}
@@ -131,3 +141,13 @@
 <a class="panel-button" href={`/agents/${encodeURIComponent(agent.id)}/setup`}
   >Back to agent</a
 >
+
+<style>
+  .rules-list {
+    display: grid;
+    gap: 8px;
+  }
+  .rules-list code {
+    overflow-wrap: anywhere;
+  }
+</style>

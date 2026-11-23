@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DataTable, StatusBadge } from "./components/index.js";
+  import { Icon, DataTable, StatusBadge } from "./components/index.js";
   import ModelPicker from "./components/ModelPicker.svelte";
   import type {
     AgentModels,
@@ -105,62 +105,77 @@
   >
 </nav>
 
-<section class="panel-card" aria-labelledby="model-heading">
-  <h2 id="model-heading">Model</h2>
-  {#if catalog}
-    <ModelPicker
-      models={catalog.models}
-      value={catalog.selected}
-      disabled={busy}
-      onchange={save}
-    />
-    {#if busy}<p role="status">Saving model…</p>{/if}
-    {#if !catalog.catalogAvailable}
-      <p role="status">Model catalog unavailable.</p>
-    {/if}
-  {:else}
-    <p role="status">Model settings unavailable.</p>
-  {/if}
-</section>
+<div class="settings-section-list">
+  <section aria-labelledby="model-heading">
+    <div class="settings-section-description">
+      <h2 id="model-heading" class="card-title">
+        <Icon name="cpu" size={20} />Model
+      </h2>
+    </div>
+    <div class="panel-card">
+      {#if catalog}
+        <ModelPicker
+          models={catalog.models}
+          value={catalog.selected}
+          disabled={busy}
+          onchange={save}
+        />
+        {#if busy}<p role="status">Saving model…</p>{/if}
+        {#if !catalog.catalogAvailable}
+          <p role="status">Model catalog unavailable.</p>
+        {/if}
+      {:else}
+        <p role="status">Model settings unavailable.</p>
+      {/if}
+    </div>
+  </section>
 
-<section class="panel-card" aria-labelledby="quota-heading">
-  <h2 id="quota-heading">OpenCode quota</h2>
-  {#if data?.quota}
-    {@const quota = data.quota}
-    <p>
-      <strong
-        >{quota.failure
-          ? "Model or quota check failed"
-          : quotaText[quota.state]}</strong
-      >
-      {#if quota.model}
-        · {quota.model.providerId}/{quota.model.modelId}{/if}
-    </p>
-    {#if quota.failure}
-      <p role="status">{failureText[quota.failure]}</p>
-    {/if}
-    {#if data.queued}<p>{number.format(data.queued)} queued</p>{/if}
-    <p>Last checked {time(quota.checkedAt)}</p>
-    {#if quota.windows.length}
-      <ul class="windows">
-        {#each quota.windows as window (window)}
-          <li>
-            <strong>{window.name}</strong>
-            · {number.format(Math.round(window.usedPercent * 10) / 10)}% used
-            {#if window.spentUsd !== undefined && window.limitUsd !== undefined}
-              · {money(window.spentUsd)} of {money(window.limitUsd)}
-            {/if}
-            {#if window.exhausted}
-              · Limit reached{/if}
-            · Resets {time(window.resetsAt)}
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  {:else}
-    <p role="status">Waiting for the first quota check.</p>
-  {/if}
-</section>
+  <section aria-labelledby="quota-heading">
+    <div class="settings-section-description">
+      <h2 id="quota-heading" class="card-title">
+        <Icon name="activity" size={20} />OpenCode quota
+      </h2>
+    </div>
+    <div class="panel-card">
+      {#if data?.quota}
+        {@const quota = data.quota}
+        <p>
+          <strong
+            >{quota.failure
+              ? "Model or quota check failed"
+              : quotaText[quota.state]}</strong
+          >
+          {#if quota.model}
+            · {quota.model.providerId}/{quota.model.modelId}{/if}
+        </p>
+        {#if quota.failure}
+          <p role="status">{failureText[quota.failure]}</p>
+        {/if}
+        {#if data.queued}<p>{number.format(data.queued)} queued</p>{/if}
+        <p>Last checked {time(quota.checkedAt)}</p>
+        {#if quota.windows.length}
+          <ul class="windows">
+            {#each quota.windows as window (window)}
+              <li>
+                <strong>{window.name}</strong>
+                · {number.format(Math.round(window.usedPercent * 10) / 10)}%
+                used
+                {#if window.spentUsd !== undefined && window.limitUsd !== undefined}
+                  · {money(window.spentUsd)} of {money(window.limitUsd)}
+                {/if}
+                {#if window.exhausted}
+                  · Limit reached{/if}
+                · Resets {time(window.resetsAt)}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {:else}
+        <p role="status">Waiting for the first quota check.</p>
+      {/if}
+    </div>
+  </section>
+</div>
 
 <section aria-labelledby="usage-heading">
   <h2 id="usage-heading">Usage</h2>

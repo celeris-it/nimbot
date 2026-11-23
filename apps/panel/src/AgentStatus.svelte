@@ -1,42 +1,19 @@
 <script lang="ts">
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   import { providers } from "../../server/src/providers/provider-contracts.js";
-  import { Icon, PasswordField, TextField } from "./components/index.js";
-  import DiscordSettings from "./DiscordSettings.svelte";
-  import {
-    processLabels,
-    botLabel,
-    failureLabels,
-    botAccessLabels,
-    ownerLabels,
-  } from "./labels.js";
+  import { Icon } from "./components/index.js";
+  import { processLabels } from "./labels.js";
   let {
     agent,
     busy,
     action,
     refresh,
-    discordAction,
-    connectTelegram,
   }: {
     agent: AgentDetail;
     busy: boolean;
     action: (kind: "start") => Promise<void>;
     refresh: () => void;
-    connectTelegram: (fields: Record<string, string>) => Promise<void>;
-    discordAction: (
-      kind: "save" | "remove" | "test",
-      fields: Record<string, string>,
-    ) => Promise<void>;
   } = $props();
-  let telegramOwner = $state("");
-  let telegramToken = $state("");
-  async function submitTelegram(event: SubmitEvent) {
-    event.preventDefault();
-    if (busy) return;
-    const fields = { ownerId: telegramOwner, token: telegramToken };
-    telegramToken = "";
-    await connectTelegram(fields);
-  }
   const providerLabels = {
     available: "Available",
     rejected: "Reconnect required",
@@ -66,15 +43,20 @@
 </script>
 
 <h1 class="sr-only" tabindex="-1">{agent.name}</h1>
-<div data-ui="agent-overview">
-  <div data-ui="agent-overview-grid">
-    <section class="panel-card" aria-labelledby="agent-host-heading">
+<a class="panel-button" href={`${base}/channels`}>
+  <Icon name="link" size={16} />Manage channels
+</a>
+<div class="settings-section-list" data-ui="agent-overview">
+  <section aria-labelledby="agent-host-heading">
+    <div class="settings-section-description">
       <h2 id="agent-host-heading" class="card-title">
         <Icon name="server" size={20} />{agent.process
           ? `Agent Host ${processLabels[agent.process.state].toLowerCase()}.`
           : "Agent Host unavailable."}
       </h2>
       <p>{processMessage}</p>
+    </div>
+    <div class="panel-card">
       <dl>
         {#if agent.process}
           <dt>Process</dt>
@@ -109,25 +91,29 @@
               : "Start agent"}</button
           >{/if}
         {#if agent.process && agent.capabilities.process?.stop}<a
-            class="panel-button"
+            class="panel-button panel-button-danger"
             href={`${base}/process/stop`}
             ><Icon name="stop" size={16} />Stop agent…</a
           >{/if}
         {#if agent.process && agent.capabilities.process?.restart}<a
-            class="panel-button"
+            class="panel-button panel-button-warning"
             href={`${base}/process/restart`}
             ><Icon name="restart" size={16} />Restart agent…</a
           >{/if}
-        <button class="panel-button" onclick={refresh}
+        <button class="panel-button panel-button-info" onclick={refresh}
           ><Icon name="refresh" size={16} />Refresh status</button
         >
       </div>
-    </section>
-    {#if agent.providerChecks}
-      <section class="panel-card" aria-labelledby="ai-provider-status">
+    </div>
+  </section>
+  {#if agent.providerChecks}
+    <section aria-labelledby="ai-provider-status">
+      <div class="settings-section-description">
         <h2 id="ai-provider-status" class="card-title">
           <Icon name="cpu" size={20} />AI provider status
         </h2>
+      </div>
+      <div class="panel-card">
         {#if agent.providerChecks.length}
           <dl>
             {#each agent.providerChecks as check (check.id)}
@@ -150,100 +136,21 @@
               : "No provider check results yet."}
           </p>
         {/if}
-      </section>
-    {/if}
-  </div>
-  <div data-ui="agent-overview-grid">
-    <section class="panel-card" aria-label="Telegram connection">
-      <h2 class="card-title" data-brand="telegram">
-        <Icon name="telegram" size={20} />Telegram connection
-      </h2>
-      {#if agent.capabilities.connectTelegram}
-        <p>
-          Create a separate bot in BotFather and enter its token and owner's
-          numeric Telegram user ID.
-        </p>
-        <form
-          onsubmit={submitTelegram}
-          aria-describedby="form-error"
-          aria-busy={busy}
-        >
-          <label for="telegram-owner">Owner's Telegram ID</label>
-          <TextField
-            id="telegram-owner"
-            inputmode="numeric"
-            pattern="[1-9][0-9]*"
-            required
-            bind:value={telegramOwner}
-          />
-          <label for="telegram-token">Telegram bot token</label>
-          <PasswordField
-            id="telegram-token"
-            maxlength={256}
-            autocomplete="off"
-            required
-            bind:value={telegramToken}
-          />
-          <button
-            class="panel-button panel-button-primary"
-            type="submit"
-            disabled={busy}
-            ><Icon name="link" size={16} />{busy
-              ? "Saving…"
-              : "Connect Telegram"}</button
-          >
-        </form>
-      {:else if agent.botUsername}
-        <dl>
-          <dt>Bot</dt>
-          <dd>@{agent.botUsername}</dd>
-          <dt>Connection</dt>
-          <dd>{botLabel(agent)}</dd>
-          {#if agent.setupAccess}
-            <dt>Bot link</dt>
-            <dd>{botAccessLabels[agent.setupAccess.bot]}</dd>
-            <dt>Owner verification</dt>
-            <dd>{ownerLabels[agent.setupAccess.owner]}</dd>
-          {/if}
-        </dl>
-        {#if agent.botConnection?.failure}<p>
-            {failureLabels[agent.botConnection.failure]}
-          </p>{/if}
-        {#if agent.botConnection?.status === "polling" && agent.setupAccess?.owner === "pending"}
-          <p>
-            Send the bot a private message from the configured owner's account
-            to link the chat.
-          </p>
-        {/if}
-        {#if agent.capabilities.replaceToken}<div class="button-row">
-            <a class="panel-button" href={`${base}/token`}
-              ><Icon name="key" size={16} />Replace bot token</a
-            >
-          </div>{/if}
-      {:else}
-        <p>Telegram is unavailable.</p>
-      {/if}
+      </div>
     </section>
-
-    {#if agent.discord}
-      {#key agent.id}<DiscordSettings
-          {agent}
-          {busy}
-          action={discordAction}
-        />{/key}
-    {/if}
-  </div>
-
+  {/if}
   {#if agent.capabilities.delete}
-    <section class="panel-card" aria-label="Danger zone" data-tone="danger">
-      <h2 class="card-title">
-        <Icon name="alert" size={20} />Danger zone
-      </h2>
-      <p>
-        Deleting an agent stops its Host. Its data is kept unless you choose to
-        delete it on the next page.
-      </p>
-      <div class="button-row">
+    <section aria-label="Danger zone" data-tone="danger">
+      <div class="settings-section-description">
+        <h2 class="card-title">
+          <Icon name="alert" size={20} />Danger zone
+        </h2>
+        <p>
+          Deleting an agent stops its Host. Its data is kept unless you choose
+          to delete it on the next page.
+        </p>
+      </div>
+      <div class="panel-card" data-tone="danger">
         <a class="panel-button panel-button-danger" href={`${base}/delete`}
           ><Icon name="trash" size={16} />Delete agent…</a
         >

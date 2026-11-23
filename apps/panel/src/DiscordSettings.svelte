@@ -38,129 +38,133 @@
   }
 </script>
 
-<section class="panel-card" aria-label="Discord connection">
-  <h2 class="card-title" data-brand="discord">
-    <Icon name="discord" size={20} />Discord connection
-  </h2>
-  <p>
-    Text messages join this agent's shared queue. Progress, approvals, and
-    results return to the channel that received the task.
-  </p>
-  {#if agent.discord?.connection}
-    {#if agent.discord.conversation}
-      <p>
-        Discord conversation: {{
-          connecting: "Connecting",
-          ready: "Connected",
-          reconnecting: "Reconnecting",
-          failed: "Connection failed",
-          stopped: "Disconnected",
-        }[agent.discord.conversation.state]}.
-      </p>
-      <p>
-        Owner DM: {agent.discord.conversation.ownerLinked
-          ? "Linked"
-          : "Waiting for the owner's first private message"}.
-      </p>
-      <p>
-        A channel connection does not confirm that the agent is ready to run
-        tasks. Check its process and Agent Host status above.
-      </p>
-    {/if}
-    <dl>
-      <dt>Discord bot</dt>
-      <dd>{agent.discord.connection.botUsername}</dd>
-      <dt>Discord owner</dt>
-      <dd>{agent.discord.connection.ownerId}</dd>
-    </dl>
+<section aria-label="Discord connection">
+  <div class="settings-section-description">
+    <h2 class="card-title" data-brand="discord">
+      <Icon name="discord" size={20} />Discord connection
+    </h2>
     <p>
-      Send a fixed test message to the saved Discord owner. Up to five new
-      notification attempts per minute are allowed.
+      Text messages join this agent's shared queue. Progress, approvals, and
+      results return to the channel that received the task.
     </p>
-    <button
-      class="panel-button"
-      disabled={busy}
-      onclick={() => testDelivery(true)}
-      ><Icon name="send" size={16} />Send Discord test</button
-    >
-    {#if requestId}
+  </div>
+  <div class="panel-card">
+    {#if agent.discord?.connection}
+      {#if agent.discord.conversation}
+        <p>
+          Discord conversation: {{
+            connecting: "Connecting",
+            ready: "Connected",
+            reconnecting: "Reconnecting",
+            failed: "Connection failed",
+            stopped: "Disconnected",
+          }[agent.discord.conversation.state]}.
+        </p>
+        <p>
+          Owner DM: {agent.discord.conversation.ownerLinked
+            ? "Linked"
+            : "Waiting for the owner's first private message"}.
+        </p>
+        <p>
+          A channel connection does not confirm that the agent is ready to run
+          tasks. Check its process and Agent Host status above.
+        </p>
+      {/if}
+      <dl>
+        <dt>Discord bot</dt>
+        <dd>{agent.discord.connection.botUsername}</dd>
+        <dt>Discord owner</dt>
+        <dd>{agent.discord.connection.ownerId}</dd>
+      </dl>
+      <p>
+        Send a fixed test message to the saved Discord owner. Up to five new
+        notification attempts per minute are allowed.
+      </p>
       <button
         class="panel-button"
         disabled={busy}
-        onclick={() => testDelivery(false)}
-        ><Icon name="refresh" size={16} />Check last test status</button
+        onclick={() => testDelivery(true)}
+        ><Icon name="send" size={16} />Send Discord test</button
       >
-      <p>
-        Checking reuses the last request and does not send it again. A new test
-        may duplicate a message whose delivery was uncertain.
-      </p>
+      {#if requestId}
+        <button
+          class="panel-button"
+          disabled={busy}
+          onclick={() => testDelivery(false)}
+          ><Icon name="refresh" size={16} />Check last test status</button
+        >
+        <p>
+          Checking reuses the last request and does not send it again. A new
+          test may duplicate a message whose delivery was uncertain.
+        </p>
+      {/if}
+    {:else}
+      <p>Discord is not configured.</p>
     {/if}
-  {:else}
-    <p>Discord is not configured.</p>
-  {/if}
-  <form onsubmit={save} aria-busy={busy} aria-describedby="form-error">
-    <label for="discord-owner">Owner's Discord user ID</label>
-    <TextField
-      id="discord-owner"
-      name="ownerId"
-      inputmode="numeric"
-      pattern={"[1-9][0-9]{0,19}"}
-      maxlength={20}
-      required
-      bind:value={ownerId}
-      aria-describedby="discord-owner-help"
-    />
-    <p id="discord-owner-help">
-      Enable Developer Mode in Discord and copy your user ID. Only this user's
-      DMs will be used. The bot may need a shared server and permission to send
-      you direct messages.
-    </p>
-    <label for="discord-token">Discord bot token</label>
-    <PasswordField
-      id="discord-token"
-      name="token"
-      autocomplete="off"
-      maxlength={256}
-      required
-      bind:value={token}
-      aria-describedby="discord-token-help"
-    />
-    <p id="discord-token-help">
-      Create a bot in the Discord Developer Portal. Its token is stored
-      privately and never shown here. Enter it again if saving fails.
-    </p>
-    <button
-      class="panel-button panel-button-primary"
-      type="submit"
-      disabled={busy}
-      ><Icon name="link" size={16} />{busy
-        ? "Saving…"
-        : agent.discord?.connection
-          ? "Replace Discord connection"
-          : "Connect Discord"}</button
-    >
-  </form>
-  {#if agent.discord?.connection}
-    <h3>Remove Discord</h3>
-    <p>
-      Disconnecting Discord keeps the agent and its files. The bot remains in
-      Discord.
-    </p>
-    <form onsubmit={remove} aria-busy={busy} aria-describedby="form-error">
-      <label for="discord-confirm">Type {agent.id} to confirm removal</label>
+    <form onsubmit={save} aria-busy={busy} aria-describedby="form-error">
+      <label for="discord-owner">Owner's Discord user ID</label>
       <TextField
-        id="discord-confirm"
-        name="confirm"
-        autocomplete="off"
+        id="discord-owner"
+        name="ownerId"
+        inputmode="numeric"
+        pattern={"[1-9][0-9]{0,19}"}
+        maxlength={20}
         required
-        bind:value={confirmation}
+        bind:value={ownerId}
+        aria-describedby="discord-owner-help"
       />
+      <p id="discord-owner-help">
+        Enable Developer Mode in Discord and copy your user ID. Only this user's
+        DMs will be used. The bot may need a shared server and permission to
+        send you direct messages.
+      </p>
+      <label for="discord-token">Discord bot token</label>
+      <PasswordField
+        id="discord-token"
+        name="token"
+        autocomplete="off"
+        maxlength={256}
+        required
+        bind:value={token}
+        aria-describedby="discord-token-help"
+      />
+      <p id="discord-token-help">
+        Create a bot in the Discord Developer Portal. Its token is stored
+        privately and never shown here. Enter it again if saving fails.
+      </p>
       <button
-        class="panel-button"
+        class="panel-button panel-button-primary"
         type="submit"
-        disabled={busy || confirmation !== agent.id}
-        ><Icon name="trash" size={16} />Remove Discord connection</button
+        disabled={busy}
+        ><Icon name="link" size={16} />{busy
+          ? "Saving…"
+          : agent.discord?.connection
+            ? "Replace Discord connection"
+            : "Connect Discord"}</button
       >
     </form>
-  {/if}
+    {#if agent.discord?.connection}
+      <h3>Remove Discord</h3>
+      <p>
+        Disconnecting Discord keeps the agent and its files. The bot remains in
+        Discord.
+      </p>
+      <form onsubmit={remove} aria-busy={busy} aria-describedby="form-error">
+        <label for="discord-confirm">Type {agent.id} to confirm removal</label>
+        <TextField
+          id="discord-confirm"
+          name="confirm"
+          autocomplete="off"
+          required
+          bind:value={confirmation}
+        />
+        <button
+          class="panel-button"
+          type="submit"
+          disabled={busy || confirmation !== agent.id}
+          ><Icon name="trash" size={16} />Remove Discord connection</button
+        >
+      </form>
+    {/if}
+  </div>
 </section>

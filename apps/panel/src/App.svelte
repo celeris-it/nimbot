@@ -26,6 +26,7 @@
   } from "./components/index.js";
   import type { IconName } from "./components/icons.js";
   import AgentForm from "./AgentForm.svelte";
+  import AgentChannels from "./AgentChannels.svelte";
   import AgentStatus from "./AgentStatus.svelte";
   import AgentHeader from "./AgentHeader.svelte";
   import AgentNavigation from "./AgentNavigation.svelte";
@@ -106,7 +107,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|settings|usage|memory|approvals|access|delegations|schedules|token|delete|process\/(?:stop|restart))$/,
+      /^\/agents\/([^/]+)\/(setup|channels|settings|usage|memory|approvals|access|delegations|schedules|token|delete|process\/(?:stop|restart))$/,
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
@@ -146,6 +147,7 @@
     (
       [
         { view: "setup", label: "Overview", icon: "home" },
+        { view: "channels", label: "Channels", icon: "link" },
         { view: "usage", label: "Model and usage", icon: "activity" },
         { view: "memory", label: "Memory", icon: "notebook" },
         { view: "approvals", label: "Approvals", icon: "shield" },
@@ -212,31 +214,33 @@
           ? "AI providers"
           : mcpRoute
             ? "MCP catalog"
-            : route?.[2] === "access"
-              ? "Access"
-              : route?.[2] === "usage"
-                ? "Model and usage"
-                : route?.[2] === "schedules"
-                  ? scheduleText.pageTitle
-                  : route?.[2] === "delegations"
-                    ? "Delegations"
-                    : route?.[2] === "approvals"
-                      ? "Approvals"
-                      : route?.[2] === "memory"
-                        ? "Memory"
-                        : path === "/agents/new"
-                          ? "Create agent"
-                          : route?.[2] === "settings"
-                            ? "Edit agent"
-                            : route?.[2] === "token"
-                              ? "Bot token"
-                              : route?.[2] === "delete"
-                                ? "Delete agent"
-                                : route?.[2] === "process/restart"
-                                  ? "Restart agent"
-                                  : route?.[2] === "process/stop"
-                                    ? "Stop agent"
-                                    : "Agent setup",
+            : route?.[2] === "channels"
+              ? "Channels"
+              : route?.[2] === "access"
+                ? "Access"
+                : route?.[2] === "usage"
+                  ? "Model and usage"
+                  : route?.[2] === "schedules"
+                    ? scheduleText.pageTitle
+                    : route?.[2] === "delegations"
+                      ? "Delegations"
+                      : route?.[2] === "approvals"
+                        ? "Approvals"
+                        : route?.[2] === "memory"
+                          ? "Memory"
+                          : path === "/agents/new"
+                            ? "Create agent"
+                            : route?.[2] === "settings"
+                              ? "Edit agent"
+                              : route?.[2] === "token"
+                                ? "Bot token"
+                                : route?.[2] === "delete"
+                                  ? "Delete agent"
+                                  : route?.[2] === "process/restart"
+                                    ? "Restart agent"
+                                    : route?.[2] === "process/stop"
+                                      ? "Stop agent"
+                                      : "Agent setup",
   );
   let viewLabel = $derived(
     path === "/settings"
@@ -975,6 +979,7 @@
         !busy &&
         (path === "/" ||
           route?.[2] === "setup" ||
+          route?.[2] === "channels" ||
           route?.[2] === "schedules" ||
           route?.[2] === "usage")
       )
@@ -1113,7 +1118,7 @@
       {#key path}<AgentNavigation
           links={agentLinks}
           agentId={agent.id}
-          currentView={route[2]}
+          currentView={route[2] === "token" ? "channels" : route[2]}
         />{/key}
     {/if}
     <main
@@ -1281,7 +1286,7 @@
         {:else if route[2] === "access"}
           <h1 tabindex="-1">Access for {agent.name}</h1>
           {#key agent.id}
-            <div data-ui="agent-access-grid">
+            <div class="settings-section-list">
               <Peers
                 {agent}
                 data={peers}
@@ -1350,6 +1355,12 @@
               {agent}
               {busy}
               {action}
+              refresh={() => load()}
+            />{/key}
+        {:else if route[2] === "channels"}
+          {#key agent.id}<AgentChannels
+              {agent}
+              {busy}
               {discordAction}
               {connectTelegram}
               refresh={() => load()}

@@ -1025,17 +1025,34 @@ test("completes device login and recovers its pending state after reload", async
   ).toHaveAttribute("href", "https://auth.openai.com/codex/device");
   await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
   await expect(page.getByLabel("OpenAI API key")).toBeDisabled();
+  const openai = page.getByRole("region", { name: "OpenAI", exact: true });
+  await expect(openai).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   for (const width of [1280, 375, 320]) {
     await page.setViewportSize({ width, height: 800 });
+    const [identity, controls] = await Promise.all([
+      openai.locator(".settings-section-description").boundingBox(),
+      openai.locator(":scope > .panel-card").boundingBox(),
+    ]);
+    if (!identity || !controls) throw new Error("Expected provider settings");
+    const field = await openai.locator('[data-ui="field-group"]').boundingBox();
+    if (!field) throw new Error("Expected the API key field");
+    expect(field.x + field.width).toBeLessThanOrEqual(
+      controls.x + controls.width - 16,
+    );
+    if (width === 1280) {
+      expect(controls.x - identity.x - identity.width).toBeCloseTo(24);
+      expect(controls.y).toBeCloseTo(identity.y);
+    } else {
+      expect(controls.x).toBeCloseTo(identity.x);
+      expect(controls.y - identity.y - identity.height).toBeCloseTo(16);
+    }
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(width);
     if (width !== 375)
-      await page
-        .getByRole("region", { name: "OpenAI", exact: true })
-        .screenshot({
-          path: test.info().outputPath(`provider-authorization-${width}.png`),
-        });
+      await openai.screenshot({
+        path: test.info().outputPath(`provider-authorization-${width}.png`),
+      });
   }
   await page.reload();
   await expect(page.getByText("ABCD-EFGH", { exact: true })).toBeVisible();
@@ -1043,9 +1060,13 @@ test("completes device login and recovers its pending state after reload", async
   await expect(
     page.getByText("ChatGPT login completed for all agents."),
   ).toBeVisible();
-  await expect(
-    page.getByText("Configured — ChatGPT device login"),
-  ).toBeVisible();
+  const badge = page.getByText("Configured — ChatGPT device login", {
+    exact: true,
+  });
+  await expect(badge).toBeVisible();
+  const icon = badge.locator('[data-ui="icon"]');
+  await expect(icon).toHaveAttribute("aria-hidden", "true");
+  await expect(icon).toHaveCSS("mask-image", /url\("data:image\/svg\+xml/);
   await expect(page.getByLabel("OpenAI API key")).toBeEnabled();
 });
 
@@ -1174,6 +1195,7 @@ test("creates an agent using only Discord and defaults new schedules to Discord"
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  await page.getByRole("link", { name: "Manage channels" }).click();
   const discord = page.getByRole("region", { name: "Discord connection" });
   await discord
     .getByLabel("Owner's Discord user ID")
@@ -1203,6 +1225,7 @@ test("connects Telegram after creation and clears rejected tokens", async ({
   await page.getByLabel("Name", { exact: true }).fill("Researcher");
   await page.getByRole("button", { name: "Create agent" }).click();
   await expect(page).toHaveURL(/\/agents\/created\/setup$/);
+  await openAgentSection(page, "Channels");
   const telegram = page.getByRole("region", { name: "Telegram connection" });
   await telegram.getByLabel("Owner's Telegram ID").fill("42");
   const token = telegram.getByLabel("Telegram bot token");
@@ -1256,7 +1279,9 @@ test("replaces a token, starts and confirms stopping an agent process", async ({
   await page.getByRole("button", { name: "Save token" }).click();
   await expect(page.getByRole("status")).toContainText("Restart this agent");
   await expect(page.getByLabel("New Telegram token")).toHaveValue("");
-  await page.getByRole("link", { name: "Back to agent" }).click();
+  await page.getByRole("link", { name: "Back to channels" }).click();
+  await expect(page).toHaveURL("/agents/dev/channels");
+  await openAgentSection(page, "Overview");
   await expect(
     page.getByRole("heading", { name: "Agent Host stopped." }),
   ).toBeVisible();
@@ -1472,7 +1497,10 @@ test("keeps the desktop sidebar fixed with Settings at the bottom", async ({
 }) => {
   await page.setViewportSize({ width: 1280, height: 640 });
   await login(page);
-  await page.goto("/agents/dev/setup");
+  await page.goto("/agents/dev/channels");
+  await expect(
+    page.getByRole("region", { name: "Discord connection" }),
+  ).toBeVisible();
   const sidebar = page.getByRole("navigation", { name: "Main navigation" });
   const home = sidebar.getByRole("link", { name: "Nimbot home" });
   const settings = sidebar.getByRole("link", { name: "Settings", exact: true });
@@ -1610,7 +1638,15 @@ test("moves between agent pages with an expandable main navigation", async ({
   await expect(agents).toHaveAttribute("aria-current", "page");
   await expect(hideLabels).toHaveAttribute("aria-expanded", "true");
   await expect(label).toBeVisible();
+  const [toggleIcon, linkIcon] = await Promise.all(
+    [hideLabels, agents].map((item) =>
+      item.locator('[data-ui="icon"]').boundingBox(),
+    ),
+  );
+  if (!toggleIcon || !linkIcon) throw new Error("Expected navigation icons");
+  expect(toggleIcon.x).toBe(linkIcon.x);
   await hideLabels.click();
+  await expect(showLabels).toHaveCSS("justify-content", "center");
   await expect(label).toBeHidden();
   await showLabels.focus();
   await page.keyboard.press("Tab");
@@ -1825,6 +1861,51 @@ test("keeps the available Access section usable and retries only the failed sect
   expect(peerRequests).toBe(1);
 });
 
+test("shares the split layout across agent configuration sections", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  for (const [path, regions] of [
+    ["access", ["Other agents", "MCP integrations"]],
+    ["usage", ["Model", "OpenCode quota"]],
+    ["approvals", ["Rules"]],
+  ] as const) {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(`/agents/dev/${path}`);
+    for (const width of [1280, 375, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const name of regions) {
+        const region = page.getByRole("region", { name, exact: true });
+        await expect(region).toBeVisible();
+        const [description, content] = await Promise.all([
+          region.locator(".settings-section-description").boundingBox(),
+          region.locator(":scope > .panel-card").boundingBox(),
+        ]);
+        if (!description || !content)
+          throw new Error(`Expected ${name} content`);
+        if (width === 1280) {
+          expect(content.y).toBeCloseTo(description.y);
+          expect(content.x - description.x - description.width).toBeCloseTo(24);
+        } else {
+          expect(content.x).toBeCloseTo(description.x);
+          expect(content.y - description.y - description.height).toBeCloseTo(
+            16,
+          );
+        }
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(width);
+      if (width !== 320)
+        await page.screenshot({
+          path: info.outputPath(`agent-${path}-${width}.png`),
+          fullPage: true,
+        });
+    }
+  }
+});
+
 test("shows the current agent section and supports keyboard navigation at narrow widths", async ({
   page,
 }) => {
@@ -1858,7 +1939,7 @@ test("shows the current agent section and supports keyboard navigation at narrow
   await expect(edit).toHaveAttribute("aria-current", "page");
 });
 
-test("shares the agent panel with the right navigation and stacks cards on phones", async ({
+test("organizes agent overview sections in rows and stacks their contents on phones", async ({
   page,
 }, info) => {
   await login(page);
@@ -1875,57 +1956,63 @@ test("shares the agent panel with the right navigation and stacks cards on phone
   const overview = main.locator('[data-ui="agent-overview"]');
   const host = overview.getByRole("region", { name: /Agent Host stopped/ });
   const provider = overview.getByRole("region", { name: "AI provider status" });
-  const telegram = overview.getByRole("region", {
-    name: "Telegram connection",
-  });
-  const discord = overview.getByRole("region", { name: "Discord connection" });
   const danger = overview.getByRole("region", { name: "Danger zone" });
 
   await expect(main.getByRole("heading", { level: 1 })).toHaveCSS(
     "position",
     "absolute",
   );
-  await expect(overview.getByRole("region")).toHaveCount(5);
+  await expect(overview.getByRole("region")).toHaveCount(3);
+  await expect(
+    overview.getByRole("region", { name: /connection/i }),
+  ).toHaveCount(0);
   await expect(panel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(panel).toHaveCSS("border-width", "0px");
-  await expect(host).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(host).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(host.locator(".panel-card")).not.toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
 
-  for (const width of [1280, 1920, 320, 375]) {
+  for (const width of [1280, 1920, 840, 320, 375]) {
     await page.setViewportSize({ width, height: 800 });
-    await expect(discord).toBeVisible();
     if (width === 1920) await expect(panel).toHaveCSS("width", "1200px");
-    const [
-      agentBox,
-      mainBox,
-      hostBox,
-      providerBox,
-      telegramBox,
-      discordBox,
-      dangerBox,
-    ] = await Promise.all(
-      [agentNav, main, host, provider, telegram, discord, danger].map((item) =>
-        item.boundingBox(),
-      ),
-    );
-    if (!(
-      agentBox &&
-      mainBox &&
-      hostBox &&
-      providerBox &&
-      telegramBox &&
-      discordBox &&
-      dangerBox
-    ))
-      throw new Error("Expected the agent navigation and overview cards");
-    if (width >= 1280) {
+    const [agentBox, mainBox] = await Promise.all([
+      agentNav.boundingBox(),
+      main.boundingBox(),
+    ]);
+    if (!agentBox || !mainBox)
+      throw new Error("Expected the agent navigation and content");
+
+    let previousBottom = mainBox.y;
+    for (const region of [host, provider, danger]) {
+      const [row, description, content] = await Promise.all([
+        region.boundingBox(),
+        region.locator(".settings-section-description").boundingBox(),
+        region.locator(".panel-card").boundingBox(),
+      ]);
+      if (!row || !description || !content)
+        throw new Error("Expected a description and content in every row");
+      expect(row.y).toBeGreaterThanOrEqual(previousBottom);
+      previousBottom = row.y + row.height;
+      if (width >= 1280) {
+        expect(content.y).toBeCloseTo(description.y);
+        expect(content.x - (description.x + description.width)).toBeCloseTo(24);
+      } else {
+        expect(content.y - (description.y + description.height)).toBeCloseTo(
+          16,
+        );
+        expect(content.x).toBeCloseTo(description.x);
+      }
+    }
+
+    if (width >= 840) {
       const globalBox = await globalNav.boundingBox();
       if (!globalBox) throw new Error("Expected global navigation");
       expect(globalBox.x + globalBox.width).toBeLessThan(mainBox.x);
       expect(agentBox.x - (mainBox.x + mainBox.width)).toBeCloseTo(24);
       await expect(main).toHaveCSS("border-inline-end-width", "1px");
-      expect(hostBox.y).toBe(providerBox.y);
-      expect(telegramBox.y).toBe(discordBox.y);
-      await expect(agentNav.getByRole("link")).toHaveCount(8);
+      await expect(agentNav.getByRole("link")).toHaveCount(9);
       const selected = agentNav.getByRole("link", { name: "Overview" });
       await expect(selected).toHaveAttribute("aria-current", "page");
       const mainLink = globalNav.getByRole("link", {
@@ -1941,15 +2028,7 @@ test("shares the agent panel with the right navigation and stacks cards on phone
     } else {
       expect(mainBox.y - (agentBox.y + agentBox.height)).toBeCloseTo(16);
       await expect(agentNav).toHaveCSS("border-block-end-width", "1px");
-      expect(hostBox.y + hostBox.height).toBeLessThan(providerBox.y);
-      expect(telegramBox.y + telegramBox.height).toBeLessThan(discordBox.y);
     }
-    expect(
-      Math.max(
-        telegramBox.y + telegramBox.height,
-        discordBox.y + discordBox.height,
-      ),
-    ).toBeLessThan(dangerBox.y);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
@@ -1958,6 +2037,43 @@ test("shares the agent panel with the right navigation and stacks cards on phone
         path: info.outputPath(`agent-overview-${width}.png`),
         fullPage: true,
       });
+  }
+});
+
+test("opens Channels from agent navigation and loads it directly", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await login(page);
+  await page.goto("/agents/dev/setup");
+  await openAgentSection(page, "Channels");
+  await expect(page).toHaveURL("/agents/dev/channels");
+  const heading = page.getByRole("heading", { name: "Channels for Developer" });
+  await expect(heading).toBeFocused();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Agent navigation" })
+      .getByRole("link", { name: "Channels" }),
+  ).toHaveAttribute("aria-current", "page");
+  await page.reload();
+  await expect(heading).toBeVisible();
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const name of ["Telegram connection", "Discord connection"]) {
+      const region = page.getByRole("region", { name });
+      await expect(region).toBeVisible();
+      const [description, card] = await Promise.all([
+        region.locator(".settings-section-description").boundingBox(),
+        region.locator(".panel-card").boundingBox(),
+      ]);
+      if (!description || !card) throw new Error(`Expected ${name} controls`);
+      if (width === 1280)
+        expect(card.x - description.x - description.width).toBeCloseTo(24);
+      else expect(card.y - description.y - description.height).toBeCloseTo(16);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
   }
 });
 
@@ -2316,6 +2432,7 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
 }) => {
   await login(page);
   await page.getByRole("link", { name: "Manage" }).click();
+  await page.getByRole("link", { name: "Manage channels" }).click();
   const discord = page.getByRole("region", { name: "Discord connection" });
   await expect(discord.getByText("Discord is not configured.")).toBeVisible();
   await discord
@@ -2350,7 +2467,7 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
     .getByLabel("Owner's Discord user ID")
     .fill("876543210987654321");
   await page
-    .getByRole("button", { name: "Refresh status", exact: true })
+    .getByRole("button", { name: "Refresh channel status", exact: true })
     .click();
   await expect(discord.getByLabel("Owner's Discord user ID")).toHaveValue(
     "876543210987654321",
@@ -2378,7 +2495,7 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
       .getByText("@developer_bot", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Developer", exact: true }),
+    page.getByRole("heading", { name: "Channels for Developer", exact: true }),
   ).toBeVisible();
 });
 
@@ -2386,7 +2503,7 @@ test("sends Discord tests and reuses the request when checking uncertain deliver
   page,
 }) => {
   await login(page);
-  await page.getByRole("link", { name: "Manage" }).click();
+  await page.goto("/agents/dev/channels");
   await page.getByLabel("Owner's Discord user ID").fill("987654321098765432");
   await page
     .getByLabel("Discord bot token", { exact: true })
@@ -2426,7 +2543,7 @@ test("shows independent Discord conversation and owner-link status while Telegra
   page,
 }) => {
   await login(page);
-  await page.getByRole("link", { name: "Manage" }).click();
+  await page.goto("/agents/dev/channels");
   await page.getByLabel("Owner's Discord user ID").fill("987654321098765432");
   await page
     .getByLabel("Discord bot token", { exact: true })
@@ -2447,7 +2564,7 @@ test("shows independent Discord conversation and owner-link status while Telegra
     await route.fulfill({ json: body });
   });
   await page
-    .getByRole("button", { name: "Refresh status", exact: true })
+    .getByRole("button", { name: "Refresh channel status", exact: true })
     .click();
   await expect(
     page.getByText("Discord conversation: Connection failed.", { exact: true }),
@@ -2561,6 +2678,17 @@ for (const deploymentMode of ["native", "docker"] as const)
     await expect(
       page.getByRole("button", { name: "Start agent", exact: true }),
     ).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Stop agent…" })).toHaveCSS(
+      "border-color",
+      "rgb(255, 168, 177)",
+    );
+    await expect(page.getByRole("link", { name: "Restart agent…" })).toHaveCSS(
+      "border-color",
+      "rgb(255, 207, 136)",
+    );
+    await expect(
+      page.getByRole("button", { name: "Refresh status" }),
+    ).toHaveCSS("border-color", "rgb(186, 207, 253)");
     await page.getByRole("link", { name: "Restart agent…" }).click();
     await expect(
       page.getByRole("heading", { name: "Restart Developer?" }),
@@ -2620,7 +2748,7 @@ for (const deploymentMode of ["native", "docker"] as const)
     ).toBe(true);
     await page.goto("/agents/new");
     await expect(
-      page.getByText(/Connect Telegram or Discord from setup/),
+      page.getByText(/Connect Telegram or Discord from Channels/),
     ).toBeVisible();
     await expect(page.getByText(/its container is prepared/)).toHaveCount(0);
     await page.screenshot({

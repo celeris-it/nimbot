@@ -694,6 +694,7 @@ it("serves known deep links with a strict production CSP and returns 404 for unk
   for (const path of [
     "/",
     "/agents/dev/setup",
+    "/agents/dev/channels",
     "/agents/dev/access",
     "/agents/dev/settings",
     "/agents/dev/token",

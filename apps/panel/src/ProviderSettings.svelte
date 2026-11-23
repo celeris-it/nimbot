@@ -108,7 +108,7 @@
         The previous login was interrupted. Start a new login.
       </p>
     {/if}
-    <div class="provider-list">
+    <div class="settings-section-list">
       {#each settings.providers as provider (provider.id)}
         {@const consoleProvider = provider.id === "opencode"}
         {@const deviceLogin = provider.id === "openai" || consoleProvider}
@@ -124,11 +124,8 @@
               : provider.method === "api_key"
                 ? "Configured — API key"
                 : "Not configured"}
-        <section
-          class="panel-card provider-card"
-          aria-labelledby={`provider-${provider.id}`}
-        >
-          <div class="provider-identity">
+        <section aria-labelledby={`provider-${provider.id}`}>
+          <div class="settings-section-description provider-identity">
             <h2 id={`provider-${provider.id}`}>{provider.name}</h2>
             <StatusBadge
               label={state}
@@ -142,7 +139,7 @@
               <p>Connect this provider again to use it with your agents.</p>
             {/if}
           </div>
-          <div class="provider-controls">
+          <div class="panel-card">
             {#if !consoleProvider}
               <form
                 class="provider-key"
@@ -307,44 +304,21 @@
   .provider-page {
     display: grid;
     gap: 24px;
-    max-width: 66rem;
   }
   .provider-heading {
     display: grid;
     gap: 8px;
   }
   .provider-heading p,
-  .provider-identity p,
   .device-settings > p,
   .provider-dialog p {
     color: var(--color-muted);
   }
-  .provider-list,
-  .provider-controls {
-    display: grid;
-    gap: 16px;
-    min-width: 0;
-  }
-  .provider-card {
-    display: grid;
-    grid-template-columns: minmax(11rem, 1fr) minmax(0, 2.4fr);
-    gap: var(--pane-gap);
-    align-items: start;
-  }
   .provider-identity {
-    display: grid;
     justify-items: start;
-    gap: 8px;
-    min-width: 0;
-  }
-  .provider-identity h2 {
-    font-size: 1.125rem;
-    font-weight: 700;
-  }
-  .provider-card :is(.provider-identity, .provider-controls) p {
-    margin: 0;
   }
   .provider-key {
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
   .key-actions {
@@ -422,11 +396,5 @@
   .provider-dialog[open] {
     display: grid;
     gap: 16px;
-  }
-  @container (width < 640px) {
-    .provider-card {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 16px;
-    }
   }
 </style>

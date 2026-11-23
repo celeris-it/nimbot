@@ -29,7 +29,7 @@
 
 {#if mode === "new"}
   <h1 tabindex="-1">Create agent.</h1>
-  <p>Connect Telegram or Discord from setup after creating the agent.</p>
+  <p>Connect Telegram or Discord from Channels after creating the agent.</p>
 {:else if mode === "settings"}
   <h1 tabindex="-1">Edit agent.</h1>
   <p>
@@ -102,8 +102,14 @@
     >
     <a
       class="panel-button panel-button-ghost"
-      href={agent ? `/agents/${encodeURIComponent(agent.id)}/setup` : "/"}
-      >{mode === "new" ? "Cancel" : "Back to agent"}</a
+      href={agent
+        ? `/agents/${encodeURIComponent(agent.id)}/${mode === "token" ? "channels" : "setup"}`
+        : "/"}
+      >{mode === "new"
+        ? "Cancel"
+        : mode === "token"
+          ? "Back to channels"
+          : "Back to agent"}</a
     >
   </form>
 </section>
