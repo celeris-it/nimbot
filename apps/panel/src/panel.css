@@ -758,11 +758,37 @@ small,
 .settings-section-list > section > .panel-card > .panel-button {
   align-self: start;
 }
+[data-ui="agent-channels"] .panel-card > dl {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: clamp(12px, 3vw, 24px);
+}
+[data-ui="agent-channels"] [data-ui="channel-identifier"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-ui="agent-channels"] summary {
+  width: fit-content;
+  padding-block: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.channel-settings {
+  border-block-start: 1px solid var(--color-base-300);
+  padding-block-start: 8px;
+}
+.channel-settings[open] > summary {
+  margin-block-end: 12px;
+}
+.channel-settings > p {
+  margin-block-end: 12px;
+}
 @container (width >= 560px) {
   .settings-section-list {
     gap: 24px;
   }
-  .settings-section-list:not([data-ui="agent-channels"]) > section {
+  .settings-section-list:not([data-ui="agent-channels"]) > section,
+  [data-ui="agent-channels"] > section[data-configured="true"] {
     grid-template-columns: 192px minmax(0, 1fr);
     gap: var(--pane-gap);
   }

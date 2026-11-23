@@ -42,12 +42,17 @@
   }
 </script>
 
-<h1 tabindex="-1">Channels for {agent.name}</h1>
-<ActionButton disabled={busy} onclick={refresh}>
-  <Icon name="refresh" size={16} />Refresh channel status
-</ActionButton>
+<div data-ui="page-heading" class="flex-wrap">
+  <h1 tabindex="-1">Channels for {agent.name}</h1>
+  <ActionButton disabled={busy} onclick={refresh}>
+    <Icon name="refresh" size={16} />Refresh channel status
+  </ActionButton>
+</div>
 <div class="settings-section-list" data-ui="agent-channels">
-  <section aria-label="Telegram connection">
+  <section
+    aria-label="Telegram connection"
+    data-configured={!!agent.botUsername}
+  >
     <div class="settings-section-description max-w-[72ch]">
       <h2
         id="telegram-connection"
@@ -120,7 +125,9 @@
       {:else if agent.botUsername}
         <dl>
           <dt>Bot</dt>
-          <dd>@{agent.botUsername}</dd>
+          <dd data-ui="channel-identifier" title={`@${agent.botUsername}`}>
+            @{agent.botUsername}
+          </dd>
           <dt>Connection</dt>
           <dd>{botLabel(agent)}</dd>
           {#if agent.setupAccess}

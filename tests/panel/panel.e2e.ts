@@ -1623,9 +1623,7 @@ test("creates an agent using only Discord and defaults new schedules to Discord"
   await expect(setupGuide).toHaveCount(0);
   await expect(dmHelp).toBeVisible();
   await expect(
-    discord.getByText(
-      /After installing the app in Discord, send a test message/,
-    ),
+    discord.getByText(/Send a Discord test, then reply from the owner/),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Connect Telegram" }),
@@ -2780,7 +2778,7 @@ test("organizes agent overview sections in rows and stacks their contents on pho
 
 test("opens Channels from agent navigation and loads it directly", async ({
   page,
-}) => {
+}, info) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await login(page);
   await page.goto("/agents/dev/setup");
@@ -2795,7 +2793,16 @@ test("opens Channels from agent navigation and loads it directly", async ({
   ).toHaveAttribute("aria-current", "page");
   await page.reload();
   await expect(heading).toBeVisible();
-  for (const width of [1280, 375]) {
+  const discord = page.getByRole("region", { name: "Discord connection" });
+  await discord
+    .getByLabel("Owner's Discord user ID")
+    .fill("987654321098765432");
+  await discord.getByLabel("Discord bot token").fill("valid-discord-token");
+  await discord.getByRole("button", { name: "Connect Discord" }).click();
+  await expect(
+    discord.getByRole("heading", { name: "Discord connection" }),
+  ).toBeFocused();
+  for (const width of [1280, 375, 320]) {
     await page.setViewportSize({ width, height: 800 });
     for (const name of ["Telegram connection", "Discord connection"]) {
       const region = page.getByRole("region", { name });
@@ -2812,6 +2819,9 @@ test("opens Channels from agent navigation and loads it directly", async ({
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
+    await page.locator('[data-ui="agent-channels"]').screenshot({
+      path: info.outputPath(`configured-channels-${width}.png`),
+    });
   }
 });
 
@@ -3567,8 +3577,16 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
   ).toBeVisible();
   await expect(
     discord.getByLabel("Discord bot token", { exact: true }),
-  ).toHaveValue("");
+  ).toBeHidden();
   await page.reload();
+  const credentials = discord.getByText("Change Discord credentials", {
+    exact: true,
+  });
+  await credentials.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    discord.getByLabel("Discord bot token", { exact: true }),
+  ).toHaveValue("");
   await expect(discord.getByLabel("Owner's Discord user ID")).toHaveValue(
     "987654321098765432",
   );
@@ -3590,6 +3608,10 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
   await expect(
     discord.getByText("876543210987654321", { exact: true }),
   ).toBeVisible();
+  const disconnect = discord.getByText("Disconnect Discord", { exact: true });
+  await expect(discord.getByLabel("Type dev to confirm removal")).toBeHidden();
+  await disconnect.focus();
+  await page.keyboard.press("Enter");
   await expect(
     discord.getByRole("button", { name: "Remove Discord connection" }),
   ).toBeDisabled();
@@ -3664,11 +3686,9 @@ test("shows independent Discord conversation and owner-link status while Telegra
     .getByLabel("Discord bot token", { exact: true })
     .fill("valid-discord-token");
   await page.getByRole("button", { name: "Connect Discord" }).click();
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("Discord conversation: Connected.", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Owner DM: Waiting for the owner's first private message.", {
+    page.getByText("Waiting for a reply", {
       exact: true,
     }),
   ).toBeVisible();
@@ -3682,10 +3702,12 @@ test("shows independent Discord conversation and owner-link status while Telegra
     .getByRole("button", { name: "Refresh channel status", exact: true })
     .click();
   await expect(
-    page.getByText("Discord conversation: Connection failed.", { exact: true }),
+    page.getByText("Connection failed", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Owner DM: Linked.", { exact: true }),
+    page
+      .getByRole("region", { name: "Discord connection" })
+      .getByText("Linked", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Connection", { exact: true })).toBeVisible();
   await expect(
