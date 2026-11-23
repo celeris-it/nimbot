@@ -48,6 +48,30 @@ explicit **Start agent**; a Server restart restores only agents whose saved
 intent was running. `/stop` in a chat cancels its current task and leaves the Host
 running. Deleting an agent retains its directory unless purge is selected.
 
+The panel follows your system theme by default. Under **Settings → Appearance**,
+choose **System**, **Light**, or **Dark** to save a preference in this browser.
+Agents reply in the language you request or follow the conversation’s language,
+with English as the fallback.
+
+### Telegram commands
+
+Each agent uses a distinct bot for each connected platform. The bot accepts
+private messages from its configured owner. Use the web panel for agent
+administration and bot token replacement.
+
+| Command | Action |
+|---|---|
+| `/start` | Show an optional welcome message |
+| `/help` | Show this agent's help |
+| `/status` | Show chat and runtime status |
+| `/schedules` | List this agent's scheduled tasks, next run times, and enabled state |
+| `/stop` | Cancel only this agent's running task |
+| Text message | Queue a task for this bot's agent |
+| Document with a caption | Queue a task using that document |
+| Document without a caption | Save the document and confirm its workspace path |
+
+For file size limits and return files, see [Telegram documents](#telegram-documents).
+
 ## What holds your data
 
 All Docker state lives in the single `/data` volume:
@@ -206,6 +230,7 @@ the key or sign in again. Saving a key requires a successful provider check.
 If the provider is unavailable, denies access, or rate limits the check, the
 previous credential stays active. An OAuth connection without a conclusive
 sign-in signal appears as **Unverified**. The checks use no inference quota.
+API key checks run at startup, every five minutes, and after credential changes.
 
 Open **Schedules** to investigate three consecutive execution failures.
 A successful execution resets the streak. Timed, manual and webhook runs share
@@ -283,23 +308,40 @@ before asking again if delivery is uncertain.
 
 ### Model and usage
 
-Use **AI providers** in the sidebar and choose **Sign in to
-OpenCode Console** to connect a workspace with Console budgets or a Go
-subscription. This is per agent. Set spending policies in OpenCode Console.
-Nimbot reads applicable monthly budgets and Go allowances from OpenCode.
+Use **AI providers** in the sidebar to connect an OpenCode Console workspace
+with Console budgets or a Go subscription. The saved connection is shared by the
+installation. Configure spending policies in OpenCode Console.
 
-When the queue is paused, **Model and usage** shows the model, the latest quota
-check, and reset times published by OpenCode. The server checks again every
-30 seconds while tasks are waiting and resumes when the limits allow it. If
-OpenCode cannot check a covered connection, verify the workspace login and
-network connectivity. For a removed model, select an available model or
-**Automatic**. A stopped Agent Host still needs to be started from the panel.
+Open **Model and usage** from an agent's setup page. Choose an enabled model or
+**Automatic** to use OpenCode's current default. The selection applies when the
+next task starts and uses the same conversation. When the selected model offers
+variants, choose a **Reasoning effort** or leave it at **Default**. Changing
+models resets the effort. If a saved model or effort becomes unavailable, the
+queue waits for it to return or for the administrator to change the selection.
 
-A task is counted in the UTC day and month when it started. Reported costs come
-from OpenCode and may be estimated. A missing cost or partial reading is marked
-in the history. Work outside Nimbot's managed task sessions is outside this
-history and can still affect a shared Console or Go quota. A quota check can
-allow a task to start shortly before the account reaches a limit.
+Usage shows tokens and OpenCode's reported USD cost for each executed task, with
+agent totals for the UTC day and month. The figures reflect the engine's
+available observations, including when a task fails or is cancelled. Partial
+readings and missing costs are shown in the panel. Provider invoices and
+subscription fees can differ from these figures.
+
+For a connected OpenCode Console workspace, the applicable monthly Console
+budgets and the Go rolling, weekly, and monthly allowances come from OpenCode.
+An exhausted applicable limit or a temporary error checking a covered quota
+pauses new work. Chat, scheduled, and webhook tasks keep their normal enqueue
+rules and resume in order after OpenCode confirms that work can continue.
+For a direct OpenAI model connected through ChatGPT device login, the panel
+shows the account's reported usage windows and reset times. This read uses
+ChatGPT's internal usage endpoint and is informational. Console and Go limits
+apply at the start of a task. Quota readings reflect snapshots of possibly
+shared accounts. When quota data is unavailable for other connections or the
+ChatGPT read fails, the panel shows **Quota unavailable** and tasks can proceed.
+
+While the queue is paused, the Server checks applicable limits every 30 seconds.
+If a check fails, verify the workspace login and network connectivity. A stopped
+Agent Host still needs to be started from the panel. Usage is attributed to the
+UTC day and month when the task started. Work outside Nimbot can also use the
+shared quota, and a check can allow a task to start just before the limit is reached.
 
 ### Scheduled tasks
 
@@ -367,7 +409,7 @@ its own IANA time zone; changing the browser or server's local time zone does no
 change an existing schedule. The browser's zone is only the form's initial
 default. A skipped daylight-saving local time moves to the next valid instant;
 a repeated local time uses its first occurrence only. Intervals use elapsed
-minutes anchored to creation time. See [Scheduled tasks](../README.md#scheduled-tasks)
+minutes anchored to creation time. See [Scheduled tasks](SCHEDULES.md)
 for cadence rules and limits.
 
 ## Security limitations
@@ -389,7 +431,13 @@ the installation. Per-agent resource-limit configuration is deferred. Use an
 existing HTTPS proxy for remote panel access, keep `.env` and backups private,
 and never mount the Docker socket into the application.
 
-### Discord notification tests
+Disk usage is uncapped. Bot credentials stay in the Server and are kept out of
+model context, task events, and normal logs. Panel passwords use scrypt. Sessions
+expire after eight hours or on Server restart. Cookies use HttpOnly and SameSite,
+with Secure cookies for HTTPS. State changes require the configured same origin.
+Messages and provider requests are sent to their respective external services.
+
+## Discord notification tests
 
 The agent page can send a test DM to its saved Discord owner. A confirmed
 rejection may mean the owner blocked the bot or does not allow DMs. Verify the
@@ -403,7 +451,15 @@ server restart become uncertain and are never replayed. Notification records
 and the per-agent five-attempt rolling minute limit persist in server SQLite;
 automatic task results, progress, errors, and approvals use their independent path.
 
-### Conversational channel availability
+The authenticated test API accepts a request ID and sends a fixed message to the
+saved owner. Request IDs deduplicate repeated submissions. The quota counts new
+attempts across channels, including provider rate-limit responses. Locally blocked
+requests leave the window unchanged. Nimbot stores a content hash and sanitized
+delivery state, and refreshes its resolved recipient when configuration changes.
+The Discord adapter splits long text, suppresses mentions, and honors rate-limit
+cooldowns. Remove the Discord connection from **Channels** before deleting the agent.
+
+## Conversational channel availability
 
 Each agent page reports Telegram polling and Discord conversation state
 separately. Discord can be connecting, connected, reconnecting, failed, or

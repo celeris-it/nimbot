@@ -2,7 +2,7 @@
 
 Nimbot runs the Server, panel and Agent Host subprocesses in one non-root Docker
 container. Docker Compose and a Docker socket mount are not required. Native
-development is documented in [README.md](../README.md#development).
+development is documented in [CONTRIBUTING.md](../CONTRIBUTING.md#native-development).
 
 ## Fresh installation requirement
 
