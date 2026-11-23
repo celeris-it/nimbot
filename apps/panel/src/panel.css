@@ -1292,15 +1292,19 @@ li[data-slice="4"] {
     border-color 120ms ease,
     box-shadow 120ms ease;
 }
-.panel-input,
 .panel-textarea {
   padding: 16px;
 }
+.panel-input,
+.panel-select {
+  @apply min-h-11;
+  line-height: 1.5;
+}
 .panel-input {
-  @apply min-h-12;
+  padding: 8px 16px;
 }
 .panel-select {
-  @apply min-h-12 max-w-full;
+  @apply max-w-full;
   appearance: none;
   padding-inline: 16px 40px;
 }
@@ -1334,7 +1338,7 @@ li[data-slice="4"] {
 [data-ui="field-group"] input {
   flex: 1;
   min-width: 0;
-  padding: 16px;
+  padding: 8px 16px;
   border: 0;
   outline: none;
   background: transparent;
@@ -1385,8 +1389,8 @@ li[data-slice="4"] {
 [data-ui="stepper-buttons"] {
   display: grid;
   grid-template-rows: 1fr 1fr;
-  gap: 8px;
-  padding-block: 8px;
+  gap: 2px;
+  padding-block: 4px;
   padding-inline-start: 8px;
 }
 [data-ui="stepper-buttons"] button {
@@ -1585,7 +1589,6 @@ li[data-slice="4"] {
   border-color: var(--color-base-300);
   border-radius: 3rem;
   width: min(100%, 280px);
-  min-height: 42px;
   padding: 8px 16px;
   color: var(--color-muted);
   background: var(--color-base-100);

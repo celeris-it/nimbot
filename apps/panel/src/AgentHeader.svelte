@@ -77,6 +77,7 @@
 {#snippet agentLinks(items: AgentSummary[], view: string)}
   <ul class="panel-menu">
     {#each items as item (item.id)}
+      {@const identifier = item.botUsername ? `@${item.botUsername}` : item.id}
       <li>
         <a
           href={href(item.id, view)}
@@ -84,8 +85,8 @@
         >
           <AgentAvatar agentId={item.id} name={item.name} small />
           <span>
-            {item.name}
-            <small>{item.botUsername ? `@${item.botUsername}` : item.id}</small>
+            <span class="block truncate" title={item.name}>{item.name}</span>
+            <small class="truncate" title={identifier}>{identifier}</small>
           </span>
         </a>
       </li>

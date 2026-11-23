@@ -1049,6 +1049,8 @@ test("edits the global schedule time zone and prefills new schedules", async ({
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   const zone = page.getByLabel("Schedule time zone");
+  await expect(zone).toHaveCSS("height", "44px");
+  await expect(page.getByLabel("Appearance")).toHaveCSS("height", "44px");
   await expect(zone).toHaveValue("UTC");
   await zone.fill("Europe/Madrid");
   await page.getByRole("button", { name: "Save settings" }).click();
@@ -1379,12 +1381,20 @@ test("completes device login and recovers its pending state after reload", async
       openai.locator(":scope > .panel-card").boundingBox(),
     ]);
     if (!identity || !controls) throw new Error("Expected provider settings");
-    const field = await openai.locator('[data-ui="field-group"]').boundingBox();
-    if (!field) throw new Error("Expected the API key field");
+    const [field, save] = await Promise.all([
+      openai.locator('[data-ui="field-group"]').boundingBox(),
+      openai
+        .getByRole("button", { name: "Save API key", exact: true })
+        .boundingBox(),
+    ]);
+    if (!field || !save) throw new Error("Expected API key controls");
+    expect(field.height).toBe(44);
+    expect(save.height).toBe(field.height);
     expect(field.x + field.width).toBeLessThanOrEqual(
       controls.x + controls.width - 16,
     );
     if (width === 1280) {
+      expect(field.y).toBeCloseTo(save.y);
       expect(controls.x - identity.x - identity.width).toBeCloseTo(24);
       expect(controls.y).toBeCloseTo(identity.y);
     } else {
@@ -2218,7 +2228,18 @@ test("aligns the agent directory and sections inside the desktop page card", asy
 });
 
 test("switches agents from a deep link", async ({ page, request }) => {
-  await request.post("/__test/agent/research");
+  const researchId = `agent-${"a".repeat(32)}`;
+  await request.post(`/__test/agent/${researchId}`);
+  await page.route("**/api/status", async (route) => {
+    const response = await route.fetch();
+    const directory = await response.json();
+    const research = directory.agents.find(
+      (agent: { id: string }) => agent.id === researchId,
+    );
+    research.botUsername = null;
+    await route.fulfill({ response, json: directory });
+  });
+  await page.setViewportSize({ width: 320, height: 800 });
   await login(page);
   await page.goto("/agents/dev/access");
   const header = page.locator('[data-ui="agent-header"]');
@@ -2226,14 +2247,26 @@ test("switches agents from a deep link", async ({ page, request }) => {
   const research = header.getByRole("link", { name: /^Researcher/ });
   await switcher.focus();
   await page.keyboard.press("Enter");
-  await expect(research).toHaveAttribute("href", "/agents/research/access");
+  await expect(research).toHaveAttribute(
+    "href",
+    `/agents/${researchId}/access`,
+  );
+  const identifier = research.getByText(researchId, { exact: true });
+  await expect(identifier).toHaveAttribute("title", researchId);
+  await expect(identifier).toHaveCSS("text-overflow", "ellipsis");
+  await expect(identifier).toHaveCSS("white-space", "nowrap");
+  expect(
+    await identifier.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBe(true);
   await research.focus();
   await page.keyboard.press("Escape");
   await expect(research).toBeHidden();
   await expect(switcher).toBeFocused();
   await page.keyboard.press("Enter");
   await research.click();
-  await expect(page).toHaveURL("/agents/research/access");
+  await expect(page).toHaveURL(`/agents/${researchId}/access`);
   await expect(header.getByLabel("Switch agent, Researcher")).toBeVisible();
 });
 
