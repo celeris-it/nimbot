@@ -702,7 +702,7 @@ small,
   .settings-section-list {
     gap: 24px;
   }
-  .settings-section-list > section {
+  .settings-section-list:not([data-ui="agent-channels"]) > section {
     grid-template-columns: 192px minmax(0, 1fr);
     gap: var(--pane-gap);
   }

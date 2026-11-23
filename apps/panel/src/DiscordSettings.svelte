@@ -39,14 +39,89 @@
 </script>
 
 <section aria-label="Discord connection">
-  <div class="settings-section-description">
+  <div class="settings-section-description max-w-[72ch]">
     <h2 class="card-title" data-brand="discord">
       <Icon name="discord" size={20} />Discord connection
     </h2>
-    <p>
-      Text messages join this agent's shared queue. Progress, approvals, and
-      results return to the channel that received the task.
-    </p>
+    {#if agent.discord?.connection}
+      <p>
+        Text messages join this agent's shared queue. Progress, approvals, and
+        results return to the channel that received the task.
+      </p>
+    {:else}
+      <h3>Set up a Discord bot</h3>
+      <ol class="list-decimal space-y-2 ps-5">
+        <li>
+          Open the
+          <a
+            class="underline"
+            href="https://discord.com/developers/applications"
+            target="_blank"
+            rel="noopener noreferrer">Discord Developer Portal</a
+          >, choose <strong>New Application</strong>, then open
+          <strong>Bot</strong>
+          and select <strong>Reset Token</strong>. Copy the bot token and leave
+          privileged intents off.
+        </li>
+        <li>
+          Enable Developer Mode in Discord and copy your personal account's user
+          ID. See
+          <a
+            class="underline"
+            href="https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID"
+            target="_blank"
+            rel="noopener noreferrer">Discord's user ID instructions</a
+          >.
+        </li>
+        <li>
+          To open a DM without a shared server, open your app's
+          <strong>Installation</strong> settings. Enable
+          <strong>User Install</strong>, add the
+          <code>applications.commands</code>
+          scope under <strong>User Install</strong>, and select
+          <strong>Discord Provided Link</strong>. Open the link with the owner
+          account and select <strong>Add to my apps</strong>. See
+          <a
+            class="underline"
+            href="https://docs.discord.com/developers/quick-start/getting-started#install-to-user-account"
+            target="_blank"
+            rel="noopener noreferrer">Discord's account installation guide</a
+          >.
+        </li>
+        <li>
+          Enter the token and owner ID and select <strong
+            >Connect Discord</strong
+          >. Once the app is installed and connected, use
+          <strong>Send Discord test</strong>
+          to check delivery. Reply to the bot in the private chat to link it to Nimbot.
+        </li>
+      </ol>
+    {/if}
+    <details>
+      <summary class="cursor-pointer">Trouble opening a Discord DM?</summary>
+      <p class="mt-2">
+        If you still can't open a DM, open your app's
+        <strong>Installation</strong> settings, enable
+        <strong>Guild Install</strong>, and select
+        <strong>Discord Provided Link</strong>. Add the <code>bot</code> scope
+        under <strong>Guild Install</strong> and use the install link to add the
+        bot to a private server you manage. See
+        <a
+          class="underline"
+          href="https://docs.discord.com/developers/quick-start/getting-started#installing-your-app"
+          target="_blank"
+          rel="noopener noreferrer">Discord's installation guide</a
+        >
+        and check that your
+        <a
+          class="underline"
+          href="https://support.discord.com/hc/en-us/articles/217916488-Blocking-Privacy-Settings"
+          target="_blank"
+          rel="noopener noreferrer">Discord DM settings</a
+        >
+        allow messages from members of that server.
+      </p>
+    </details>
   </div>
   <div class="panel-card">
     {#if agent.discord?.connection}
@@ -77,7 +152,8 @@
         <dd>{agent.discord.connection.ownerId}</dd>
       </dl>
       <p>
-        Send a fixed test message to the saved Discord owner. Up to five new
+        After installing the app in Discord, send a test message to the saved
+        owner. Reply in the private chat to link it to Nimbot. Up to five new
         notification attempts per minute are allowed.
       </p>
       <button
@@ -113,11 +189,7 @@
         bind:value={ownerId}
         aria-describedby="discord-owner-help"
       />
-      <p id="discord-owner-help">
-        Enable Developer Mode in Discord and copy your user ID. Only this user's
-        DMs will be used. The bot may need a shared server and permission to
-        send you direct messages.
-      </p>
+      <p id="discord-owner-help">Nimbot accepts DMs from this account only.</p>
       <label for="discord-token">Discord bot token</label>
       <PasswordField
         id="discord-token"
@@ -129,8 +201,7 @@
         aria-describedby="discord-token-help"
       />
       <p id="discord-token-help">
-        Create a bot in the Discord Developer Portal. Its token is stored
-        privately and never shown here. Enter it again if saving fails.
+        The token is stored privately. Enter it again if saving fails.
       </p>
       <button
         class="panel-button panel-button-primary"

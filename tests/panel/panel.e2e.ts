@@ -1418,6 +1418,66 @@ test("creates an agent using only Discord and defaults new schedules to Discord"
   ).toBe(true);
   await page.getByRole("link", { name: "Manage channels" }).click();
   const discord = page.getByRole("region", { name: "Discord connection" });
+  const setupGuide = discord.getByRole("heading", {
+    name: "Set up a Discord bot",
+  });
+  await expect(setupGuide).toBeVisible();
+  await expect(
+    discord.getByRole("link", { name: "Discord Developer Portal" }),
+  ).toHaveAttribute("href", "https://discord.com/developers/applications");
+  const userIdGuide = discord.getByRole("link", {
+    name: "Discord's user ID instructions",
+  });
+  await expect(userIdGuide).toHaveAttribute(
+    "href",
+    "https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID",
+  );
+  await userIdGuide.focus();
+  await page.keyboard.press("Tab");
+  const accountInstallGuide = discord.getByRole("link", {
+    name: "Discord's account installation guide",
+  });
+  await expect(accountInstallGuide).toBeFocused();
+  await expect(accountInstallGuide).toHaveAttribute(
+    "href",
+    "https://docs.discord.com/developers/quick-start/getting-started#install-to-user-account",
+  );
+  await expect(
+    discord.getByText(/Once the app is installed and connected, use/),
+  ).toBeVisible();
+  await page.keyboard.press("Tab");
+  const dmHelp = discord.getByText("Trouble opening a Discord DM?", {
+    exact: true,
+  });
+  await expect(dmHelp).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(
+    discord.getByRole("link", { name: "Discord's installation guide" }),
+  ).toHaveAttribute(
+    "href",
+    "https://docs.discord.com/developers/quick-start/getting-started#installing-your-app",
+  );
+  await expect(
+    discord.getByRole("link", { name: "Discord DM settings" }),
+  ).toHaveAttribute(
+    "href",
+    "https://support.discord.com/hc/en-us/articles/217916488-Blocking-Privacy-Settings",
+  );
+  for (const width of [320, 375, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    for (const platform of ["Telegram", "Discord"]) {
+      const section = page.getByRole("region", {
+        name: `${platform} connection`,
+      });
+      const steps = await section.getByRole("list").boundingBox();
+      const form = await section.locator("form").boundingBox();
+      expect(form!.y).toBeGreaterThanOrEqual(steps!.y + steps!.height);
+    }
+  }
+  await page.setViewportSize({ width: 375, height: 900 });
   await discord
     .getByLabel("Owner's Discord user ID")
     .fill("987654321098765432");
@@ -1425,6 +1485,13 @@ test("creates an agent using only Discord and defaults new schedules to Discord"
   await discord.getByRole("button", { name: "Connect Discord" }).click();
   await expect(
     discord.getByText("notification_bot", { exact: true }),
+  ).toBeVisible();
+  await expect(setupGuide).toHaveCount(0);
+  await expect(dmHelp).toBeVisible();
+  await expect(
+    discord.getByText(
+      /After installing the app in Discord, send a test message/,
+    ),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Connect Telegram" }),
@@ -1448,6 +1515,16 @@ test("connects Telegram after creation and clears rejected tokens", async ({
   await expect(page).toHaveURL(/\/agents\/created\/setup$/);
   await openAgentSection(page, "Channels");
   const telegram = page.getByRole("region", { name: "Telegram connection" });
+  const setupGuide = telegram.getByRole("heading", {
+    name: "Set up a Telegram bot",
+  });
+  await expect(setupGuide).toBeVisible();
+  const botFather = telegram.getByRole("link", { name: "@BotFather" });
+  await expect(botFather).toHaveAttribute("href", "https://t.me/BotFather");
+  await expect(botFather).toHaveAttribute("target", "_blank");
+  await expect(
+    telegram.getByRole("link", { name: "@userinfobot" }),
+  ).toHaveAttribute("href", "https://t.me/userinfobot");
   await telegram.getByLabel("Owner's Telegram ID").fill("42");
   const token = telegram.getByLabel("Telegram bot token");
   await token.fill("wrong-token");
@@ -1456,12 +1533,14 @@ test("connects Telegram after creation and clears rejected tokens", async ({
     "Could not connect Telegram",
   );
   await expect(telegram.getByLabel("Owner's Telegram ID")).toHaveValue("42");
+  await expect(setupGuide).toBeVisible();
   await expect(token).toHaveValue("");
   await token.fill("valid-token");
   await telegram.getByRole("button", { name: "Connect Telegram" }).click();
   await expect(
     telegram.getByText("@developer_bot", { exact: true }),
   ).toBeVisible();
+  await expect(setupGuide).toHaveCount(0);
   await expect(
     telegram.getByRole("link", { name: "Replace bot token" }),
   ).toBeVisible();

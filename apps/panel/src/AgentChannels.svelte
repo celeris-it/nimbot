@@ -41,17 +41,41 @@
 <button class="panel-button" disabled={busy} onclick={refresh}>
   <Icon name="refresh" size={16} />Refresh channel status
 </button>
-<div class="settings-section-list">
+<div class="settings-section-list" data-ui="agent-channels">
   <section aria-label="Telegram connection">
-    <div class="settings-section-description">
+    <div class="settings-section-description max-w-[72ch]">
       <h2 class="card-title" data-brand="telegram">
         <Icon name="telegram" size={20} />Telegram connection
       </h2>
       {#if agent.capabilities.connectTelegram}
-        <p>
-          Create a separate bot in BotFather and enter its token and owner's
-          numeric Telegram user ID.
-        </p>
+        <h3>Set up a Telegram bot</h3>
+        <ol class="list-decimal space-y-2 ps-5">
+          <li>
+            Open
+            <a
+              class="underline"
+              href="https://t.me/BotFather"
+              target="_blank"
+              rel="noopener noreferrer">@BotFather</a
+            >, send <code>/newbot</code>, and choose a username ending in
+            <code>bot</code>. Copy the bot token.
+          </li>
+          <li>
+            Copy your personal account's numeric Telegram user ID. You can use
+            <a
+              class="underline"
+              href="https://t.me/userinfobot"
+              target="_blank"
+              rel="noopener noreferrer">@userinfobot</a
+            >, a third-party bot, to find it. Paste the bot token only into
+            Nimbot.
+          </li>
+          <li>
+            Enter both values and select <strong>Connect Telegram</strong>. Open
+            your new bot in Telegram and send it a private message from the
+            configured owner account to link the chat.
+          </li>
+        </ol>
       {/if}
     </div>
     <div class="panel-card">
