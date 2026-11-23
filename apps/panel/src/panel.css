@@ -1669,9 +1669,11 @@ li[data-slice="4"] {
   min-width: 0;
 }
 [data-ui="agent-profile"] {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  display: grid;
+  grid-template:
+    "avatar destination" auto
+    "identity identity" 1fr
+    "status status" auto / minmax(0, 1fr) auto;
   gap: 12px;
   height: 100%;
   padding: 0 16px 16px;
@@ -1683,23 +1685,32 @@ li[data-slice="4"] {
 [data-ui="agent-profile"]:is(:hover, :focus-visible) {
   border-color: var(--color-primary);
 }
-[data-ui="agent-profile-top"] {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  width: 100%;
-  color: var(--color-muted);
-}
-[data-ui="agent-profile-top"] > .agent-avatar {
+[data-ui="agent-profile"] > .agent-avatar {
+  grid-area: avatar;
   margin-block-start: -13px;
 }
-[data-ui="agent-profile-top"] > [data-ui="icon"] {
+[data-ui="agent-profile-destination"] {
+  grid-area: destination;
+  display: flex;
+  align-items: center;
+  align-self: start;
+  justify-self: end;
+  gap: 4px;
   margin-block-start: 12px;
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+[data-ui="agent-profile"]:is(:hover, :focus-visible)
+  [data-ui="agent-profile-destination"] {
+  text-decoration: underline;
 }
 [data-ui="agent-profile-identity"] {
+  grid-area: identity;
   display: grid;
+  align-content: start;
   gap: 2px;
-  width: 100%;
+  min-width: 0;
 }
 [data-ui="agent-profile-identity"] strong {
   font-size: 1rem;
@@ -1713,12 +1724,36 @@ li[data-slice="4"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-[data-ui="agent-profile"] > .panel-badge {
-  margin-block-start: auto;
+[data-ui="agent-profile-status"] {
+  grid-area: status;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 @container (width < 500px) {
   [data-ui="agent-grid"] {
     grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding-block-start: 0;
+  }
+  [data-ui="agent-profile"] {
+    grid-template:
+      "avatar identity identity"
+      "status status destination" / auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 12px;
+  }
+  [data-ui="agent-profile"] > .agent-avatar {
+    width: 36px;
+    height: 36px;
+    margin-block-start: 0;
+    font-size: 0.75rem;
+  }
+  [data-ui="agent-profile-destination"] {
+    align-self: center;
+    margin-block-start: 0;
   }
 }
 [data-ui="dashboard-footer"] {

@@ -3407,7 +3407,7 @@ test("filters and searches agent cards, opens settings with Enter, and reconcile
       optionCapabilities: { edit: false, discord: true },
       botUsername: "findings_bot",
       provisioning: "failed",
-      process: { state: "failed", desiredState: "running" },
+      process: { state: "running", desiredState: "running" },
       botConnection: { status: "blocked" },
       setupAccess: { bot: "linked", owner: "pending" },
     },
@@ -3424,7 +3424,7 @@ test("filters and searches agent cards, opens settings with Enter, and reconcile
     filters.getByRole("button", { name: /All agents/ }),
   ).toContainText("3");
   await expect(filters.getByRole("button", { name: /Running/ })).toContainText(
-    "1",
+    "2",
   );
   await expect(
     filters.getByRole("button", { name: /Needs attention/ }),
@@ -3457,6 +3457,15 @@ test("filters and searches agent cards, opens settings with Enter, and reconcile
   const search = page.getByRole("searchbox", { name: "Search agents" });
   await filters.getByRole("button", { name: /Needs attention/ }).click();
   await expect(research).toHaveAttribute("href", "/agents/research/setup");
+  await expect(research.getByText("Overview", { exact: true })).toBeVisible();
+  await expect(research.getByText("Running", { exact: true })).toHaveAttribute(
+    "data-tone",
+    "good",
+  );
+  await expect(research.getByText("Telegram blocked")).toBeVisible();
+  await expect(research).toHaveAccessibleDescription(
+    "Running Telegram blocked @findings_bot",
+  );
   await expect(developer).toHaveCount(0);
   await search.fill("writer");
   await expect(
@@ -3465,6 +3474,7 @@ test("filters and searches agent cards, opens settings with Enter, and reconcile
   await page.getByRole("button", { name: "Clear filters" }).click();
   await expect(search).toHaveValue("");
   await expect(writer).toBeVisible();
+  await expect(developer.getByText("Settings", { exact: true })).toBeVisible();
   await filters.getByRole("button", { name: /Needs attention/ }).focus();
   await page.keyboard.press("Tab");
   await expect(developer).toBeFocused();
@@ -3476,9 +3486,16 @@ test("filters and searches agent cards, opens settings with Enter, and reconcile
   );
   await page.goBack();
   await expect(writer).toBeVisible();
-  agents = agents.filter((agent) => agent.id !== "writer");
+  agents = agents
+    .filter((agent) => agent.id !== "writer")
+    .map((agent) =>
+      agent.id === "research"
+        ? { ...agent, botConnection: { status: "failed" } }
+        : agent,
+    );
   await page.getByRole("button", { name: "Refresh status" }).click();
   await expect(writer).toHaveCount(0);
+  await expect(research.getByText("Telegram connection failed")).toBeVisible();
   await search.fill("@FINDINGS_BOT");
   await expect(research).toBeVisible();
   await expect(developer).toHaveCount(0);
@@ -3641,6 +3658,8 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   const personal = cards.getByRole("link", {
     name: /^Open Personal assistant/,
   });
+  const avatar = developer.locator(".agent-avatar");
+  const name = developer.getByText("Developer", { exact: true });
   const running = developer.getByText("Running", { exact: true });
   const identifier = developer.getByText("@nimbot_developer_bot", {
     exact: true,
@@ -3743,9 +3762,14 @@ test("renders the reference-inspired dashboard across screen sizes without exter
         if (width === 320 || width === 375) {
           expect(secondCardBox.x).toBe(firstCardBox.x);
           expect(secondCardBox.y).toBeGreaterThan(firstCardBox.y);
+          await expect(avatar).toHaveCSS("width", "36px");
+          const avatarBox = (await avatar.boundingBox())!;
+          const nameBox = (await name.boundingBox())!;
+          expect(nameBox.x).toBeGreaterThan(avatarBox.x + avatarBox.width);
         } else {
           expect(secondCardBox.x).toBeGreaterThan(firstCardBox.x);
           expect(secondCardBox.y).toBe(firstCardBox.y);
+          await expect(avatar).toHaveCSS("width", "54px");
         }
         const prefix = theme === "light" ? "dashboard-light" : "dashboard";
         await page.screenshot({

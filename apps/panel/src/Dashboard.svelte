@@ -33,10 +33,14 @@
   } = $props();
   let filter = $state("all");
   let agentQuery = $state("");
+  const telegramIssue = (item: AgentSummary) =>
+    item.botConnection?.status === "blocked"
+      ? "Telegram blocked"
+      : item.botConnection?.status === "failed"
+        ? "Telegram connection failed"
+        : undefined;
   const attention = (item: AgentSummary) =>
-    item.process?.state === "failed" ||
-    item.botConnection?.status === "failed" ||
-    item.botConnection?.status === "blocked";
+    item.process?.state === "failed" || Boolean(telegramIssue(item));
   let configured = $derived(
     agents.filter((item) => item.process?.state === "running").length,
   );
@@ -235,6 +239,7 @@
       {#each filtered as item (item.id)}
         {@const id = encodeURIComponent(item.id)}
         {@const editable = item.optionCapabilities?.edit}
+        {@const issue = telegramIssue(item)}
         {@const statusId = `fleet-status-${id}`}
         {@const handleId = `fleet-handle-${id}`}
         <li>
@@ -247,10 +252,7 @@
               ? `${statusId} ${handleId}`
               : statusId}
           >
-            <span data-ui="agent-profile-top">
-              <AgentAvatar agentId={item.id} name={item.name} />
-              <Icon name="chevron" size={16} />
-            </span>
+            <AgentAvatar agentId={item.id} name={item.name} />
             <span data-ui="agent-profile-identity">
               <strong title={item.name}>{item.name}</strong>
               {#if item.botUsername}
@@ -259,15 +261,21 @@
                 </small>
               {/if}
             </span>
-            <StatusBadge
-              id={statusId}
-              label={processLabel(item)}
-              tone={attention(item)
-                ? "warning"
-                : item.process?.state === "running"
-                  ? "good"
-                  : "neutral"}
-            />
+            <span id={statusId} data-ui="agent-profile-status">
+              <StatusBadge
+                label={processLabel(item)}
+                tone={item.process?.state === "failed"
+                  ? "warning"
+                  : item.process?.state === "running"
+                    ? "good"
+                    : "neutral"}
+              />
+              {#if issue}<StatusBadge label={issue} tone="warning" />{/if}
+            </span>
+            <span data-ui="agent-profile-destination">
+              {editable ? "Settings" : "Overview"}
+              <Icon name="chevron" size={16} />
+            </span>
           </ActionButton>
         </li>
       {/each}
