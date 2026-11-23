@@ -109,3 +109,23 @@ export interface AgentUsage {
   }[];
   next: number | null;
 }
+
+export interface UsageOverview {
+  days: { day: string; costUsd: number; tokens: number; tasks: number }[];
+  models: (ModelReference & {
+    costUsd: number;
+    tokens: number;
+    tasks: number;
+  })[];
+  missingCost: number;
+  /** Tightest quota window per AI provider, from the latest agent checks. */
+  quotas: {
+    providerId: string;
+    window: string;
+    remainingPercent: number;
+    resetsAt: number;
+    exhausted: boolean;
+  }[];
+  /** 48 hourly buckets, oldest first: the previous 24 hours, then the last 24. */
+  hourly: { hour: string; costUsd: number; tokens: number }[];
+}

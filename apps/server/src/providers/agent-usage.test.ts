@@ -190,6 +190,20 @@ it("leaves chats, schedules and webhooks in one FIFO until the provider check su
       ],
     });
     expect(usage.report("b").today.tasks).toBe(1);
+    const overview = usage.overview(7);
+    expect(overview.days).toHaveLength(7);
+    expect(overview.days.at(-1)).toMatchObject({ costUsd: 0.5, tasks: 4 });
+    expect(overview.days.slice(0, -1).every((day) => day.tasks === 0)).toBe(
+      true,
+    );
+    expect(overview.hourly).toHaveLength(48);
+    expect(overview.quotas).toEqual([]);
+    expect(overview.hourly.slice(24).reduce((n, h) => n + h.costUsd, 0)).toBe(
+      0.5,
+    );
+    expect(overview.models).toEqual([
+      { ...model, costUsd: 0.5, tokens: 120, tasks: 4 },
+    ]);
   } finally {
     a.close();
     b.close();
@@ -228,5 +242,46 @@ it("requeues a task only when the Host explicitly rejects it before acceptance",
   } finally {
     queue.close();
     store.close();
+  }
+});
+
+it("reports the tightest quota window per provider across agents", async () => {
+  const root = await mkdtemp(join(tmpdir(), "nimbot-usage-quota-"));
+  const path = join(root, "server.sqlite");
+  const tasks = openTaskStore(path);
+  const store = openAgentUsage(path);
+  const window = (name: "Go weekly" | "Go monthly", usedPercent: number) => ({
+    name,
+    usedPercent,
+    exhausted: usedPercent >= 100,
+    resetsAt: 5,
+  });
+  const quota = (windows: ReturnType<typeof window>[]) => ({
+    model,
+    state: "available" as const,
+    checkedAt: 1,
+    windows,
+  });
+  try {
+    store.saveQuota("a", 0, quota([window("Go weekly", 30)]));
+    store.saveQuota(
+      "b",
+      0,
+      quota([window("Go weekly", 10), window("Go monthly", 80)]),
+    );
+    store.saveQuota("c", 0, { ...quota([]), model: null });
+    expect(store.overview(7).quotas).toEqual([
+      {
+        providerId: "opencode",
+        window: "Go monthly",
+        remainingPercent: 20,
+        resetsAt: 5,
+        exhausted: false,
+      },
+    ]);
+  } finally {
+    store.close();
+    tasks.close();
+    await rm(root, { recursive: true, force: true });
   }
 });

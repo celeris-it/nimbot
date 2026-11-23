@@ -12,11 +12,16 @@
     EmptyState,
     FilterGroup,
     Icon,
-    Metric,
-    ProgressMeter,
     StatusBadge,
     Surface,
+    UsageChart,
+    UsageDonut,
+    UsageTrend,
+    UsageRings,
   } from "./components/index.js";
+  import { modelIcon } from "./components/model-brand.js";
+  import { request } from "./api.js";
+  import type { UsageOverview } from "../../server/src/providers/usage-contracts.js";
 
   let {
     agents,
@@ -40,10 +45,116 @@
   let configured = $derived(
     agents.filter((item) => item.process?.state === "running").length,
   );
-  let connected = $derived(
-    agents.filter((item) => item.botConnection?.status === "polling").length,
+  let range = $state("7");
+  let overview = $state<UsageOverview>();
+  let overviewFailed = $state(false);
+  // Agent statuses refresh every few seconds, which also refreshes usage.
+  $effect(() => {
+    void agents;
+    const days = range;
+    const current = new AbortController();
+    request<UsageOverview>(`/api/usage/overview?days=${days}`, {
+      signal: current.signal,
+    }).then(
+      (value) => {
+        overview = value;
+        overviewFailed = false;
+      },
+      () => {
+        if (!current.signal.aborted) overviewFailed = true;
+      },
+    );
+    return () => current.abort();
+  });
+  const usd = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  });
+  const money = (value: number) =>
+    value > 0 && value < 0.01 ? "< $0.01" : usd.format(value);
+  const count = new Intl.NumberFormat(undefined, { notation: "compact" });
+  const weekday = new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    timeZone: "UTC",
+  });
+  const monthDay = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  let totalCost = $derived(
+    overview?.days.reduce((sum, day) => sum + day.costUsd, 0) ?? 0,
   );
-  let telegramBots = $derived(agents.filter((item) => item.botUsername).length);
+  let totalTokens = $derived(
+    overview?.days.reduce((sum, day) => sum + day.tokens, 0) ?? 0,
+  );
+  let bars = $derived(
+    (overview?.days ?? []).map((day) => {
+      const date = new Date(`${day.day}T00:00:00Z`);
+      return {
+        key: day.day,
+        label: (range === "7" ? weekday : monthDay).format(date),
+        value: day.costUsd,
+        title: `${monthDay.format(date)} (UTC): ${money(day.costUsd)}, ${count.format(day.tokens)} tokens, ${day.tasks} ${day.tasks === 1 ? "task" : "tasks"}`,
+      };
+    }),
+  );
+  let hourCurrent = $derived(
+    (overview?.hourly ?? []).slice(24).map((hour) => hour.costUsd),
+  );
+  let hourPrevious = $derived(
+    (overview?.hourly ?? []).slice(0, 24).map((hour) => hour.costUsd),
+  );
+  let hourTotal = $derived(hourCurrent.reduce((sum, value) => sum + value, 0));
+  let hourBefore = $derived(
+    hourPrevious.reduce((sum, value) => sum + value, 0),
+  );
+  let hourDelta = $derived(hourTotal - hourBefore);
+  let deltaText = $derived(
+    `${hourDelta >= 0 ? "+" : "−"}${money(Math.abs(hourDelta))}${
+      hourBefore > 0
+        ? ` (${Math.abs(Math.round((hourDelta / hourBefore) * 100))}%)`
+        : ""
+    }`,
+  );
+  let quotas = $derived((overview?.quotas ?? []).slice(0, 4));
+  const resets = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const shown = 4;
+  let modelRows = $derived.by(() => {
+    const models = overview?.models ?? [];
+    const rows = models.slice(0, shown).map((model) => ({
+      key: `${model.providerId}/${model.modelId}`,
+      label: model.modelId,
+      icon: modelIcon(model),
+      value: model.costUsd,
+      tokens: model.tokens,
+    }));
+    const rest = models.slice(shown);
+    if (rest.length)
+      rows.push({
+        key: "other",
+        label: `${rest.length} other ${rest.length === 1 ? "model" : "models"}`,
+        icon: "bot" as const,
+        value: rest.reduce((sum, model) => sum + model.costUsd, 0),
+        tokens: rest.reduce((sum, model) => sum + model.tokens, 0),
+      });
+    return rows;
+  });
+  // Cost is the share when any is reported; otherwise fall back to tokens.
+  let byTokens = $derived(modelRows.every((row) => row.value === 0));
+  let slices = $derived(
+    modelRows.map((row) => ({
+      key: row.key,
+      value: byTokens ? row.tokens : row.value,
+    })),
+  );
+  let shareTotal = $derived(slices.reduce((sum, item) => sum + item.value, 0));
   let needsAttention = $derived(agents.filter(attention).length);
   let filtered = $derived(
     matchingAgents.filter(
@@ -79,65 +190,147 @@
 </div>
 
 <div data-ui="overview-grid">
-  <Surface title="At a glance" description="Agent Hosts and bot connections.">
-    {#snippet actions()}<span data-ui="icon-disc"
-        ><Icon name="grid" size={17} /></span
-      >{/snippet}
-    <div class="metrics" aria-label="Agent overview">
-      <Metric
-        label="Total agents"
-        value={agents.length}
-        description="Independent workspaces"
-      />
-      <Metric
-        label="Running"
-        value={configured}
-        description="Agent Hosts running"
-      />
-      <Metric
-        label="Needs attention"
-        value={needsAttention}
-        description="Failed Host or bot connection"
-      />
-    </div>
-    <div data-ui="overview-footer">
-      <div class="agent-avatar-group">
-        {#each agents.slice(0, 4) as item (item.id)}<AgentAvatar
-            name={item.name}
-            small
-          />{/each}
+  <Surface
+    title="Usage"
+    description="Reported model cost per day across all agents (UTC)."
+  >
+    {#snippet actions()}<FilterGroup
+        label="Usage range"
+        bind:value={range}
+        options={[
+          { value: "7", label: "7 days" },
+          { value: "30", label: "30 days" },
+        ]}
+      />{/snippet}
+    {#if overviewFailed && !overview}
+      <p data-ui="muted">Usage is unavailable right now.</p>
+    {:else}
+      <div data-ui="usage-totals">
+        <strong>{money(totalCost)}</strong>
+        <span
+          >reported cost<small
+            >{count.format(totalTokens)} tokens in the last {range} days</small
+          ></span
+        >
       </div>
-      <p>
-        {agents.length
-          ? `${agents.length} ${agents.length === 1 ? "workspace" : "workspaces"}`
-          : "No agents yet."}
-      </p>
-      {#if canCreate}<a
-          class="panel-button panel-button-icon panel-button-ghost"
-          href="/agents/new"
-          aria-label="Add a workspace"><Icon name="arrow" size={16} /></a
-        >{/if}
-    </div>
+      <UsageChart
+        {bars}
+        caption={`Reported cost per day for the last ${range} days`}
+      />
+      {#if overview?.missingCost}<p data-ui="muted">
+          {overview.missingCost}
+          {overview.missingCost === 1 ? "task has" : "tasks have"} no reported cost
+          and {overview.missingCost === 1 ? "is" : "are"} counted as $0.
+        </p>{/if}
+    {/if}
   </Surface>
-  <Surface title="Telegram bots">
-    {#snippet actions()}<Icon name="telegram" size={20} />{/snippet}
-    <div data-ui="connection-total">
-      <strong>{connected}</strong><span
-        >bots polling<small>of {telegramBots} registered</small></span
-      ><span data-ui="connection-symbol"
-        ><Icon name="activity" size={28} /></span
-      >
-    </div>
-    <ProgressMeter
-      label="Bot connections"
-      value={connected}
-      max={telegramBots}
-    />
+  <Surface
+    title="Models"
+    description={`Share of ${byTokens ? "tokens" : "cost"}.`}
+  >
+    {#if modelRows.length === 0}
+      <p data-ui="muted">
+        {overviewFailed
+          ? "Usage is unavailable right now."
+          : `No model usage in the last ${range} days.`}
+      </p>
+    {:else}
+      <div data-ui="model-breakdown">
+        <UsageDonut
+          {slices}
+          label={byTokens ? count.format(totalTokens) : money(totalCost)}
+          detail={byTokens ? "tokens" : `last ${range} days`}
+        />
+        <ul>
+          {#each modelRows as row, index (row.key)}
+            <li data-slice={index}>
+              <span data-ui="legend-name"
+                ><i></i><Icon name={row.icon} size={14} /><span title={row.key}
+                  >{row.label}</span
+                ></span
+              >
+              <strong
+                >{shareTotal
+                  ? Math.round(
+                      ((byTokens ? row.tokens : row.value) / shareTotal) * 100,
+                    )
+                  : 0}%</strong
+              >
+              <small
+                >{byTokens
+                  ? `${count.format(row.tokens)} tokens`
+                  : money(row.value)}</small
+              >
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
     <p data-ui="muted">
-      Bots are polled by the Server even while an Agent Host is stopped, so this
-      count can be higher than Running. The owner’s first private message links
-      their chat. Discord connections are shown on each agent’s page.
+      Costs are the amounts reported by each provider after a task finishes.
+      Tasks without a reported cost are counted as $0, and the model share falls
+      back to tokens when no cost was reported.
     </p>
+  </Surface>
+</div>
+
+<div data-ui="overview-grid" data-order="swapped">
+  <Surface title="Quota left" description="Tightest limit per AI provider.">
+    {#if quotas.length === 0}
+      <p data-ui="muted">
+        No provider quota data yet. It appears once an agent’s model reports its
+        limits.
+      </p>
+    {:else}
+      <div data-ui="model-breakdown">
+        <UsageRings
+          rings={quotas.map((item) => ({
+            key: item.providerId,
+            percent: item.remainingPercent,
+          }))}
+          label={`${quotas[0]!.remainingPercent}%`}
+          detail="left"
+        />
+        <ul>
+          {#each quotas as item, index (item.providerId)}
+            <li data-slice={index}>
+              <span data-ui="legend-name"
+                ><i></i><span title={`${item.providerId} · ${item.window}`}
+                  >{item.providerId}</span
+                ></span
+              >
+              <strong>{item.remainingPercent}%</strong>
+              <small
+                title={`${item.window}, resets ${resets.format(item.resetsAt)}`}
+                >{item.window}</small
+              >
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+  </Surface>
+  <Surface
+    title="Last 24 hours"
+    description="Cumulative reported cost by hour, compared with the 24 hours before."
+  >
+    <div data-ui="trend-summary">
+      <strong>{money(hourTotal)}</strong>
+      {#if hourBefore > 0 || hourTotal > 0}<span
+          data-ui="trend-delta"
+          data-direction={hourDelta > 0
+            ? "up"
+            : hourDelta < 0
+              ? "down"
+              : "flat"}>{deltaText}</span
+        >{/if}
+      <small>vs {money(hourBefore)} in the previous 24 hours</small>
+    </div>
+    <UsageTrend
+      current={hourCurrent}
+      previous={hourPrevious}
+      caption="Cumulative reported cost over the last 24 hours"
+    />
   </Surface>
 </div>
 

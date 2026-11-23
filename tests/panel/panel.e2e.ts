@@ -1621,7 +1621,7 @@ test("keeps dashboard body copy readable on a wide screen", async ({
   await login(page);
   const main = page.getByRole("main");
   await expect(main).toHaveCSS("width", "1200px");
-  const copy = page.getByText(/^Bots are polled by the Server/);
+  const copy = page.getByText(/^Costs are the amounts reported/);
   await expect(copy).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   const lineLengths = await copy.evaluate((paragraph) => {
@@ -2356,17 +2356,62 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
   await page.route("**/api/status", (route) =>
     route.fulfill({ json: { agents } }),
   );
+  await page.route("**/api/usage/overview*", (route) =>
+    route.fulfill({
+      json: {
+        days: [
+          { day: "2026-11-21", costUsd: 0.125, tokens: 40, tasks: 1 },
+          { day: "2026-11-22", costUsd: 0.375, tokens: 80, tasks: 3 },
+        ],
+        models: [
+          {
+            providerId: "opencode",
+            modelId: "fixture",
+            costUsd: 0.5,
+            tokens: 120,
+            tasks: 4,
+          },
+        ],
+        missingCost: 0,
+        quotas: [
+          {
+            providerId: "opencode",
+            window: "Go monthly",
+            remainingPercent: 42,
+            resetsAt: Date.UTC(2026, 11, 1),
+            exhausted: false,
+          },
+        ],
+        hourly: Array.from({ length: 48 }, (_, index) => ({
+          hour: new Date(Date.UTC(2026, 10, 21, index)).toISOString(),
+          costUsd: index === 47 ? 0.5 : index === 10 ? 0.25 : 0,
+          tokens: 0,
+        })),
+      },
+    }),
+  );
   await login(page);
-  const overview = page.getByLabel("Agent overview");
-  const metric = (label: string) =>
-    overview
-      .locator('[data-ui="metric"]')
-      .filter({ hasText: label })
-      .locator(".metric-value");
-  await expect(metric("Total agents")).toHaveText("3");
-  await expect(metric("Running")).toHaveText("1");
-  await expect(metric("Needs attention")).toHaveText("1");
   const filters = page.getByRole("group", { name: "Filter agents" });
+  await expect(
+    filters.getByRole("button", { name: /All agents/ }),
+  ).toContainText("3");
+  await expect(filters.getByRole("button", { name: /Running/ })).toContainText(
+    "1",
+  );
+  await expect(
+    filters.getByRole("button", { name: /Needs attention/ }),
+  ).toContainText("1");
+  const usage = page.getByLabel("Usage", { exact: true });
+  await expect(usage.getByText("$0.50")).toBeVisible();
+  const trend = page.getByLabel("Last 24 hours", { exact: true });
+  await expect(trend.getByText("$0.50", { exact: true })).toBeVisible();
+  const quota = page.getByLabel("Quota left", { exact: true });
+  await expect(quota.getByText("opencode")).toBeVisible();
+  await expect(quota.getByText("Go monthly")).toBeVisible();
+  await expect(trend.getByText(/\+\$0\.25\s+\(100%\)/)).toBeVisible();
+  await expect(
+    page.getByLabel("Models", { exact: true }).getByText("fixture"),
+  ).toBeVisible();
   await filters.getByRole("button", { name: /Needs attention/ }).click();
   await expect(
     page.getByRole("button", { name: "Select Research" }),

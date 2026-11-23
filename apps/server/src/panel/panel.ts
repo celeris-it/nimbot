@@ -699,6 +699,20 @@ export function createPanel(
     return c.json({ selected: parsed.data.model });
   });
   app.get(
+    "/api/usage/overview",
+    validated(
+      "query",
+      z.object({
+        days: z.enum(["7", "30"]).transform(Number).default(7),
+      }),
+      "Invalid usage range.",
+    ),
+    (c) =>
+      deps.usage
+        ? c.json(deps.usage.overview(c.req.valid("query").days))
+        : c.json({ error: "Usage unavailable." }, 503),
+  );
+  app.get(
     "/api/agents/:id/usage",
     validated(
       "query",

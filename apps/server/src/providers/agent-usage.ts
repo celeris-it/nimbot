@@ -7,6 +7,7 @@ import {
   quotaStatus,
   taskUsage,
   type AgentUsage,
+  type UsageOverview,
   type ModelReference,
   type QuotaStatus,
   type TaskUsage,
@@ -147,6 +148,111 @@ export function openAgentUsage(path: string, now = Date.now) {
         )
         .all()
         .map((row) => String(row.id));
+    },
+    overview(days: number): UsageOverview {
+      const dayMs = 86_400_000;
+      const today = Math.floor(now() / dayMs) * dayMs;
+      const from = today - (days - 1) * dayMs;
+      const rows = db
+        .prepare(
+          `SELECT (t.started_at / ${dayMs}) * ${dayMs} AS day,
+          json_extract(u.usage, '$.model.providerId') AS providerId,
+          json_extract(u.usage, '$.model.modelId') AS modelId,
+          COALESCE(SUM(u.cost_usd), 0) AS cost,
+          COALESCE(SUM(u.total_tokens), 0) AS tokens,
+          COUNT(*) AS tasks, COALESCE(SUM(u.cost_usd IS NULL), 0) AS missing
+        FROM task_usage u JOIN tasks t ON t.id = u.task_id
+        WHERE t.started_at >= ? GROUP BY day, providerId, modelId`,
+        )
+        .all(from);
+      const perDay = new Map<number, UsageOverview["days"][number]>();
+      for (let i = 0; i < days; i++)
+        perDay.set(from + i * dayMs, {
+          day: new Date(from + i * dayMs).toISOString().slice(0, 10),
+          costUsd: 0,
+          tokens: 0,
+          tasks: 0,
+        });
+      const perModel = new Map<string, UsageOverview["models"][number]>();
+      let missingCost = 0;
+      for (const row of rows) {
+        const bucket = perDay.get(Number(row.day));
+        if (bucket) {
+          bucket.costUsd += Number(row.cost);
+          bucket.tokens += Number(row.tokens);
+          bucket.tasks += Number(row.tasks);
+        }
+        missingCost += Number(row.missing);
+        if (
+          typeof row.providerId !== "string" ||
+          typeof row.modelId !== "string"
+        )
+          continue;
+        const key = JSON.stringify([row.providerId, row.modelId]);
+        const model = perModel.get(key) ?? {
+          providerId: row.providerId,
+          modelId: row.modelId,
+          costUsd: 0,
+          tokens: 0,
+          tasks: 0,
+        };
+        model.costUsd += Number(row.cost);
+        model.tokens += Number(row.tokens);
+        model.tasks += Number(row.tasks);
+        perModel.set(key, model);
+      }
+      const hourMs = 3_600_000;
+      const thisHour = Math.floor(now() / hourMs) * hourMs;
+      const firstHour = thisHour - 47 * hourMs;
+      const hourly = Array.from({ length: 48 }, (_, i) => ({
+        hour: new Date(firstHour + i * hourMs).toISOString(),
+        costUsd: 0,
+        tokens: 0,
+      }));
+      const hourRows = db
+        .prepare(
+          `SELECT t.started_at / ${hourMs} AS hour,
+          COALESCE(SUM(u.cost_usd), 0) AS cost, COALESCE(SUM(u.total_tokens), 0) AS tokens
+        FROM task_usage u JOIN tasks t ON t.id = u.task_id
+        WHERE t.started_at >= ? GROUP BY hour`,
+        )
+        .all(firstHour);
+      for (const row of hourRows) {
+        const bucket = hourly[Number(row.hour) - firstHour / hourMs];
+        if (!bucket) continue;
+        bucket.costUsd = Number(row.cost);
+        bucket.tokens = Number(row.tokens);
+      }
+      const quotas = new Map<string, UsageOverview["quotas"][number]>();
+      for (const row of db
+        .prepare("SELECT quota FROM agent_models WHERE quota IS NOT NULL")
+        .all()) {
+        const quota = readJson<QuotaStatus>(row.quota);
+        if (!quota?.model) continue;
+        for (const window of quota.windows) {
+          const known = quotas.get(quota.model.providerId);
+          if (known && known.remainingPercent <= 100 - window.usedPercent)
+            continue;
+          quotas.set(quota.model.providerId, {
+            providerId: quota.model.providerId,
+            window: window.name,
+            remainingPercent: Math.round(100 - window.usedPercent),
+            resetsAt: window.resetsAt,
+            exhausted: window.exhausted,
+          });
+        }
+      }
+      return {
+        quotas: [...quotas.values()].sort(
+          (a, b) => a.remainingPercent - b.remainingPercent,
+        ),
+        hourly,
+        days: [...perDay.values()],
+        models: [...perModel.values()].sort(
+          (a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens,
+        ),
+        missingCost,
+      };
     },
     report(id: string, before = Number.MAX_SAFE_INTEGER): AgentUsage {
       const date = new Date(now());
@@ -312,6 +418,7 @@ export function createAgentUsage(
     report(id: string, before?: number) {
       return store.report(id, before);
     },
+    overview: store.overview,
     refresh(id: string) {
       const now = Date.now();
       const at = Math.max(
