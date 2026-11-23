@@ -1232,10 +1232,21 @@ export function createPanel(
       agents: (listAgentIds?.() ?? []).flatMap((id) => {
         const setup = getAgentSetup?.(id);
         if (!setup) return [];
+        const discordConnection = deps.discord?.get(id);
         return [
           {
             id,
             ...setup,
+            discord: deps.discord
+              ? {
+                  connection: discordConnection
+                    ? { botUsername: discordConnection.botUsername }
+                    : null,
+                  conversation: discordConnection
+                    ? deps.discord.status?.(id)
+                    : undefined,
+                }
+              : undefined,
             optionCapabilities: {
               edit: !!agentSettings?.get(id),
               discord: !!deps.discord,

@@ -1,9 +1,18 @@
 import type {
   AgentSummary,
+  DiscordConversationStatus,
   Schedule,
   ScheduleRun,
 } from "../../server/src/panel/panel-contracts.js";
 import { nextRun } from "../../server/src/schedules/schedule-time.js";
+
+export const discordConversationLabels = {
+  connecting: "Connecting",
+  ready: "Connected",
+  reconnecting: "Reconnecting",
+  failed: "Connection failed",
+  stopped: "Disconnected",
+} satisfies Record<DiscordConversationStatus["state"], string>;
 
 export const scheduleText = {
   title: (name: string) => `Schedules for ${name}`,

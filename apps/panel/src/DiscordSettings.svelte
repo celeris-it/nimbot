@@ -7,6 +7,7 @@
     TextField,
   } from "./components/index.js";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
+  import { discordConversationLabels } from "./labels.js";
   let {
     agent,
     busy,
@@ -137,13 +138,9 @@
     {#if agent.discord?.connection}
       {#if agent.discord.conversation}
         <p>
-          Discord conversation: {{
-            connecting: "Connecting",
-            ready: "Connected",
-            reconnecting: "Reconnecting",
-            failed: "Connection failed",
-            stopped: "Disconnected",
-          }[agent.discord.conversation.state]}.
+          Discord conversation: {discordConversationLabels[
+            agent.discord.conversation.state
+          ]}.
         </p>
         <p>
           Owner DM: {agent.discord.conversation.ownerLinked

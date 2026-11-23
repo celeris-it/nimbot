@@ -98,6 +98,10 @@ export interface AgentDetail extends AgentSummary {
   };
 }
 export interface AgentDirectoryEntry extends AgentSummary {
+  discord?: {
+    connection: { botUsername: string } | null;
+    conversation?: DiscordConversationStatus;
+  };
   optionCapabilities: {
     edit: boolean;
     discord: boolean;

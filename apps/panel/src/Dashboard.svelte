@@ -1,8 +1,13 @@
 <script lang="ts">
-  import type { AgentSummary } from "../../server/src/panel/panel-contracts.js";
+  import type {
+    AgentDetail,
+    AgentDirectoryEntry,
+    AgentSummary,
+  } from "../../server/src/panel/panel-contracts.js";
   import {
     botLabel,
     botAccessLabels,
+    discordConversationLabels,
     ownerLabels,
     processLabels,
   } from "./labels.js";
@@ -29,7 +34,7 @@
     canCreate,
     refresh,
   }: {
-    agents: AgentSummary[];
+    agents: AgentDirectoryEntry[];
     canCreate: boolean;
     refresh: () => void;
   } = $props();
@@ -170,6 +175,45 @@
   let selected = $derived(
     filtered.find((item) => item.id === selectedId) ?? filtered[0],
   );
+  let discordFromDetails = $state<{
+    agentId: string;
+    discord: AgentDirectoryEntry["discord"];
+  }>();
+  let selectedDiscordDetails = $derived(
+    discordFromDetails?.agentId === selected?.id
+      ? discordFromDetails
+      : undefined,
+  );
+  let previewDiscord = $derived(
+    selected?.discord ??
+      (selected?.optionCapabilities?.discord
+        ? selectedDiscordDetails?.discord
+        : undefined),
+  );
+  $effect(() => {
+    const item = selected;
+    // A running server may advertise Discord before its directory includes the summary.
+    if (!item?.optionCapabilities?.discord || item.discord) return;
+    const current = new AbortController();
+    void request<AgentDetail>(`/api/agents/${encodeURIComponent(item.id)}`, {
+      signal: current.signal,
+    }).then(
+      ({ discord }) => {
+        if (!current.signal.aborted)
+          discordFromDetails = {
+            agentId: item.id,
+            discord: discord?.connection
+              ? discord
+              : discord && { connection: null },
+          };
+      },
+      () => {
+        if (!current.signal.aborted)
+          discordFromDetails = { agentId: item.id, discord: undefined };
+      },
+    );
+    return () => current.abort();
+  });
   const setupLabel = (item: AgentSummary) =>
     item.process ? processLabels[item.process.state] : "Unavailable";
 </script>
@@ -348,9 +392,11 @@
 
 <Surface tone="muted">
   <div data-ui="workspace-heading">
-    <h2>
-      Agent workspaces <span>{filtered.length}</span>
-    </h2>
+    <SearchField
+      label="Search agents"
+      placeholder="Search agents"
+      bind:value={agentQuery}
+    />
     <FilterGroup
       label="Filter agents"
       bind:value={filter}
@@ -363,13 +409,6 @@
         },
         { value: "attention", label: "Needs attention", count: needsAttention },
       ]}
-    />
-  </div>
-  <div class="mb-4 w-full max-w-xs">
-    <SearchField
-      label="Search agents"
-      placeholder="Search agents"
-      bind:value={agentQuery}
     />
   </div>
   {#if agents.length === 0}
@@ -396,50 +435,57 @@
     <div data-ui="fleet-layout">
       <div data-ui="agent-list" role="group" aria-label="Agent workspaces">
         {#each filtered as item (item.id)}
+          {@const identifier = item.botUsername
+            ? `@${item.botUsername}`
+            : item.id}
           <ActionButton
             variant="plain"
             type="button"
             data-ui="agent-row"
             aria-label={`Select ${item.name}`}
+            aria-describedby={`fleet-status-${encodeURIComponent(item.id)}`}
             aria-pressed={selected.id === item.id}
             onclick={() => (selectedId = item.id)}
           >
             <AgentAvatar agentId={item.id} name={item.name} small /><span
-              ><strong>{item.name}</strong><small
-                >{item.botUsername ? `@${item.botUsername}` : item.id}</small
+              ><strong title={item.name}>{item.name}</strong><small
+                title={identifier}>{identifier}</small
               ></span
             ><StatusBadge
+              id={`fleet-status-${encodeURIComponent(item.id)}`}
               label={setupLabel(item)}
-              tone={attention(item) ? "warning" : "neutral"}
+              tone={attention(item)
+                ? "warning"
+                : item.process?.state === "running"
+                  ? "good"
+                  : "neutral"}
             /><Icon name="chevron" size={14} />
           </ActionButton>
         {/each}
       </div>
       <article data-ui="agent-preview" aria-label="Selected agent">
         <div data-ui="preview-top">
-          <span data-ui="eyebrow">AGENT WORKSPACE</span><StatusBadge
-            label={setupLabel(selected)}
-            tone={attention(selected)
-              ? "warning"
-              : selected.process?.state === "running"
-                ? "good"
-                : "neutral"}
-          />
-        </div>
-        <div data-ui="preview-identity">
-          {#key selected.id}
-            <AgentAvatar agentId={selected.id} name={selected.name} />
-          {/key}
-          <div>
-            <h3>{selected.name}</h3>
-            <p>
-              {selected.botUsername ? `@${selected.botUsername}` : selected.id}
-            </p>
+          <div data-ui="preview-identity">
+            {#key selected.id}
+              <AgentAvatar agentId={selected.id} name={selected.name} />
+            {/key}
+            <div>
+              <h3>{selected.name}</h3>
+              <p>
+                {selected.botUsername
+                  ? `@${selected.botUsername}`
+                  : selected.id}
+              </p>
+            </div>
           </div>
-          <Icon name="bot" size={34} />
+          <ActionButton
+            variant="primary"
+            href={`/agents/${encodeURIComponent(selected.id)}/setup`}
+            icon="chevron">Manage</ActionButton
+          >
         </div>
         <div data-ui="preview-facts">
-          <div>
+          <div class:col-span-full={!selected.botUsername}>
             <Icon name="telegram" /><span
               >Telegram bot<strong>{botLabel(selected)}</strong></span
             >
@@ -453,7 +499,7 @@
                 ></span
               >
             </div>
-            <div>
+            <div class="col-span-full">
               <Icon name="terminal" /><span
                 >Bot link<strong
                   >{selected.setupAccess
@@ -462,18 +508,45 @@
                 ></span
               >
             </div>{/if}
+          {#if previewDiscord || selected.optionCapabilities?.discord}
+            <div class:col-span-full={!previewDiscord?.conversation}>
+              <Icon name="discord" /><span>
+                Discord bot
+                <strong
+                  >{previewDiscord
+                    ? (previewDiscord.connection?.botUsername ??
+                      "Not configured")
+                    : selectedDiscordDetails
+                      ? "Status unavailable"
+                      : "Loading…"}</strong
+                >
+                {#if previewDiscord?.conversation}
+                  {discordConversationLabels[previewDiscord.conversation.state]}
+                {/if}
+              </span>
+            </div>
+            {#if previewDiscord?.conversation}
+              <div>
+                <Icon name="shield" /><span>
+                  Discord owner DM
+                  <strong
+                    >{previewDiscord.conversation.ownerLinked
+                      ? "Linked"
+                      : "Waiting for the owner's first private message"}</strong
+                  >
+                </span>
+              </div>
+            {/if}
+          {/if}
         </div>
-        <div data-ui="preview-actions">
-          <div>
-            {#if selected.botUsername}<ActionButton
-                href={`https://t.me/${selected.botUsername}`}
-                icon="arrow">Open chat in Telegram</ActionButton
-              >{/if}<ActionButton
-              href={`/agents/${encodeURIComponent(selected.id)}/setup`}
-              icon="chevron">Manage</ActionButton
+        {#if selected.botUsername}
+          <div data-ui="preview-actions">
+            <ActionButton
+              href={`https://t.me/${selected.botUsername}`}
+              icon="arrow">Open chat in Telegram</ActionButton
             >
           </div>
-        </div>
+        {/if}
       </article>
     </div>
   {/if}

@@ -29,12 +29,14 @@ it("protects Discord configuration, isolates agents, and never returns credentia
       async () => ({ status: "delivered", sentParts: 1 }) as const,
     );
     const app = createPanel(config, {
+      listAgentIds: () => ["a", "b"],
       getAgentSetup: (id) =>
         registry.get(id)
           ? { name: id, botUsername: null, provisioning: "pending" }
           : undefined,
       discord: {
         ...discord,
+        status: () => ({ state: "ready", ownerLinked: false }),
         test: testDelivery,
         get: (id) => registry.getDiscordConnection(id),
       },
@@ -115,6 +117,20 @@ it("protects Discord configuration, isolates agents, and never returns credentia
     });
     expect(JSON.stringify(response)).not.toContain("file:");
     expect(await (await get("b")).json()).toEqual({ connection: null });
+    const directory = await app.request("/api/status", {
+      headers: { Cookie: cookie },
+    });
+    expect(
+      (await directory.json()).agents.map(
+        ({ discord }: { discord: unknown }) => discord,
+      ),
+    ).toEqual([
+      {
+        connection: { botUsername: "discord_bot" },
+        conversation: { state: "ready", ownerLinked: false },
+      },
+      { connection: null },
+    ]);
     const first = await discord.resolve("a");
     expect(
       (

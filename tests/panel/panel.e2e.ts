@@ -3074,6 +3074,52 @@ const dashboardUsage = {
   })),
 };
 
+test("draws rounded model usage segments with gaps and keeps single-model rings whole", async ({
+  page,
+}, info) => {
+  let models = [76_000, 54_000, 38_000, 22_000, 0].map((tokens, index) => ({
+    providerId: "opencode",
+    modelId: `model-${index}`,
+    costUsd: 0,
+    tokens,
+    tasks: 1,
+  }));
+  await page.route("**/api/usage/overview*", (route) =>
+    route.fulfill({
+      json: {
+        ...dashboardUsage,
+        days: [{ day: "2026-11-22", costUsd: 0, tokens: 190_000, tasks: 5 }],
+        models,
+      },
+    }),
+  );
+  await login(page);
+  const modelUsage = page.getByRole("region", { name: "Models", exact: true });
+  const donut = modelUsage.locator('[data-ui="usage-donut"]');
+  const segments = donut.locator("circle[data-slice]");
+  const track = donut.locator("circle[data-track]");
+  await expect(segments).toHaveCount(4);
+  await expect(track).toHaveCount(0);
+  await expect(segments.first()).toHaveCSS("stroke-linecap", "round");
+  await expect(segments.first()).toHaveCSS("stroke-width", "13px");
+  await expect(segments.first()).not.toHaveCSS("stroke-dasharray", "none");
+  expect(
+    Number(await segments.first().getAttribute("stroke-dashoffset")),
+  ).toBeLessThan(-6.5);
+  await expect(donut.getByText("tokens", { exact: true })).toBeVisible();
+  await donut.screenshot({ path: info.outputPath("rounded-usage-donut.png") });
+
+  models = models.slice(0, 1);
+  await page.getByRole("button", { name: "30 days" }).click();
+  await expect(segments).toHaveCount(1);
+  await expect(segments.first()).toHaveCSS("stroke-dasharray", "none");
+
+  models = models.map((model) => ({ ...model, tokens: 0 }));
+  await page.getByRole("button", { name: "7 days" }).click();
+  await expect(segments).toHaveCount(0);
+  await expect(track).toHaveCount(1);
+});
+
 test("filters and searches the fleet, selects previews, and reconciles removed agents", async ({
   page,
 }) => {
@@ -3309,15 +3355,46 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   await expect(destination).toBeHidden();
   await expect(switcher).toBeFocused();
 
+  const fleetSearch = page.getByRole("searchbox", {
+    name: "Search agents",
+  });
   const fleet = dashboard
-    .getByRole("heading", { name: /Agent workspaces/ })
-    .locator('xpath=ancestor::section[@data-ui="surface"]');
+    .locator('[data-ui="surface"]')
+    .filter({ has: fleetSearch });
+  const fleetToolbar = fleet.locator('[data-ui="workspace-heading"]');
+  await expect(
+    fleetToolbar.getByRole("searchbox", { name: "Search agents" }),
+  ).toBeVisible();
+  await expect(
+    fleetToolbar.getByRole("group", { name: "Filter agents" }),
+  ).toBeVisible();
+  await expect(
+    fleet.getByRole("heading", { name: /Agent workspaces/ }),
+  ).toHaveCount(0);
+  const developer = fleet.getByRole("button", { name: "Select Developer" });
+  const running = developer.getByText("Running", { exact: true });
+  const identifier = developer.getByText("@nimbot_developer_bot", {
+    exact: true,
+  });
+  await expect(identifier).toHaveAttribute("title", "@nimbot_developer_bot");
+  await expect(identifier).toHaveCSS("text-overflow", "ellipsis");
+  await expect(identifier).toHaveCSS("white-space", "nowrap");
+  const preview = fleet.getByRole("article", { name: "Selected agent" });
+  const manage = preview.getByRole("link", { name: "Manage", exact: true });
+  await expect(running).toHaveAttribute("data-tone", "good");
+  await expect(developer).toHaveAccessibleDescription("Running");
+  await expect(preview.locator('[data-ui="status"]')).toHaveCount(0);
+  await expect(
+    preview
+      .locator('[data-ui="preview-top"]')
+      .getByRole("link", { name: "Manage" }),
+  ).toHaveAttribute("href", "/agents/dev/setup");
   const plainSurfaces = [
     ...["Usage", "Models", "Quota left", "Last 24 hours"].map((name) =>
       dashboard.getByRole("region", { name, exact: true }),
     ),
     fleet,
-    fleet.getByRole("article", { name: "Selected agent" }),
+    preview,
   ];
   await expect(dashboard.locator('[data-line="current"]')).toHaveCSS(
     "filter",
@@ -3379,9 +3456,16 @@ test("renders the reference-inspired dashboard across screen sizes without exter
           await expect(bars).toHaveCount(30);
           expect((await bars.last().boundingBox())?.width).toBeGreaterThan(4);
         }
-        await expect(
-          page.getByRole("link", { name: "Manage", exact: true }),
-        ).toBeVisible();
+        await expect(running).toBeVisible();
+        await expect(running).toHaveCSS(
+          "color",
+          theme === "dark" ? "rgb(179, 255, 57)" : "rgb(39, 99, 49)",
+        );
+        await expect(manage).toBeVisible();
+        await expect(manage).toHaveCSS(
+          "background-color",
+          theme === "dark" ? "rgb(91, 156, 255)" : "rgb(32, 85, 172)",
+        );
         if (width === 320 && state === "populated") {
           await switcher.click();
           await destination.click({ trial: true });
@@ -3533,8 +3617,14 @@ test("sends Discord tests and reuses the request when checking uncertain deliver
 
 test("shows independent Discord conversation and owner-link status while Telegram stays connected", async ({
   page,
-}) => {
+  request,
+}, info) => {
+  await request.post("/__test/agent/research");
   await login(page);
+  const preview = page.getByRole("article", { name: "Selected agent" });
+  await expect(
+    preview.getByText("Discord bot", { exact: false }),
+  ).toContainText("Not configured");
   await page.goto("/agents/dev/channels");
   await page.getByLabel("Owner's Discord user ID").fill("987654321098765432");
   await page
@@ -3570,6 +3660,59 @@ test("shows independent Discord conversation and owner-link status while Telegra
       .getByRole("region", { name: "Telegram connection" })
       .getByText("@developer_bot", { exact: true }),
   ).toBeVisible();
+  await page.goto("/");
+  await expect(
+    preview.getByText("Telegram bot", { exact: false }),
+  ).toBeVisible();
+  const discordBot = preview.getByText("Discord bot", { exact: false });
+  await expect(discordBot).toContainText("notification_bot");
+  await expect(discordBot).toContainText("Connected");
+  const ownerDm = preview.getByText("Discord owner DM", { exact: false });
+  await expect(ownerDm).toContainText(
+    "Waiting for the owner's first private message",
+  );
+  await request.post("/__test/discord-owner/dev");
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  await expect(ownerDm).toContainText("Linked");
+  await expect(
+    preview.getByText("Agent workspace", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    preview.locator('[data-ui="preview-identity"] > [data-ui="icon"]'),
+  ).toHaveCount(0);
+  for (const width of [1280, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    await preview.screenshot({
+      path: info.outputPath(`discord-preview-${width}.png`),
+    });
+  }
+  await page.unroute("**/api/agents/dev");
+  await page.route("**/api/status", async (route) => {
+    const response = await route.fetch();
+    const directory = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        agents: directory.agents.map((entry: Record<string, unknown>) => ({
+          ...entry,
+          discord: undefined,
+        })),
+      },
+    });
+  });
+  await page.reload();
+  await expect(discordBot).toContainText("notification_bot");
+  await expect(discordBot).toContainText("Connected");
+  await expect(ownerDm).toContainText("Linked");
+  await page.getByRole("button", { name: "Select Researcher" }).click();
+  await expect(
+    preview.getByRole("heading", { name: "Researcher" }),
+  ).toBeVisible();
+  await expect(discordBot).toContainText("Not configured");
+  await expect(ownerDm).toHaveCount(0);
 });
 
 test("creates a webhook schedule, shows credentials, triggers it, and revokes its token", async ({

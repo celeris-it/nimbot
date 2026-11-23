@@ -10,11 +10,12 @@
   } satisfies Record<string, IconName>;
 
   let {
+    id,
     label,
     tone = "neutral",
-  }: { label: string; tone?: keyof typeof statusIcons } = $props();
+  }: { id?: string; label: string; tone?: keyof typeof statusIcons } = $props();
 </script>
 
-<span class="panel-badge" data-ui="status" data-tone={tone}>
+<span {id} class="panel-badge" data-ui="status" data-tone={tone}>
   <Icon name={statusIcons[tone]} size={12} />{label}
 </span>
