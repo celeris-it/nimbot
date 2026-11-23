@@ -105,7 +105,7 @@ it("migrates subprocess state with saved Telegram and Discord connections to opt
   );
   prepareStateSchema(path, "server-process");
   prepareStateSchema(path, "server-process");
-  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 3 });
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 4 });
   expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   expect(
     read(path, "SELECT owner_id, bot_id, credential_ref FROM agents"),
@@ -231,7 +231,7 @@ it("upgrades subprocess v2 schedules and run history to the fresh v3 schema", ()
   const run = read(migrated, "SELECT * FROM schedule_runs");
   for (const path of [migrated, fresh]) {
     prepareStateSchema(path, kind);
-    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 3 });
+    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 4 });
     expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   }
   expect(read(migrated, "SELECT * FROM schedules")).toEqual({
@@ -242,4 +242,34 @@ it("upgrades subprocess v2 schedules and run history to the fresh v3 schema", ()
   const ddl =
     "SELECT group_concat(sql, '\\n') AS ddl FROM (SELECT sql FROM sqlite_schema ORDER BY name)";
   expect(read(migrated, ddl)).toEqual(read(fresh, ddl));
+});
+
+it("migrates version 3 task history without changing execution identity or inferring delivery", () => {
+  const kind = "server-process";
+  const migration = (version: number) =>
+    readFileSync(
+      new URL(
+        `../scripts/state-schema/server-process-v${version}.sql`,
+        import.meta.url,
+      ),
+      "utf8",
+    );
+  const path = fixture(
+    kind,
+    `
+    ${legacy(kind)}
+    ${migration(2)}
+    ${migration(3)}
+    PRAGMA application_id = 0x4e494d50;
+    PRAGMA user_version = 3;
+    INSERT INTO tasks (id, agent_id, bot_id, chat_id, prompt, status, created_at,
+      updated_at, host_task_id) VALUES ('t', 'a', 123, 42, 'saved', 'completed', 1, 2, 'host-t');
+  `,
+  );
+  const previous = read(path, "SELECT * FROM tasks");
+  prepareStateSchema(path, kind);
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 4 });
+  expect(read(path, "SELECT * FROM tasks")).toEqual(previous);
+  expect(read(path, "SELECT * FROM task_execution_details")).toBeUndefined();
+  expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
 });

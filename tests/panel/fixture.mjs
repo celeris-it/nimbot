@@ -9,6 +9,7 @@ import {
   createHostUsage,
   openAgentUsage,
 } from "../../apps/server/dist/providers/agent-usage.js";
+import { createExecutionHistory } from "../../apps/server/dist/tasks/execution-history.js";
 import { openTaskStore } from "../../apps/server/dist/tasks/task-queue.js";
 import { openScheduleStore } from "../../apps/server/dist/schedules/schedule-store.js";
 import { openMcpCatalog } from "../../apps/server/dist/mcp/mcp-catalog.js";
@@ -146,6 +147,7 @@ const panel = createPanel(
       const agent = agents.get(id);
       agent.processState = action === "stop" ? "stopped" : "running";
     },
+    executions: createExecutionHistory(tasks, stateDir),
     peers: {
       grants,
       candidates: (id) => {
@@ -402,6 +404,28 @@ app.post("/__test/agent/:id", (c) => {
     authBusy: false,
   });
   return c.json({ ok: true });
+});
+app.post("/__test/execution", (c) => {
+  const id = tasks.enqueue({
+    agentId: "dev",
+    botId: 123,
+    chatId: 42,
+    prompt: "Summarize the report.",
+  }).id;
+  tasks.claimNextTask("dev");
+  tasks.finishWithDelegations(
+    id,
+    "completed",
+    () => false,
+    false,
+    {
+      ok: true,
+      output: "The report contains <strong>three findings</strong>.",
+    },
+    true,
+  );
+  tasks.settleExecutionDelivery(id, "unconfirmed");
+  return c.json({ id });
 });
 app.post("/__test/delegations/:source", (c) => {
   const source = c.req.param("source");

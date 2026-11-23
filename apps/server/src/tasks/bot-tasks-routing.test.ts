@@ -326,3 +326,101 @@ it("can execute Discord work without any Telegram attachment when it is the FIFO
     store.close();
   }
 });
+
+it("records a partially delivered Telegram result without changing execution status", async () => {
+  const store = openTaskStore(":memory:");
+  const output = "a".repeat(4097);
+  const tasks = createBotTasks({
+    agentId: "a",
+    store,
+    ownerId: () => 42,
+    run: async () => output,
+  });
+  let sent = 0;
+  const bot = new Bot("123:test-token");
+  bot.api.config.use(async (previous, method, payload, signal) => {
+    if (method !== "sendMessage") return previous(method, payload, signal);
+    if (++sent === 2) throw new Error("Connection lost after the first part");
+    return { ok: true, result: { message_id: 1 } } as Awaited<
+      ReturnType<typeof previous>
+    >;
+  });
+  tasks.attach(bot);
+  try {
+    tasks.submit(123, 42, "request", 1);
+    await tasks.idle();
+    expect(sent).toBe(2);
+    expect(store.listExecutions("a").history).toMatchObject([
+      { status: "completed", origin: "telegram", delivery: "unconfirmed" },
+    ]);
+  } finally {
+    tasks.close();
+    store.close();
+  }
+});
+
+it.each([
+  ["delivered", false, "delivered"],
+  ["failed", false, "unconfirmed"],
+  ["failed", true, "not_sent"],
+] as const)(
+  "tracks Discord delivery %s (destination invalidated: %s)",
+  async (fileStatus, invalidate, expected) => {
+    const store = openTaskStore(":memory:");
+    const hostId = "a0000000-0000-4000-8000-000000000001";
+    const file = { bytes: Buffer.from("report"), name: "report.txt" };
+    let current = true;
+    const deliver = vi.fn(async () => "delivered" as const);
+    const sendFile = vi.fn(async () =>
+      fileStatus === "delivered"
+        ? { status: "delivered" as const, sentParts: 1 }
+        : {
+            status: "failed" as const,
+            sentParts: 0,
+            reason: "rejected" as const,
+          },
+    );
+    const tasks = createBotTasks({
+      agentId: "a",
+      store,
+      ownerId: () => 42,
+      run: async (_prompt, _report, _signal, _approval, execution) => {
+        execution?.onAccepted(hostId);
+        execution?.onAttachment?.();
+        if (invalidate) current = false;
+        return "report text";
+      },
+      discord: {
+        admit: () => current,
+        progress: async () => {},
+        sendApproval: async () => "1",
+        deliver,
+        sendFile,
+        attachments: { take: async () => file, save: async () => {} },
+      },
+    });
+    try {
+      tasks.submitDiscord(
+        {
+          platform: "discord",
+          botId: "123",
+          ownerId: "456",
+          channelId: "789",
+          messageId: "1",
+        },
+        "report",
+      );
+      await tasks.idle();
+      expect(store.listExecutions("a").history).toMatchObject([
+        { origin: "discord", status: "completed", delivery: expected },
+      ]);
+      expect(deliver.mock.calls.length).toBe(
+        invalidate ? 0 : fileStatus === "failed" ? 2 : 1,
+      );
+      expect(sendFile.mock.calls.length).toBe(invalidate ? 0 : 1);
+    } finally {
+      tasks.close();
+      store.close();
+    }
+  },
+);

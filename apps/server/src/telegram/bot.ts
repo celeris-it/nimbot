@@ -8,7 +8,8 @@ import type { HostStatus } from "../host/agent-host.js";
 import type { ChatBinding } from "./chat-binding.js";
 import { splitTelegramText } from "./telegram-text.js";
 import type { TaskOutcome } from "../tasks/task-queue.js";
-import { Bot, type Api } from "grammy";
+import { Bot, GrammyError, type Api } from "grammy";
+import type { DeliveryOutcome } from "../tasks/execution-history.js";
 import type { BotAccess } from "../agents/agent-access.js";
 import {
   formatScheduleList,
@@ -39,13 +40,25 @@ export async function sendTaskOutcome(
   outcome: TaskOutcome,
   scheduleName?: string,
   canSend: () => boolean = () => true,
-) {
+): Promise<DeliveryOutcome> {
+  let sent = false;
   for (const part of splitTelegramText(
     taskOutcomeText(outcome, scheduleName),
   )) {
-    if (!canSend()) return;
-    await api.sendMessage(chatId, part);
+    if (!canSend()) return sent ? "unconfirmed" : "not_sent";
+    try {
+      await api.sendMessage(chatId, part);
+    } catch (error) {
+      return !sent &&
+        error instanceof GrammyError &&
+        error.error_code >= 400 &&
+        error.error_code < 500
+        ? "not_sent"
+        : "unconfirmed";
+    }
+    sent = true;
   }
+  return "delivered";
 }
 
 export function taskOutcomeText(outcome: TaskOutcome, scheduleName?: string) {

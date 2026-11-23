@@ -53,6 +53,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 - Choose a model per agent, review tokens and reported cost by agent or task, and pause the agent’s queue when OpenCode reports an exhausted Console budget or Go allowance.
 - Run saved prompts once, daily, weekly, at fixed intervals, or on authenticated webhook requests configured from the panel, with results delivered to the owner's Telegram or Discord chat, as selected for each schedule.
 - Send documents up to 10 MiB to a Telegram agent and ask it to return generated files in the same chat.
+- Inspect an agent’s running, queued, and finished tasks in **Executions**, including the original request, saved response text, and chat delivery status.
 - Cancel a running task without affecting other agents or blocking later queued tasks.
 - Preserve conversations, files, configuration, and chat bindings across restarts; safely mark interrupted tasks instead of replaying potentially completed actions.
 - Replace revoked bot tokens securely and retain persistent data by default when deleting an agent.
@@ -172,6 +173,13 @@ For tool-enabled turns, the engine starts a bundled HTTP MCP adapter on loopback
 Host-registered Server tools now use a durable outbox in the task database. Each invocation and its `tool_request` event are committed together before waiting for a result. Arguments and outcomes are limited to 16 KiB each, with four pending requests and 100 invocations per turn. Reusing an invocation ID with changed arguments is rejected; identical replays return the saved outcome without publishing another request. Authenticated Host endpoints report whether an invocation is still awaiting a result and accept a single immutable outcome. Cancellation and timeout emit `tool_cancel` events; a Host restart marks unresolved requests interrupted, and no old waiter is restored. Capability and Host API credentials are not included in these events. Server dispatch and write replay protection are implemented, and private memory handlers run locally in the Host; Host records are not trusted authorization or proof of a Server side effect. Server cancellation immediately aborts active tool calls without waiting for another Host poll and rejects later tool requests. The dispatcher stops waiting even if a handler ignores cancellation, aborts the handler scope on every exit, and never replaces a saved cancelled write outcome with a late result. It rechecks authorization immediately before entering a handler.
 
 Terminal and filesystem tools run through OpenCode in the Agent Host process environment. Browser automation uses headless Chromium through terminal execution with the bundled Playwright tooling; no external browser service is required. Client-side ACP filesystem and terminal capabilities remain disabled.
+
+Open **Executions** in the panel to see the queue and page through finished tasks.
+The detail shows the saved request and available response text, even when the
+Agent Host is stopped. An execution can finish successfully while its chat delivery
+remains unconfirmed. Tasks recorded before delivery tracking show **Unknown** for
+delivery. Older response text is available when the associated Host record still
+exists.
 
 ### Model selection and usage
 

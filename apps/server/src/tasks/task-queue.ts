@@ -1,3 +1,9 @@
+import { taskExecutionSchema } from "../../../../scripts/state-schema.mjs";
+import type {
+  DeliveryOutcome,
+  ExecutionEntry,
+  ExecutionPage,
+} from "./execution-history.js";
 import type {
   DiscordAttachmentInput,
   DiscordDocument,
@@ -200,6 +206,44 @@ function readDelegationResult(
   return undefined;
 }
 
+const executionColumns = `t.id, t.status, t.platform, t.schedule_id,
+  t.schedule_name, t.schedule_trigger, t.created_at, t.started_at, t.updated_at,
+  d.delivery`;
+const executionTables = `tasks t LEFT JOIN task_execution_details d ON d.task_id = t.id`;
+
+function executionEntry(row: Record<string, unknown>): ExecutionEntry {
+  const status = row.status as TaskStatus;
+  const channel =
+    row.platform === "delegated"
+      ? null
+      : (row.platform as "telegram" | "discord");
+  return {
+    id: String(row.id),
+    status,
+    origin:
+      channel === null
+        ? "delegated"
+        : row.schedule_id == null
+          ? channel
+          : row.schedule_trigger === "webhook"
+            ? "webhook"
+            : "schedule",
+    channel,
+    scheduleName:
+      typeof row.schedule_name === "string" ? row.schedule_name : null,
+    createdAt: Number(row.created_at),
+    startedAt: row.started_at == null ? null : Number(row.started_at),
+    finishedAt:
+      status === "queued" || status === "running"
+        ? null
+        : Number(row.updated_at),
+    delivery:
+      channel === null
+        ? "not_applicable"
+        : ((row.delivery ?? "unknown") as ExecutionEntry["delivery"]),
+  };
+}
+
 /** Chat results stay on the Host; bounded delegation results are retained here. Bot tokens never enter this database. */
 export function openTaskStore(path: string) {
   const db = new DatabaseSync(path);
@@ -244,6 +288,7 @@ export function openTaskStore(path: string) {
       CHECK ((platform = 'delegated' AND delegation_id IS NOT NULL AND parent_task_id IS NOT NULL AND source_agent_id IS NOT NULL AND source_agent_id != agent_id AND parent_task_id != id AND schedule_id IS NULL AND schedule_name IS NULL AND scheduled_for IS NULL)
         OR (platform != 'delegated' AND delegation_id IS NULL AND parent_task_id IS NULL AND source_agent_id IS NULL))
     )`);
+    db.exec(taskExecutionSchema);
     db.exec(
       "CREATE INDEX IF NOT EXISTS tasks_agent_queue ON tasks (agent_id, status, seq)",
     );
@@ -450,6 +495,7 @@ export function openTaskStore(path: string) {
     allowed: DelegationPolicy,
     cancelled = false,
     outcome?: TaskOutcome,
+    recordExecution = false,
   ): string[] {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -475,6 +521,22 @@ export function openTaskStore(path: string) {
       db.prepare(
         "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = 'running'",
       ).run(terminalStatus, Date.now(), id);
+      if (recordExecution && outcome) {
+        const chat = parent.origin.platform !== "delegated";
+        const hostTask = db
+          .prepare("SELECT host_task_id FROM tasks WHERE id = ?")
+          .get(id);
+        db.prepare(
+          "INSERT INTO task_execution_details (task_id, failure_reason, response_text, delivery) VALUES (?, ?, ?, ?)",
+        ).run(
+          id,
+          outcome.ok ? null : outcome.kind,
+          chat && outcome.ok && !hostTask?.host_task_id
+            ? outcome.output.slice(0, 64_000)
+            : null,
+          chat ? "pending" : null,
+        );
+      }
       if (parent.origin.platform === "delegated") {
         const saved = db
           .prepare(
@@ -1112,14 +1174,25 @@ export function openTaskStore(path: string) {
       id: string,
       status: "completed" | "failed" | "interrupted" | "cancelled",
       outcome?: TaskOutcome,
+      recordExecution = false,
     ) {
       // Unconfigured callers cannot release a pending handoff.
-      finishWithDelegations(id, status, () => false, false, outcome);
+      finishWithDelegations(
+        id,
+        status,
+        () => false,
+        false,
+        outcome,
+        recordExecution,
+      );
     },
     /** A task left running by a stopped server cannot be proven finished. */
     markRunningInterrupted() {
       db.exec("BEGIN IMMEDIATE");
       try {
+        db.exec(
+          "UPDATE task_execution_details SET delivery = 'unconfirmed' WHERE delivery = 'pending'",
+        );
         db.prepare(
           `UPDATE tasks SET status = CASE WHEN platform = 'delegated' AND EXISTS (
             SELECT 1 FROM delegations d WHERE d.id = tasks.delegation_id AND d.child_task_id = tasks.id
@@ -1152,6 +1225,59 @@ export function openTaskStore(path: string) {
           "SELECT DISTINCT bot_id AS botId, chat_id AS chatId FROM tasks WHERE agent_id = ? AND platform = 'telegram' AND status = 'queued'",
         )
         .all(agentId) as unknown as { botId: number; chatId: number }[];
+    },
+    listExecutions(
+      agentId: string,
+      before?: { finishedAt: number; seq: number },
+    ): ExecutionPage {
+      const active = db
+        .prepare(
+          `SELECT ${executionColumns} FROM ${executionTables}
+         WHERE t.agent_id = ? AND t.status IN ('queued', 'running')
+         ORDER BY t.status DESC, t.seq`,
+        )
+        .all(agentId);
+      const rows = db
+        .prepare(
+          `SELECT t.seq, ${executionColumns} FROM ${executionTables}
+         WHERE t.agent_id = ? AND t.status NOT IN ('queued', 'running')
+         ${before === undefined ? "" : "AND (t.updated_at, t.seq) < (?, ?)"}
+         ORDER BY t.updated_at DESC, t.seq DESC LIMIT 21`,
+        )
+        .all(
+          agentId,
+          ...(before === undefined ? [] : [before.finishedAt, before.seq]),
+        );
+      return {
+        active: active.map(executionEntry),
+        history: rows.slice(0, 20).map(executionEntry),
+        nextCursor:
+          rows.length > 20 ? `${rows[19]!.updated_at}.${rows[19]!.seq}` : null,
+      };
+    },
+    getExecution(agentId: string, taskId: string) {
+      const row = db
+        .prepare(
+          `SELECT ${executionColumns}, t.prompt, t.host_task_id, d.failure_reason, d.response_text
+         FROM ${executionTables} WHERE t.agent_id = ? AND t.id = ?`,
+        )
+        .get(agentId, taskId);
+      if (!row) return undefined;
+      return {
+        ...executionEntry(row),
+        prompt: String(row.prompt),
+        hostTaskId:
+          typeof row.host_task_id === "string" ? row.host_task_id : null,
+        failureReason:
+          typeof row.failure_reason === "string" ? row.failure_reason : null,
+        responseText:
+          typeof row.response_text === "string" ? row.response_text : null,
+      };
+    },
+    settleExecutionDelivery(taskId: string, delivery: DeliveryOutcome) {
+      db.prepare(
+        "UPDATE task_execution_details SET delivery = ? WHERE task_id = ? AND delivery = 'pending'",
+      ).run(delivery, taskId);
     },
     getTask(id: string): (RoutedTask & { status: TaskStatus }) | undefined {
       const row = db

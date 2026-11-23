@@ -242,6 +242,7 @@ async function setup() {
     engine,
     messages,
     documents,
+    executions: () => store.listExecutions("dev").history,
     downloads,
     calls,
     get bot() {
@@ -404,6 +405,10 @@ describe("Telegram document tasks", () => {
       expect(
         f.messages.some((text) => text.includes("could not confirm document")),
       ).toBe(true);
+      expect(f.executions()[0]).toMatchObject({
+        status: "completed",
+        delivery: "unconfirmed",
+      });
       expect((await f.consume()).status).toBe(404);
     } finally {
       await f.close();
@@ -427,6 +432,10 @@ describe("Telegram document tasks", () => {
         { chat: owner.id, name: "result.txt", bytes: "result" },
       ]);
       expect(f.messages).toEqual(["Done"]);
+      expect(f.executions()[0]).toMatchObject({
+        status: "completed",
+        delivery: "delivered",
+      });
       expect((await f.consume()).status).toBe(404);
     } finally {
       await f.close();
@@ -466,6 +475,10 @@ describe("Telegram document tasks", () => {
       f.release();
       await f.tasks.idle();
       expect(f.documents).toEqual([]);
+      expect(f.executions()[0]).toMatchObject({
+        status: "completed",
+        delivery: "not_sent",
+      });
     } finally {
       await f.close();
     }

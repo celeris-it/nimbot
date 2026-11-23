@@ -11,6 +11,11 @@ export type {
   ProviderSettings,
   DeviceLogin,
 } from "../providers/provider-contracts.js";
+export type {
+  ExecutionDetail,
+  ExecutionEntry,
+  ExecutionPage,
+} from "../tasks/execution-history.js";
 export type { DelegationHistoryEntry } from "../tasks/task-queue.js";
 export type DelegationHistory = ReturnType<
   import("../tasks/task-queue.js").TaskStore["listDelegations"]
@@ -62,6 +67,7 @@ export interface PanelSession {
     createAgent: boolean;
     mcp?: boolean;
     scheduleSettings?: boolean;
+    executions?: boolean;
   };
 }
 export interface DiscordConversationStatus {

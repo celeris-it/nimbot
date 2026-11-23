@@ -60,6 +60,9 @@ export interface RegisteredAgentSettings {
   hostStatus?(id: string): Promise<HostStatus>;
 }
 export interface PanelDeps {
+  executions?: ReturnType<
+    typeof import("../tasks/execution-history.js").createExecutionHistory
+  >;
   deploymentMode?: "native" | "docker";
   processAction?: (
     id: string,
@@ -403,6 +406,7 @@ export function createPanel(
         ...(deps.providers ? { providers: true } : {}),
         ...(deps.mcp ? { mcp: true } : {}),
         ...(deps.schedules ? { scheduleSettings: true } : {}),
+        ...(deps.executions ? { executions: true } : {}),
       },
     } satisfies PanelSession),
   );
@@ -911,6 +915,35 @@ export function createPanel(
     await deps.memories!.remove(c.req.param("id"), c.req.param("memoryId"));
     return c.json({ deleted: true });
   });
+  if (deps.executions) {
+    const executions = deps.executions;
+    app.get("/api/agents/:id/executions", (c) => {
+      const id = c.req.param("id");
+      if (!getAgentSetup?.(id))
+        return c.json({ error: "Agent not found." }, 404);
+      const raw = c.req.query("before");
+      if (raw === undefined) return c.json(executions.list(id));
+      const [finishedAt, seq] = raw.split(".").map(Number);
+      if (
+        !/^\d+\.[1-9]\d*$/.test(raw) ||
+        !Number.isSafeInteger(finishedAt) ||
+        !Number.isSafeInteger(seq)
+      )
+        return c.json({ error: "Invalid execution cursor." }, 400);
+      return c.json(
+        executions.list(id, { finishedAt: finishedAt!, seq: seq! }),
+      );
+    });
+    app.get("/api/agents/:id/executions/:taskId", (c) => {
+      const { id, taskId } = c.req.param();
+      if (!getAgentSetup?.(id))
+        return c.json({ error: "Agent not found." }, 404);
+      const execution = executions.detail(id, taskId);
+      return execution
+        ? c.json(execution)
+        : c.json({ error: "Execution not found." }, 404);
+    });
+  }
   app.get("/api/agents/:id", async (c) => {
     const id = c.req.param("id");
     const setup = getAgentSetup?.(id);
@@ -1243,6 +1276,7 @@ export function createPanel(
     "access",
     "peers",
     "delegations",
+    "executions",
     "mcp",
     "schedules",
     "settings",
@@ -1261,6 +1295,7 @@ export function createPanel(
         (suffix === "approvals" && !deps.approvals) ||
         (suffix === "peers" && !deps.peers) ||
         (suffix === "delegations" && !deps.delegations) ||
+        (suffix === "executions" && !deps.executions) ||
         (suffix === "mcp" && !deps.mcp) ||
         (suffix === "settings" && !agentSettings?.get(id)) ||
         (suffix === "token" &&

@@ -30,7 +30,11 @@ import {
   createToolDispatcher,
   type ServerToolHandler,
 } from "./tool-dispatch.js";
-import { InlineKeyboard, type Bot, type InputFile } from "grammy";
+import { GrammyError, InlineKeyboard, type Bot } from "grammy";
+import {
+  notificationDelivery,
+  type DeliveryOutcome,
+} from "./execution-history.js";
 import type { BotAccess } from "../agents/agent-access.js";
 import { createApprovalBook } from "../approvals/approvals.js";
 import { sendTaskOutcome } from "../telegram/bot.js";
@@ -135,7 +139,10 @@ export function createBotTasks(config: {
       canSend: () => boolean,
     ): Promise<NotificationResult>;
     progress(task: DiscordQueuedTask, message: string): Promise<void>;
-    deliver(task: DiscordQueuedTask, outcome: TaskOutcome): Promise<void>;
+    deliver(
+      task: DiscordQueuedTask,
+      outcome: TaskOutcome,
+    ): Promise<void | DeliveryOutcome>;
     sendDelegation?(
       task: DiscordQueuedTask,
       text: string,
@@ -464,6 +471,121 @@ export function createBotTasks(config: {
       config.decide?.(approval.taskId, approval.id, allow) ??
       Promise.resolve(false),
   });
+  async function deliverAttachment<File>(
+    canSend: () => boolean,
+    take: () => Promise<File | undefined>,
+    sendFile: (file: File) => Promise<DeliveryOutcome>,
+    sendText: () => Promise<DeliveryOutcome>,
+    hasText: boolean,
+    warn: () => Promise<unknown>,
+  ): Promise<DeliveryOutcome> {
+    if (!canSend()) return "not_sent";
+    let takeFailed = false;
+    const file = await take().catch(() => {
+      takeFailed = true;
+      return undefined;
+    });
+    const text =
+      hasText && canSend()
+        ? await sendText().catch(() => "unconfirmed" as const)
+        : "not_sent";
+    const maySendFile = canSend();
+    const attemptedFile = !!file && maySendFile;
+    const attachment = !maySendFile
+      ? "not_sent"
+      : !file
+        ? "unconfirmed"
+        : await sendFile(file).catch(() => "unconfirmed" as const);
+    if (
+      canSend() &&
+      (takeFailed || (attemptedFile && attachment !== "delivered"))
+    )
+      await warn().catch(() => log.warn("task.attachment_warning_failed"));
+    if (!hasText || text === attachment) return attachment;
+    return "unconfirmed";
+  }
+
+  const attachmentWarning =
+    "I could not confirm document delivery. Check this chat before asking for it again.";
+
+  async function deliverChat(
+    task: ChatTask,
+    outcome: TaskOutcome,
+  ): Promise<DeliveryOutcome> {
+    const hostTaskId =
+      outcome.ok &&
+      taskWithAttachment === task.id &&
+      config.store.getTask(task.id)?.status === "completed" &&
+      config.store.getHostTaskId(task.agentId, task.id);
+    taskWithAttachment = undefined;
+    if (task.origin.platform === "discord") {
+      const discordTask = task as DiscordQueuedTask;
+      const discord = config.discord;
+      const canSend = () => !closed && !!discord?.admit(discordTask);
+      if (!discord || !canSend()) return "not_sent";
+      const sendText = async () =>
+        (await discord.deliver(discordTask, outcome)) ?? "delivered";
+      if (!hostTaskId || !discord.attachments || !discord.sendFile)
+        return sendText();
+      const { attachments, sendFile } = discord;
+      return deliverAttachment(
+        canSend,
+        () => attachments.take(hostTaskId),
+        async (file) =>
+          notificationDelivery(await sendFile(discordTask, file, canSend)),
+        sendText,
+        outcome.ok && !!outcome.output,
+        () =>
+          discord.deliver(discordTask, { ok: true, output: attachmentWarning }),
+      );
+    }
+
+    const origin = bot;
+    if (!origin || !("botId" in task)) return "not_sent";
+    const chatId = task.origin.chatId;
+    const canSend = () =>
+      !closed &&
+      bot === origin &&
+      origin.botInfo.id === task.botId &&
+      admit(task);
+    const guarded =
+      task.scheduleId !== undefined ||
+      task.telegramDocument ||
+      task.replyDocumentId !== undefined ||
+      hostTaskId;
+    const sendText = () =>
+      sendTaskOutcome(
+        origin.api,
+        chatId,
+        outcome,
+        task.scheduleName,
+        guarded ? canSend : undefined,
+      );
+    if (!hostTaskId || !config.attachments) return sendText();
+    const attachments = config.attachments;
+    return deliverAttachment(
+      canSend,
+      () => attachments.take(hostTaskId),
+      async (file) => {
+        try {
+          await origin.api.sendDocument(chatId, file, {
+            disable_content_type_detection: true,
+          });
+          return "delivered";
+        } catch (error) {
+          return error instanceof GrammyError &&
+            error.error_code >= 400 &&
+            error.error_code < 500
+            ? "not_sent"
+            : "unconfirmed";
+        }
+      },
+      sendText,
+      outcome.ok && !!outcome.output,
+      () => origin.api.sendMessage(chatId, attachmentWarning),
+    );
+  }
+
   let admission: ModelAdmission | undefined;
   const queue = createRoutedTaskQueue({
     agentId: config.agentId,
@@ -486,32 +608,33 @@ export function createBotTasks(config: {
           },
         }
       : {}),
-    ...(config.delegation || config.onScheduleOutcome
-      ? {
-          finalize(task, status, signal, outcome) {
-            const targets = config.store.finishWithDelegations(
-              task.id,
-              status,
-              config.delegation?.canHandoff ?? (() => false),
-              signal.aborted,
-              outcome,
-            );
-            if (task.scheduleId && config.onScheduleOutcome) {
-              void config.onScheduleOutcome(task.scheduleId).catch(() =>
-                log.warn("schedule.alert_failed", {
-                  agentId: config.agentId,
-                }),
-              );
-            }
-            if (targets.length)
-              void Promise.resolve()
-                .then(() => config.delegation!.wake(targets))
-                .catch(() => {
-                  /* The queued children remain durable for explicit resume or startup reconciliation. */
-                });
-          },
-        }
-      : {}),
+    finalize(task, status, signal, outcome) {
+      if (!config.delegation && !config.onScheduleOutcome) {
+        config.store.finish(task.id, status, outcome, true);
+        return;
+      }
+      const targets = config.store.finishWithDelegations(
+        task.id,
+        status,
+        config.delegation?.canHandoff ?? (() => false),
+        signal.aborted,
+        outcome,
+        true,
+      );
+      if (task.scheduleId && config.onScheduleOutcome) {
+        void config
+          .onScheduleOutcome(task.scheduleId)
+          .catch(() =>
+            log.warn("schedule.alert_failed", { agentId: config.agentId }),
+          );
+      }
+      if (targets.length)
+        void Promise.resolve()
+          .then(() => config.delegation!.wake(targets))
+          .catch(() => {
+            /* The queued children remain durable for startup reconciliation. */
+          });
+    },
     ready: (task) =>
       (config.canClaim?.() ?? true) &&
       (task.origin.platform === "delegated"
@@ -700,122 +823,14 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
         await config.delegationResult(task);
         return;
       }
-      if (task.origin.platform === "discord") {
-        const discordTask = task as DiscordQueuedTask;
-        const discord = config.discord;
-        const canDeliver = () => !closed && !!discord?.admit(discordTask);
-        if (!discord || !canDeliver())
-          throw new Error("Discord is unavailable");
-        const hostTaskId =
-          outcome.ok &&
-          taskWithAttachment === task.id &&
-          discord.attachments &&
-          discord.sendFile &&
-          config.store.getTask(task.id)?.status === "completed" &&
-          config.store.getHostTaskId(task.agentId, task.id);
-        taskWithAttachment = undefined;
-        if (!hostTaskId) {
-          await discord.deliver(discordTask, outcome);
-          return;
-        }
-        let uncertain = false;
-        let file: WorkspaceFile | undefined;
-        try {
-          file = await discord.attachments!.take(hostTaskId);
-        } catch {
-          uncertain = true;
-        }
-        if (outcome.output && canDeliver()) {
-          try {
-            await discord.deliver(discordTask, outcome);
-          } catch {
-            log.warn("task.text_delivery_failed", { taskId: task.id });
-          }
-        }
-        if (file && canDeliver()) {
-          const result = await discord.sendFile!(
-            discordTask,
-            file,
-            canDeliver,
-          ).catch(() => undefined);
-          uncertain = result?.status !== "delivered";
-        }
-        if (uncertain && canDeliver()) {
-          await discord.deliver(discordTask, {
-            ok: true,
-            output:
-              "I could not confirm document delivery. Check this chat before asking for it again.",
-          });
-          throw new Error("Document delivery could not be confirmed");
-        }
-      } else {
-        if (!bot) throw new Error("Bot is not attached");
-        const origin = bot;
-        const chatId = task.origin.chatId;
-        const sendText = () =>
-          sendTaskOutcome(
-            origin.api,
-            chatId,
-            outcome,
-            task.scheduleName,
-            task.scheduleId === undefined ? undefined : canDeliver,
-          );
-        const hostTaskId =
-          outcome.ok &&
-          taskWithAttachment === task.id &&
-          config.attachments &&
-          config.store.getTask(task.id)?.status === "completed" &&
-          config.store.getHostTaskId(task.agentId, task.id);
-        taskWithAttachment = undefined;
-        const canDeliver = () =>
-          !closed &&
-          bot === origin &&
-          "botId" in task &&
-          origin.botInfo.id === task.botId &&
-          admit(task);
-        if (
-          "botId" in task &&
-          (task.telegramDocument || task.replyDocumentId !== undefined) &&
-          !canDeliver()
-        )
-          return;
-        if (!hostTaskId) {
-          await sendText();
-          return;
-        }
-        if (!canDeliver()) return;
-        let file: InputFile | undefined;
-        let documentUncertain = false;
-        try {
-          file = await config.attachments!.take(hostTaskId);
-        } catch {
-          documentUncertain = true;
-        }
-        if (!canDeliver()) return;
-        if (outcome.output) {
-          try {
-            await sendText();
-          } catch {
-            log.warn("task.text_delivery_failed", { taskId: task.id });
-          }
-        }
-        if (file && canDeliver()) {
-          try {
-            await origin.api.sendDocument(chatId, file, {
-              disable_content_type_detection: true,
-            });
-          } catch {
-            documentUncertain = true;
-          }
-        }
-        if (documentUncertain && canDeliver()) {
-          await origin.api.sendMessage(
-            chatId,
-            "I could not confirm document delivery. Check this chat before asking for it again.",
-          );
-          throw new Error("Document delivery could not be confirmed");
-        }
+      let delivery: DeliveryOutcome = "unconfirmed";
+      try {
+        delivery = await deliverChat(task as ChatTask, outcome);
+      } finally {
+        config.store.settleExecutionDelivery(task.id, delivery);
       }
+      if (delivery === "unconfirmed")
+        log.warn("task.delivery_failed", { taskId: task.id });
     },
   });
   return {

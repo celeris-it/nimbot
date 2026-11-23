@@ -2165,7 +2165,7 @@ test("organizes agent overview sections in rows and stacks their contents on pho
       expect(globalBox.x + globalBox.width).toBeLessThan(mainBox.x);
       expect(agentBox.x - (mainBox.x + mainBox.width)).toBeCloseTo(24);
       await expect(main).toHaveCSS("border-inline-end-width", "1px");
-      await expect(agentNav.getByRole("link")).toHaveCount(9);
+      await expect(agentNav.getByRole("link")).toHaveCount(10);
       const selected = agentNav.getByRole("link", { name: "Overview" });
       await expect(selected).toHaveAttribute("aria-current", "page");
       const mainLink = globalNav.getByRole("link", {
@@ -3195,4 +3195,45 @@ test("creates and edits cron schedules with local previews and inline errors", a
     .getByRole("button", { name: "Save schedule", exact: true })
     .click();
   await expect(card).toContainText("Cron 30 9 * * MON-FRI");
+});
+
+test("opens saved execution details and shows delivery separately on a narrow panel", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.post("/__test/execution");
+  const { id } = await seeded.json();
+  await page.setViewportSize({ width: 375, height: 800 });
+  await login(page);
+  await page.goto("/agents/dev/setup");
+  await openAgentSection(page, "Executions");
+  const link = page.getByRole("link", { name: `View execution ${id}` });
+  const row = page.getByRole("row").filter({ has: link });
+  await expect(row.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(row.getByText("Unconfirmed", { exact: true })).toBeVisible();
+  await link.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Execution details" }),
+  ).toBeFocused();
+  await expect(page.getByText("Summarize the report.")).toBeVisible();
+  await expect(
+    page.getByText("The report contains <strong>three findings</strong>."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Telegram · Unconfirmed", { exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(375);
+  await page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/agents/dev/executions/${id}`) &&
+      response.ok(),
+  );
+  await expect(
+    page.getByRole("heading", { name: "Execution details" }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Back to executions" }).click();
+  await expect(link).toBeVisible();
 });

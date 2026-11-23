@@ -3,6 +3,8 @@
   import type {
     AgentDetail,
     DelegationHistory,
+    ExecutionDetail,
+    ExecutionPage,
     McpAgentDefinition,
     McpDefinition,
     McpDefinitionSummary,
@@ -49,6 +51,7 @@
   import Memory from "./Memory.svelte";
   import Approvals from "./Approvals.svelte";
   import Peers from "./Peers.svelte";
+  import Executions from "./Executions.svelte";
   import Delegations from "./Delegations.svelte";
   import McpAgentAccess from "./McpAgentAccess.svelte";
   import McpDefinitionForm from "./McpDefinitionForm.svelte";
@@ -86,6 +89,9 @@
   let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
   let memoryPage = $state(1);
   let delegations = $state<DelegationHistory>();
+  let executionQuery = $state(new URLSearchParams(location.search));
+  let executions = $state<ExecutionPage>();
+  let executionDetail = $state<ExecutionDetail | null>();
   let delegationPage = $state(delegationPageOf(location.search));
   let mcpDefinitions = $state<McpDefinitionSummary[]>([]);
   let mcpDefinition = $state<McpDefinition>();
@@ -118,7 +124,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|channels|settings|usage|memory|approvals|access|delegations|schedules|token|delete|process\/(?:stop|restart))$/,
+      /^\/agents\/([^/]+)\/(setup|channels|settings|usage|memory|approvals|access|delegations|executions|schedules|token|delete|process\/(?:stop|restart))$/,
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
@@ -163,6 +169,12 @@
         { view: "memory", label: "Memory", icon: "notebook" },
         { view: "approvals", label: "Approvals", icon: "shield" },
         { view: "access", label: "Access", icon: "key" },
+        {
+          view: "executions",
+          label: "Executions",
+          icon: "activity",
+          hidden: !session?.capabilities.executions,
+        },
         { view: "delegations", label: "Delegations", icon: "delegate" },
         { view: "schedules", label: scheduleText.link, icon: "clock" },
         {
@@ -225,33 +237,35 @@
           ? "AI providers"
           : mcpRoute
             ? "MCP catalog"
-            : route?.[2] === "channels"
-              ? "Channels"
-              : route?.[2] === "access"
-                ? "Access"
-                : route?.[2] === "usage"
-                  ? "Model and usage"
-                  : route?.[2] === "schedules"
-                    ? scheduleText.pageTitle
-                    : route?.[2] === "delegations"
-                      ? "Delegations"
-                      : route?.[2] === "approvals"
-                        ? "Approvals"
-                        : route?.[2] === "memory"
-                          ? "Memory"
-                          : path === "/agents/new"
-                            ? "Create agent"
-                            : route?.[2] === "settings"
-                              ? "Edit agent"
-                              : route?.[2] === "token"
-                                ? "Bot token"
-                                : route?.[2] === "delete"
-                                  ? "Delete agent"
-                                  : route?.[2] === "process/restart"
-                                    ? "Restart agent"
-                                    : route?.[2] === "process/stop"
-                                      ? "Stop agent"
-                                      : "Agent setup",
+            : route?.[2] === "executions"
+              ? "Executions"
+              : route?.[2] === "channels"
+                ? "Channels"
+                : route?.[2] === "access"
+                  ? "Access"
+                  : route?.[2] === "usage"
+                    ? "Model and usage"
+                    : route?.[2] === "schedules"
+                      ? scheduleText.pageTitle
+                      : route?.[2] === "delegations"
+                        ? "Delegations"
+                        : route?.[2] === "approvals"
+                          ? "Approvals"
+                          : route?.[2] === "memory"
+                            ? "Memory"
+                            : path === "/agents/new"
+                              ? "Create agent"
+                              : route?.[2] === "settings"
+                                ? "Edit agent"
+                                : route?.[2] === "token"
+                                  ? "Bot token"
+                                  : route?.[2] === "delete"
+                                    ? "Delete agent"
+                                    : route?.[2] === "process/restart"
+                                      ? "Restart agent"
+                                      : route?.[2] === "process/stop"
+                                        ? "Stop agent"
+                                        : "Agent setup",
   );
   let viewLabel = $derived(
     path === "/settings"
@@ -300,6 +314,9 @@
     directoryLoading = false;
     directoryUnavailable = false;
     delegationPage = delegationPageOf(url.search);
+    executionQuery = new URLSearchParams(url.search);
+    executions = undefined;
+    executionDetail = undefined;
     usageBefore = usageCursor(url.search);
     agentModels = undefined;
     usage = undefined;
@@ -445,6 +462,31 @@
                 (data) => (mcpAgentDefinitions = data?.definitions),
               ),
           ]);
+          if (current.signal.aborted) return;
+        }
+        if (route[2] === "executions") {
+          const base = `/api/agents/${route[1]}/executions`;
+          const selected = executionQuery.get("task");
+          if (selected) {
+            try {
+              const data = await request<ExecutionDetail>(
+                `${base}/${encodeURIComponent(selected)}`,
+                { signal: current.signal },
+              );
+              if (!current.signal.aborted) executionDetail = data;
+            } catch (cause) {
+              if (!(cause instanceof ApiError) || cause.status !== 404)
+                throw cause;
+              if (!current.signal.aborted) executionDetail = null;
+            }
+          } else {
+            const before = executionQuery.get("before");
+            const query = before ? `?before=${encodeURIComponent(before)}` : "";
+            const data = await request<ExecutionPage>(base + query, {
+              signal: current.signal,
+            });
+            if (!current.signal.aborted) executions = data;
+          }
           if (current.signal.aborted) return;
         }
         if (route[2] === "delegations") {
@@ -997,6 +1039,7 @@
           route?.[2] === "setup" ||
           route?.[2] === "channels" ||
           route?.[2] === "schedules" ||
+          route?.[2] === "executions" ||
           route?.[2] === "usage")
       )
         void load();
@@ -1353,6 +1396,14 @@
               {/if}
             </div>
           {/key}
+        {:else if route[2] === "executions"}
+          <Executions
+            agentId={agent.id}
+            data={executions}
+            detail={executionDetail}
+            before={executionQuery.get("before")}
+            selected={executionQuery.get("task")}
+          />
         {:else if route[2] === "delegations"}
           <Delegations
             {agent}

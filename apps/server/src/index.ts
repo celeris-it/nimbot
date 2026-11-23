@@ -48,6 +48,10 @@ import { createDiscordNotifications } from "./discord/discord-notifications.js";
 import { log } from "./logger.js";
 import { createRegisteredBots } from "./telegram/registered-bots.js";
 import { createAgentAccess } from "./agents/agent-access.js";
+import {
+  createExecutionHistory,
+  notificationDelivery,
+} from "./tasks/execution-history.js";
 import { openTaskStore } from "./tasks/task-queue.js";
 import { openScheduleStore } from "./schedules/schedule-store.js";
 import {
@@ -237,13 +241,10 @@ async function main(): Promise<void> {
     );
   }
   async function sendDiscordTask(task: DiscordDestination, text: string) {
-    if (!discordAdmit(task))
-      throw new Error("Discord destination is unavailable");
-    const result = await discordDelivery.sendTask(task, text, () =>
-      discordAdmit(task),
+    if (!discordAdmit(task)) return "not_sent" as const;
+    return notificationDelivery(
+      await discordDelivery.sendTask(task, text, () => discordAdmit(task)),
     );
-    if (result.status !== "delivered")
-      throw new Error("Discord delivery could not be confirmed");
   }
   const executeMcp = createMcpExecution({
     catalog: mcpCatalog,
@@ -362,8 +363,11 @@ async function main(): Promise<void> {
           sendFile: discordDelivery.sendFile,
           sendText: discordDelivery.sendTask,
           sendScheduleProposal: discordDelivery.sendScheduleProposal,
-          progress: (task, message) =>
-            sendDiscordTask(task, `Working: ${message}`),
+          progress: async (task, message) => {
+            const delivery = await sendDiscordTask(task, `Working: ${message}`);
+            if (delivery !== "delivered")
+              throw new Error("Discord progress could not be confirmed");
+          },
           deliver: (task, outcome) =>
             sendDiscordTask(
               task,
@@ -570,6 +574,7 @@ async function main(): Promise<void> {
       discordOwnerLinked: (id) => !!linkedDiscord(id),
     },
     providers,
+    executions: createExecutionHistory(taskStore, stateDir),
     usage: { ...usage, wake: (id) => taskServices.wake([id]) },
     approvals: { rules: approvalRules, history: approvalStore },
     delegations: {
