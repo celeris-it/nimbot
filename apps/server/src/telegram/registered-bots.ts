@@ -15,6 +15,7 @@ import { getHostStatus } from "../host/agent-host.js";
 import { withAgentInstructions } from "../agents/agent-instructions.js";
 import { DEFAULT_RETRY_DELAYS_MS, retryTransient } from "../retry.js";
 import { createTelegramNotifications } from "./telegram-notifications.js";
+import { syncTelegramAvatar } from "./telegram-avatar.js";
 
 export interface RegisteredBotState {
   status:
@@ -44,6 +45,7 @@ export function createRegisteredBots(
     schedules?: Pick<ScheduleStore, "listByAgent">;
     allowsWork?: (id: string) => boolean;
     runtimeReady: (id: string) => boolean;
+    loadAvatar?: (id: string) => Promise<Buffer | undefined>;
     /** Upper bound for waiting on one task; omit for the default. */
     taskWaitMs?: number;
     /** Shared agent runner owned outside the Telegram polling lifecycle. */
@@ -164,6 +166,23 @@ export function createRegisteredBots(
           connection.state = { status: "polling" };
           log.info("bot.polling", { agentId: id });
           tasks.resume();
+          const loadAvatar = config.loadAvatar;
+          if (loadAvatar) {
+            const isCurrent = () =>
+              !connection.controller.signal.aborted &&
+              !connection.finished &&
+              registry.get(id)?.credentialRef === agent.credentialRef;
+            void syncTelegramAvatar(
+              bot.api,
+              info.id,
+              () => loadAvatar(id),
+              isCurrent,
+              connection.controller.signal,
+            ).catch(() => {
+              if (isCurrent())
+                log.warn("telegram.avatar_sync_failed", { agentId: id });
+            });
+          }
         },
       });
       if (!connection.controller.signal.aborted)

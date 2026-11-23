@@ -48,6 +48,7 @@ import { createDiscordNotifications } from "./discord/discord-notifications.js";
 import { log } from "./logger.js";
 import { createRegisteredBots } from "./telegram/registered-bots.js";
 import { createAgentAccess } from "./agents/agent-access.js";
+import { createAgentAvatars } from "./agents/agent-avatars.js";
 import {
   createExecutionHistory,
   notificationDelivery,
@@ -413,6 +414,7 @@ async function main(): Promise<void> {
       },
     },
   );
+  const avatars = createAgentAvatars(stateDir, (id) => !!registry.get(id));
   const registeredBots = hosts
     ? createRegisteredBots(
         registry,
@@ -424,6 +426,7 @@ async function main(): Promise<void> {
           taskWaitMs: taskWaitMs(taskTimeoutSeconds),
           allowsWork,
           runtimeReady,
+          loadAvatar: avatars.get,
         },
         botSecrets,
         hosts,
@@ -457,6 +460,7 @@ async function main(): Promise<void> {
           },
         }
       : undefined,
+    avatars.get,
   );
   const executablePath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
   const processAgents: ReturnType<typeof createProcessAgents> =
@@ -553,6 +557,7 @@ async function main(): Promise<void> {
   });
   const panel = createPanel(panelConfig, {
     deploymentMode: serverMode.mode,
+    loadAvatar: avatars.get,
     processAction: async (id, action) => {
       await processAgents![action](id);
     },
@@ -677,7 +682,9 @@ async function main(): Promise<void> {
     listAgentIds: () => registry.listIds(),
     deleteAgent: async (id, deleteData) => {
       requireAgent(id);
-      await processAgents!.remove(id, deleteData);
+      if (deleteData)
+        await avatars.withPurge(id, () => processAgents.remove(id, true));
+      else await processAgents.remove(id);
       operationalAlerts?.removeAgent(id);
       if ((await mcpCredentials.cleanup()).cleanupPending)
         log.warn("mcp.credential_cleanup_pending");

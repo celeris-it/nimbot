@@ -6,6 +6,7 @@ import { openAgentRegistry } from "../agents/agent-registry.js";
 import { openDiscordInbox } from "./discord-inbox.js";
 import { createRegisteredDiscord } from "./registered-discord.js";
 import { createDiscordGateway } from "./discord-gateway.js";
+import { log } from "../logger.js";
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "registered-discord-"));
@@ -82,6 +83,36 @@ it("isolates Gateway lifecycles and saves messages before returning from callbac
     await f.close();
   }
 });
+it("keeps the Gateway ready after an avatar synchronization error", async () => {
+  const f = await fixture();
+  const loadAvatar = vi.fn(async () => {
+    throw new Error("private failure detail");
+  });
+  const manager = createRegisteredDiscord(
+    f.registry,
+    { read: async () => "secret" },
+    f.inbox,
+    f.makeGateway,
+    undefined,
+    loadAvatar,
+  );
+  const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+  try {
+    await manager.start("a");
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith("discord.avatar_sync_failed", {
+        agentId: "a",
+      }),
+    );
+    expect(loadAvatar).toHaveBeenCalledExactlyOnceWith("a");
+    expect(manager.getState("a")).toBe("ready");
+  } finally {
+    warn.mockRestore();
+    manager.close();
+    await f.close();
+  }
+});
+
 it("does not start a stale Gateway after removal or shutdown during secret loading", async () => {
   const f = await fixture();
   let release!: (token: string) => void;

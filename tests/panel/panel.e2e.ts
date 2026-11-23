@@ -54,6 +54,36 @@ test("renders the Nimbot logo on sign-in and in the desktop sidebar", async ({
     .toBeGreaterThan(0);
 });
 
+test("shows agent avatars in the Dashboard and falls back to initials", async ({
+  page,
+}) => {
+  const path = "**/api/agents/dev/avatar";
+  await page.route(path, (route) =>
+    route.fulfill({
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8ioAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    }),
+  );
+  await login(page);
+  const images = page.locator(
+    '.agent-avatar img[src="/api/agents/dev/avatar"]',
+  );
+  const preview = page.locator('[data-ui="preview-identity"] .agent-avatar');
+  await expect(images).toHaveCount(2);
+  await expect(images.first()).toBeVisible();
+  await expect(preview.locator("img")).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 800 });
+  await expect(preview.locator("img")).toBeVisible();
+  await page.unroute(path);
+  await page.route(path, (route) => route.fulfill({ status: 503 }));
+  await page.reload();
+  await expect(preview.locator("span")).toHaveText("D");
+  await expect(preview.locator("img")).toHaveCount(0);
+});
+
 test("recovers an uncertain sign-in using the session", async ({ page }) => {
   await page.goto("/login");
   await page.route("**/api/login", (route) => route.abort(), { times: 1 });

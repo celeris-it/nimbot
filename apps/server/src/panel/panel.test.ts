@@ -379,6 +379,23 @@ function apiSetup(overrides: PanelDeps = {}) {
   return { app, post, login, get, calls, records };
 }
 
+it("serves agent avatars only to authenticated panel requests", async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0xff, 0xd9]);
+  const loadAvatar = vi.fn(async (id: string) =>
+    id === "dev" ? jpeg : undefined,
+  );
+  const { get, login } = apiSetup({ loadAvatar });
+  expect((await get("/api/agents/dev/avatar", "")).status).toBe(401);
+  const cookie = await login();
+  expect((await get("/api/agents/missing/avatar", cookie)).status).toBe(404);
+  expect(loadAvatar).not.toHaveBeenCalled();
+  const avatar = await get("/api/agents/dev/avatar", cookie);
+  expect(avatar.status).toBe(200);
+  expect(avatar.headers.get("content-type")).toBe("image/jpeg");
+  expect(Buffer.from(await avatar.arrayBuffer())).toEqual(jpeg);
+  expect((await get("/api/agents/other/avatar", cookie)).status).toBe(503);
+});
+
 it("validates and protects first-time Telegram linking", async () => {
   const connectTelegram = vi.fn(
     async (_id: string, _ownerId: number, token: string) => {
@@ -707,7 +724,7 @@ it("serves known deep links with a strict production CSP and returns 404 for unk
     const csp = response.headers.get("content-security-policy")!;
     expect(csp).toContain("script-src 'self'");
     expect(csp).toContain("connect-src 'self'");
-    expect(csp).toMatch(/(?:^|;\s*)img-src data:(?:;|$)/);
+    expect(csp).toMatch(/(?:^|;\s*)img-src 'self' data:(?:;|$)/);
     expect(csp).not.toMatch(/unsafe-inline|unsafe-eval/);
   }
   for (const path of [

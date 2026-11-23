@@ -395,7 +395,7 @@
             aria-pressed={selected.id === item.id}
             onclick={() => (selectedId = item.id)}
           >
-            <AgentAvatar name={item.name} small /><span
+            <AgentAvatar agentId={item.id} name={item.name} small /><span
               ><strong>{item.name}</strong><small
                 >{item.botUsername ? `@${item.botUsername}` : item.id}</small
               ></span
@@ -418,7 +418,9 @@
           />
         </div>
         <div data-ui="preview-identity">
-          <AgentAvatar name={selected.name} />
+          {#key selected.id}
+            <AgentAvatar agentId={selected.id} name={selected.name} />
+          {/key}
           <div>
             <h3>{selected.name}</h3>
             <p>

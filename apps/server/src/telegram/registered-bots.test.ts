@@ -9,9 +9,12 @@ import { openTaskStore } from "../tasks/task-queue.js";
 import { openScheduleStore } from "../schedules/schedule-store.js";
 import { createRegisteredBots } from "./registered-bots.js";
 import { createBot } from "./bot.js";
+import { log } from "../logger.js";
 
 let nextUpdateId = 0;
-async function fixture() {
+async function fixture(
+  loadAvatar?: (id: string) => Promise<Buffer | undefined>,
+) {
   const dir = await mkdtemp(join(tmpdir(), "nimbot-registered-bots-"));
   const statePath = join(dir, "state.sqlite");
   let registry = openAgentRegistry(statePath);
@@ -164,6 +167,7 @@ async function fixture() {
         runtimeReady: (id) => processes.getDesiredState(id) === "running",
         taskStore,
         schedules: scheduleStore,
+        loadAvatar,
       },
       secrets,
       hosts,
@@ -238,6 +242,28 @@ async function fixture() {
     },
   };
 }
+
+it("continues polling after an avatar synchronization error", async () => {
+  const loadAvatar = vi.fn(async () => {
+    throw new Error("private failure detail");
+  });
+  const f = await fixture(loadAvatar);
+  const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+  try {
+    f.manager.start("a");
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith("telegram.avatar_sync_failed", {
+        agentId: "a",
+      }),
+    );
+    expect(loadAvatar).toHaveBeenCalledExactlyOnceWith("a");
+    expect(f.manager.getState("a").status).toBe("polling");
+    await vi.waitFor(() => expect(f.pending.has("a")).toBe(true));
+  } finally {
+    warn.mockRestore();
+    await f.close();
+  }
+});
 
 it("lists only each bot's persisted schedules for its owner, including after restart with a stopped Host", async () => {
   const f = await fixture();

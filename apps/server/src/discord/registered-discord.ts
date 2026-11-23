@@ -3,6 +3,8 @@ import type { openAgentRegistry } from "../agents/agent-registry.js";
 import type { openDiscordSecrets } from "./discord-secret.js";
 import type { openDiscordInbox } from "./discord-inbox.js";
 import { createDiscordGateway } from "./discord-gateway.js";
+import { syncDiscordAvatar } from "./discord-avatar.js";
+import { log } from "../logger.js";
 
 /** Independent Gateway per configured agent. Tokens and incoming DMs stay on the server. */
 export function createRegisteredDiscord(
@@ -18,6 +20,7 @@ export function createRegisteredDiscord(
       origin: Parameters<ReturnType<typeof createBotTasks>["submitDiscord"]>[0],
     ): Promise<void>;
   },
+  loadAvatar?: (id: string) => Promise<Buffer | undefined>,
 ) {
   type Entry = {
     gateway?: ReturnType<typeof createDiscordGateway>;
@@ -104,6 +107,18 @@ export function createRegisteredDiscord(
             dispatch();
           },
         });
+        if (loadAvatar) {
+          const isCurrent = () => current(id, entry, connection.credentialRef);
+          void syncDiscordAvatar(
+            token,
+            connection.botId,
+            () => loadAvatar(id),
+            isCurrent,
+          ).catch(() => {
+            if (isCurrent())
+              log.warn("discord.avatar_sync_failed", { agentId: id });
+          });
+        }
       } catch {
         // Never expose credentials, message contents, or provider descriptions.
         entry.failed = true;

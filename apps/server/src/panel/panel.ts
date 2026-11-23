@@ -177,6 +177,7 @@ export interface PanelDeps {
     | undefined;
   agentSettings?: RegisteredAgentSettings;
   listAgentIds?: () => string[];
+  loadAvatar?: (id: string) => Promise<Buffer | undefined>;
   deleteAgent?: (agentId: string, deleteData: boolean) => Promise<void>;
 }
 
@@ -210,7 +211,7 @@ export function createPanel(
         styleSrc: ["'self'"],
         connectSrc: ["'self'"],
         fontSrc: ["'self'"],
-        imgSrc: ["data:"],
+        imgSrc: ["'self'", "data:"],
         formAction: ["'self'"],
         frameAncestors: ["'none'"],
         baseUri: ["'none'"],
@@ -944,6 +945,15 @@ export function createPanel(
         : c.json({ error: "Execution not found." }, 404);
     });
   }
+  app.get("/api/agents/:id/avatar", async (c) => {
+    const id = c.req.param("id");
+    if (!getAgentSetup?.(id)) return c.json({ error: "Agent not found." }, 404);
+    const avatar = await deps.loadAvatar?.(id);
+    if (!avatar) return c.json({ error: "Avatar unavailable." }, 503);
+    return c.body(new Uint8Array(avatar), 200, {
+      "Content-Type": "image/jpeg",
+    });
+  });
   app.get("/api/agents/:id", async (c) => {
     const id = c.req.param("id");
     const setup = getAgentSetup?.(id);
