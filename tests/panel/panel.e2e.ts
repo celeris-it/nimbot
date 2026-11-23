@@ -205,6 +205,68 @@ test("selects an agent model and shows its published quota in the panel", async 
   await expect(model).toContainText("Automatic");
 });
 
+test("saves reasoning effort and recovers when the model loses its variants", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await login(page);
+  await page.goto("/agents/dev/usage");
+  const model = page.getByRole("button", { name: /Model for new turns/ });
+  const effort = page.getByRole("combobox", { name: "Reasoning effort" });
+  const choose = async (name: string | RegExp) => {
+    await model.click();
+    await page.getByRole("option", { name }).click();
+  };
+
+  await expect(effort).toHaveCount(0);
+  await choose(/Fixture model/);
+  await expect(effort).toHaveValue("");
+  await model.press("Tab");
+  await expect(effort).toBeFocused();
+  await effort.press("Space");
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await expect(effort).toHaveValue("high");
+  await expect(effort).toBeEnabled();
+  await page.reload();
+  await expect(effort).toHaveValue("high");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
+    375,
+  );
+  await page.setViewportSize({ width: 320, height: 812 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
+    320,
+  );
+  await page.setViewportSize({ width: 1280, height: 812 });
+
+  await choose(/Plain model/);
+  await expect(effort).toHaveCount(0);
+  await choose(/Fixture model/);
+  await expect(effort).toHaveValue("");
+  await effort.selectOption("high");
+  await expect(effort).toHaveValue("high");
+  await expect(effort).toBeEnabled();
+
+  await page.route("**/api/agents/dev/models", async (route) => {
+    const response = await route.fetch();
+    const catalog = await response.json();
+    for (const model of catalog.models) model.efforts = [];
+    await route.fulfill({ response, json: catalog });
+  });
+  await page.reload();
+  await expect(effort).toHaveValue("high");
+  await expect(
+    effort.getByRole("option", { name: "High (Unavailable)" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText(
+      "Choose another reasoning effort or Default to resume the queue.",
+    ),
+  ).toBeVisible();
+  await effort.selectOption({ label: "Default" });
+  await expect(effort).toHaveCount(0);
+});
+
 test("shows model maker icons for direct and shared providers", async ({
   page,
 }) => {

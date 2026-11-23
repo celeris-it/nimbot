@@ -1,7 +1,7 @@
 import type { ProviderCheck } from "../providers/provider-contracts.js";
 import { HostProviderError } from "../providers/host-providers.js";
 import type { createAgentUsage } from "../providers/agent-usage.js";
-import { modelReference } from "../providers/usage-contracts.js";
+import { modelSelection } from "../providers/usage-contracts.js";
 import { z } from "zod";
 import { HostMemoryError } from "../memory/host-memories.js";
 import { randomBytes } from "node:crypto";
@@ -682,7 +682,7 @@ export function createPanel(
   app.post("/api/agents/:id/model", async (c) => {
     const id = c.req.param("id");
     const parsed = z
-      .strictObject({ model: modelReference.nullable() })
+      .strictObject({ model: modelSelection.nullable() })
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success)
       return c.json({ error: "Invalid model selection." }, 400);
@@ -695,7 +695,12 @@ export function createPanel(
         503,
       );
     }
-    if (!saved)
+    if (saved === "effort_unavailable")
+      return c.json(
+        { error: "That reasoning effort is unavailable for this model." },
+        409,
+      );
+    if (saved === "model_unavailable")
       return c.json(
         { error: "That model is unavailable for this agent." },
         409,

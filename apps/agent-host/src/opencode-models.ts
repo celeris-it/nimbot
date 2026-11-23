@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type {
-  EngineModels,
-  ModelAdmission,
-  ModelCheck,
-  ModelReference,
+import {
+  effortId,
+  type EngineModels,
+  type ModelAdmission,
+  type ModelCheck,
+  type ModelReference,
+  type ModelSelection,
 } from "./engine-usage.js";
 import { readOpenCodeCredentials } from "./opencode-auth.js";
 import { OpenCodeStartupError, type OpenCodeRequest } from "./opencode-api.js";
@@ -18,12 +20,31 @@ const catalog = z.object({
     apiModelRef.extend({
       enabled: z.boolean(),
       name: z.string().min(1),
+      variants: z.array(z.object({ id: z.string() })).default([]),
       cost: z.array(z.object({ input: z.number().nonnegative() })).optional(),
       settings: z.object({ baseURL: z.string().optional() }).optional(),
     }),
   ),
 });
 const defaultModel = z.object({ data: apiModelRef.nullable() });
+const configDocuments = z.array(
+  z.object({
+    info: z
+      .object({
+        model: z
+          .union([
+            z.string(),
+            z.object({
+              providerID: z.string(),
+              model: z.string(),
+              variant: z.string().optional(),
+            }),
+          ])
+          .optional(),
+      })
+      .optional(),
+  }),
+);
 const meter = z.object({
   percent: z.number().min(0).max(100),
   limited: z.boolean(),
@@ -106,6 +127,31 @@ function listModels(value: unknown) {
   return catalog.parse(value).data.filter((model) => model.enabled);
 }
 
+function efforts(model: { variants: { id: string }[] }) {
+  return [...new Set(model.variants.map(({ id }) => id))].filter(
+    (id) => effortId.safeParse(id).success,
+  );
+}
+
+async function defaultEffort(request: OpenCodeRequest, model: ModelReference) {
+  // The default catalog entry contains every variant, but the chosen one is in
+  // the highest-priority configuration document that specifies a model.
+  const documents = configDocuments.parse(await request("/api/config"));
+  const configured = documents.findLast(({ info }) => info?.model)?.info?.model;
+  if (typeof configured === "string") {
+    const [base, variant] = configured.split("#");
+    return base === `${model.providerId}/${model.modelId}`
+      ? variant
+      : undefined;
+  }
+  if (
+    configured?.providerID === model.providerId &&
+    configured.model === model.modelId
+  )
+    return configured.variant;
+  return undefined;
+}
+
 export function quotaWindows(
   raw: unknown,
   model: ModelReference,
@@ -173,16 +219,19 @@ export function createOpenCodeModels(
       return models.map((model) => ({
         ...reference(model),
         name: model.name.slice(0, 256),
+        efforts: efforts(model),
       }));
     },
     async check(
-      selected: ModelReference | null,
+      selected: ModelSelection | null,
       issue: boolean,
     ): Promise<ModelCheck> {
       const revision = generation;
       const checkedAt = Date.now();
       const result: ModelCheck = {
-        model: selected,
+        model: selected
+          ? { providerId: selected.providerId, modelId: selected.modelId }
+          : null,
         state: "checking",
         checkedAt,
         windows: [],
@@ -199,7 +248,7 @@ export function createOpenCodeModels(
           request("/api/model"),
           readOpenCodeCredentials(request),
         ]);
-        result.model = selected ?? (raw ? reference(raw) : null);
+        if (raw) result.model = reference(raw);
         const models = listModels(catalogValue);
         const model = result.model;
         const selectedEntry = models.find((entry) =>
@@ -207,6 +256,13 @@ export function createOpenCodeModels(
         );
         if (!model || !selectedEntry)
           return { ...result, state: "model_unavailable" };
+        const availableEfforts = efforts(selectedEntry);
+        if (selected?.effort && !availableEfforts.includes(selected.effort))
+          return { ...result, state: "effort_unavailable" };
+        const effort =
+          !selected && issue && availableEfforts.length
+            ? await defaultEffort(request, model)
+            : selected?.effort;
 
         if (
           credentials.some(
@@ -249,7 +305,13 @@ export function createOpenCodeModels(
             ? "available"
             : "unavailable";
         if (issue && result.state !== "exhausted") {
-          result.admission = { model, revision: randomUUID() };
+          result.admission = {
+            model:
+              effort && availableEfforts.includes(effort)
+                ? { ...model, effort }
+                : model,
+            revision: randomUUID(),
+          };
           issued = {
             admission: result.admission,
             credentials: connectionRevision,
@@ -272,7 +334,8 @@ export function createOpenCodeModels(
         issued?.admission.revision !== admission.revision ||
         Date.now() >= issued.expiresAt ||
         issued.credentials !== credentialRevision() ||
-        !sameModel(issued.admission.model, admission.model)
+        !sameModel(issued.admission.model, admission.model) ||
+        issued.admission.model.effort !== admission.model.effort
       )
         return false;
       issued = undefined;

@@ -1,6 +1,6 @@
 import type { TaskIdentity, TaskToolAccess } from "./task-identity.js";
 import type {
-  ModelReference,
+  ModelSelection,
   TaskUsage,
   UsageReading,
 } from "./engine-usage.js";
@@ -12,7 +12,7 @@ export interface EngineTaskContext {
   tools?: TaskToolAccess;
   /** A separate conversation that must never read or replace the saved owner session. */
   sessionMode?: "fresh";
-  model?: ModelReference;
+  model?: ModelSelection;
   recordUsageBaseline?: (reading: UsageReading) => Promise<void>;
   recordUsage?: (usage: TaskUsage) => Promise<void>;
   /** Host outbox transport; the receiving Server must enforce its own authorization. */

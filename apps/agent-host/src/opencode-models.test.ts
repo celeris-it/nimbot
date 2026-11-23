@@ -5,6 +5,63 @@ import { OpenCodeStartupError, type OpenCodeRequest } from "./opencode-api.js";
 const consoleModel = { providerId: "opencode", modelId: "vendor/model" };
 const goModel = { providerId: "opencode-go", modelId: "model" };
 
+it("discovers effort variants, binds admissions and pauses for a retired variant", async () => {
+  const model = {
+    id: consoleModel.modelId,
+    providerID: consoleModel.providerId,
+    enabled: true,
+    name: "Fixture",
+    variants: [{ id: "high" }, { id: "default" }, { id: "low" }],
+  };
+  const request = vi.fn<OpenCodeRequest>(async (path) => {
+    if (path === "/api/model") return { data: [model] };
+    if (path === "/api/model/default") return { data: model };
+    if (path === "/api/config")
+      return [
+        {
+          info: {
+            model: `${consoleModel.providerId}/${consoleModel.modelId}#high`,
+          },
+        },
+        {
+          info: {
+            model: {
+              providerID: consoleModel.providerId,
+              model: consoleModel.modelId,
+              variant: "low",
+            },
+          },
+        },
+        { info: {} },
+      ];
+    if (path === "/api/credential") return { data: [] };
+    throw new Error(`Unexpected path: ${path}`);
+  });
+  const models = createOpenCodeModels(request, () => false);
+  const selected = { ...consoleModel, effort: "high" };
+  expect(await models.list()).toEqual([
+    { ...consoleModel, name: "Fixture", efforts: ["high", "low"] },
+  ]);
+  const { admission } = await models.check(selected, true);
+  expect(admission?.model).toEqual(selected);
+  expect(models.accept({ ...admission!, model: consoleModel })).toBe(false);
+  expect(models.accept(admission!)).toBe(true);
+  expect((await models.check(null, true)).admission?.model).toEqual({
+    ...consoleModel,
+    effort: "low",
+  });
+
+  model.variants = [];
+  expect(await models.check(selected, true)).toMatchObject({
+    model: consoleModel,
+    state: "effort_unavailable",
+  });
+  expect((await models.check(selected, true)).admission).toBeUndefined();
+  expect((await models.check(consoleModel, true)).admission?.model).toEqual(
+    consoleModel,
+  );
+});
+
 it.each([
   "opencode_missing",
   "opencode_start_failed",

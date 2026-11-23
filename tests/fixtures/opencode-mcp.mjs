@@ -112,7 +112,11 @@ const server = createServer(async (req, res) => {
   assert.equal(req.url, "/v1/chat/completions");
   modelCalls++;
   if (mode === "counted" && message.stream && message.tools?.length)
-    countedModels.push(message.model);
+    countedModels.push({
+      model: message.model,
+      effort: message.reasoning_effort,
+      history: JSON.stringify(message.messages),
+    });
   if (!message.tools?.length) {
     res.writeHead(200, { "content-type": "application/json" }).end(
       JSON.stringify({
@@ -244,18 +248,23 @@ const base = `http://127.0.0.1:${server.address().port}`;
 await writeFile(
   join(root, "opencode.json"),
   JSON.stringify({
-    model: "fixture/fixture",
+    model: "fixture/fixture#low",
     enabled_providers: ["fixture"],
     provider: {
       fixture: {
         npm: "@ai-sdk/openai-compatible",
         options: { baseURL: `${base}/v1`, apiKey: "fixture-only" },
         models: {
-          fixture: { name: "fixture", limit: { context: 16000, output: 1000 } },
+          fixture: {
+            name: "fixture",
+            limit: { context: 16000, output: 1000 },
+            variants: { low: { reasoningEffort: "low" } },
+          },
           counted: {
             name: "counted",
             limit: { context: 16000, output: 1000 },
             cost: { input: 1, output: 2 },
+            variants: { high: { reasoningEffort: "high" } },
           },
         },
       },
@@ -432,7 +441,9 @@ try {
       null,
     );
     assert.ok(
-      (await models.list()).some((model) => model.modelId === "counted"),
+      (await models.list())
+        .find((model) => model.modelId === "counted")
+        ?.efforts.includes("high"),
     );
     assert.equal((await models.check(null, false)).model.modelId, "fixture");
 
@@ -440,14 +451,19 @@ try {
     const session = createSessionFile(join(root, "counted-session.json"));
     const usage = createOpenCodeUsage(openCode.request);
     const readings = [];
-    for (const model of [counted, (await models.check(null, false)).model]) {
+    const turns = [
+      { ...counted, effort: "high" },
+      counted,
+      (await models.check(null, true)).admission.model,
+    ];
+    for (const [index, model] of turns.entries()) {
       const engine = createOpenCodeEngine(root, session, [], [], {
         usage,
         hasCost: models.hasCost,
       });
       try {
         await engine.run(
-          "Return the fixture response.",
+          `Return the fixture response for turn ${index}.`,
           () => {},
           undefined,
           undefined,
@@ -463,8 +479,16 @@ try {
         await engine.stop();
       }
     }
-    assert.deepEqual(countedModels, ["counted", "fixture"]);
-    assert.equal(readings.length, 2);
+    assert.deepEqual(
+      countedModels.map(({ model, effort }) => ({ model, effort })),
+      [
+        { model: "counted", effort: "high" },
+        { model: "counted", effort: undefined },
+        { model: "fixture", effort: "low" },
+      ],
+    );
+    assert.match(countedModels[1].history, /fixture response for turn 0/);
+    assert.equal(readings.length, 3);
     for (const reading of readings) {
       assert.equal(reading.state, "reported");
       assert.ok(

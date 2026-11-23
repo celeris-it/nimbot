@@ -78,7 +78,8 @@ it("preserves model check failure reasons and clears them on recovery", async ()
 it("leaves chats, schedules and webhooks in one FIFO until the provider check succeeds", async () => {
   const root = await mkdtemp(join(tmpdir(), "nimbot-usage-"));
   const file = join(root, "server.sqlite");
-  let quota: "exhausted" | "checking" | "available" = "exhausted";
+  let quota: "exhausted" | "checking" | "available" | "effort_unavailable" =
+    "exhausted";
   const store = openTaskStore(file);
   const usageStore = openAgentUsage(file);
   const schedules = openScheduleStore(file);
@@ -86,7 +87,18 @@ it("leaves chats, schedules and webhooks in one FIFO until the provider check su
     usageStore,
     createHostUsage(
       async (id) => ({ url: `http://${id}.test`, token: "token" }),
-      vi.fn<typeof fetch>(async (url) => {
+      vi.fn<typeof fetch>(async (url, init) => {
+        if (String(url).endsWith("/models"))
+          return Response.json({
+            models: [
+              {
+                ...model,
+                name: "Fixture",
+                efforts: quota === "effort_unavailable" ? [] : ["high"],
+              },
+            ],
+          });
+        const selected = JSON.parse(String(init?.body)).model;
         const state = String(url).includes("b.test") ? "unavailable" : quota;
         return Response.json({
           model,
@@ -94,7 +106,9 @@ it("leaves chats, schedules and webhooks in one FIFO until the provider check su
           checkedAt: Date.now(),
           windows: [],
           ...(state === "available" || state === "unavailable"
-            ? { admission: { model, revision: randomUUID() } }
+            ? {
+                admission: { model: selected ?? model, revision: randomUUID() },
+              }
             : {}),
         });
       }),
@@ -135,7 +149,17 @@ it("leaves chats, schedules and webhooks in one FIFO until the provider check su
   let a = queue("a");
   const b = queue("b");
   try {
-    expect(await usage.setModel("a", null)).toBe(true);
+    const selection = { ...model, effort: "high" };
+    expect(await usage.setModel("a", selection)).toBe("saved");
+    expect(await usage.setModel("a", { ...model, effort: "low" })).toBe(
+      "effort_unavailable",
+    );
+    const reopened = openAgentUsage(file);
+    try {
+      expect(reopened.settings("a").selected).toEqual(selection);
+    } finally {
+      reopened.close();
+    }
     const first = a.submitTelegram(123, 42, "chat");
     const timed = schedules.create({
       agentId: "a",
@@ -175,6 +199,16 @@ it("leaves chats, schedules and webhooks in one FIFO until the provider check su
       queued: 3,
       quota: { state: "checking" },
     });
+    quota = "effort_unavailable";
+    a.resume();
+    await a.idle();
+    expect(usage.report("a")).toMatchObject({
+      queued: 3,
+      quota: { state: "effort_unavailable" },
+    });
+    expect(await usage.setModel("a", selection)).toBe("effort_unavailable");
+    expect(usageStore.settings("a").selected).toEqual(selection);
+    expect(await usage.setModel("a", model)).toBe("saved");
     quota = "available";
     a.resume();
     await a.idle();

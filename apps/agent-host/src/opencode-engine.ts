@@ -181,6 +181,7 @@ export function createOpenCodeEngine(
                 session,
                 context.model.providerId,
                 context.model.modelId,
+                context.model.effort,
               );
             return { engine, session };
           } catch (error) {

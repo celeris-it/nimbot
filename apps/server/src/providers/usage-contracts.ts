@@ -10,13 +10,23 @@ export const modelReference = z.strictObject({
   modelId: identifier,
 });
 export type ModelReference = z.infer<typeof modelReference>;
+const effortId = identifier.refine((value) => value !== "default");
+export const modelSelection = modelReference.extend({
+  effort: effortId.optional(),
+});
+export type ModelSelection = z.infer<typeof modelSelection>;
 export const modelCatalog = z.object({
   models: z
-    .array(modelReference.extend({ name: z.string().min(1).max(256) }))
+    .array(
+      modelReference.extend({
+        name: z.string().min(1).max(256),
+        efforts: z.array(effortId).default([]),
+      }),
+    )
     .max(20_000),
 });
 export const modelAdmission = z.strictObject({
-  model: modelReference,
+  model: modelSelection,
   revision: z.uuid(),
 });
 export type ModelAdmission = z.infer<typeof modelAdmission>;
@@ -46,6 +56,7 @@ export const quotaStatus = z.object({
     "exhausted",
     "checking",
     "model_unavailable",
+    "effort_unavailable",
   ]),
   checkedAt: z.int().nonnegative(),
   failure: z
@@ -82,7 +93,7 @@ export const modelCheck = quotaStatus.extend({
   admission: modelAdmission.optional(),
 });
 export interface AgentModels {
-  selected: ModelReference | null;
+  selected: ModelSelection | null;
   models: z.infer<typeof modelCatalog>["models"];
   catalogAvailable: boolean;
 }

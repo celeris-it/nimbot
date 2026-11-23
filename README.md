@@ -189,9 +189,10 @@ exists.
 
 Open **Model and usage** from an agent's setup page. Choose an enabled model or
 **Automatic** to use OpenCode's current default. The selection applies when the
-next task starts and uses the same conversation. If a saved model becomes
-unavailable, the queue waits for it to return or for the administrator to change
-the selection.
+next task starts and uses the same conversation. When the selected model offers
+variants, choose a **Reasoning effort** or leave it at **Default**. Changing
+models resets the effort. If a saved model or effort becomes unavailable, the
+queue waits for it to return or for the administrator to change the selection.
 
 Usage shows tokens and OpenCode's reported USD cost for each executed task, with
 agent totals for the UTC day and month. The figures reflect the engine's

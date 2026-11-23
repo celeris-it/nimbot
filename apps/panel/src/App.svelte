@@ -48,7 +48,7 @@
   import type {
     AgentModels,
     AgentUsage,
-    ModelReference,
+    ModelSelection,
   } from "../../server/src/providers/usage-contracts.js";
   import Memory from "./Memory.svelte";
   import Approvals from "./Approvals.svelte";
@@ -758,9 +758,9 @@
       },
     );
   }
-  async function saveModel(model: ModelReference | null) {
+  async function saveModel(model: ModelSelection | null) {
     if (!agent) return;
-    await mutate<{ selected: ModelReference | null }>(
+    await mutate<{ selected: ModelSelection | null }>(
       `/api/agents/${encodeURIComponent(agent.id)}/model`,
       JSON.stringify({ model }),
       ({ selected }) => {

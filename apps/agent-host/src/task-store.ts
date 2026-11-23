@@ -4,7 +4,7 @@ import { eq, gt, and, asc, inArray } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import type { TaskIdentity } from "./task-identity.js";
 import type {
-  ModelReference,
+  ModelSelection,
   TaskUsage,
   UsageReading,
 } from "./engine-usage.js";
@@ -24,7 +24,7 @@ const tasks = sqliteTable("tasks", {
   agentId: text("agent_id"),
   serverTaskId: text("server_task_id"),
   sessionMode: text("session_mode").$type<"fresh">(),
-  model: text("model", { mode: "json" }).$type<ModelReference>(),
+  model: text("model", { mode: "json" }).$type<ModelSelection>(),
   status: text("status", {
     enum: [
       "accepted",
@@ -238,7 +238,7 @@ export async function openTaskStore(url: string) {
       prompt: string,
       identity?: TaskIdentity,
       sessionMode?: "fresh",
-      model?: ModelReference,
+      model?: ModelSelection,
     ) {
       await db.batch([
         db.insert(tasks).values({

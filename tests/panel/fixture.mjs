@@ -46,7 +46,14 @@ const usage = createAgentUsage(
     async (url) =>
       new URL(url).pathname === "/models"
         ? globalThis.Response.json({
-            models: [{ ...fixtureModel, name: "Fixture model" }],
+            models: [
+              { ...fixtureModel, name: "Fixture model", efforts: ["high"] },
+              {
+                providerId: "opencode",
+                modelId: "plain",
+                name: "Plain model",
+              },
+            ],
           })
         : globalThis.Response.json({
             model: fixtureModel,

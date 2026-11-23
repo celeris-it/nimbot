@@ -9,7 +9,7 @@ import {
   type TaskToolAccess,
 } from "./task-identity.js";
 import { createToolRequests, type ToolOutcome } from "./tool-requests.js";
-import { modelReference, type ModelReference } from "./engine-usage.js";
+import { modelSelection, type ModelSelection } from "./engine-usage.js";
 
 const MAX_PROGRESS_EVENTS = 100;
 
@@ -51,7 +51,7 @@ export function createTaskRunner(
       identity?: TaskIdentity,
       tools?: TaskToolAccess,
       sessionMode?: "fresh",
-      model?: ModelReference,
+      model?: ModelSelection,
     ): Promise<string | undefined> {
       if (identity !== undefined && !isTaskIdentity(identity))
         throw new Error("Invalid task identity");
@@ -60,7 +60,7 @@ export function createTaskRunner(
       if (sessionMode !== undefined && (sessionMode !== "fresh" || !identity))
         throw new Error("Invalid session mode");
       if (model && !identity) throw new Error("Invalid task model");
-      model = model === undefined ? undefined : modelReference.parse(model);
+      model = model === undefined ? undefined : modelSelection.parse(model);
       // Copy before the first await: caller mutation cannot change the running turn.
       const executionIdentity =
         identity === undefined ? undefined : { ...identity };

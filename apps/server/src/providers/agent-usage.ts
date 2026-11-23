@@ -8,7 +8,7 @@ import {
   taskUsage,
   type AgentUsage,
   type UsageOverview,
-  type ModelReference,
+  type ModelSelection,
   type QuotaStatus,
   type TaskUsage,
 } from "./usage-contracts.js";
@@ -48,7 +48,7 @@ export function openAgentUsage(path: string, now = Date.now) {
       .prepare("SELECT * FROM agent_models WHERE agent_id = ?")
       .get(id);
     return {
-      selected: readJson<ModelReference>(row?.model),
+      selected: readJson<ModelSelection>(row?.model),
       revision: Number(row?.revision ?? 0),
       quota: readJson<QuotaStatus>(row?.quota),
     };
@@ -76,7 +76,7 @@ export function openAgentUsage(path: string, now = Date.now) {
 
   return {
     settings,
-    setModel(id: string, model: ModelReference | null) {
+    setModel(id: string, model: ModelSelection | null) {
       db.prepare(
         `INSERT INTO agent_models (agent_id, model, revision) VALUES (?, ?, 1)
         ON CONFLICT(agent_id) DO UPDATE SET model = excluded.model, revision = revision + 1, quota = NULL, checked_at = NULL`,
@@ -326,7 +326,7 @@ export function createHostUsage(
     async models(agentId: string) {
       return modelCatalog.parse(await call(agentId, "/models")).models;
     },
-    async check(agentId: string, model: ModelReference | null, issue: boolean) {
+    async check(agentId: string, model: ModelSelection | null, issue: boolean) {
       return modelCheck.parse(
         await call(agentId, "/models/check", { model, issue }),
       );
@@ -358,7 +358,9 @@ export function createAgentUsage(
     const { selected, revision, quota: previous } = store.settings(id);
     const checkedAt = Date.now();
     const response = await host.check(id, selected, issue).catch(() => ({
-      model: selected,
+      model: selected
+        ? { providerId: selected.providerId, modelId: selected.modelId }
+        : null,
       state: "checking" as const,
       checkedAt,
       failure: "host_unavailable" as const,
@@ -394,21 +396,21 @@ export function createAgentUsage(
         catalogAvailable: models !== null,
       };
     },
-    async setModel(id: string, model: ModelReference | null) {
+    async setModel(id: string, model: ModelSelection | null) {
       if (model) {
         const models = await host.models(id);
-        if (
-          !models.some(
-            (entry) =>
-              entry.providerId === model.providerId &&
-              entry.modelId === model.modelId,
-          )
-        )
-          return false;
+        const entry = models.find(
+          (entry) =>
+            entry.providerId === model.providerId &&
+            entry.modelId === model.modelId,
+        );
+        if (!entry) return "model_unavailable";
+        if (model.effort && !entry.efforts.includes(model.effort))
+          return "effort_unavailable";
       }
       store.setModel(id, model);
       attempts.delete(id);
-      return true;
+      return "saved";
     },
     invalidate(id: string) {
       store.invalidate(id);

@@ -133,7 +133,12 @@ export class AcpClient {
       throw new Error("The ACP engine does not support HTTP MCP servers");
   }
 
-  async setModel(sessionId: string, providerId: string, modelId: string) {
+  async setModel(
+    sessionId: string,
+    providerId: string,
+    modelId: string,
+    effort?: string,
+  ) {
     const value = `${providerId}/${modelId}`;
     const result = (await this.request("session/set_config_option", {
       sessionId,
@@ -145,6 +150,34 @@ export class AcpClient {
         ?.currentValue !== value
     )
       throw new Error("OpenCode could not select the configured model");
+
+    const currentEffort = result.configOptions?.find(
+      (option) => option.id === "effort",
+    );
+    // Selecting the same model can preserve the restored session's effort.
+    if (!effort && (!currentEffort || currentEffort.currentValue === "default"))
+      return;
+    const effortValue = effort ?? "default";
+    // OpenCode can echo the previous model selection while applying the effort.
+    // Reapply once if the returned options have not caught up.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const updated = (await this.request("session/set_config_option", {
+        sessionId,
+        configId: "effort",
+        value: effortValue,
+      })) as typeof result;
+      const options = updated.configOptions;
+      if (
+        options?.find((option) => option.id === "model")?.currentValue ===
+          value &&
+        options.find((option) => option.id === "effort")?.currentValue ===
+          effortValue
+      )
+        return;
+    }
+    throw new Error(
+      "OpenCode could not select the configured reasoning effort",
+    );
   }
 
   /** Sends a text prompt; resolves with the stop reason once the turn ends. */

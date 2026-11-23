@@ -52,7 +52,7 @@ export function createOpenCodeUsage(request: OpenCodeRequest) {
   ): Promise<UsageReading> {
     const reading: UsageReading = {
       session,
-      model,
+      model: { providerId: model.providerId, modelId: model.modelId },
       priced,
       complete: false,
       counters: [],

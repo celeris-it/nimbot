@@ -15,7 +15,7 @@ import { parseJson, validated } from "./validate.js";
 import type { TaskRunner } from "./tasks.js";
 import {
   modelAdmission,
-  modelReference,
+  modelSelection,
   type EngineModels,
 } from "./engine-usage.js";
 import type { MemoryStore } from "./memory-store.js";
@@ -391,7 +391,7 @@ export function createHostApi(
       const parsed = await parseJson(
         c,
         z.strictObject({
-          model: modelReference.nullable(),
+          model: modelSelection.nullable(),
           issue: z.boolean(),
         }),
         { malformed: "Invalid JSON" },

@@ -10,9 +10,14 @@ export const modelReference = z.strictObject({
   modelId: identifier,
 });
 export type ModelReference = z.infer<typeof modelReference>;
+export const effortId = identifier.refine((value) => value !== "default");
+export const modelSelection = modelReference.extend({
+  effort: effortId.optional(),
+});
+export type ModelSelection = z.infer<typeof modelSelection>;
 
 export const modelAdmission = z.strictObject({
-  model: modelReference,
+  model: modelSelection,
   revision: z.uuid(),
 });
 export type ModelAdmission = z.infer<typeof modelAdmission>;
@@ -48,7 +53,8 @@ export interface ModelCheck {
     | "unavailable"
     | "exhausted"
     | "checking"
-    | "model_unavailable";
+    | "model_unavailable"
+    | "effort_unavailable";
   checkedAt: number;
   failure?:
     | "opencode_missing"
@@ -68,7 +74,7 @@ export interface ModelCheck {
 }
 
 export interface EngineModels {
-  list(): Promise<(ModelReference & { name: string })[]>;
-  check(selected: ModelReference | null, issue: boolean): Promise<ModelCheck>;
+  list(): Promise<(ModelReference & { name: string; efforts: string[] })[]>;
+  check(selected: ModelSelection | null, issue: boolean): Promise<ModelCheck>;
   accept(admission: ModelAdmission): boolean;
 }

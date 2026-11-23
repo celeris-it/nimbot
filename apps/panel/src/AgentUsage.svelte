@@ -1,10 +1,11 @@
 <script lang="ts">
   import { Icon, DataTable, StatusBadge } from "./components/index.js";
   import ModelPicker from "./components/ModelPicker.svelte";
+  import Select from "./components/Select.svelte";
   import type {
     AgentModels,
     AgentUsage,
-    ModelReference,
+    ModelSelection,
     QuotaStatus,
   } from "../../server/src/providers/usage-contracts.js";
 
@@ -22,11 +23,43 @@
     data: AgentUsage | undefined;
     before: number | undefined;
     busy: boolean;
-    save: (model: ModelReference | null) => Promise<void>;
+    save: (model: ModelSelection | null) => Promise<void>;
     refresh: () => void;
   } = $props();
 
   let base = $derived(`/agents/${encodeURIComponent(agent.id)}`);
+  let selected = $derived(catalog?.selected);
+  let selectedModel = $derived(
+    catalog?.models.find(
+      (model) =>
+        model.providerId === selected?.providerId &&
+        model.modelId === selected.modelId,
+    ),
+  );
+  let selectedEffort = $derived(selected?.effort ?? "");
+  let effortValue = $derived(selectedEffort);
+  let efforts = $derived(selectedModel?.efforts ?? []);
+  let missingEffort = $derived(
+    !!catalog?.catalogAvailable &&
+      !!selectedEffort &&
+      !efforts.includes(selectedEffort),
+  );
+  const effortLabel = (value: string) =>
+    value
+      .replace(/[_-]/g, " ")
+      .replace(/(^| )\S/g, (letter) => letter.toUpperCase());
+
+  async function changeEffort(
+    event: Event & { currentTarget: HTMLSelectElement },
+  ) {
+    if (!selectedModel) return;
+    const effort = event.currentTarget.value;
+    const { providerId, modelId } = selectedModel;
+    await save(
+      effort ? { providerId, modelId, effort } : { providerId, modelId },
+    );
+    effortValue = selectedEffort;
+  }
   const number = new Intl.NumberFormat();
   const usd = new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -47,6 +80,8 @@
     exhausted: "Queue paused for quota",
     checking: "Waiting for a quota check",
     model_unavailable: "Queue paused because the model is unavailable",
+    effort_unavailable:
+      "Queue paused because the reasoning effort is unavailable",
   };
   const failureText: Record<NonNullable<QuotaStatus["failure"]>, string> = {
     host_unavailable:
@@ -120,7 +155,40 @@
           disabled={busy}
           onchange={save}
         />
-        {#if busy}<p role="status">Saving model…</p>{/if}
+        {#if efforts.length || selectedEffort}
+          <div class="effort-field">
+            <label for="model-effort">Reasoning effort</label>
+            <Select
+              id="model-effort"
+              bind:value={effortValue}
+              disabled={busy || !selectedModel || !catalog.catalogAvailable}
+              aria-describedby={missingEffort
+                ? "model-effort-status"
+                : undefined}
+              onchange={changeEffort}
+            >
+              <option value="">Default</option>
+              {#if selectedEffort && !efforts.includes(selectedEffort)}
+                <option value={selectedEffort} disabled>
+                  {effortLabel(selectedEffort)}{missingEffort
+                    ? " (Unavailable)"
+                    : ""}
+                </option>
+              {/if}
+              {#each efforts as effort (effort)}
+                <option value={effort}>{effortLabel(effort)}</option>
+              {/each}
+            </Select>
+            {#if missingEffort}
+              <p id="model-effort-status" role="status">
+                {selectedModel
+                  ? "Choose another reasoning effort or Default to resume the queue."
+                  : "Choose an available model or Automatic to resume the queue."}
+              </p>
+            {/if}
+          </div>
+        {/if}
+        {#if busy}<p role="status">Saving model settings…</p>{/if}
         {#if !catalog.catalogAvailable}
           <p role="status">Model catalog unavailable.</p>
         {/if}
@@ -300,6 +368,14 @@
 </section>
 
 <style>
+  .effort-field {
+    display: grid;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    width: min(100%, 28rem);
+    min-width: 0;
+  }
+
   .actions {
     display: flex;
     flex-wrap: wrap;

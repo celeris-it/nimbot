@@ -23,6 +23,41 @@ function fakeAgent(handler: (msg: Rpc, send: (m: unknown) => void) => void) {
 }
 
 describe("AcpClient", () => {
+  it("selects reasoning effort and resets a restored selection to default", async () => {
+    const settings: unknown[] = [];
+    let effort = "low";
+    let echoed = false;
+    const { input, output } = fakeAgent((msg, send) => {
+      settings.push(msg.params);
+      if (msg.params?.configId === "effort" && msg.params.value !== "invalid")
+        effort = String(msg.params.value);
+      const stale = effort === "high" && !echoed;
+      echoed ||= stale;
+      send({
+        id: msg.id,
+        result: {
+          configOptions: [
+            { id: "model", currentValue: "fixture/vendor/model" },
+            { id: "effort", currentValue: stale ? "low" : effort },
+          ],
+        },
+      });
+    });
+    const client = new AcpClient(input, output);
+    await client.setModel("s1", "fixture", "vendor/model", "high");
+    await client.setModel("s1", "fixture", "vendor/model");
+    expect(settings).toEqual([
+      { sessionId: "s1", configId: "model", value: "fixture/vendor/model" },
+      { sessionId: "s1", configId: "effort", value: "high" },
+      { sessionId: "s1", configId: "effort", value: "high" },
+      { sessionId: "s1", configId: "model", value: "fixture/vendor/model" },
+      { sessionId: "s1", configId: "effort", value: "default" },
+    ]);
+    await expect(
+      client.setModel("s1", "fixture", "vendor/model", "invalid"),
+    ).rejects.toThrow("could not select the configured reasoning effort");
+  });
+
   it("registers HTTP MCP on both new and loaded sessions when supported", async () => {
     const seen: Rpc[] = [];
     const { input, output } = fakeAgent((msg, send) => {
