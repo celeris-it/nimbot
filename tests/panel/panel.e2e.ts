@@ -25,6 +25,35 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("renders the Nimbot logo on sign-in and in the desktop sidebar", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/login");
+  const logo = page.getByRole("link", { name: "Nimbot home" }).locator("img");
+  await expect(logo).toBeVisible();
+  await expect
+    .poll(() => logo.evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBeGreaterThan(0);
+  const favicon = page.locator('link[rel="icon"]');
+  await expect(favicon).toHaveAttribute(
+    "href",
+    (await logo.getAttribute("src"))!,
+  );
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await login(page);
+  const sidebarLogo = page
+    .getByRole("navigation", { name: "Main navigation" })
+    .locator("img");
+  await expect(sidebarLogo).toBeVisible();
+  await expect
+    .poll(() =>
+      sidebarLogo.evaluate((image: HTMLImageElement) => image.naturalWidth),
+    )
+    .toBeGreaterThan(0);
+});
+
 test("recovers an uncertain sign-in using the session", async ({ page }) => {
   await page.goto("/login");
   await page.route("**/api/login", (route) => route.abort(), { times: 1 });

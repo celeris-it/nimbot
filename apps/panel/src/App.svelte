@@ -17,6 +17,7 @@
     ProviderSettings as ProviderSettingsState,
   } from "../../server/src/panel/panel-contracts.js";
   import { ApiError, post, request } from "./api.js";
+  import logo from "./nimbot-logo.svg?inline";
   import {
     applyAppearance,
     isAppearance,
@@ -1014,28 +1015,18 @@
   });
 </script>
 
-<svelte:head
-  ><title>{path === "/settings" ? "Settings" : title} · Nimbot</title
-  ></svelte:head
->
+<svelte:head>
+  <title>{path === "/settings" ? "Settings" : title} · Nimbot</title>
+  <link rel="icon" type="image/svg+xml" href={logo} />
+</svelte:head>
 <a id="skip" href="#main">Skip to main content</a>
 {#snippet wordmark()}
-  <a href="/" data-ui="wordmark" aria-label="Nimbot home"
-    ><svg
-      width="30"
-      height="30"
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-hidden="true"
-      ><path
-        d="M16 2v28M2 16h28M6 6l20 20M6 26 26 6"
-        stroke="currentColor"
-        stroke-width="2"
-      /><circle cx="16" cy="16" r="5" fill="currentColor" /></svg
-    ><span data-ui="wordmark-text"
+  <a href="/" data-ui="wordmark" aria-label="Nimbot home">
+    <img src={logo} alt="" width="30" height="30" />
+    <span data-ui="wordmark-text"
       >nimbot<span data-ui="wordmark-dot">.</span></span
-    ></a
-  >
+    >
+  </a>
 {/snippet}
 {#snippet mainNavLink(link: (typeof mainLinks)[number])}
   <li>

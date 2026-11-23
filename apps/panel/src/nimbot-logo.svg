@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 432 420" role="img" aria-label="Nimbot">
+  <defs>
+    <linearGradient id="top" x1="526" y1="238" x2="454" y2="406" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29d2d7"/>
+      <stop offset=".42" stop-color="#2bb6df"/>
+      <stop offset="1" stop-color="#367de2"/>
+    </linearGradient>
+    <linearGradient id="right" x1="518" y1="275" x2="707" y2="433" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5145c7"/>
+      <stop offset=".36" stop-color="#9c50cf"/>
+      <stop offset=".7" stop-color="#dc509a"/>
+      <stop offset="1" stop-color="#fb527c"/>
+    </linearGradient>
+    <linearGradient id="lower-right" x1="666" y1="415" x2="612" y2="646" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#bd3f89"/>
+      <stop offset=".42" stop-color="#f6587b"/>
+      <stop offset=".77" stop-color="#fc8861"/>
+      <stop offset="1" stop-color="#ffa14e"/>
+    </linearGradient>
+    <linearGradient id="bottom" x1="370" y1="620" x2="601" y2="562" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffd550"/>
+      <stop offset=".48" stop-color="#ffa953"/>
+      <stop offset=".76" stop-color="#ff8061"/>
+      <stop offset="1" stop-color="#ed4b7d"/>
+    </linearGradient>
+    <linearGradient id="left" x1="310" y1="384" x2="425" y2="591" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#17afe7"/>
+      <stop offset=".42" stop-color="#337ee9"/>
+      <stop offset=".72" stop-color="#7953d8"/>
+      <stop offset="1" stop-color="#a849c3"/>
+    </linearGradient>
+    <linearGradient id="blue-fold" x1="357" y1="376" x2="480" y2="388" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4b4bd7"/>
+      <stop offset=".54" stop-color="#4b7dee"/>
+      <stop offset="1" stop-color="#7adcf6"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".55" stop-color="#fff" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(-296 -228)">
+    <path
+      fill="url(#left)"
+      d="M442 358 473 263C486 225 538 224 551 263L582 358H680C721 358 737 408 705 433L626 491 657 586C669 626 626 656 593 633L512 574 430 633C397 657 354 626 367 586L398 491 319 432C287 407 303 358 343 358ZM360 404 424 455C441 469 449 483 442 505L417 582 482 536C504 521 520 523 541 538L606 583 582 507C575 485 580 471 597 456L664 404H579C555 404 543 393 536 372L512 294 487 372C480 393 467 404 444 404Z"
+    />
+    <path
+      fill="url(#top)"
+      d="M343 358H442L473 263C486 225 538 224 551 263L556 279C541 253 521 266 512 294L487 372C480 393 467 404 444 404H360C332 388 332 363 343 358Z"
+    />
+    <path
+      fill="url(#blue-fold)"
+      d="M360 358H442C428 397 396 412 360 404C331 388 334 363 349 359Z"
+    />
+    <path
+      fill="url(#blue-fold)"
+      opacity=".64"
+      d="M442 358C466 358 489 346 501 328L487 372C480 393 467 404 444 404H382C412 401 432 385 442 358Z"
+    />
+    <path
+      fill="url(#right)"
+      d="M512 294C521 266 541 253 556 279L582 358H680C721 358 737 408 705 433L692 443C710 428 699 401 664 404H579C555 404 543 393 536 372Z"
+    />
+    <path
+      fill="url(#sheen)"
+      d="M525 335C541 352 560 357 582 358C591 384 607 399 632 404H579C555 404 543 393 536 372Z"
+    />
+    <path
+      fill="url(#lower-right)"
+      d="M664 404C699 401 710 428 692 443L626 491 657 586C669 626 626 656 593 633L578 622C606 640 620 613 606 583L582 507C575 485 580 471 597 456Z"
+    />
+    <path
+      fill="url(#sheen)"
+      d="M664 404C639 431 608 452 626 491C606 504 596 520 596 551L582 507C575 485 580 471 597 456Z"
+    />
+    <path
+      fill="url(#bottom)"
+      d="M367 586 374 565C362 596 387 608 417 582L482 536C504 521 520 523 541 538L606 583C620 613 606 640 578 622L512 574 430 633C397 657 354 626 367 586Z"
+    />
+    <path
+      fill="url(#sheen)"
+      d="M451 558 482 536C504 521 520 523 541 538L574 561C550 554 529 562 512 574C491 559 471 554 451 558Z"
+    />
+    <path
+      fill="url(#sheen)"
+      d="M383 423 424 455C441 469 449 483 442 505L427 551C429 527 416 505 398 491C407 466 404 442 383 423Z"
+    />
+  </g>
+</svg>

@@ -2140,7 +2140,7 @@ main:focus {
   [data-ui="wordmark"] {
     font-size: 1.25rem;
   }
-  [data-ui="wordmark"] svg {
+  [data-ui="wordmark"] img {
     width: 24px;
     height: 24px;
   }
