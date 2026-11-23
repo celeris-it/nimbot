@@ -1037,6 +1037,23 @@
     </a>
   </li>
 {/snippet}
+{#snippet signOut(inSidebar: boolean)}
+  <button
+    class="panel-button panel-button-ghost"
+    type="button"
+    aria-label="Sign out"
+    disabled={busy}
+    onclick={() => mutate("/api/logout", {}, expired)}
+  >
+    <Icon name="logout" size={inSidebar ? 18 : 16} />
+    <span
+      aria-hidden="true"
+      data-ui={inSidebar ? "navigation-label" : undefined}
+    >
+      Sign out
+    </span>
+  </button>
+{/snippet}
 <header>
   {#if !desktopSidebar}{@render wordmark()}{/if}
   {#if session && path !== "/login"}
@@ -1052,22 +1069,22 @@
         bind:query={agentQuery}
       />
     {/key}
-    <div data-ui="header-actions">
-      {#if compact}<button
-          class="panel-button panel-button-ghost"
-          type="button"
-          aria-expanded={menuOpen}
-          aria-controls="main-navigation-links"
-          onclick={() => (menuOpen = !menuOpen)}
-          ><Icon name={menuOpen ? "collapsePanel" : "expandPanel"} size={16} /> Menu</button
-        >{/if}
-      <button
-        class="panel-button panel-button-ghost"
-        disabled={busy}
-        onclick={() => mutate("/api/logout", {}, expired)}
-        ><Icon name="logout" size={16} /> Sign out</button
-      >
-    </div>
+    {#if !desktopSidebar}
+      <div data-ui="header-actions">
+        {#if compact}<button
+            class="panel-button panel-button-ghost"
+            type="button"
+            aria-expanded={menuOpen}
+            aria-controls="main-navigation-links"
+            onclick={() => (menuOpen = !menuOpen)}
+            ><Icon
+              name={menuOpen ? "collapsePanel" : "expandPanel"}
+              size={16}
+            /> Menu</button
+          >{/if}
+        {@render signOut(false)}
+      </div>
+    {/if}
   {:else}<span data-ui="installation"
       ><Icon name="shield" size={15} /> SELF-HOSTED & PRIVATE</span
     >{/if}
@@ -1104,11 +1121,14 @@
           {@const settings = mainLinks.find(
             (link) => link.href === "/settings",
           )}
-          {#if settings}
-            <ul class="panel-menu">
-              {@render mainNavLink(settings)}
-            </ul>
-          {/if}
+          <div data-ui="sidebar-actions">
+            {#if settings}
+              <ul class="panel-menu">
+                {@render mainNavLink(settings)}
+              </ul>
+            {/if}
+            {@render signOut(true)}
+          </div>
         {/if}
       </div>
     </nav>

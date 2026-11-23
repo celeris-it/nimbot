@@ -47,6 +47,7 @@
   --screen-gutter: 16px;
   --pane-gap: 16px;
   --prose-width: 42ch;
+  --page-max-width: 1200px;
   --app-bar-height: 112px;
   --focus-ring: 0 0 0 3px
     color-mix(in srgb, var(--color-primary) 35%, transparent);
@@ -126,7 +127,7 @@ svg {
   justify-self: center;
   inline-size: 100%;
   min-inline-size: 0;
-  max-inline-size: 1200px;
+  max-inline-size: var(--page-max-width);
 }
 [data-ui="main-navigation"] {
   align-self: start;
@@ -174,30 +175,49 @@ svg {
 @media (width >= 840px) {
   #app:has([data-ui="main-navigation"]) {
     --sidebar-width: 160px;
+    --content-inline-start: calc(
+      var(--screen-gutter) + var(--sidebar-width) + var(--pane-gap)
+    );
   }
   #app:has([data-ui="main-navigation"][data-expanded="false"]) {
     --sidebar-width: 64px;
   }
   #app:has([data-ui="main-navigation"]) > header {
-    padding-inline-start: calc(var(--sidebar-width) + var(--pane-gap));
+    --header-extra-gutter: max(
+      0px,
+      (
+          100% - var(--content-inline-start) - var(--screen-gutter) -
+            var(--page-max-width)
+        ) /
+        2
+    );
+    padding-inline-start: calc(
+      var(--content-inline-start) + var(--header-extra-gutter)
+    );
+    padding-inline-end: calc(var(--screen-gutter) + var(--header-extra-gutter));
     min-block-size: 80px;
   }
   [data-ui="panel-shell"]:has(> [data-ui="main-navigation"]) {
-    margin-inline-start: calc(var(--sidebar-width) + var(--pane-gap));
+    margin-inline-start: var(--content-inline-start);
   }
   [data-ui="main-navigation"] {
     position: fixed;
-    inset-block-start: 0;
-    inset-inline-start: 0;
+    inset-block-start: 16px;
+    inset-inline-start: var(--screen-gutter);
     z-index: 3;
     inline-size: var(--sidebar-width);
-    block-size: 100dvh;
+    block-size: calc(100dvh - 32px);
     grid-template-rows: auto auto minmax(0, 1fr);
     gap: 16px;
     padding: 16px 8px;
-    border: 0;
-    border-inline-end: 1px solid var(--color-base-300);
-    border-radius: 0;
+    border-radius: 24px;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-base-100) 92%, var(--color-accent)),
+      var(--color-field) 48%,
+      var(--color-base-100)
+    );
+    box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
   }
   [data-ui="main-navigation"] > [data-ui="wordmark"] {
     justify-content: center;
@@ -212,8 +232,12 @@ svg {
     justify-content: space-between;
     gap: 16px;
   }
+  [data-ui="sidebar-actions"] {
+    display: grid;
+    gap: 8px;
+  }
 }
-@media (width >= 840px) and (height < 432px) {
+@media (width >= 840px) and (height < 520px) {
   [data-ui="main-navigation"] {
     grid-template-rows: auto auto minmax(min-content, 1fr);
     overflow-y: auto;
@@ -234,7 +258,7 @@ svg {
   white-space: nowrap;
 }
 [data-expanded="false"]
-  a:is(:hover, :focus-visible)
+  :is(a, button):is(:hover, :focus-visible)
   [data-ui="navigation-label"] {
   visibility: visible;
 }

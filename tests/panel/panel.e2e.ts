@@ -1455,7 +1455,7 @@ test("uses Material screen gutters and navigation modes at the width boundaries"
     await page.setViewportSize({ width, height: 800 });
     const gutter = width < 600 ? 16 : 24;
     const paneGap = width < 600 ? 16 : 24;
-    const contentStart = width < 840 ? gutter : 184;
+    const contentStart = width < 840 ? gutter : gutter + 160 + paneGap;
     await expect(shell).toHaveCSS("margin-inline-start", `${contentStart}px`);
     await expect(shell).toHaveCSS("margin-inline-end", `${gutter}px`);
     await expect(banner).toHaveCSS("width", `${width}px`);
@@ -1492,7 +1492,7 @@ test("uses Material screen gutters and navigation modes at the width boundaries"
   }
 });
 
-test("keeps the desktop sidebar fixed with Settings at the bottom", async ({
+test("keeps the floating desktop sidebar fixed with Sign out below Settings", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 640 });
@@ -1504,14 +1504,19 @@ test("keeps the desktop sidebar fixed with Settings at the bottom", async ({
   const sidebar = page.getByRole("navigation", { name: "Main navigation" });
   const home = sidebar.getByRole("link", { name: "Nimbot home" });
   const settings = sidebar.getByRole("link", { name: "Settings", exact: true });
+  const signOut = sidebar.getByRole("button", { name: "Sign out" });
   await expect(home).toBeVisible();
   await expect(sidebar).toHaveCSS("position", "fixed");
+  await expect(sidebar).toHaveCSS("border-radius", "24px");
+  await expect(sidebar).toHaveCSS("background-image", /^linear-gradient/);
   const initial = (await sidebar.boundingBox())!;
-  expect(initial.x).toBe(0);
-  expect(initial.y).toBe(0);
-  expect(initial.height).toBe(640);
+  expect(initial.x).toBe(24);
+  expect(initial.y).toBe(16);
+  expect(initial.height).toBe(608);
   const settingsBox = (await settings.boundingBox())!;
-  expect(settingsBox.y + settingsBox.height).toBe(624);
+  const signOutBox = (await signOut.boundingBox())!;
+  expect(signOutBox.y - settingsBox.y - settingsBox.height).toBe(8);
+  expect(signOutBox.y + signOutBox.height).toBe(607);
 
   await page.evaluate(() =>
     window.scrollTo(0, document.documentElement.scrollHeight),
@@ -1521,6 +1526,7 @@ test("keeps the desktop sidebar fixed with Settings at the bottom", async ({
     .toBeGreaterThan(0);
   expect(await sidebar.boundingBox()).toEqual(initial);
   expect(await settings.boundingBox()).toEqual(settingsBox);
+  expect(await signOut.boundingBox()).toEqual(signOutBox);
 
   await sidebar.getByRole("button", { name: "Hide labels" }).click();
   await expect(sidebar).toHaveCSS("width", "64px");
@@ -1529,13 +1535,17 @@ test("keeps the desktop sidebar fixed with Settings at the bottom", async ({
   await expect(settings).toHaveAttribute("aria-current", "page");
 
   await page.setViewportSize({ width: 1280, height: 320 });
-  await settings.focus();
-  await expect(settings).toBeInViewport();
+  await signOut.focus();
+  await expect(signOut).toBeInViewport();
   await page.setViewportSize({ width: 839, height: 640 });
   await expect(
     page.getByRole("banner").getByRole("link", { name: "Nimbot home" }),
   ).toBeVisible();
   await expect(sidebar).toHaveCSS("position", "static");
+  await expect(signOut).toHaveCount(0);
+  await expect(
+    page.getByRole("banner").getByRole("button", { name: "Sign out" }),
+  ).toBeVisible();
 });
 
 test("keeps dashboard body copy readable on a wide screen", async ({
@@ -1587,7 +1597,7 @@ test("mirrors panel rails, popovers, and the switch in RTL", async ({
   if (!shellBox || !mainNavBox || !agentNavBox || !mainBox)
     throw new Error("Expected visible RTL panel panes");
   expect(shellBox.x).toBeCloseTo(24);
-  expect(mainNavBox.x + mainNavBox.width).toBeCloseTo(1200);
+  expect(mainNavBox.x + mainNavBox.width).toBeCloseTo(1176);
   expect(mainBox.x - (agentNavBox.x + agentNavBox.width)).toBeCloseTo(24);
 
   const switcher = page.getByLabel("Switch agent, Developer");
@@ -1723,6 +1733,39 @@ test("moves between agent pages with an expandable main navigation", async ({
     });
     await agents.click();
     await expect(mainNav).toHaveCount(0);
+  }
+});
+
+test("aligns the desktop header with the centered page layout", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 900 });
+  await login(page);
+  const banner = page.getByRole("banner");
+  const directory = banner.locator('[data-ui="agent-header"]');
+  await expect(banner.getByRole("button", { name: "Sign out" })).toHaveCount(0);
+  const layout = page.locator('[data-ui="page-layout"]');
+  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
+
+  for (const [direction, expanded] of [
+    ["ltr", true],
+    ["ltr", false],
+    ["rtl", false],
+  ] as const) {
+    if (!expanded && direction === "ltr")
+      await sidebar.getByRole("button", { name: "Hide labels" }).click();
+    await page.evaluate(
+      (dir) => (document.documentElement.dir = dir),
+      direction,
+    );
+    const [directoryBox, layoutBox] = await Promise.all(
+      [directory, layout].map((element) => element.boundingBox()),
+    );
+    if (!directoryBox || !layoutBox)
+      throw new Error("Expected visible header and page content");
+    expect(layoutBox.width).toBe(1200);
+    expect(directoryBox.width).toBeCloseTo(layoutBox.width);
+    expect(directoryBox.x).toBeCloseTo(layoutBox.x);
   }
 });
 
