@@ -226,7 +226,6 @@
     {/if}
   </Surface>
   <Surface
-    glow="violet"
     title="Models"
     description={`Share of ${byTokens ? "tokens" : "cost"}.`}
   >
@@ -277,11 +276,7 @@
 </div>
 
 <div data-ui="overview-grid" data-order="swapped">
-  <Surface
-    glow="amber"
-    title="Quota left"
-    description="Tightest limit per AI provider."
-  >
+  <Surface title="Quota left" description="Tightest limit per AI provider.">
     {#if quotas.length === 0}
       <p data-ui="muted">
         No provider quota data yet. It appears once an agent’s model reports its
@@ -349,7 +344,7 @@
   </div>
 </div>
 
-<Surface tone="muted">
+<Surface tone="muted" glow="amber">
   <div data-ui="workspace-heading">
     <h2>
       Agent workspaces <span>{filtered.length}</span>

@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 
+const cardGlow = /^radial-gradient\(circle.*radial-gradient.*linear-gradient/;
+
 async function login(page: Page) {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
@@ -380,6 +382,7 @@ test("keeps usage history readable and keyboard-scrollable on narrow screens", a
   const failed = table.getByRole("row", { name: /Failed/ });
   await expect(failed.getByText("Unavailable", { exact: true })).toHaveCount(3);
   const history = page.locator(".table-panel");
+  await expect(history).toHaveCSS("background-image", "none");
   await history.screenshot({
     path: test.info().outputPath("usage-desktop.png"),
   });
@@ -1560,7 +1563,7 @@ test("uses Material screen gutters and navigation modes at the width boundaries"
 
 test("keeps the floating desktop sidebar fixed with Sign out below Settings", async ({
   page,
-}) => {
+}, info) => {
   await page.setViewportSize({ width: 1280, height: 640 });
   await login(page);
   await page.goto("/agents/dev/channels");
@@ -1574,7 +1577,10 @@ test("keeps the floating desktop sidebar fixed with Sign out below Settings", as
   await expect(home).toBeVisible();
   await expect(sidebar).toHaveCSS("position", "fixed");
   await expect(sidebar).toHaveCSS("border-radius", "24px");
-  await expect(sidebar).toHaveCSS("background-image", /^linear-gradient/);
+  const multicolorGlow =
+    /^radial-gradient\(circle.*(?:radial-gradient\(\d+% \d+%.*){3}linear-gradient/;
+  await expect(sidebar).toHaveCSS("background-image", multicolorGlow);
+  await sidebar.screenshot({ path: info.outputPath("sidebar-expanded.png") });
   const initial = (await sidebar.boundingBox())!;
   expect(initial.x).toBe(24);
   expect(initial.y).toBe(16);
@@ -1596,7 +1602,9 @@ test("keeps the floating desktop sidebar fixed with Sign out below Settings", as
 
   await sidebar.getByRole("button", { name: "Hide labels" }).click();
   await expect(sidebar).toHaveCSS("width", "64px");
+  await expect(sidebar).toHaveCSS("background-image", multicolorGlow);
   await expect(home).toBeVisible();
+  await sidebar.screenshot({ path: info.outputPath("sidebar-collapsed.png") });
   await settings.click();
   await expect(settings).toHaveAttribute("aria-current", "page");
 
@@ -1608,6 +1616,7 @@ test("keeps the floating desktop sidebar fixed with Sign out below Settings", as
     page.getByRole("banner").getByRole("link", { name: "Nimbot home" }),
   ).toBeVisible();
   await expect(sidebar).toHaveCSS("position", "static");
+  await expect(sidebar).toHaveCSS("background-image", "none");
   await expect(signOut).toHaveCount(0);
   await expect(
     page.getByRole("banner").getByRole("button", { name: "Sign out" }),
@@ -1987,9 +1996,11 @@ test("shares the split layout across agent configuration sections", async ({
       for (const name of regions) {
         const region = page.getByRole("region", { name, exact: true });
         await expect(region).toBeVisible();
+        const card = region.locator(":scope > .panel-card");
+        await expect(card).toHaveCSS("background-image", "none");
         const [description, content] = await Promise.all([
           region.locator(".settings-section-description").boundingBox(),
-          region.locator(":scope > .panel-card").boundingBox(),
+          card.boundingBox(),
         ]);
         if (!description || !content)
           throw new Error(`Expected ${name} content`);
@@ -2078,9 +2089,13 @@ test("organizes agent overview sections in rows and stacks their contents on pho
   await expect(panel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(panel).toHaveCSS("border-width", "0px");
   await expect(host).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(host.locator(".panel-card")).not.toHaveCSS(
-    "background-color",
-    "rgba(0, 0, 0, 0)",
+  await expect(host.locator(".panel-card")).toHaveCSS(
+    "background-image",
+    "none",
+  );
+  await expect(danger.locator(".panel-card")).toHaveCSS(
+    "background-image",
+    "none",
   );
 
   for (const width of [1280, 1920, 840, 320, 375]) {
@@ -2552,10 +2567,13 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   ).toBe(true);
   const models = page.getByRole("region", { name: "Models" });
   await expect(models.getByText("fixture", { exact: true })).toBeVisible();
+  await expect(models).toHaveCSS("background-image", "none");
+  await expect(page.getByRole("region", { name: "Quota left" })).toHaveCSS(
+    "background-image",
+    "none",
+  );
   for (const [name, glow] of [
     ["Usage", "blue"],
-    ["Models", "violet"],
-    ["Quota left", "amber"],
     ["Last 24 hours", "teal"],
   ] as const) {
     const card = page.getByRole("region", { name });
@@ -2568,7 +2586,14 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   const fleet = page
     .getByRole("heading", { name: /Agent workspaces/ })
     .locator('xpath=ancestor::section[@data-ui="surface"]');
-  await expect(fleet).toHaveCSS("background-image", "none");
+  await expect(fleet).toHaveAttribute("data-glow", "amber");
+  await expect(fleet).toHaveCSS("background-image", cardGlow);
+  await expect(
+    fleet.getByRole("article", { name: "Selected agent" }),
+  ).toHaveCSS("background-image", "none");
+  await expect(
+    fleet.getByRole("button", { name: "Select Developer" }),
+  ).toHaveCSS("background-image", "none");
 
   const range = page.getByRole("group", { name: "Usage range" });
   for (const state of ["populated", "empty"]) {

@@ -13,7 +13,7 @@
     children: Snippet;
     actions?: Snippet;
     tone?: "dark" | "muted";
-    glow?: "blue" | "violet" | "amber" | "teal";
+    glow?: "blue" | "amber" | "teal";
   } = $props();
 </script>
 
