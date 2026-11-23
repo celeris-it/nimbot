@@ -8,6 +8,7 @@ import { readPanelConfig } from "./panel-config.js";
 import { openAgentRegistry } from "../agents/agent-registry.js";
 import { openDiscordSecrets } from "../discord/discord-secret.js";
 import { createDiscordConfiguration } from "../discord/discord-configuration.js";
+import { InvalidDiscordBotToken } from "../discord/discord-identity.js";
 
 it("protects Discord configuration, isolates agents, and never returns credentials", async () => {
   const dir = await mkdtemp(join(tmpdir(), "panel-discord-"));
@@ -104,9 +105,27 @@ it("protects Discord configuration, isolates agents, and never returns credentia
       expect((await post("/api/agents/a/discord", invalid)).status).toBe(400);
     }
     expect(verify).not.toHaveBeenCalled();
+    const invalidOwner = await post(
+      "/api/agents/a/discord",
+      payload.replace("987654321098765432", "18446744073709551616"),
+    );
+    expect(await invalidOwner.json()).toMatchObject({
+      code: "discord_owner_id_invalid",
+    });
+    verify.mockRejectedValueOnce(new InvalidDiscordBotToken());
+    const invalidToken = await post("/api/agents/a/discord", payload);
+    expect(invalidToken.status).toBe(400);
+    expect(await invalidToken.json()).toMatchObject({
+      code: "discord_token_rejected",
+    });
     expect(await (await post("/api/agents/a/discord", payload)).json()).toEqual(
       { saved: true, cleanupPending: false },
     );
+    const duplicate = await post("/api/agents/b/discord", payload);
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toMatchObject({
+      code: "discord_bot_already_assigned",
+    });
     const response = await (await get("a")).json();
     expect(response).toEqual({
       connection: {

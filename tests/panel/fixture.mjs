@@ -27,6 +27,7 @@ import { Hono } from "../../apps/server/node_modules/hono/dist/index.js";
 import { createPanel } from "../../apps/server/dist/panel/panel.js";
 import { hashPassword } from "../../apps/server/dist/panel/panel-auth.js";
 import { providers } from "../../apps/server/dist/providers/provider-contracts.js";
+import { InvalidDiscordBotToken } from "../../apps/server/dist/discord/discord-identity.js";
 
 const agents = new Map();
 let nativeMode = false;
@@ -259,8 +260,7 @@ const panel = createPanel(
       test: async () => ({ status: "delivered", sentParts: 1 }),
       get: (id) => agents.get(id)?.discord,
       configure: async (id, ownerId, token) => {
-        if (token !== "valid-discord-token")
-          throw new Error("private-token-error");
+        if (token !== "valid-discord-token") throw new InvalidDiscordBotToken();
         agents.get(id).discord = {
           botId: "123456789012345678",
           botUsername: "notification_bot",

@@ -8,6 +8,11 @@ export interface DiscordConnection {
   ownerId: string;
   credentialRef: string;
 }
+export class DiscordBotAlreadyAssigned extends Error {
+  constructor() {
+    super("Discord bot is already assigned to another agent");
+  }
+}
 export interface RegisteredAgent {
   id: string;
   name: string;
@@ -79,6 +84,9 @@ export function openAgentRegistry(path: string) {
         (agent_id, bot_id, bot_username, owner_id, credential_ref)
         SELECT id, ?, ?, ?, ? FROM agents WHERE id = ? AND deleted_at IS NULL
         AND (SELECT credential_ref FROM agent_discord_connections WHERE agent_id = ?) IS ?
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_discord_connections WHERE bot_id = ? AND agent_id <> ?
+        )
         ON CONFLICT(agent_id) DO UPDATE SET bot_id = excluded.bot_id,
         bot_username = excluded.bot_username, owner_id = excluded.owner_id,
         credential_ref = excluded.credential_ref`,
@@ -91,9 +99,18 @@ export function openAgentRegistry(path: string) {
           id,
           id,
           expectedRef,
+          connection.botId,
+          id,
         );
-      if (!result.changes)
+      if (!result.changes) {
+        const assigned = db
+          .prepare(
+            "SELECT 1 FROM agent_discord_connections WHERE bot_id = ? AND agent_id <> ?",
+          )
+          .get(connection.botId, id);
+        if (assigned) throw new DiscordBotAlreadyAssigned();
         throw new Error("Discord connection changed or agent is unavailable");
+      }
     },
     removeDiscordConnection(id: string, expectedRef: string) {
       const result = db

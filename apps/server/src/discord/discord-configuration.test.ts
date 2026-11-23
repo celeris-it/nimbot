@@ -5,7 +5,11 @@ import { expect, it, vi } from "vitest";
 import { openAgentRegistry } from "../agents/agent-registry.js";
 import { openDiscordSecrets } from "./discord-secret.js";
 import { createDiscordConfiguration } from "./discord-configuration.js";
-import { verifyDiscordBot, isDiscordId } from "./discord-identity.js";
+import {
+  verifyDiscordBot,
+  isDiscordId,
+  InvalidDiscordBotToken,
+} from "./discord-identity.js";
 
 it("persists private credentials, preserves exact IDs, replaces and removes independently", async () => {
   const dir = await mkdtemp(join(tmpdir(), "discord-config-"));
@@ -126,6 +130,10 @@ it("verifies a bot over authenticated HTTP and sanitizes provider failures", asy
     headers: { Authorization: "Bot secret" },
     redirect: "error",
   });
+  request.mockResolvedValueOnce(new Response(null, { status: 401 }));
+  await expect(verifyDiscordBot("secret", request)).rejects.toBeInstanceOf(
+    InvalidDiscordBotToken,
+  );
   for (const body of [
     { id: "123", username: "user", bot: false },
     { id: 123, username: "bot", bot: true },

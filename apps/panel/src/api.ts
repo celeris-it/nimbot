@@ -2,6 +2,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
   ) {
     super(message);
   }
@@ -18,11 +19,12 @@ export async function request<T>(
   });
   if (!response.ok) {
     const data = (await response.json().catch(() => undefined)) as
-      { error?: string } | undefined;
+      { error?: string; code?: string } | undefined;
     throw new ApiError(
       response.status,
       data?.error ??
         "The request could not be completed. Refresh the status before retrying.",
+      data?.code,
     );
   }
   return response.json() as Promise<T>;

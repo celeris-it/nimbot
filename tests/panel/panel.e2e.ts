@@ -1624,19 +1624,17 @@ test("creates an agent using only Discord and defaults new schedules to Discord"
     "href",
     "https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID",
   );
-  await userIdGuide.focus();
-  await page.keyboard.press("Tab");
   const accountInstallGuide = discord.getByRole("link", {
     name: "Discord's account installation guide",
   });
-  await expect(accountInstallGuide).toBeFocused();
   await expect(accountInstallGuide).toHaveAttribute(
     "href",
     "https://docs.discord.com/developers/quick-start/getting-started#install-to-user-account",
   );
-  await expect(
-    discord.getByText(/Once the app is installed and connected, use/),
-  ).toBeVisible();
+  await accountInstallGuide.focus();
+  await page.keyboard.press("Tab");
+  await expect(userIdGuide).toBeFocused();
+  await discord.getByRole("button", { name: "Connect Discord" }).focus();
   await page.keyboard.press("Tab");
   const dmHelp = discord.getByText("Trouble opening a Discord DM?", {
     exact: true,
@@ -1681,7 +1679,7 @@ test("creates an agent using only Discord and defaults new schedules to Discord"
   await expect(setupGuide).toHaveCount(0);
   await expect(dmHelp).toBeVisible();
   await expect(
-    discord.getByText(/Send a Discord test, then reply from the owner/),
+    discord.getByRole("paragraph").filter({ hasText: "link the DM" }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Connect Telegram" }),
@@ -3619,24 +3617,46 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
   await page.getByRole("link", { name: "Manage channels" }).click();
   const discord = page.getByRole("region", { name: "Discord connection" });
   await expect(discord.getByText("Discord is not configured.")).toBeVisible();
-  await discord
-    .getByLabel("Owner's Discord user ID")
-    .fill("987654321098765432");
-  await discord
-    .getByLabel("Discord bot token", { exact: true })
-    .fill("invalid-token");
-  await discord.getByRole("button", { name: "Connect Discord" }).click();
-  await expect(page.getByRole("alert")).toContainText("Could not save Discord");
-  await expect(
-    discord.getByLabel("Discord bot token", { exact: true }),
-  ).toHaveValue("");
-  await expect(discord.getByLabel("Owner's Discord user ID")).toHaveValue(
-    "987654321098765432",
+  const owner = discord.getByLabel("Owner's Discord user ID");
+  const token = discord.getByLabel("Discord bot token", { exact: true });
+  const connect = discord.getByRole("button", { name: "Connect Discord" });
+  await owner.fill("18446744073709551616");
+  await token.fill("invalid-token");
+  await connect.click();
+  await expect(discord.getByRole("alert")).toContainText(
+    "personal Discord profile",
   );
-  await discord
-    .getByLabel("Discord bot token", { exact: true })
-    .fill("valid-discord-token");
-  await discord.getByRole("button", { name: "Connect Discord" }).click();
+  await expect(owner).toBeFocused();
+  await expect(owner).toHaveAttribute("aria-invalid", "true");
+  await expect(token).toHaveValue("invalid-token");
+  await owner.fill("987654321098765432");
+  await expect(discord.getByRole("alert")).toHaveCount(0);
+  await connect.click();
+  await expect(discord.getByRole("alert")).toContainText(
+    "Discord rejected the bot token",
+  );
+  await expect(token).toBeFocused();
+  await expect(token).toHaveValue("");
+  await expect(owner).toHaveValue("987654321098765432");
+
+  await page.route(
+    "**/api/agents/dev/discord",
+    async (route) => {
+      await route.fulfill({
+        status: 503,
+        json: { error: "Could not save Discord. Wait a moment and try again." },
+      });
+    },
+    { times: 1 },
+  );
+  await token.fill("valid-discord-token");
+  await discord.getByRole("button", { name: "Show value" }).click();
+  await expect(token).toHaveAttribute("type", "text");
+  await connect.click();
+  await expect(page.getByRole("alert")).toContainText("Could not save Discord");
+  await expect(token).toHaveValue("valid-discord-token");
+  await expect(token).toHaveAttribute("type", "password");
+  await connect.click();
   await expect(
     discord.getByText("notification_bot", { exact: true }),
   ).toBeVisible();

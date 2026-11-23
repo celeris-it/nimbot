@@ -7,6 +7,7 @@
     TextField,
   } from "./components/index.js";
   import DiscordSettings from "./DiscordSettings.svelte";
+  import type { ApiError } from "./api.js";
   import {
     botLabel,
     failureLabels,
@@ -28,7 +29,8 @@
     discordAction: (
       kind: "save" | "remove" | "test",
       fields: Record<string, string>,
-    ) => Promise<void>;
+      handleSaveError?: (error: ApiError) => boolean,
+    ) => Promise<boolean | undefined>;
   } = $props();
   let base = $derived(`/agents/${encodeURIComponent(agent.id)}`);
   let telegramOwner = $state("");

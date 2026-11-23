@@ -1,4 +1,7 @@
-import type { openAgentRegistry } from "../agents/agent-registry.js";
+import {
+  DiscordBotAlreadyAssigned,
+  type openAgentRegistry,
+} from "../agents/agent-registry.js";
 import type { openDiscordSecrets } from "./discord-secret.js";
 import { isDiscordId, verifyDiscordBot } from "./discord-identity.js";
 import type { DiscordNotificationTarget } from "./discord-notifications.js";
@@ -30,9 +33,10 @@ export function createDiscordConfiguration(
           { botId: bot.id, botUsername: bot.username, ownerId, credentialRef },
           previous?.credentialRef ?? null,
         );
-      } catch {
+      } catch (error) {
         await erase(credentialRef);
-        throw new Error("Could not save Discord connection");
+        if (error instanceof DiscordBotAlreadyAssigned) throw error;
+        throw new Error("Could not save Discord connection", { cause: error });
       }
       return {
         cleanupPending: previous

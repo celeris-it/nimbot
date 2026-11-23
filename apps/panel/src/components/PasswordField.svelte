@@ -4,12 +4,13 @@
   import Icon from "./Icon.svelte";
   let {
     value = $bindable(),
+    visible = $bindable(false),
     disabled,
     ...rest
   }: Omit<HTMLInputAttributes, "value" | "type"> & {
     value?: string | null;
+    visible?: boolean;
   } = $props();
-  let visible = $state(false);
 </script>
 
 <div class="panel-input" data-ui="field-group">

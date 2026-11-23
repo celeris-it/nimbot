@@ -7,6 +7,7 @@
     TextField,
   } from "./components/index.js";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
+  import type { ApiError } from "./api.js";
   import { discordConversationLabels } from "./labels.js";
   let {
     agent,
@@ -18,10 +19,13 @@
     action: (
       kind: "save" | "remove" | "test",
       fields: Record<string, string>,
-    ) => Promise<void>;
+      handleSaveError?: (error: ApiError) => boolean,
+    ) => Promise<boolean | undefined>;
   } = $props();
   let ownerId = $state(untrack(() => agent.discord?.connection?.ownerId ?? ""));
   let token = $state("");
+  let tokenVisible = $state(false);
+  let fieldError = $state<{ field: "owner" | "token"; message: string }>();
   let requestId = $state("");
   let section: HTMLElement;
   let heading: HTMLHeadingElement;
@@ -46,9 +50,31 @@
   async function save(event: SubmitEvent) {
     event.preventDefault();
     if (busy) return;
-    const submitted = token;
-    token = "";
-    await action("save", { ownerId, token: submitted });
+    fieldError = undefined;
+    tokenVisible = false;
+    const saved = await action("save", { ownerId, token }, (error) => {
+      switch (error.code) {
+        case "discord_owner_id_invalid":
+          fieldError = { field: "owner", message: error.message };
+          return true;
+        case "discord_token_rejected":
+          token = "";
+        // Fall through to show the error next to the token field.
+        case "discord_token_invalid":
+        case "discord_bot_already_assigned":
+          fieldError = { field: "token", message: error.message };
+          return true;
+        default:
+          return false;
+      }
+    });
+    tokenVisible = false;
+    if (saved) token = "";
+    if (fieldError) {
+      const { field } = fieldError;
+      await tick();
+      section.querySelector<HTMLInputElement>(`#discord-${field}`)?.focus();
+    }
   }
   async function remove(event: SubmitEvent) {
     event.preventDefault();
@@ -89,6 +115,16 @@
 {#snippet credentials()}
   <form onsubmit={save} aria-busy={busy} aria-describedby="form-error">
     <label for="discord-owner">Owner's Discord user ID</label>
+    <p id="discord-owner-help">
+      Copy the user ID from your personal Discord profile. Nimbot accepts DMs
+      from this account only.
+      <a
+        class="underline"
+        href="https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID"
+        target="_blank"
+        rel="noopener noreferrer">Discord's user ID instructions</a
+      >.
+    </p>
     <TextField
       id="discord-owner"
       name="ownerId"
@@ -96,10 +132,21 @@
       pattern={"[1-9][0-9]{0,19}"}
       maxlength={20}
       required
+      readonly={busy}
       bind:value={ownerId}
-      aria-describedby="discord-owner-help"
+      aria-invalid={fieldError?.field === "owner" || undefined}
+      aria-describedby={fieldError?.field === "owner"
+        ? "discord-owner-error discord-owner-help"
+        : "discord-owner-help"}
+      oninput={() => {
+        if (fieldError?.field === "owner") fieldError = undefined;
+      }}
     />
-    <p id="discord-owner-help">Nimbot accepts DMs from this account only.</p>
+    {#if fieldError?.field === "owner"}
+      <p id="discord-owner-error" class="discord-field-error" role="alert">
+        {fieldError.message}
+      </p>
+    {/if}
     <label for="discord-token">Discord bot token</label>
     <PasswordField
       id="discord-token"
@@ -107,12 +154,22 @@
       autocomplete="off"
       maxlength={256}
       required
+      readonly={busy}
       bind:value={token}
-      aria-describedby="discord-token-help"
+      bind:visible={tokenVisible}
+      aria-invalid={fieldError?.field === "token" || undefined}
+      aria-describedby={fieldError?.field === "token"
+        ? "discord-token-error"
+        : undefined}
+      oninput={() => {
+        if (fieldError?.field === "token") fieldError = undefined;
+      }}
     />
-    <p id="discord-token-help">
-      The token is stored privately. Enter it again if saving fails.
-    </p>
+    {#if fieldError?.field === "token"}
+      <p id="discord-token-error" class="discord-field-error" role="alert">
+        {fieldError.message}
+      </p>
+    {/if}
     <ActionButton variant="primary" type="submit" disabled={busy}
       ><Icon name="link" size={16} />{busy
         ? "Saving…"
@@ -140,8 +197,10 @@
     </h2>
     {#if !agent.discord?.connection}
       <h3>Set up a Discord bot</h3>
+      <p>You'll need a bot token and your personal Discord user ID.</p>
       <ol class="list-decimal space-y-2 ps-5">
         <li>
+          <strong>Create a bot and copy its token.</strong>
           Open the
           <a
             class="underline"
@@ -154,23 +213,20 @@
           privileged intents off.
         </li>
         <li>
-          Enable Developer Mode in Discord and copy your personal account's user
-          ID. See
-          <a
-            class="underline"
-            href="https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID"
-            target="_blank"
-            rel="noopener noreferrer">Discord's user ID instructions</a
-          >.
+          <strong>Copy your Discord user ID.</strong>
+          Enable Developer Mode in Discord and choose
+          <strong>Copy User ID</strong> from your personal profile.
         </li>
         <li>
-          To open a DM without a shared server, open your app's
-          <strong>Installation</strong> settings. Enable
-          <strong>User Install</strong>, add the
-          <code>applications.commands</code>
-          scope under <strong>User Install</strong>, and select
-          <strong>Discord Provided Link</strong>. Open the link with the owner
-          account and select <strong>Add to my apps</strong>. See
+          <strong>Install the app on your Discord account.</strong>
+          In your app's <strong>Installation</strong> settings, enable
+          <strong>User Install</strong> and select
+          <strong>Discord Provided Link</strong>. Under
+          <strong>Default Install Settings</strong>, add the
+          <code class="wrap-anywhere">applications.commands</code>
+          scope to <strong>User Install</strong>. Open the install link as the
+          owner and choose <strong>Add to my apps</strong>. This lets you open a
+          DM without a shared server. See
           <a
             class="underline"
             href="https://docs.discord.com/developers/quick-start/getting-started#install-to-user-account"
@@ -178,16 +234,8 @@
             rel="noopener noreferrer">Discord's account installation guide</a
           >.
         </li>
-        <li>
-          Enter the token and owner ID and select <strong
-            >Connect Discord</strong
-          >. Once the app is installed and connected, use
-          <strong>Send Discord test</strong>
-          to check delivery. Reply to the bot in the private chat to link it to Nimbot.
-        </li>
       </ol>
     {/if}
-    {#if !agent.discord?.connection}{@render troubleshooting()}{/if}
   </div>
   <div class="panel-card">
     {#if agent.discord?.connection}
@@ -219,8 +267,8 @@
       </dl>
       {#if agent.discord.conversation && !agent.discord.conversation.ownerLinked}
         <p>
-          Send a Discord test, then reply from the owner's account to link the
-          DM.
+          Select <strong>Send Discord test</strong>, then reply to the bot in
+          Discord from the owner's account to link the DM.
         </p>
       {/if}
       <div class="button-row">
@@ -271,6 +319,13 @@
     {:else}
       <p>Discord is not configured.</p>
       {@render credentials()}
+      {@render troubleshooting()}
     {/if}
   </div>
 </section>
+
+<style>
+  .discord-field-error {
+    color: var(--color-error);
+  }
+</style>

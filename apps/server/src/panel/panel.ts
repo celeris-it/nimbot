@@ -51,6 +51,8 @@ import {
   telegramConfigureForm,
 } from "./panel-schemas.js";
 import { createMcpPanel, type McpPanelDeps } from "../mcp/mcp-panel.js";
+import { DiscordBotAlreadyAssigned } from "../agents/agent-registry.js";
+import { InvalidDiscordBotToken } from "../discord/discord-identity.js";
 
 export interface RegisteredAgentSettings {
   get(id: string): { name: string; instructions: string } | undefined;
@@ -1023,12 +1025,28 @@ export function createPanel(
     const id = c.req.param("id");
     if (!deps.discord || !getAgentSetup?.(id))
       return c.json({ error: "Agent not found." }, 404);
-    const form = await parseForm(
-      c,
-      discordConfigureForm,
-      "Enter a valid Discord owner ID and bot token.",
+    const form = discordConfigureForm.safeParse(
+      await c.req.parseBody({ all: true }),
     );
-    if (form.response) return form.response;
+    if (!form.success) {
+      if (form.error.issues.some((issue) => issue.path[0] === "ownerId"))
+        return c.json(
+          {
+            code: "discord_owner_id_invalid",
+            error:
+              "Copy the user ID from your personal Discord profile and paste it here.",
+          },
+          400,
+        );
+      return c.json(
+        {
+          code: "discord_token_invalid",
+          error:
+            "Paste the bot token from your app’s Bot settings in the Discord Developer Portal.",
+        },
+        400,
+      );
+    }
     try {
       const result = await deps.discord.configure(
         id,
@@ -1036,11 +1054,28 @@ export function createPanel(
         form.data.token,
       );
       return c.json({ saved: true, cleanupPending: result.cleanupPending });
-    } catch {
+    } catch (error) {
+      if (error instanceof InvalidDiscordBotToken)
+        return c.json(
+          {
+            code: "discord_token_rejected",
+            error:
+              "Discord rejected the bot token. Copy the current token from your app’s Bot settings and try again.",
+          },
+          400,
+        );
+      if (error instanceof DiscordBotAlreadyAssigned)
+        return c.json(
+          {
+            code: "discord_bot_already_assigned",
+            error:
+              "This Discord bot is linked to another agent. Use a different bot or disconnect it from the other agent first.",
+          },
+          409,
+        );
       return c.json(
         {
-          error:
-            "Could not save Discord. Check the bot token, owner ID, and whether the bot is already linked.",
+          error: "Could not save Discord. Wait a moment and try again.",
         },
         400,
       );

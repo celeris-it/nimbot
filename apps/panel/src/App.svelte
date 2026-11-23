@@ -617,6 +617,7 @@
     url: string,
     fields: Record<string, string> | string,
     done: (result: T) => void,
+    handleError?: (error: ApiError) => boolean,
   ) {
     if (busy) return;
     busy = true;
@@ -626,6 +627,7 @@
     try {
       const result = await post<T>(url, fields);
       if (path === startedPath) done(result);
+      return true;
     } catch (cause) {
       if (path !== startedPath) return;
       if (
@@ -636,6 +638,7 @@
         expired();
         return;
       }
+      if (cause instanceof ApiError && handleError?.(cause)) return;
       if (
         startedPath === "/login" &&
         (!(cause instanceof ApiError) || cause.status >= 500)
@@ -710,6 +713,7 @@
   async function discordAction(
     kind: "save" | "remove" | "test",
     fields: Record<string, string>,
+    handleSaveError?: (error: ApiError) => boolean,
   ) {
     if (!agent) return;
     if (kind === "test") {
@@ -735,7 +739,7 @@
       );
       return;
     }
-    await mutate<{ cleanupPending: boolean }>(
+    return mutate<{ cleanupPending: boolean }>(
       `/api/agents/${encodeURIComponent(agent.id)}/discord${kind === "remove" ? "/remove" : ""}`,
       fields,
       (result) => {
@@ -748,6 +752,7 @@
             : "");
         void load();
       },
+      handleSaveError,
     );
   }
   async function action(kind: "start" | "restart" | "stop" | "delete") {
