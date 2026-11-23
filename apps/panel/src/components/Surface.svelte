@@ -6,12 +6,14 @@
     children,
     actions,
     tone = "dark",
+    glow,
   }: {
     title?: string;
     description?: string;
     children: Snippet;
     actions?: Snippet;
     tone?: "dark" | "muted";
+    glow?: "blue" | "violet" | "amber" | "teal";
   } = $props();
 </script>
 
@@ -19,6 +21,7 @@
   class="panel-card"
   data-ui="surface"
   data-tone={tone}
+  data-glow={glow}
   aria-label={title}
 >
   {#if title || actions}<div data-ui="surface-heading">

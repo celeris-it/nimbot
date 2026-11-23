@@ -191,6 +191,7 @@
 
 <div data-ui="overview-grid">
   <Surface
+    glow="blue"
     title="Usage"
     description="Reported model cost per day across all agents (UTC)."
   >
@@ -225,6 +226,7 @@
     {/if}
   </Surface>
   <Surface
+    glow="violet"
     title="Models"
     description={`Share of ${byTokens ? "tokens" : "cost"}.`}
   >
@@ -275,7 +277,11 @@
 </div>
 
 <div data-ui="overview-grid" data-order="swapped">
-  <Surface title="Quota left" description="Tightest limit per AI provider.">
+  <Surface
+    glow="amber"
+    title="Quota left"
+    description="Tightest limit per AI provider."
+  >
     {#if quotas.length === 0}
       <p data-ui="muted">
         No provider quota data yet. It appears once an agent’s model reports its
@@ -311,6 +317,7 @@
     {/if}
   </Surface>
   <Surface
+    glow="teal"
     title="Last 24 hours"
     description="Cumulative reported cost by hour, compared with the 24 hours before."
   >

@@ -2321,6 +2321,37 @@ test("keeps forms within mobile widths and retains readable theme contrast", asy
   });
 });
 
+const dashboardUsage = {
+  days: [
+    { day: "2026-11-21", costUsd: 0.125, tokens: 40, tasks: 1 },
+    { day: "2026-11-22", costUsd: 0.375, tokens: 80, tasks: 3 },
+  ],
+  models: [
+    {
+      providerId: "opencode",
+      modelId: "fixture",
+      costUsd: 0.5,
+      tokens: 120,
+      tasks: 4,
+    },
+  ],
+  missingCost: 0,
+  quotas: [
+    {
+      providerId: "opencode",
+      window: "Go monthly",
+      remainingPercent: 42,
+      resetsAt: Date.UTC(2026, 11, 1),
+      exhausted: false,
+    },
+  ],
+  hourly: Array.from({ length: 48 }, (_, index) => ({
+    hour: new Date(Date.UTC(2026, 10, 21, index)).toISOString(),
+    costUsd: index === 47 ? 0.5 : index === 10 ? 0.25 : 0,
+    tokens: 0,
+  })),
+};
+
 test("filters and searches the fleet, selects previews, and reconciles removed agents", async ({
   page,
 }) => {
@@ -2357,38 +2388,7 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
     route.fulfill({ json: { agents } }),
   );
   await page.route("**/api/usage/overview*", (route) =>
-    route.fulfill({
-      json: {
-        days: [
-          { day: "2026-11-21", costUsd: 0.125, tokens: 40, tasks: 1 },
-          { day: "2026-11-22", costUsd: 0.375, tokens: 80, tasks: 3 },
-        ],
-        models: [
-          {
-            providerId: "opencode",
-            modelId: "fixture",
-            costUsd: 0.5,
-            tokens: 120,
-            tasks: 4,
-          },
-        ],
-        missingCost: 0,
-        quotas: [
-          {
-            providerId: "opencode",
-            window: "Go monthly",
-            remainingPercent: 42,
-            resetsAt: Date.UTC(2026, 11, 1),
-            exhausted: false,
-          },
-        ],
-        hourly: Array.from({ length: 48 }, (_, index) => ({
-          hour: new Date(Date.UTC(2026, 10, 21, index)).toISOString(),
-          costUsd: index === 47 ? 0.5 : index === 10 ? 0.25 : 0,
-          tokens: 0,
-        })),
-      },
-    }),
+    route.fulfill({ json: dashboardUsage }),
   );
   await login(page);
   const filters = page.getByRole("group", { name: "Filter agents" });
@@ -2458,7 +2458,7 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
 
 test("renders the reference-inspired dashboard across screen sizes without external assets", async ({
   page,
-}) => {
+}, info) => {
   const violations: string[] = [];
   page.on("console", (message) => {
     if (
@@ -2472,6 +2472,14 @@ test("renders the reference-inspired dashboard across screen sizes without exter
     if (!request.url().startsWith("http://127.0.0.1:3199"))
       external.push(request.url());
   });
+  await page.route("**/api/usage/overview*", (route) =>
+    route.fulfill({
+      json:
+        new URL(route.request().url()).searchParams.get("days") === "30"
+          ? { days: [], models: [], quotas: [], hourly: [], missingCost: 0 }
+          : dashboardUsage,
+    }),
+  );
   await page.route("**/api/status", (route) =>
     route.fulfill({
       json: {
@@ -2542,21 +2550,55 @@ test("renders the reference-inspired dashboard across screen sizes without exter
       document.fonts.check('400 14px "Manrope Variable"'),
     ),
   ).toBe(true);
-  for (const width of [1440, 768, 375, 320]) {
-    await page.setViewportSize({ width, height: 1000 });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-      `overflow at ${width}px`,
-    ).toBe(true);
-    await expect(
-      page.getByRole("link", { name: "Manage", exact: true }),
-    ).toBeVisible();
-    await page.screenshot({
-      path: `test-results/dashboard-${width}.png`,
-      fullPage: true,
-    });
+  const models = page.getByRole("region", { name: "Models" });
+  await expect(models.getByText("fixture", { exact: true })).toBeVisible();
+  for (const [name, glow] of [
+    ["Usage", "blue"],
+    ["Models", "violet"],
+    ["Quota left", "amber"],
+    ["Last 24 hours", "teal"],
+  ] as const) {
+    const card = page.getByRole("region", { name });
+    await expect(card).toHaveAttribute("data-glow", glow);
+    await expect(card).toHaveCSS(
+      "background-image",
+      /radial-gradient.*linear-gradient/,
+    );
+  }
+  const fleet = page
+    .getByRole("heading", { name: /Agent workspaces/ })
+    .locator('xpath=ancestor::section[@data-ui="surface"]');
+  await expect(fleet).toHaveCSS("background-image", "none");
+
+  const range = page.getByRole("group", { name: "Usage range" });
+  for (const state of ["populated", "empty"]) {
+    if (state === "empty") {
+      await range.getByRole("button", { name: "7 days" }).focus();
+      await page.keyboard.press("Tab");
+      const longerRange = range.getByRole("button", { name: "30 days" });
+      await expect(longerRange).toBeFocused();
+      await expect(longerRange).toHaveCSS("outline-style", "solid");
+      await page.keyboard.press("Enter");
+      await expect(longerRange).toHaveAttribute("aria-pressed", "true");
+      await expect(
+        models.getByText("No model usage in the last 30 days."),
+      ).toBeVisible();
+    }
+    for (const width of [1440, 768, 375, 320]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth), {
+          message: `overflow in the ${state} dashboard at ${width}px`,
+        })
+        .toBeLessThanOrEqual(width);
+      await expect(
+        page.getByRole("link", { name: "Manage", exact: true }),
+      ).toBeVisible();
+      await page.screenshot({
+        path: info.outputPath(`dashboard-${state}-${width}.png`),
+        fullPage: true,
+      });
+    }
   }
   expect(violations).toEqual([]);
   expect(external).toEqual([]);
