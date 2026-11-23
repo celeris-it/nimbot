@@ -301,7 +301,7 @@ test("shows model maker icons for direct and shared providers", async ({
       "Nemotron Lightning",
       "simple-icons--nvidia",
     ],
-    ["opencode", "beam-free", "Beam Free", "lucide--bot"],
+    ["opencode", "beam-free", "Beam Free", "coolicons--robot-duotone-round"],
     ["openai", "gpt-6.2-sol", "GPT Sol", "simple-icons--openai"],
     [
       "openrouter",
@@ -3003,6 +3003,13 @@ test("organizes agent overview sections in rows and stacks their contents on pho
 
   for (const width of [1280, 1920, 840, 320, 375]) {
     await page.setViewportSize({ width, height: 800 });
+    if (width < 840) {
+      await expect(
+        page.getByRole("button", { name: "Menu", exact: true }),
+      ).toBeVisible();
+    } else {
+      await expect(page.getByRole("banner")).toHaveCount(0);
+    }
     if (width === 1920) await expect(panel).toHaveCSS("width", "1200px");
     const [agentBox, mainBox] = await Promise.all([
       agentNav.boundingBox(),
@@ -3803,6 +3810,15 @@ test("renders the reference-inspired dashboard across screen sizes without exter
       }
       for (const width of [1440, 768, 375, 320]) {
         await page.setViewportSize({ width, height: 1000 });
+        const banner = page.getByRole("banner");
+        if (width < 840) {
+          await expect(banner).toBeVisible();
+          await expect(
+            banner.getByRole("button", { name: "Menu", exact: true }),
+          ).toHaveCount(width < 600 ? 1 : 0);
+        } else {
+          await expect(banner).toHaveCount(0);
+        }
         const title = dashboard.getByRole("heading", { name: "Your agents." });
         const [titleBox, fleetBox, usageBox, searchBox] = await Promise.all(
           [title, fleet, usage, search].map((element) =>
