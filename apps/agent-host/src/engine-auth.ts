@@ -54,6 +54,7 @@ export class EngineAuthError extends Error {
       | "restricted"
       | "rate_limited"
       | "check_unavailable",
+    readonly reason?: string,
   ) {
     super(kind);
   }

@@ -13,7 +13,7 @@ import {
   type ProviderCheck,
 } from "./engine-auth.js";
 import { checkApiKey } from "./provider-check.js";
-import type { OpenCodeRequest } from "./opencode-api.js";
+import { OpenCodeStartupError, type OpenCodeRequest } from "./opencode-api.js";
 
 const credentialValue = z.object({
   type: z.enum(["key", "oauth", "external"]),
@@ -226,9 +226,16 @@ export function createOpenCodeAuth(
       }
     },
     async status() {
-      const credentials = await readOpenCodeCredentials(request).catch(() => {
-        throw new EngineAuthError("unavailable");
-      });
+      const credentials = await readOpenCodeCredentials(request).catch(
+        (error: unknown) => {
+          throw new EngineAuthError(
+            "unavailable",
+            error instanceof OpenCodeStartupError
+              ? error.reason
+              : "opencode_check_failed",
+          );
+        },
+      );
       return {
         providers: providers.map((provider) => {
           const type = credentials.find(

@@ -1373,7 +1373,18 @@ export function createPanel(
                   502: "Could not validate the API key. Try again when the provider is available.",
                   404: "Login attempt not found. Start a new login.",
                   409: "An authentication change is in progress. Try again when it finishes.",
-                  503: "Provider settings unavailable. Refresh to try again.",
+                  503: error.reason
+                    ? {
+                        opencode_missing:
+                          "OpenCode is missing from Nimbot’s PATH. Install OpenCode 2.2.7 and restart Nimbot.",
+                        opencode_start_failed:
+                          "OpenCode failed to start. Check that Nimbot is using OpenCode 2.2.7, then restart Nimbot.",
+                        opencode_start_timeout:
+                          "OpenCode did not become ready in time. Check the OpenCode installation and refresh.",
+                        opencode_check_failed:
+                          "OpenCode could not read provider settings. Check that Nimbot is using OpenCode 2.2.7.",
+                      }[error.reason]
+                    : "Provider settings unavailable. Check the Nimbot Server logs and refresh.",
                 }[error.status],
               },
               error.status,

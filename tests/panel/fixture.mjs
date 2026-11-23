@@ -114,7 +114,11 @@ const scheduler = createScheduler({
 const pendingLogin = () =>
   ["starting", "awaiting_authorization"].includes(providerLogin?.state);
 function requireProviders(mutate = false) {
-  if (providersOffline) throw new HostProviderError(503);
+  if (providersOffline)
+    throw new HostProviderError(
+      503,
+      providersOffline === "missing-opencode" ? "opencode_missing" : undefined,
+    );
   if (mutate && (providerBusy || pendingLogin()))
     throw new HostProviderError(409);
 }
@@ -485,6 +489,7 @@ app.post("/__test/discord-owner/:id", (c) => {
 app.post("/__test/providers/:state", (c) => {
   const state = c.req.param("state");
   if (state === "offline") providersOffline = true;
+  else if (state === "missing-opencode") providersOffline = state;
   else if (state === "busy") providerBusy = true;
   else if (state === "idle") {
     providerBusy = false;

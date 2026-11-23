@@ -96,6 +96,24 @@ it("rejects malformed metadata, arbitrary login links and unsafe errors", async 
   });
 });
 
+it("preserves only recognized diagnostics from provider status failures", async () => {
+  const request = vi.fn<typeof fetch>();
+  const client = createHostProviders(
+    async () => ({ url: "http://host", token: "secret" }),
+    request,
+  );
+  for (const reason of ["opencode_missing", "private-error"]) {
+    request.mockResolvedValueOnce(
+      Response.json({ reason, error: "private details" }, { status: 503 }),
+    );
+    await expect(client.status("a")).rejects.toMatchObject({
+      status: 503,
+      reason: reason === "opencode_missing" ? reason : undefined,
+      message: "Provider request failed",
+    });
+  }
+});
+
 it("validates provider checks and strips extra fields from the Host response", async () => {
   const entries = providers.map(({ id }) => ({
     id,

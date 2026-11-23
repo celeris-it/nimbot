@@ -9,11 +9,13 @@
   import type { ProviderSettings } from "../../server/src/panel/panel-contracts.js";
   let {
     settings,
+    loadError,
     busy,
     action,
     refresh,
   }: {
     settings: ProviderSettings | undefined;
+    loadError: string;
     busy: boolean;
     action: (
       id: string,
@@ -97,7 +99,7 @@
 
   {#if !settings}
     <div class="panel-card provider-notice">
-      <p role="status">Provider settings unavailable. Refresh to try again.</p>
+      <p role="status">{loadError || "Provider settings unavailable."}</p>
       <ActionButton onclick={refresh}
         ><Icon name="refresh" size={16} />Refresh provider settings</ActionButton
       >

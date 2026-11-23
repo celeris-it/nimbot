@@ -1525,7 +1525,7 @@ for (const state of ["failed", "expired", "restart"])
     ).toBeEnabled();
   });
 
-test("shows global provider busy and unavailable states", async ({
+test("shows provider busy and startup failures and recovers on refresh", async ({
   page,
   request,
 }) => {
@@ -1538,13 +1538,15 @@ test("shows global provider busy and unavailable states", async ({
     page.getByRole("button", { name: "Sign in with ChatGPT" }),
   ).toBeDisabled();
   await request.post("/__test/providers/idle");
-  await request.post("/__test/providers/offline");
+  await request.post("/__test/providers/missing-opencode");
   await page.goto("/agents/dev/providers");
   await expect(
-    page.getByText("Provider settings unavailable.", { exact: false }),
+    page.getByRole("status").filter({ hasText: "OpenCode is missing" }),
   ).toBeVisible();
+  await request.post("/__test/providers/idle");
+  await page.getByRole("button", { name: "Refresh provider settings" }).click();
   await expect(
-    page.getByRole("button", { name: "Refresh provider settings" }),
+    page.getByRole("region", { name: "OpenAI", exact: true }),
   ).toBeVisible();
 });
 

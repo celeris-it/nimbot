@@ -447,6 +447,7 @@ export function createHostApi(
     error instanceof EngineAuthError
       ? c.json(
           {
+            ...(error.reason ? { reason: error.reason } : {}),
             error: {
               busy: "Agent is busy. Try again after the task or login finishes.",
               invalid: "Invalid provider or API key.",

@@ -78,6 +78,7 @@
   let directoryAttempt = $state(0);
   let agent = $state<AgentDetail>();
   let providerSettings = $state<ProviderSettingsState>();
+  let providerSettingsError = $state("");
   let agentModels = $state<AgentModels>();
   let usage = $state<AgentUsage>();
   let usageBefore = $state(usageCursor(location.search));
@@ -352,6 +353,7 @@
     )
       agent = undefined;
     providerSettings = undefined;
+    providerSettingsError = "";
     schedules = undefined;
     scheduleTimeZone = "";
     loaded = false;
@@ -420,6 +422,7 @@
             "/api/providers",
             { signal: current.signal },
           );
+          providerSettingsError = "";
         } catch (cause) {
           if (
             current.signal.aborted ||
@@ -427,6 +430,10 @@
           )
             throw cause;
           providerSettings = undefined;
+          providerSettingsError =
+            cause instanceof ApiError
+              ? cause.message
+              : "Could not load provider settings from the Nimbot Server.";
         }
       } else if (mcpRoute) {
         const id = mcpRoute[1];
@@ -1373,6 +1380,7 @@
       {:else if path === "/providers"}
         <ProviderSettings
           settings={providerSettings}
+          loadError={providerSettingsError}
           {busy}
           action={providerAction}
           refresh={() => load()}

@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAgentProcessManager } from "../processes/agent-process-manager.js";
-import { createHostProviders } from "./host-providers.js";
+import { createHostProviders, HostProviderError } from "./host-providers.js";
+import { log } from "../logger.js";
 import type { DeviceProvider, ProviderId } from "./provider-contracts.js";
 
 export function createSharedProviders(options: {
@@ -28,10 +29,21 @@ export function createSharedProviders(options: {
   const client = createHostProviders(
     async () => manager.host(id) ?? manager.start(id),
   );
+  let lastStatusFailure: string | undefined;
   return {
     checks: () => client.checks(id),
     async status() {
-      const status = await client.status(id);
+      const status = await client.status(id).catch((error: unknown) => {
+        const reason =
+          (error instanceof HostProviderError && error.reason) ||
+          "provider_host_unavailable";
+        if (reason !== lastStatusFailure) {
+          log.warn("server.provider_settings_unavailable", { reason });
+          lastStatusFailure = reason;
+        }
+        throw error;
+      });
+      lastStatusFailure = undefined;
       const conflicts = options.conflicts();
       return {
         ...status,

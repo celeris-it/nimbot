@@ -1,6 +1,29 @@
 import { expect, it, vi } from "vitest";
 import { createOpenCodeAuth } from "./opencode-auth.js";
-import type { OpenCodeRequest } from "./opencode-api.js";
+import { OpenCodeStartupError, type OpenCodeRequest } from "./opencode-api.js";
+import { createHostApi } from "./http.js";
+
+it("reports a missing OpenCode binary without returning raw startup errors", async () => {
+  const { auth, request } = fixture();
+  const token = "a".repeat(64);
+  const app = createHostApi(
+    { token, workspace: "/workspace" },
+    undefined,
+    auth,
+  );
+  request.mockRejectedValueOnce(new OpenCodeStartupError("opencode_missing"));
+  request.mockRejectedValueOnce(new Error("private details"));
+  for (const reason of ["opencode_missing", "opencode_check_failed"]) {
+    const response = await app.request("/providers", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Provider settings unavailable.",
+      reason,
+    });
+  }
+});
 
 function fixture() {
   let busy = false;

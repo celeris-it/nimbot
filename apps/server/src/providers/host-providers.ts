@@ -26,9 +26,18 @@ const providerChecks = z
 
 const providerErrorStatuses = [400, 403, 404, 409, 422, 429, 502, 503] as const;
 type ProviderErrorStatus = (typeof providerErrorStatuses)[number];
+const providerFailureReason = z.enum([
+  "opencode_missing",
+  "opencode_start_failed",
+  "opencode_start_timeout",
+  "opencode_check_failed",
+]);
 
 export class HostProviderError extends Error {
-  constructor(readonly status: ProviderErrorStatus) {
+  constructor(
+    readonly status: ProviderErrorStatus,
+    readonly reason?: z.infer<typeof providerFailureReason>,
+  ) {
     super("Provider request failed");
   }
 }
@@ -106,11 +115,17 @@ export function createHostProviders(
         signal: AbortSignal.timeout(body && "key" in body ? 30_000 : 20_000),
         redirect: "error",
       });
-      if (!response.ok)
+      if (!response.ok) {
+        const failure =
+          path === "" && response.status === 503
+            ? await response.json().catch(() => null)
+            : null;
         throw new HostProviderError(
           providerErrorStatuses.find((status) => status === response.status) ??
             503,
+          providerFailureReason.safeParse(failure?.reason).data,
         );
+      }
       return await response.json();
     } catch (error) {
       if (error instanceof HostProviderError) throw error;
