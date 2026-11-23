@@ -524,8 +524,7 @@
 <style>
   [data-ui="schedules"] {
     display: grid;
-    gap: 1.25rem;
-    margin-top: 1.25rem;
+    gap: 24px;
   }
   [data-ui="schedules"] :global(.panel-button) {
     border-color: var(--color-field-border);
@@ -535,7 +534,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.65rem;
+    gap: 8px;
   }
   [data-ui="schedule-heading"] {
     justify-content: space-between;
@@ -552,13 +551,13 @@
     grid-template-columns: minmax(0, 1fr);
     min-width: 0;
     padding: 0;
-    gap: 0.8rem;
+    gap: 16px;
     font-size: inherit;
   }
   [data-ui="schedule-weekdays"] {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem 1rem;
+    gap: 8px 16px;
   }
   [data-ui="schedule-weekdays"] :global(label) {
     display: inline-flex;
@@ -567,16 +566,15 @@
   }
   dl {
     grid-template-columns: minmax(0, 6rem) minmax(0, 1fr);
-    gap: 0.65rem;
+    gap: 8px;
   }
   summary {
     cursor: pointer;
     min-height: 44px;
     display: list-item;
-    padding-top: 0.65rem;
+    padding-block-start: 8px;
   }
   li {
-    margin-top: 0.65rem;
     overflow-wrap: anywhere;
   }
   #schedule-form-error:not(:empty) {

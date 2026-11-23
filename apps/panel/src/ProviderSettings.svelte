@@ -305,12 +305,13 @@
 
 <style>
   .provider-page {
+    display: grid;
+    gap: 24px;
     max-width: 66rem;
   }
   .provider-heading {
     display: grid;
-    gap: 0.5rem;
-    margin-bottom: 1.75rem;
+    gap: 8px;
   }
   .provider-heading p,
   .provider-identity p,
@@ -321,19 +322,19 @@
   .provider-list,
   .provider-controls {
     display: grid;
-    gap: 1rem;
+    gap: 16px;
     min-width: 0;
   }
   .provider-card {
     display: grid;
     grid-template-columns: minmax(11rem, 1fr) minmax(0, 2.4fr);
-    gap: 1.25rem;
+    gap: var(--pane-gap);
     align-items: start;
   }
   .provider-identity {
     display: grid;
     justify-items: start;
-    gap: 0.5rem;
+    gap: 8px;
     min-width: 0;
   }
   .provider-identity h2 {
@@ -344,13 +345,13 @@
     margin: 0;
   }
   .provider-key {
-    gap: 0.35rem;
+    gap: 8px;
   }
   .key-actions {
     display: flex;
     flex-wrap: wrap;
     align-items: end;
-    gap: 0.5rem;
+    gap: 8px;
   }
   .key-actions > :global([data-ui="field-group"]) {
     flex: 1 1 13rem;
@@ -358,7 +359,7 @@
   .device-settings {
     display: grid;
     justify-items: start;
-    gap: 0.5rem;
+    gap: 8px;
   }
   .device-settings h3 {
     font-size: 0.875rem;
@@ -366,22 +367,19 @@
   }
   .alternate,
   .provider-disconnect {
-    border-top: 1px solid var(--color-base-300);
-    padding-top: 0.875rem;
+    border-block-start: 1px solid var(--color-base-300);
+    padding-block-start: 16px;
   }
   .device-status,
   .provider-message {
     display: grid;
     justify-items: start;
-    gap: 0.625rem;
+    gap: 8px;
     width: 100%;
-    padding: 0.875rem;
+    padding: 16px;
     border: 1px solid var(--color-base-300);
     border-radius: 1rem;
     background: var(--color-base-200);
-  }
-  .provider-message {
-    margin-bottom: 1rem;
   }
   .device-status a {
     color: var(--color-primary);
@@ -393,10 +391,10 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    gap: 8px;
   }
   .device-code code {
-    padding: 0.5rem 0.75rem;
+    padding: 8px 16px;
     border-radius: 0.5rem;
     background: var(--color-base-100);
     font-weight: 700;
@@ -407,12 +405,12 @@
   .provider-disconnect button,
   .provider-notice {
     align-items: start;
-    gap: 0.75rem;
+    gap: 16px;
   }
   .provider-dialog {
     margin: auto;
-    width: min(27rem, calc(100% - 2rem));
-    padding: 1.25rem;
+    inline-size: min(27rem, calc(100% - 2 * var(--screen-gutter)));
+    padding: 24px;
     border: 1px solid var(--color-base-300);
     border-radius: var(--radius-panel);
     background: var(--color-base-100);
@@ -421,13 +419,14 @@
   .provider-dialog::backdrop {
     background: rgb(0 0 0 / 65%);
   }
-  .provider-dialog p {
-    margin-block: 0.5rem 1rem;
+  .provider-dialog[open] {
+    display: grid;
+    gap: 16px;
   }
-  @media (max-width: 760px) {
+  @container (width < 640px) {
     .provider-card {
       grid-template-columns: minmax(0, 1fr);
-      gap: 1rem;
+      gap: 16px;
     }
   }
 </style>

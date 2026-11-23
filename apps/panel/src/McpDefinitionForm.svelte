@@ -279,7 +279,7 @@
 <style>
   fieldset {
     display: grid;
-    gap: 0.5rem;
+    gap: 8px;
     min-width: 0;
   }
   textarea {
@@ -288,7 +288,7 @@
   .actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 8px;
   }
   .discovered {
     padding: 0;
@@ -298,7 +298,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 8px;
     overflow-wrap: anywhere;
   }
 </style>

@@ -316,10 +316,10 @@ test("keeps usage history readable and keyboard-scrollable on narrow screens", a
   await expect(scrollHint).toBeHidden();
   await expect(
     table.getByRole("columnheader", { name: "Reported cost (USD)" }),
-  ).toHaveCSS("text-align", "right");
+  ).toHaveCSS("text-align", "end");
   await expect(table.getByRole("cell", { name: /1,500/ })).toHaveCSS(
     "text-align",
-    "right",
+    "end",
   );
   const partial = table.getByRole("row", { name: /Completed/ });
   await expect(partial.getByText("Partial usage")).toBeVisible();
@@ -986,7 +986,12 @@ test("manages global API keys with keyboard navigation and blank secret fields",
     name: "Disconnect provider",
   });
   const confirmation = page.getByRole("dialog", { name: "Disconnect OpenAI?" });
+  await page.setViewportSize({ width: 320, height: 800 });
   await disconnect.click();
+  await expect(confirmation).toBeInViewport();
+  const dialogBox = (await confirmation.boundingBox())!;
+  expect(dialogBox.x).toBeGreaterThanOrEqual(16);
+  expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(304);
   await expect(
     confirmation.getByRole("button", { name: "Keep connected" }),
   ).toBeFocused();
@@ -1400,6 +1405,196 @@ test("supports keyboard navigation and narrow screens", async ({ page }) => {
   });
 });
 
+test("uses Material screen gutters and navigation modes at the width boundaries", async ({
+  page,
+}) => {
+  const shell = page.locator('[data-ui="panel-shell"]');
+  const banner = page.getByRole("banner");
+  const main = page.getByRole("main");
+  const menu = page.getByRole("button", { name: "Menu", exact: true });
+  const mainNav = page.getByRole("navigation", { name: "Main navigation" });
+  const agentNav = page.getByRole("navigation", { name: "Agent navigation" });
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/login");
+  await expect(shell).toHaveCSS("margin-inline-start", "16px");
+  await expect(shell).toHaveCSS("margin-inline-end", "16px");
+  await expect(
+    page.getByRole("heading", { name: "Your agent workspace." }),
+  ).toBeInViewport();
+  await login(page);
+  await page.goto("/agents/dev/settings");
+  await expect(agentNav).toBeVisible();
+
+  for (const width of [375, 599, 600, 839, 840, 1199, 1200]) {
+    await page.setViewportSize({ width, height: 800 });
+    const gutter = width < 600 ? 16 : 24;
+    const paneGap = width < 600 ? 16 : 24;
+    const contentStart = width < 840 ? gutter : 184;
+    await expect(shell).toHaveCSS("margin-inline-start", `${contentStart}px`);
+    await expect(shell).toHaveCSS("margin-inline-end", `${gutter}px`);
+    await expect(banner).toHaveCSS("width", `${width}px`);
+    await expect(banner).toHaveCSS("padding-inline-start", `${contentStart}px`);
+
+    if (width < 600) {
+      await expect(mainNav).toHaveCount(0);
+      await menu.click();
+      await expect(menu).toHaveAttribute("aria-expanded", "true");
+    } else {
+      await expect(menu).toHaveCount(0);
+    }
+
+    const [navBox, shellBox, agentBox, mainBox] = await Promise.all(
+      [mainNav, shell, agentNav, main].map((element) => element.boundingBox()),
+    );
+    if (!navBox || !shellBox || !agentBox || !mainBox)
+      throw new Error("Expected visible panel panes");
+    expect(shellBox.x).toBeCloseTo(contentStart);
+    expect(shellBox.x + shellBox.width).toBeCloseTo(width - gutter);
+    if (width < 840) {
+      expect(agentBox.y - (navBox.y + navBox.height)).toBeCloseTo(paneGap);
+      expect(mainBox.y - (agentBox.y + agentBox.height)).toBeCloseTo(paneGap);
+      await expect(agentNav.locator("summary")).toBeVisible();
+    } else {
+      expect(mainBox.x - (navBox.x + navBox.width)).toBeCloseTo(paneGap);
+      expect(agentBox.x - (mainBox.x + mainBox.width)).toBeCloseTo(paneGap);
+      await expect(agentNav.locator("summary")).toBeHidden();
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    if (width < 600) await menu.click();
+  }
+});
+
+test("keeps the desktop sidebar fixed with Settings at the bottom", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 640 });
+  await login(page);
+  await page.goto("/agents/dev/setup");
+  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
+  const home = sidebar.getByRole("link", { name: "Nimbot home" });
+  const settings = sidebar.getByRole("link", { name: "Settings", exact: true });
+  await expect(home).toBeVisible();
+  await expect(sidebar).toHaveCSS("position", "fixed");
+  const initial = (await sidebar.boundingBox())!;
+  expect(initial.x).toBe(0);
+  expect(initial.y).toBe(0);
+  expect(initial.height).toBe(640);
+  const settingsBox = (await settings.boundingBox())!;
+  expect(settingsBox.y + settingsBox.height).toBe(624);
+
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight),
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBeGreaterThan(0);
+  expect(await sidebar.boundingBox()).toEqual(initial);
+  expect(await settings.boundingBox()).toEqual(settingsBox);
+
+  await sidebar.getByRole("button", { name: "Hide labels" }).click();
+  await expect(sidebar).toHaveCSS("width", "64px");
+  await expect(home).toBeVisible();
+  await settings.click();
+  await expect(settings).toHaveAttribute("aria-current", "page");
+
+  await page.setViewportSize({ width: 1280, height: 320 });
+  await settings.focus();
+  await expect(settings).toBeInViewport();
+  await page.setViewportSize({ width: 839, height: 640 });
+  await expect(
+    page.getByRole("banner").getByRole("link", { name: "Nimbot home" }),
+  ).toBeVisible();
+  await expect(sidebar).toHaveCSS("position", "static");
+});
+
+test("keeps dashboard body copy readable on a wide screen", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 920 });
+  await login(page);
+  const main = page.getByRole("main");
+  await expect(main).toHaveCSS("width", "1200px");
+  const copy = page.getByText(/^Bots are polled by the Server/);
+  await expect(copy).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  const lineLengths = await copy.evaluate((paragraph) => {
+    const content = paragraph.firstChild;
+    if (!(content instanceof Text)) throw new Error("Expected body copy");
+    const range = document.createRange();
+    const lines = new Map<number, string>();
+    for (let index = 0; index < content.length; index++) {
+      range.setStart(content, index);
+      range.setEnd(content, index + 1);
+      const { top } = range.getBoundingClientRect();
+      lines.set(top, (lines.get(top) ?? "") + content.data[index]);
+    }
+    return [...lines.values()].map((line) => line.trim().length);
+  });
+  expect(lineLengths.length).toBeGreaterThan(1);
+  for (const length of lineLengths.slice(0, -1)) {
+    expect(length).toBeGreaterThanOrEqual(40);
+    expect(length).toBeLessThanOrEqual(60);
+  }
+});
+
+test("mirrors panel rails, popovers, and the switch in RTL", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await login(page);
+  await page.goto("/agents/dev/settings");
+  await page.evaluate(() => (document.documentElement.dir = "rtl"));
+
+  const shell = page.locator('[data-ui="panel-shell"]');
+  const mainNav = page.getByRole("navigation", { name: "Main navigation" });
+  const agentNav = page.getByRole("navigation", { name: "Agent navigation" });
+  const main = page.getByRole("main");
+  await expect(agentNav).toBeVisible();
+  const [shellBox, mainNavBox, agentNavBox, mainBox] = await Promise.all(
+    [shell, mainNav, agentNav, main].map((element) => element.boundingBox()),
+  );
+  if (!shellBox || !mainNavBox || !agentNavBox || !mainBox)
+    throw new Error("Expected visible RTL panel panes");
+  expect(shellBox.x).toBeCloseTo(24);
+  expect(mainNavBox.x + mainNavBox.width).toBeCloseTo(1200);
+  expect(mainBox.x - (agentNavBox.x + agentNavBox.width)).toBeCloseTo(24);
+
+  const switcher = page.getByLabel("Switch agent, Developer");
+  await switcher.press("Enter");
+  const popover = page.locator(
+    '[data-ui="agent-switcher"] [data-ui="agent-header-popover"]',
+  );
+  await expect(popover).toBeVisible();
+  const [switcherBox, popoverBox] = await Promise.all([
+    switcher.boundingBox(),
+    popover.boundingBox(),
+  ]);
+  if (!switcherBox || !popoverBox)
+    throw new Error("Expected an open agent switcher");
+  expect(popoverBox.x + popoverBox.width).toBeCloseTo(
+    switcherBox.x + switcherBox.width,
+  );
+  await switcher.press("Escape");
+  await expect(popover).toBeHidden();
+
+  await page.goto("/mcp/new");
+  await page.evaluate(() => (document.documentElement.dir = "rtl"));
+  const toggle = page.getByLabel("Enable integration");
+  await expect(toggle).toBeVisible();
+  await toggle.check();
+  await expect(toggle).toBeChecked();
+  const thumbTranslate = () =>
+    page
+      .locator('[data-ui="switch-track"]')
+      .evaluate((element) => getComputedStyle(element, "::after").translate);
+  await expect.poll(thumbTranslate).toBe("-16px");
+  await page.evaluate(() => (document.documentElement.dir = "ltr"));
+  await expect.poll(thumbTranslate).toBe("16px");
+});
+
 test("moves between agent pages with an expandable main navigation", async ({
   page,
   request,
@@ -1454,7 +1649,7 @@ test("moves between agent pages with an expandable main navigation", async ({
   await expect(memory).toHaveAttribute("href", "/agents/research/memory");
   await expect(agentNav.locator('a[href^="/agents/dev/"]')).toHaveCount(0);
 
-  for (const width of [1051, 1280]) {
+  for (const width of [840, 1280]) {
     await page.setViewportSize({ width, height: 800 });
     for (const expanded of [true, false]) {
       await expect(expanded ? hideLabels : showLabels).toHaveAttribute(
@@ -1571,7 +1766,11 @@ test("keeps capability-gated links out of both navigation bars", async ({
   });
   await page.goto("/agents/dev/setup");
   const mainNav = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(mainNav.getByRole("link")).toHaveText(["Agents"]);
+  await expect(
+    mainNav
+      .getByRole("link")
+      .filter({ hasNot: page.locator("[data-ui=wordmark-text]") }),
+  ).toHaveText(["Agents"]);
   const agentNav = page.getByRole("navigation", { name: "Agent navigation" });
   await expect(agentNav.getByRole("link", { name: "Overview" })).toBeVisible();
   await expect(
@@ -1652,9 +1851,9 @@ test("shows the current agent section and supports keyboard navigation at narrow
   await expect(nav.getByRole("link", { name: "Schedules" })).toBeHidden();
   await page.goBack();
   await expect(summary).toHaveText("Agent sections · Agent settings");
-  await page.setViewportSize({ width: 1050, height: 800 });
+  await page.setViewportSize({ width: 839, height: 800 });
   await expect(summary).toBeVisible();
-  await page.setViewportSize({ width: 1051, height: 800 });
+  await page.setViewportSize({ width: 840, height: 800 });
   await expect(summary).toBeHidden();
   await expect(edit).toHaveAttribute("aria-current", "page");
 });
@@ -1687,16 +1886,14 @@ test("shares the agent panel with the right navigation and stacks cards on phone
     "absolute",
   );
   await expect(overview.getByRole("region")).toHaveCount(5);
-  const [outerColor, innerColor] = await Promise.all(
-    [panel, host].map((card) =>
-      card.evaluate((element) => getComputedStyle(element).backgroundColor),
-    ),
-  );
-  expect(outerColor).not.toBe(innerColor);
+  await expect(panel).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(panel).toHaveCSS("border-width", "0px");
+  await expect(host).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   for (const width of [1280, 1920, 320, 375]) {
     await page.setViewportSize({ width, height: 800 });
     await expect(discord).toBeVisible();
+    if (width === 1920) await expect(panel).toHaveCSS("width", "1200px");
     const [
       agentBox,
       mainBox,
@@ -1724,20 +1921,25 @@ test("shares the agent panel with the right navigation and stacks cards on phone
       const globalBox = await globalNav.boundingBox();
       if (!globalBox) throw new Error("Expected global navigation");
       expect(globalBox.x + globalBox.width).toBeLessThan(mainBox.x);
-      expect(mainBox.x + mainBox.width).toBeCloseTo(agentBox.x);
+      expect(agentBox.x - (mainBox.x + mainBox.width)).toBeCloseTo(24);
       await expect(main).toHaveCSS("border-inline-end-width", "1px");
       expect(hostBox.y).toBe(providerBox.y);
       expect(telegramBox.y).toBe(discordBox.y);
       await expect(agentNav.getByRole("link")).toHaveCount(8);
       const selected = agentNav.getByRole("link", { name: "Overview" });
       await expect(selected).toHaveAttribute("aria-current", "page");
-      await expect(selected).toHaveCSS("border-top-left-radius", "9999px");
+      const mainLink = globalNav.getByRole("link", {
+        name: "Agents",
+        exact: true,
+      });
+      for (const link of [mainLink, selected])
+        await expect(link).toHaveCSS("border-top-left-radius", "16px");
       await expect(selected.locator('[data-ui="icon"]')).toHaveCSS(
         "mask-image",
         /url\("data:image\/svg\+xml/,
       );
     } else {
-      expect(agentBox.y + agentBox.height).toBeCloseTo(mainBox.y);
+      expect(mainBox.y - (agentBox.y + agentBox.height)).toBeCloseTo(16);
       await expect(agentNav).toHaveCSS("border-block-end-width", "1px");
       expect(hostBox.y + hostBox.height).toBeLessThan(providerBox.y);
       expect(telegramBox.y + telegramBox.height).toBeLessThan(discordBox.y);

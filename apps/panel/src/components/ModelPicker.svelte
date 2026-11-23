@@ -281,7 +281,7 @@
 <style>
   .picker {
     display: grid;
-    gap: 0.8rem;
+    gap: 16px;
     width: min(100%, 28rem);
     min-width: 0;
   }
@@ -293,7 +293,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.6rem;
+    gap: 8px;
     min-width: 0;
     min-height: 44px;
     text-align: start;
@@ -308,26 +308,28 @@
     transform: rotate(-90deg);
   }
   .popover {
+    display: grid;
+    gap: 8px;
     position: absolute;
     z-index: 3;
     inset-inline: 0;
-    top: calc(100% + 0.4rem);
-    padding: 0.5rem;
+    inset-block-start: calc(100% + 8px);
+    padding: 8px;
     border: 1px solid var(--color-base-300);
     border-radius: 1rem;
     background: var(--color-base-200);
     box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 35%);
   }
   .popover.above {
-    top: auto;
-    bottom: calc(100% + 0.4rem);
+    inset-block-start: auto;
+    inset-block-end: calc(100% + 8px);
   }
   .search {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
-    padding: 0 0.65rem;
-    margin-bottom: 0.35rem;
+    gap: 8px;
+    padding: 0 8px;
+
     border: 1px solid var(--color-field-border);
     border-radius: 0.65rem;
     color: var(--color-muted);
@@ -353,12 +355,12 @@
     overscroll-behavior: contain;
   }
   .provider {
-    border-top: 1px solid var(--color-base-300);
-    padding-top: 0.35rem;
+    border-block-start: 1px solid var(--color-base-300);
+    padding-block-start: 8px;
   }
   .provider-label,
   .empty {
-    padding: 0.3rem 0.65rem;
+    padding: 8px;
     color: var(--color-muted);
     overflow-wrap: anywhere;
   }
@@ -369,10 +371,10 @@
   .option {
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    gap: 8px;
     width: 100%;
     min-height: 44px;
-    padding: 0.3rem 0.65rem;
+    padding: 8px;
     border-radius: 0.55rem;
     text-align: start;
   }

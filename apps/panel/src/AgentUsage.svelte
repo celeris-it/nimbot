@@ -289,19 +289,20 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.75rem;
+    gap: 16px;
   }
-  section {
-    margin-block: 1rem;
+  section[aria-labelledby="usage-heading"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
   }
   .totals {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-    gap: 0.75rem;
+    gap: 16px;
   }
   .history-detail {
     display: block;
-    margin-top: 0.2rem;
     color: var(--color-muted);
     font-size: 0.75rem;
   }
@@ -313,7 +314,7 @@
   }
   @container (48rem <= width <= 58rem) {
     section[aria-labelledby="usage-heading"] :global(.panel-table :is(th, td)) {
-      padding-inline: 0.75rem;
+      padding-inline: 8px;
     }
     .usage-origin {
       min-width: 8rem;
@@ -328,17 +329,17 @@
   }
   .windows {
     margin: 0;
-    padding-left: 1.25rem;
+    padding-inline-start: 24px;
     list-style: disc;
   }
   dl {
     display: grid;
-    gap: 0.4rem;
+    gap: 8px;
   }
   dl div {
     display: flex;
     justify-content: space-between;
-    gap: 1rem;
+    gap: 16px;
   }
   dd {
     font-weight: 600;

@@ -98,7 +98,8 @@
   let password = $state("");
   let deleteData = $state(false);
   const labelsKey = "nimbot-panel-nav-labels";
-  let narrow = $state(false);
+  let compact = $state(false);
+  let rail = $state(false);
   let menuOpen = $state(false);
   let navigationExpanded = $state(storedLabels());
   let controller: AbortController | undefined;
@@ -140,6 +141,7 @@
       ] as const
     ).filter((link) => link.available),
   );
+  let desktopSidebar = $derived(rail && session && path !== "/login");
   let agentLinks = $derived(
     (
       [
@@ -946,13 +948,16 @@
     if (!busy) navigate(url.pathname + url.search);
   }
   onMount(() => {
-    const query = window.matchMedia("(max-width: 760px)");
-    const syncNarrow = () => {
-      narrow = query.matches;
-      if (!narrow) menuOpen = false;
+    const compactWidth = window.matchMedia("(width < 600px)");
+    const railWidth = window.matchMedia("(width >= 840px)");
+    const syncNavigation = () => {
+      compact = compactWidth.matches;
+      rail = railWidth.matches;
+      if (!compact) menuOpen = false;
     };
-    syncNarrow();
-    query.addEventListener("change", syncNarrow);
+    syncNavigation();
+    compactWidth.addEventListener("change", syncNavigation);
+    railWidth.addEventListener("change", syncNavigation);
     document.addEventListener("click", click);
     const pop = () => navigate(location.pathname + location.search, true);
     const visible = () => {
@@ -978,7 +983,8 @@
     void load();
     return () => {
       clearInterval(timer);
-      query.removeEventListener("change", syncNarrow);
+      compactWidth.removeEventListener("change", syncNavigation);
+      railWidth.removeEventListener("change", syncNavigation);
       controller?.abort();
       document.removeEventListener("click", click);
       window.removeEventListener("popstate", pop);
@@ -992,7 +998,7 @@
   ></svelte:head
 >
 <a id="skip" href="#main">Skip to main content</a>
-<header>
+{#snippet wordmark()}
   <a href="/" data-ui="wordmark" aria-label="Nimbot home"
     ><svg
       width="30"
@@ -1005,8 +1011,29 @@
         stroke="currentColor"
         stroke-width="2"
       /><circle cx="16" cy="16" r="5" fill="currentColor" /></svg
-    >nimbot<span data-ui="wordmark-dot">.</span></a
+    ><span data-ui="wordmark-text"
+      >nimbot<span data-ui="wordmark-dot">.</span></span
+    ></a
   >
+{/snippet}
+{#snippet mainNavLink(link: (typeof mainLinks)[number])}
+  <li>
+    <a
+      href={link.href}
+      aria-label={link.label}
+      aria-current={path === link.href
+        ? "page"
+        : (link.href === "/" && route) || (link.href === "/mcp" && mcpRoute)
+          ? "location"
+          : undefined}
+    >
+      <Icon name={link.icon} />
+      <span aria-hidden="true" data-ui="navigation-label">{link.label}</span>
+    </a>
+  </li>
+{/snippet}
+<header>
+  {#if !desktopSidebar}{@render wordmark()}{/if}
   {#if session && path !== "/login"}
     {#key path}
       <AgentHeader
@@ -1021,7 +1048,7 @@
       />
     {/key}
     <div data-ui="header-actions">
-      {#if narrow}<button
+      {#if compact}<button
           class="panel-button panel-button-ghost"
           type="button"
           aria-expanded={menuOpen}
@@ -1040,357 +1067,366 @@
       ><Icon name="shield" size={15} /> SELF-HOSTED & PRIVATE</span
     >{/if}
 </header>
-{#if session && path !== "/login" && (!narrow || menuOpen)}
-  <nav
-    aria-label="Main navigation"
-    data-ui="main-navigation"
-    data-expanded={narrow || navigationExpanded}
-  >
-    {#if !narrow}<button
-        class="panel-button panel-button-ghost"
-        type="button"
-        aria-label={navigationExpanded ? "Hide labels" : "Show labels"}
-        aria-expanded={navigationExpanded}
-        aria-controls="main-navigation-links"
-        onclick={toggleLabels}
-      >
-        <Icon name={navigationExpanded ? "collapsePanel" : "expandPanel"} />
-        {#if navigationExpanded}<span>Hide labels</span>{/if}
-      </button>{/if}
-    <ul class="panel-menu" id="main-navigation-links">
-      {#each mainLinks as link (link.href)}
-        <li>
-          <a
-            href={link.href}
-            aria-label={link.label}
-            aria-current={path === link.href
-              ? "page"
-              : (link.href === "/" && route) ||
-                  (link.href === "/mcp" && mcpRoute)
-                ? "location"
-                : undefined}
-          >
-            <Icon name={link.icon} />
-            <span aria-hidden="true" data-ui="navigation-label"
-              >{link.label}</span
-            >
-          </a>
-        </li>
-      {/each}
-    </ul>
-  </nav>
-{/if}
-<div data-ui="page-layout">
-  {#if !missing && agent && route}
-    {#key path}<AgentNavigation
-        links={agentLinks}
-        agentId={agent.id}
-        currentView={route[2]}
-      />{/key}
-  {/if}
-  <main
-    id="main"
-    tabindex="-1"
-    data-page={path === "/login"
-      ? "login"
-      : path === "/"
-        ? "dashboard"
-        : "detail"}
-  >
-    {#if path !== "/login"}<p id="form-error" role="alert" tabindex="-1">
-        {error}
-      </p>{/if}
-    {#if notice}<p role="status">{notice}</p>{/if}
-    {#if updateError}<p role="status">{updateError}</p>
-      <button class="panel-button" onclick={() => load()}
-        >Retry loading {viewLabel}</button
-      >{/if}
-    {#if path === "/login"}
-      <section aria-label="Sign in">
-        <small>ADMINISTRATION</small>
-        <h1 tabindex="-1">Your agent workspace.</h1>
-        <p>Sign in to check the status of your installation.</p>
-        <div class="panel-card">
-          <form onsubmit={login} aria-describedby="form-error" aria-busy={busy}>
-            <label for="password">Administrator password</label>
-            <PasswordField
-              aria-invalid={error ? "true" : undefined}
-              id="password"
-              name="password"
-              autocomplete="current-password"
-              required
-              maxlength={256}
-              aria-describedby="password-help form-error"
-              bind:value={password}
-            />
-            <p id="password-help">
-              Use the password configured on your server.
-            </p>
-            <p id="form-error" role="alert" tabindex="-1">{error}</p>
-            <button class="panel-button" type="submit" disabled={busy}
-              >{busy ? "Signing in…" : "Sign in to the panel"}</button
-            >
-          </form>
-        </div>
-      </section>
-    {:else if !loaded}<p role="status">Loading…</p>
-    {:else if missing}<h1 tabindex="-1">Page not found.</h1>
-      <p>This agent or action is no longer available.</p>
-      <a class="panel-button" href="/">All agents</a>
-    {:else if !contentAvailable}
-      <h1 tabindex="-1">Status unavailable.</h1>
-      <a class="panel-button" href="/">All agents</a>
-    {:else if path === "/"}
-      <Dashboard
-        agents={status.agents}
-        {matchingAgents}
-        clearSearch={() => (agentQuery = "")}
-        canCreate={session?.capabilities.createAgent ?? false}
-        refresh={() => load()}
-      />
-    {:else if path === "/settings"}
-      <h1 tabindex="-1">Settings</h1>
-      <form
-        class="panel-card"
-        aria-busy={busy}
-        aria-describedby="form-error"
-        onsubmit={(event) => {
-          event.preventDefault();
-          void mutate<ScheduleDefaults>(
-            "/api/settings/schedules",
-            { timeZone: scheduleTimeZone },
-            (result) => {
-              scheduleTimeZone = result.timeZone;
-              notice = "Schedule time zone saved.";
-            },
-          );
-        }}
-      >
-        <label for="schedule-default-zone">Schedule time zone</label>
-        <TextField
-          id="schedule-default-zone"
-          aria-describedby="schedule-default-zone-help"
-          bind:value={scheduleTimeZone}
-          required
-          disabled={busy}
-          spellcheck="false"
-          placeholder="America/New_York"
-        />
-        <p id="schedule-default-zone-help">
-          Use an IANA time zone such as America/New_York or UTC. It applies to
-          new schedules in Telegram and prefills the schedule form in the panel.
-        </p>
+<div data-ui="panel-shell">
+  {#if session && path !== "/login" && (!compact || menuOpen)}
+    <nav
+      aria-label="Main navigation"
+      data-ui="main-navigation"
+      data-expanded={!rail || navigationExpanded}
+    >
+      {#if desktopSidebar}
+        {@render wordmark()}
         <button
-          type="submit"
-          class="panel-button panel-button-primary"
-          disabled={busy}>Save settings</button
+          class="panel-button panel-button-ghost"
+          type="button"
+          aria-label={navigationExpanded ? "Hide labels" : "Show labels"}
+          aria-expanded={navigationExpanded}
+          aria-controls="main-navigation-links"
+          onclick={toggleLabels}
         >
-      </form>
-    {:else if path === "/providers"}
-      <ProviderSettings
-        settings={providerSettings}
-        {busy}
-        action={providerAction}
-        refresh={() => load()}
-      />
-    {:else if path === "/agents/new"}
-      {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
-    {:else if path === "/mcp"}
-      <h1 tabindex="-1">MCP catalog</h1>
-      <a class="panel-button panel-button-primary" href="/mcp/new"
-        >Add integration</a
-      >
-      {#if mcpDefinitions.length === 0}
-        <p>No integrations in the catalog.</p>
-      {:else}
-        <section class="panel-card" aria-label="Integrations">
-          <ul>
-            {#each mcpDefinitions as definition (definition.id)}
-              <li>
-                <a href={`/mcp/${encodeURIComponent(definition.id)}`}
-                  >{definition.label}</a
-                >
-                · {definition.enabled ? "Enabled" : "Disabled"}
-                {#if definition.blockedTools?.length}<span class="panel-badge"
-                    >Review needed</span
-                  >{/if}
-              </li>
-            {/each}
-          </ul>
-        </section>
-      {/if}
-    {:else if mcpRoute}
-      <h1 tabindex="-1">
-        {mcpDefinition ? `Edit ${mcpDefinition.label}` : "Add MCP integration"}
-      </h1>
-      <a class="panel-button" href="/mcp">Back to catalog</a>
-      {#key path + (mcpDefinition?.revision ?? "")}
-        <McpDefinitionForm
-          definition={mcpDefinition}
-          {busy}
-          save={saveMcp}
-          discoveryAgents={mcpDiscoveryAgents}
-          discover={discoverMcp}
-        />
-      {/key}
-    {:else if agent && route}
-      {#if route[2] === "schedules" && schedules}
-        {#key agent.id}<Schedules
-            {agent}
-            data={schedules}
-            {busy}
-            save={saveSchedule}
-            action={scheduleAction}
-            refresh={() => load()}
-          />{/key}
-      {:else if route[2] === "access"}
-        <h1 tabindex="-1">Access for {agent.name}</h1>
-        {#key agent.id}
-          <div data-ui="agent-access-grid">
-            <Peers
-              {agent}
-              data={peers}
-              {busy}
-              refresh={() => load("peers")}
-              grant={(target, permission) =>
-                peerAction("grant", target, permission)}
-              revoke={async (target, permission) => {
-                await peerAction("revoke", target, permission);
-              }}
-            />
-            {#if session?.capabilities.mcp}
-              <McpAgentAccess
-                {busy}
-                definitions={mcpAgentDefinitions}
-                refresh={() => load("mcp")}
-                action={mcpAgentAction}
-              />
+          <Icon name={navigationExpanded ? "collapsePanel" : "expandPanel"} />
+          {#if navigationExpanded}<span>Hide labels</span>{/if}
+        </button>{/if}
+      <div id="main-navigation-links">
+        <ul class="panel-menu">
+          {#each mainLinks as link (link.href)}
+            {#if !desktopSidebar || link.href !== "/settings"}
+              {@render mainNavLink(link)}
             {/if}
+          {/each}
+        </ul>
+        {#if desktopSidebar}
+          {@const settings = mainLinks.find(
+            (link) => link.href === "/settings",
+          )}
+          {#if settings}
+            <ul class="panel-menu">
+              {@render mainNavLink(settings)}
+            </ul>
+          {/if}
+        {/if}
+      </div>
+    </nav>
+  {/if}
+  <div data-ui="page-layout">
+    {#if !missing && agent && route}
+      {#key path}<AgentNavigation
+          links={agentLinks}
+          agentId={agent.id}
+          currentView={route[2]}
+        />{/key}
+    {/if}
+    <main
+      id="main"
+      tabindex="-1"
+      data-page={path === "/login"
+        ? "login"
+        : path === "/"
+          ? "dashboard"
+          : "detail"}
+    >
+      {#if path !== "/login"}<p id="form-error" role="alert" tabindex="-1">
+          {error}
+        </p>{/if}
+      {#if notice}<p role="status">{notice}</p>{/if}
+      {#if updateError}<p role="status">{updateError}</p>
+        <button class="panel-button" onclick={() => load()}
+          >Retry loading {viewLabel}</button
+        >{/if}
+      {#if path === "/login"}
+        <section aria-label="Sign in">
+          <small>ADMINISTRATION</small>
+          <h1 tabindex="-1">Your agent workspace.</h1>
+          <p>Sign in to check the status of your installation.</p>
+          <div class="panel-card">
+            <form
+              onsubmit={login}
+              aria-describedby="form-error"
+              aria-busy={busy}
+            >
+              <label for="password">Administrator password</label>
+              <PasswordField
+                aria-invalid={error ? "true" : undefined}
+                id="password"
+                name="password"
+                autocomplete="current-password"
+                required
+                maxlength={256}
+                aria-describedby="password-help form-error"
+                bind:value={password}
+              />
+              <p id="password-help">
+                Use the password configured on your server.
+              </p>
+              <p id="form-error" role="alert" tabindex="-1">{error}</p>
+              <button class="panel-button" type="submit" disabled={busy}
+                >{busy ? "Signing in…" : "Sign in to the panel"}</button
+              >
+            </form>
           </div>
-        {/key}
-      {:else if route[2] === "delegations"}
-        <Delegations
-          {agent}
-          data={delegations}
-          page={delegationPage}
-          {busy}
-          cancel={cancelDelegation}
+        </section>
+      {:else if !loaded}<p role="status">Loading…</p>
+      {:else if missing}<h1 tabindex="-1">Page not found.</h1>
+        <p>This agent or action is no longer available.</p>
+        <a class="panel-button" href="/">All agents</a>
+      {:else if !contentAvailable}
+        <h1 tabindex="-1">Status unavailable.</h1>
+        <a class="panel-button" href="/">All agents</a>
+      {:else if path === "/"}
+        <Dashboard
+          agents={status.agents}
+          {matchingAgents}
+          clearSearch={() => (agentQuery = "")}
+          canCreate={session?.capabilities.createAgent ?? false}
           refresh={() => load()}
         />
-      {:else if route[2] === "approvals"}
-        {#key agent.id}<Approvals
-            {agent}
-            history={approvalHistory}
-            rules={approvalRules}
-            {busy}
-            createRule={createApprovalRule}
-            revokeRule={revokeApprovalRule}
-          />{/key}
-      {:else if route[2] === "memory"}
-        {#key agent.id}<Memory
-            {agent}
-            {memories}
-            page={memoryPage}
-            {busy}
-            remove={deleteMemory}
-            enabled={agent.memoryEnabled}
-            setEnabled={setMemoryEnabled}
-            go={(next) => {
-              memoryPage = next;
-              void load();
-            }}
-          />{/key}
-      {:else if route[2] === "usage"}
-        {#key agent.id}<AgentUsageView
-            {agent}
-            catalog={agentModels}
-            data={usage}
-            before={usageBefore}
-            {busy}
-            save={saveModel}
-            refresh={load}
-          />{/key}
-      {:else if route[2] === "setup"}
-        {#key agent.id}<AgentStatus
-            {agent}
-            {busy}
-            {action}
-            {discordAction}
-            {connectTelegram}
-            refresh={() => load()}
-          />{/key}
-      {:else if route[2] === "settings" || route[2] === "token"}
-        {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
-      {:else if route[2] === "process/stop" || route[2] === "process/restart"}
-        <h1 tabindex="-1">
-          {route[2] === "process/restart" ? "Restart" : "Stop"}
-          {agent.name}?
-        </h1>
-        <p>
-          The Agent Host process will be {route[2] === "process/restart"
-            ? "stopped and started again"
-            : "stopped"}. Active work may be interrupted. Files and conversation
-          history are kept.
-        </p>
-        <div class="button-row">
-          <button
-            class={`panel-button ${route[2] === "process/restart" ? "panel-button-primary" : "panel-button-danger"}`}
-            disabled={busy}
-            onclick={() =>
-              action(route?.[2] === "process/restart" ? "restart" : "stop")}
-            >{busy
-              ? "Working…"
-              : route[2] === "process/restart"
-                ? "Confirm restart"
-                : "Confirm stop"}</button
-          >
-          <a
-            class="panel-button panel-button-ghost"
-            href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
-          >
-        </div>
-      {:else if route[2] === "delete"}
-        <h1 tabindex="-1">Delete {agent.name}?</h1>
-        <p>
-          Its Agent Host will stop. Agent data is kept unless you explicitly
-          delete it below.
-        </p>
-        {#if agent.botUsername}
-          <p>
-            Local Telegram credentials and the chat binding will be erased. The
-            Telegram bot can be revoked separately in BotFather.
-          </p>
-        {/if}
+      {:else if path === "/settings"}
+        <h1 tabindex="-1">Settings</h1>
         <form
+          class="panel-card"
+          aria-busy={busy}
+          aria-describedby="form-error"
           onsubmit={(event) => {
             event.preventDefault();
-            void action("delete");
+            void mutate<ScheduleDefaults>(
+              "/api/settings/schedules",
+              { timeZone: scheduleTimeZone },
+              (result) => {
+                scheduleTimeZone = result.timeZone;
+                notice = "Schedule time zone saved.";
+              },
+            );
           }}
-          aria-describedby="form-error"
-          aria-busy={busy}
         >
-          <Checkbox bind:checked={deleteData}
-            >Also permanently delete the agent data directory and AI
-            conversation history, including its workspace, task history and
-            browser profile.</Checkbox
+          <label for="schedule-default-zone">Schedule time zone</label>
+          <TextField
+            id="schedule-default-zone"
+            aria-describedby="schedule-default-zone-help"
+            bind:value={scheduleTimeZone}
+            required
+            disabled={busy}
+            spellcheck="false"
+            placeholder="America/New_York"
+          />
+          <p id="schedule-default-zone-help">
+            Use an IANA time zone such as America/New_York or UTC. It applies to
+            new schedules in Telegram and prefills the schedule form in the
+            panel.
+          </p>
+          <button
+            type="submit"
+            class="panel-button panel-button-primary"
+            disabled={busy}>Save settings</button
           >
+        </form>
+      {:else if path === "/providers"}
+        <ProviderSettings
+          settings={providerSettings}
+          {busy}
+          action={providerAction}
+          refresh={() => load()}
+        />
+      {:else if path === "/agents/new"}
+        {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
+      {:else if path === "/mcp"}
+        <h1 tabindex="-1">MCP catalog</h1>
+        <a class="panel-button panel-button-primary" href="/mcp/new"
+          >Add integration</a
+        >
+        {#if mcpDefinitions.length === 0}
+          <p>No integrations in the catalog.</p>
+        {:else}
+          <section class="panel-card" aria-label="Integrations">
+            <ul>
+              {#each mcpDefinitions as definition (definition.id)}
+                <li>
+                  <a href={`/mcp/${encodeURIComponent(definition.id)}`}
+                    >{definition.label}</a
+                  >
+                  · {definition.enabled ? "Enabled" : "Disabled"}
+                  {#if definition.blockedTools?.length}<span class="panel-badge"
+                      >Review needed</span
+                    >{/if}
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+      {:else if mcpRoute}
+        <h1 tabindex="-1">
+          {mcpDefinition
+            ? `Edit ${mcpDefinition.label}`
+            : "Add MCP integration"}
+        </h1>
+        <a class="panel-button" href="/mcp">Back to catalog</a>
+        {#key path + (mcpDefinition?.revision ?? "")}
+          <McpDefinitionForm
+            definition={mcpDefinition}
+            {busy}
+            save={saveMcp}
+            discoveryAgents={mcpDiscoveryAgents}
+            discover={discoverMcp}
+          />
+        {/key}
+      {:else if agent && route}
+        {#if route[2] === "schedules" && schedules}
+          {#key agent.id}<Schedules
+              {agent}
+              data={schedules}
+              {busy}
+              save={saveSchedule}
+              action={scheduleAction}
+              refresh={() => load()}
+            />{/key}
+        {:else if route[2] === "access"}
+          <h1 tabindex="-1">Access for {agent.name}</h1>
+          {#key agent.id}
+            <div data-ui="agent-access-grid">
+              <Peers
+                {agent}
+                data={peers}
+                {busy}
+                refresh={() => load("peers")}
+                grant={(target, permission) =>
+                  peerAction("grant", target, permission)}
+                revoke={async (target, permission) => {
+                  await peerAction("revoke", target, permission);
+                }}
+              />
+              {#if session?.capabilities.mcp}
+                <McpAgentAccess
+                  {busy}
+                  definitions={mcpAgentDefinitions}
+                  refresh={() => load("mcp")}
+                  action={mcpAgentAction}
+                />
+              {/if}
+            </div>
+          {/key}
+        {:else if route[2] === "delegations"}
+          <Delegations
+            {agent}
+            data={delegations}
+            page={delegationPage}
+            {busy}
+            cancel={cancelDelegation}
+            refresh={() => load()}
+          />
+        {:else if route[2] === "approvals"}
+          {#key agent.id}<Approvals
+              {agent}
+              history={approvalHistory}
+              rules={approvalRules}
+              {busy}
+              createRule={createApprovalRule}
+              revokeRule={revokeApprovalRule}
+            />{/key}
+        {:else if route[2] === "memory"}
+          {#key agent.id}<Memory
+              {agent}
+              {memories}
+              page={memoryPage}
+              {busy}
+              remove={deleteMemory}
+              enabled={agent.memoryEnabled}
+              setEnabled={setMemoryEnabled}
+              go={(next) => {
+                memoryPage = next;
+                void load();
+              }}
+            />{/key}
+        {:else if route[2] === "usage"}
+          {#key agent.id}<AgentUsageView
+              {agent}
+              catalog={agentModels}
+              data={usage}
+              before={usageBefore}
+              {busy}
+              save={saveModel}
+              refresh={load}
+            />{/key}
+        {:else if route[2] === "setup"}
+          {#key agent.id}<AgentStatus
+              {agent}
+              {busy}
+              {action}
+              {discordAction}
+              {connectTelegram}
+              refresh={() => load()}
+            />{/key}
+        {:else if route[2] === "settings" || route[2] === "token"}
+          {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
+        {:else if route[2] === "process/stop" || route[2] === "process/restart"}
+          <h1 tabindex="-1">
+            {route[2] === "process/restart" ? "Restart" : "Stop"}
+            {agent.name}?
+          </h1>
+          <p>
+            The Agent Host process will be {route[2] === "process/restart"
+              ? "stopped and started again"
+              : "stopped"}. Active work may be interrupted. Files and
+            conversation history are kept.
+          </p>
           <div class="button-row">
             <button
-              class="panel-button panel-button-danger"
-              type="submit"
+              class={`panel-button ${route[2] === "process/restart" ? "panel-button-primary" : "panel-button-danger"}`}
               disabled={busy}
+              onclick={() =>
+                action(route?.[2] === "process/restart" ? "restart" : "stop")}
               >{busy
-                ? "Deleting…"
-                : deleteData
-                  ? "Delete agent and its data"
-                  : "Delete agent, keep its data"}</button
-            ><a
+                ? "Working…"
+                : route[2] === "process/restart"
+                  ? "Confirm restart"
+                  : "Confirm stop"}</button
+            >
+            <a
               class="panel-button panel-button-ghost"
               href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
             >
           </div>
-        </form>
+        {:else if route[2] === "delete"}
+          <h1 tabindex="-1">Delete {agent.name}?</h1>
+          <p>
+            Its Agent Host will stop. Agent data is kept unless you explicitly
+            delete it below.
+          </p>
+          {#if agent.botUsername}
+            <p>
+              Local Telegram credentials and the chat binding will be erased.
+              The Telegram bot can be revoked separately in BotFather.
+            </p>
+          {/if}
+          <form
+            onsubmit={(event) => {
+              event.preventDefault();
+              void action("delete");
+            }}
+            aria-describedby="form-error"
+            aria-busy={busy}
+          >
+            <Checkbox bind:checked={deleteData}
+              >Also permanently delete the agent data directory and AI
+              conversation history, including its workspace, task history and
+              browser profile.</Checkbox
+            >
+            <div class="button-row">
+              <button
+                class="panel-button panel-button-danger"
+                type="submit"
+                disabled={busy}
+                >{busy
+                  ? "Deleting…"
+                  : deleteData
+                    ? "Delete agent and its data"
+                    : "Delete agent, keep its data"}</button
+              ><a
+                class="panel-button panel-button-ghost"
+                href={`/agents/${encodeURIComponent(agent.id)}/setup`}>Cancel</a
+              >
+            </div>
+          </form>
+        {/if}
       {/if}
-    {/if}
-  </main>
+    </main>
+  </div>
 </div>

@@ -94,7 +94,7 @@
 <style>
   .history {
     display: grid;
-    gap: 0.75rem;
+    gap: 16px;
     padding: 0;
     list-style: none;
     overflow-wrap: anywhere;
@@ -105,7 +105,6 @@
   nav {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin-top: 1rem;
+    gap: 16px;
   }
 </style>
