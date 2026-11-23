@@ -8,6 +8,7 @@ import { hashPassword } from "./panel-auth.js";
 import { readPanelConfig } from "./panel-config.js";
 import { createPanel } from "./panel.js";
 import type { createMcpDiscovery } from "../mcp/mcp-discovery.js";
+import type { McpCatalogList } from "./panel-contracts.js";
 
 const draft = {
   label: "Workspace docs",
@@ -61,6 +62,70 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
       });
 
     expect((await panel.request("/api/mcp")).status).toBe(401);
+    const examplePath = "/api/mcp/examples/context7/discover";
+    expect(
+      (
+        await panel.request(examplePath, {
+          method: "POST",
+          headers: { Origin: config.origin },
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (await post(examplePath, {}, "https://foreign.example")).status,
+    ).toBe(403);
+    expect((await post("/api/mcp/examples/missing/discover", {})).status).toBe(
+      404,
+    );
+    expect(discover).not.toHaveBeenCalled();
+    const { definitions, examples } = (await (
+      await get("/api/mcp")
+    ).json()) as McpCatalogList;
+    expect(definitions).toEqual([]);
+    expect(examples).toHaveLength(23);
+    expect(new Set(examples.map(({ id }) => id)).size).toBe(examples.length);
+    expect(new Set(examples.map(({ endpoint }) => endpoint)).size).toBe(
+      examples.length,
+    );
+    expect(examples).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "context7",
+          endpoint: "https://mcp.context7.com/mcp",
+        }),
+        expect.objectContaining({
+          id: "deepwiki",
+          endpoint: "https://mcp.deepwiki.com/mcp",
+        }),
+        expect.objectContaining({
+          id: "hugging-face",
+          endpoint: "https://huggingface.co/mcp",
+        }),
+        expect.objectContaining({
+          id: "openai-docs",
+          endpoint: "https://developers.openai.com/mcp",
+        }),
+      ]),
+    );
+    const exampleDiscovery = await post(examplePath, {
+      endpoint: "https://ignored.example.test/mcp",
+      agentId: "a",
+    });
+    expect(exampleDiscovery.status).toBe(200);
+    expect(await exampleDiscovery.json()).toEqual({
+      status: "connected",
+      tools: [],
+    });
+    expect(discover).toHaveBeenCalledExactlyOnceWith(
+      "https://mcp.context7.com/mcp",
+      undefined,
+      expect.any(AbortSignal),
+    );
+    expect(catalog.list()).toEqual([]);
+    expect(await (await get("/api/agents/a/mcp")).json()).toEqual({
+      definitions: [],
+    });
+    discover.mockClear();
     expect(
       (await post("/api/mcp", draft, "https://foreign.example")).status,
     ).toBe(403);

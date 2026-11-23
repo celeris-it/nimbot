@@ -6,9 +6,11 @@
     ExecutionDetail,
     ExecutionPage,
     McpAgentDefinition,
+    McpCatalogList,
     McpDefinition,
     McpDefinitionSummary,
     McpDiscoveryResult,
+    McpExample,
     PanelSession,
     PanelStatus,
     ScheduleList,
@@ -94,6 +96,11 @@
   let executionDetail = $state<ExecutionDetail | null>();
   let delegationPage = $state(delegationPageOf(location.search));
   let mcpDefinitions = $state<McpDefinitionSummary[]>([]);
+  let mcpExamples = $state<readonly McpExample[]>([]);
+  let mcpExample = $state<McpExample>();
+  let mcpExampleId = $state(
+    new URLSearchParams(location.search).get("example"),
+  );
   let mcpDefinition = $state<McpDefinition>();
   let mcpDiscoveryAgents = $state<{ id: string; name: string }[]>([]);
   let mcpAgentDefinitions = $state<McpAgentDefinition[]>();
@@ -322,6 +329,9 @@
     usage = undefined;
     delegations = undefined;
     mcpDefinition = undefined;
+    mcpExampleId = url.searchParams.get("example");
+    mcpExample = undefined;
+    mcpExamples = [];
     mcpDiscoveryAgents = [];
     mcpDefinitions = [];
     mcpAgentDefinitions = undefined;
@@ -411,12 +421,17 @@
       } else if (mcpRoute) {
         const id = mcpRoute[1];
         if (!session.capabilities.mcp) missing = true;
-        else if (!id) {
-          const data = await request<{ definitions: McpDefinitionSummary[] }>(
-            "/api/mcp",
-            { signal: current.signal },
-          );
+        else if (!id || (id === "new" && mcpExampleId !== null)) {
+          const data = await request<McpCatalogList>("/api/mcp", {
+            signal: current.signal,
+          });
+          if (current.signal.aborted) return;
           mcpDefinitions = data.definitions;
+          mcpExamples = data.examples;
+          if (id === "new") {
+            mcpExample = data.examples.find(({ id }) => id === mcpExampleId);
+            missing = !mcpExample;
+          }
         } else if (id !== "new") {
           const url = `/api/mcp/${id}`;
           const [definition, discovery] = await Promise.all([
@@ -785,6 +800,14 @@
       },
     );
   }
+  function mcpExampleHue(id: string) {
+    // FNV-1a keeps the color tied to the example even if the catalog is reordered.
+    let hash = 2166136261;
+    for (const character of id)
+      hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+    return ((hash >>> 0) / 2 ** 32) * 360;
+  }
+
   async function saveMcp(
     settings: Pick<
       McpDefinition,
@@ -827,6 +850,21 @@
       },
     );
     return result;
+  }
+  async function discoverMcpExample(id: string, signal: AbortSignal) {
+    try {
+      return await request<McpDiscoveryResult>(
+        `/api/mcp/examples/${encodeURIComponent(id)}/discover`,
+        { method: "POST", signal },
+      );
+    } catch (cause) {
+      if (signal.aborted) return undefined;
+      if (cause instanceof ApiError && cause.status === 401) {
+        expired();
+        return undefined;
+      }
+      return { status: "unavailable" } as const;
+    }
   }
   async function mcpAgentAction(
     definition: McpAgentDefinition,
@@ -1345,20 +1383,44 @@
             </ul>
           </section>
         {/if}
+        <section class="grid gap-4" aria-labelledby="mcp-examples-heading">
+          <h2 id="mcp-examples-heading">Examples</h2>
+          <ul class="grid gap-4 sm:grid-cols-3">
+            {#each mcpExamples as example (example.id)}
+              <li
+                class="panel-card"
+                data-glow="mcp-example"
+                style:--mcp-glow-hue={mcpExampleHue(example.id)}
+              >
+                <h3>{example.label}</h3>
+                <p class="grow">{example.description}</p>
+                <a
+                  class="panel-button self-start"
+                  href={`/mcp/new?example=${encodeURIComponent(example.id)}`}
+                  aria-label={`Set up ${example.label}`}>Set up</a
+                >
+              </li>
+            {/each}
+          </ul>
+        </section>
       {:else if mcpRoute}
         <h1 tabindex="-1">
           {mcpDefinition
             ? `Edit ${mcpDefinition.label}`
-            : "Add MCP integration"}
+            : mcpExample
+              ? `Set up ${mcpExample.label}`
+              : "Add MCP integration"}
         </h1>
         <a class="panel-button" href="/mcp">Back to catalog</a>
-        {#key path + (mcpDefinition?.revision ?? "")}
+        {#key path + (mcpDefinition?.revision ?? mcpExample?.id ?? "")}
           <McpDefinitionForm
             definition={mcpDefinition}
+            example={mcpExample}
             {busy}
             save={saveMcp}
             discoveryAgents={mcpDiscoveryAgents}
             discover={discoverMcp}
+            discoverExample={discoverMcpExample}
           />
         {/key}
       {:else if agent && route}

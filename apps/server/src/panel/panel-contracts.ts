@@ -22,10 +22,15 @@ export type DelegationHistory = ReturnType<
 >;
 export type { McpDefinition } from "../mcp/mcp-catalog.js";
 export type { McpDiscoveryResult } from "../mcp/mcp-discovery.js";
+export type { McpExample } from "../mcp/mcp-examples.js";
 export type McpDefinitionSummary = Pick<
   import("../mcp/mcp-catalog.js").McpDefinition,
   "id" | "label" | "enabled" | "revision" | "blockedTools"
 >;
+export interface McpCatalogList {
+  definitions: McpDefinitionSummary[];
+  examples: readonly import("../mcp/mcp-examples.js").McpExample[];
+}
 export interface McpAgentDefinition extends McpDefinitionSummary {
   granted: boolean;
   hasCredential: boolean;

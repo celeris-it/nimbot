@@ -442,6 +442,99 @@ test("keeps usage history readable and keyboard-scrollable on narrow screens", a
   await expect(page.getByRole("link", { name: "Newest tasks" })).toBeVisible();
 });
 
+test("sets up an MCP example with one save after reviewing a discovered tool", async ({
+  page,
+}) => {
+  await login(page);
+  let attempts = 0;
+  await page.route("**/api/mcp/examples/openai-docs/discover", (route) => {
+    attempts++;
+    return attempts === 1
+      ? route.fulfill({ json: { status: "timeout" } })
+      : route.continue();
+  });
+  const saves: unknown[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/mcp"
+    )
+      saves.push(request.postDataJSON());
+  });
+
+  await page.getByRole("link", { name: "MCP catalog" }).click();
+  const examples = page.getByRole("region", { name: "Examples" });
+  await expect(examples.getByRole("link")).toHaveCount(23);
+  const cards = examples.getByRole("listitem");
+  await expect(cards).toHaveCount(23);
+  for (const card of await cards.all())
+    await expect(card).toHaveCSS("background-image", cardGlow);
+  const cardColors = () =>
+    cards.evaluateAll((items) =>
+      items.map((card) => getComputedStyle(card).backgroundImage),
+    );
+  const colors = await cardColors();
+  expect(new Set(colors).size).toBe(colors.length);
+  await page.reload();
+  await expect(cards).toHaveCount(23);
+  expect(await cardColors()).toEqual(colors);
+  for (const width of [320, 375, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  const setup = examples.getByRole("link", { name: "Set up OpenAI Docs" });
+  await setup.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Set up OpenAI Docs" }),
+  ).toBeFocused();
+  await expect(page.getByLabel("Integration name")).toHaveValue("OpenAI Docs");
+  const endpoint = page.getByLabel("HTTPS endpoint");
+  await expect(endpoint).toHaveValue("https://developers.openai.com/mcp");
+  await expect(endpoint).not.toBeEditable();
+  const save = page.getByRole("button", { name: "Save integration" });
+  await expect(save).toBeDisabled();
+  await expect(page.getByText("Connection timed out.")).toBeVisible();
+  expect(saves).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Retry connection" }).click();
+  await expect(page.getByText("Connected.", { exact: false })).toBeVisible();
+  await expect(save).toBeDisabled();
+  await page.getByRole("button", { name: "Review tool" }).click();
+  await expect(page.getByLabel("Argument schema (JSON)")).toBeFocused();
+  await page.getByLabel("Access", { exact: true }).selectOption("read");
+  await save.click();
+  await expect(
+    page.getByRole("heading", { name: "Edit OpenAI Docs" }),
+  ).toBeVisible();
+  expect(attempts).toBe(2);
+  expect(saves).toEqual([
+    {
+      label: "OpenAI Docs",
+      endpoint: "https://developers.openai.com/mcp",
+      enabled: true,
+      tools: [
+        {
+          name: "lookup",
+          access: "read",
+          inputSchema: { type: "object", required: ["query"] },
+        },
+      ],
+      reviewedTools: [],
+    },
+  ]);
+  await page.goto("/agents/dev/access");
+  const integration = page.getByRole("region", { name: "OpenAI Docs" });
+  await expect(integration.getByText(/Access withheld/)).toBeVisible();
+  await expect(
+    integration.getByRole("button", { name: "Grant access" }),
+  ).toBeVisible();
+});
+
 test("edits the MCP catalog and manages an agent's grant and write-only credential", async ({
   page,
 }) => {

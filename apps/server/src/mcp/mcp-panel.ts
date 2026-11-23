@@ -7,6 +7,7 @@ import {
 } from "./mcp-catalog.js";
 import { isMcpBearer, type McpCredentials } from "./mcp-credentials.js";
 import type { createMcpDiscovery } from "./mcp-discovery.js";
+import { mcpExamples } from "./mcp-examples.js";
 
 export interface McpPanelDeps {
   catalog: McpCatalog;
@@ -79,8 +80,20 @@ export function createMcpPanel({
   );
 
   app.get("/mcp", (c) =>
-    c.json({ definitions: catalog.list().map(summarize) }),
+    c.json({
+      definitions: catalog.list().map(summarize),
+      examples: mcpExamples,
+    }),
   );
+  app.post("/mcp/examples/:exampleId/discover", async (c) => {
+    const example = mcpExamples.find(
+      ({ id }) => id === c.req.param("exampleId"),
+    );
+    if (!example) return c.json({ error: "MCP example not found." }, 404);
+    return c.json(
+      await discover(example.endpoint, undefined, c.req.raw.signal),
+    );
+  });
   app.post("/mcp", async (c) =>
     c.json(catalog.create(await jsonFields(c)), 201),
   );

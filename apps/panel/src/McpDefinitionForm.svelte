@@ -1,7 +1,10 @@
 <script lang="ts">
   import { Checkbox, Select, Switch, TextField } from "./components/index.js";
-  import { tick, untrack } from "svelte";
-  import type { McpDiscoveryResult } from "../../server/src/panel/panel-contracts.js";
+  import { onMount, tick, untrack } from "svelte";
+  import type {
+    McpDiscoveryResult,
+    McpExample,
+  } from "../../server/src/panel/panel-contracts.js";
   import type { McpDiscoveredTool } from "../../server/src/mcp/mcp-discovery.js";
   import type {
     McpDefinition,
@@ -14,20 +17,29 @@
   > & { reviewedTools: string[] };
   let {
     definition,
+    example,
     busy,
     save,
     discoveryAgents,
     discover,
+    discoverExample,
   }: {
     definition?: McpDefinition;
+    example?: McpExample;
     busy: boolean;
     save: (settings: Settings) => Promise<void>;
     discoveryAgents: { id: string; name: string }[];
     discover: (agentId?: string) => Promise<McpDiscoveryResult | undefined>;
+    discoverExample: (
+      id: string,
+      signal: AbortSignal,
+    ) => Promise<McpDiscoveryResult | undefined>;
   } = $props();
-  let label = $state(untrack(() => definition?.label ?? ""));
-  let endpoint = $state(untrack(() => definition?.endpoint ?? ""));
-  let enabled = $state(untrack(() => definition?.enabled ?? false));
+  let label = $state(untrack(() => definition?.label ?? example?.label ?? ""));
+  let endpoint = $state(
+    untrack(() => definition?.endpoint ?? example?.endpoint ?? ""),
+  );
+  let enabled = $state(untrack(() => definition?.enabled ?? !!example));
   let tools = $state(
     untrack(() =>
       (definition?.tools ?? []).map((tool, id) => ({
@@ -43,7 +55,14 @@
   let parseError = $state("");
   let discovery = $state<McpDiscoveryResult>();
   let credentialAgent = $state("");
-  let endpointChanged = $derived(endpoint.trim() !== definition?.endpoint);
+  let checkingExample = $state(false);
+  let exampleConnection: AbortController | undefined;
+  let endpointChanged = $derived(
+    endpoint.trim() !== (definition?.endpoint ?? example?.endpoint),
+  );
+  let saveDisabled = $derived(
+    busy || (!!example && (checkingExample || tools.length === 0)),
+  );
   const discoveryStatus = {
     timeout: "Connection timed out.",
     redirect: "The endpoint attempted to redirect the connection.",
@@ -51,6 +70,25 @@
       "The endpoint rejected the connection. Check the selected credential.",
     unavailable: "The MCP endpoint is unavailable.",
   };
+
+  onMount(() => {
+    if (!example) return;
+    const connection = new AbortController();
+    exampleConnection = connection;
+    void testExampleConnection();
+    return () => connection.abort();
+  });
+
+  async function testExampleConnection() {
+    if (!example || !exampleConnection || checkingExample) return;
+    checkingExample = true;
+    discovery = undefined;
+    try {
+      discovery = await discoverExample(example.id, exampleConnection.signal);
+    } finally {
+      checkingExample = false;
+    }
+  }
 
   async function testConnection() {
     if (busy || endpointChanged) return;
@@ -94,7 +132,7 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (busy) return;
+    if (saveDisabled) return;
     parseError = "";
     const parsed: McpCatalogTool[] = [];
     for (const tool of tools) {
@@ -147,17 +185,21 @@
     type="url"
     bind:value={endpoint}
     maxlength={2048}
+    readonly={!!example}
     required
-    aria-describedby="mcp-endpoint-help"
+    aria-describedby={example ? undefined : "mcp-endpoint-help"}
   />
-  <p id="mcp-endpoint-help">
-    Use an endpoint you trust. Changing it removes current agent grants and
-    credentials.
-  </p>
-  <Switch bind:checked={enabled}>Enable integration</Switch>
-
+  {#if !example}
+    <p id="mcp-endpoint-help">
+      Use an endpoint you trust. Changing it removes current agent grants and
+      credentials.
+    </p>
+    <Switch bind:checked={enabled}>Enable integration</Switch>
+  {/if}
+  {#if definition || example}
+    <h2>{example ? "Available tools" : "Connection test"}</h2>
+  {/if}
   {#if definition}
-    <h2>Connection test</h2>
     <label for="mcp-discovery-credential">Connection credential</label>
     <Select id="mcp-discovery-credential" bind:value={credentialAgent}>
       <option value="">No credential</option>
@@ -174,6 +216,11 @@
       disabled={busy || endpointChanged}
       onclick={testConnection}>Test connection</button
     >
+  {/if}
+  {#if example && checkingExample}
+    <p role="status">Finding tools…</p>
+  {/if}
+  {#if definition || example}
     {#if discovery && !endpointChanged}
       {#if discovery.status === "connected"}
         <p role="status">
@@ -203,9 +250,21 @@
           </ul>
         {/if}
       {:else}
-        <p role="status">{discoveryStatus[discovery.status]}</p>
+        <p role="status">
+          {example && discovery.status === "unauthorized"
+            ? "The endpoint rejected the connection without credentials."
+            : discoveryStatus[discovery.status]}
+        </p>
       {/if}
     {/if}
+  {/if}
+  {#if example && discovery && (discovery.status !== "connected" || !discovery.tools.length)}
+    <button
+      class="panel-button"
+      type="button"
+      disabled={checkingExample}
+      onclick={testExampleConnection}>Retry connection</button
+    >
   {/if}
 
   <h2>Approved tools</h2>
@@ -217,6 +276,7 @@
       <TextField
         id={`mcp-tool-name-${tool.id}`}
         bind:value={tool.name}
+        readonly={!!example}
         oninput={() => (tool.reviewed = false)}
         maxlength={128}
         required
@@ -235,6 +295,7 @@
         class="panel-textarea"
         id={`mcp-tool-schema-${tool.id}`}
         bind:value={tool.schema}
+        readonly={!!example}
         oninput={() => (tool.reviewed = false)}
         rows="6"
         maxlength={16384}
@@ -262,16 +323,18 @@
   {/each}
   {#if parseError}<p role="alert">{parseError}</p>{/if}
   <div class="actions">
-    <button
-      class="panel-button"
-      type="button"
-      disabled={busy || tools.length >= 32}
-      onclick={addTool}>Add tool</button
-    >
+    {#if !example}
+      <button
+        class="panel-button"
+        type="button"
+        disabled={busy || tools.length >= 32}
+        onclick={addTool}>Add tool</button
+      >
+    {/if}
     <button
       class="panel-button panel-button-primary"
       type="submit"
-      disabled={busy}>Save integration</button
+      disabled={saveDisabled}>Save integration</button
     >
   </div>
 </form>

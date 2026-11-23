@@ -822,6 +822,12 @@ small,
   --glow-edge: 100%;
   --dust-step: -1px;
 }
+.panel-card[data-glow="mcp-example"] {
+  --card-glow: oklch(0.42 0.085 var(--mcp-glow-hue));
+}
+:root[data-theme="light"] .panel-card[data-glow="mcp-example"] {
+  --card-glow: oklch(0.93 0.045 var(--mcp-glow-hue));
+}
 .metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
