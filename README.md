@@ -6,6 +6,8 @@ Nimbot is a self-hosted app for running AI agents. Create and manage them in a w
 
 The self-hosted app is free. You provide the server and AI provider connection.
 
+![Nimbot dashboard in dark mode showing four sample agents, model usage, and provider quotas](docs/images/dashboard.png)
+
 ## Get started
 
 1. [Install Nimbot with Docker](docs/INSTALL.md). If you're coming from the older per-agent Docker layout, [start with a new data volume](docs/INSTALL.md#fresh-installation-requirement) and keep your old data.
