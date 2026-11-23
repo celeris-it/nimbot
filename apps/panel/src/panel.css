@@ -897,6 +897,7 @@ small,
 }
 [data-ui="usage-bar"] {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 8px;
   min-width: 0;
@@ -918,6 +919,8 @@ small,
   transition: height 0.3s;
 }
 [data-ui="usage-bar"] small {
+  display: flex;
+  justify-content: center;
   text-align: center;
   font-size: 0.7rem;
   color: var(--color-muted);
@@ -1029,7 +1032,13 @@ li[data-slice="4"] {
   stroke: var(--slice);
 }
 [data-ui="usage-donut"][data-rings] circle {
-  stroke-width: 6;
+  stroke-width: 5;
+}
+[data-ui="usage-donut"][data-rings] strong {
+  font-size: 0.95rem;
+}
+[data-ui="usage-donut"][data-rings] small {
+  font-size: 0.6rem;
 }
 [data-ui="usage-donut"][data-rings] circle[data-track] {
   opacity: 0.6;

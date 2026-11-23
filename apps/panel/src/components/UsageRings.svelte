@@ -8,7 +8,7 @@
     label,
     detail,
   }: { rings: Ring[]; label: string; detail: string } = $props();
-  const radii = [44, 35, 26, 17];
+  const radii = [46, 39, 32, 25];
   const circumference = (radius: number) => 2 * Math.PI * radius;
 </script>
 
