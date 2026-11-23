@@ -436,6 +436,137 @@ test("explains why queued tasks are waiting after an OpenCode startup failure", 
   await expect(page.getByText("2 queued", { exact: true })).toBeVisible();
 });
 
+test("shows ChatGPT quota in agent usage and the dashboard without a queue pause", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 850 });
+  const resetsAt = Date.UTC(2026, 11, 1);
+  await page.route("**/api/usage/overview*", (route) =>
+    route.fulfill({
+      json: {
+        ...dashboardUsage,
+        quotas: [
+          {
+            providerId: "openai",
+            window: "ChatGPT 5-hour",
+            remainingPercent: 0,
+            resetsAt,
+            exhausted: true,
+          },
+          {
+            providerId: "openai",
+            window: "ChatGPT weekly",
+            remainingPercent: 34,
+            resetsAt,
+            exhausted: false,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/agents/dev/usage", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        quota: {
+          model: { providerId: "openai", modelId: "gpt-6.2-sol" },
+          state: "available",
+          checkedAt: resetsAt - 60_000,
+          windows: [
+            {
+              name: "ChatGPT 5-hour",
+              usedPercent: 100,
+              exhausted: true,
+              resetsAt,
+            },
+            {
+              name: "ChatGPT weekly",
+              usedPercent: 66,
+              exhausted: false,
+              resetsAt,
+            },
+          ],
+        },
+      },
+    });
+  });
+  await login(page);
+  const dashboardQuota = page.getByLabel("Quota left", { exact: true });
+  await expect(dashboardQuota.getByText("ChatGPT 5-hour")).toBeVisible();
+  await expect(dashboardQuota.getByText("ChatGPT weekly")).toBeVisible();
+  const tracks = dashboardQuota.locator("circle[data-track]");
+  await expect(tracks).toHaveCount(2);
+  await expect(
+    dashboardQuota.locator("circle[data-track][stroke-dasharray]"),
+  ).toHaveCount(0);
+  await expect(dashboardQuota.locator("circle[data-slice]")).toHaveCount(1);
+  await expect(
+    dashboardQuota.locator('circle[data-slice="1"]'),
+  ).toHaveAttribute("stroke-dasharray", "34 100");
+  for (const width of [320, 375, 1280]) {
+    await page.setViewportSize({ width, height: 850 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+  }
+  await page.goto("/agents/dev/usage");
+  const quota = page.getByRole("region", { name: "Provider quota" });
+  await expect(quota.getByText("Quota available")).toBeVisible();
+  await expect(
+    quota.getByRole("listitem").filter({ hasText: "ChatGPT 5-hour" }),
+  ).toContainText(/100%\s+used.*0% left.*Limit reached.*Resets/s);
+  await expect(
+    quota.getByRole("listitem").filter({ hasText: "ChatGPT weekly" }),
+  ).toContainText("34% left");
+  await expect(quota.getByText(/Queue paused/)).toHaveCount(0);
+  for (const width of [320, 375, 1280]) {
+    await page.setViewportSize({ width, height: 850 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+  }
+});
+
+test("charts the four tightest quota windows and lists the rest", async ({
+  page,
+}) => {
+  const windows = [
+    "ChatGPT 5-hour",
+    "Go rolling",
+    "ChatGPT weekly",
+    "Go weekly",
+    "Go monthly",
+  ];
+  await page.route("**/api/usage/overview*", (route) =>
+    route.fulfill({
+      json: {
+        ...dashboardUsage,
+        quotas: windows.map((window, index) => ({
+          providerId: window.startsWith("ChatGPT") ? "openai" : "opencode",
+          window,
+          remainingPercent: Math.min((index + 1) * 25, 100),
+          resetsAt: Date.UTC(2026, 11, 1),
+          exhausted: false,
+        })),
+      },
+    }),
+  );
+  await login(page);
+  const quota = page.getByRole("region", { name: "Quota left" });
+  await expect(quota.locator("circle[data-slice]")).toHaveCount(4);
+  await expect(quota.locator('circle[data-slice="3"]')).not.toHaveAttribute(
+    "stroke-dasharray",
+    /./,
+  );
+  await expect(quota.getByRole("listitem")).toHaveCount(5);
+  await expect(quota.getByRole("listitem").last()).toContainText("Go monthly");
+  await expect(
+    quota.getByText("Rings show the four lowest remaining quotas."),
+  ).toBeVisible();
+});
+
 test("keeps usage history readable and keyboard-scrollable on narrow screens", async ({
   page,
 }) => {
@@ -2660,7 +2791,7 @@ test("shares the split layout across agent configuration sections", async ({
   await login(page);
   for (const [path, regions] of [
     ["access", ["Other agents", "MCP integrations"]],
-    ["usage", ["Model", "OpenCode quota"]],
+    ["usage", ["Model", "Provider quota"]],
     ["approvals", ["Rules", "Decision history"]],
     ["memory", ["Saved notes"]],
   ] as const) {
@@ -3200,6 +3331,15 @@ test("draws rounded model usage segments with gaps and keeps single-model rings 
     }),
   );
   await login(page);
+  await expect(page.getByRole("button", { name: "30 days" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    page.getByRole("img", {
+      name: "Reported cost per day for the last 30 days",
+    }),
+  ).toBeVisible();
   const modelUsage = page.getByRole("region", { name: "Models", exact: true });
   const donut = modelUsage.locator('[data-ui="usage-donut"]');
   const segments = donut.locator("circle[data-slice]");
@@ -3216,12 +3356,12 @@ test("draws rounded model usage segments with gaps and keeps single-model rings 
   await donut.screenshot({ path: info.outputPath("rounded-usage-donut.png") });
 
   models = models.slice(0, 1);
-  await page.getByRole("button", { name: "30 days" }).click();
+  await page.getByRole("button", { name: "7 days" }).click();
   await expect(segments).toHaveCount(1);
   await expect(segments.first()).toHaveCSS("stroke-dasharray", "none");
 
   models = models.map((model) => ({ ...model, tokens: 0 }));
-  await page.getByRole("button", { name: "7 days" }).click();
+  await page.getByRole("button", { name: "30 days" }).click();
   await expect(segments).toHaveCount(0);
   await expect(track).toHaveCount(1);
 });
@@ -3279,9 +3419,17 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
   await expect(usage.getByText("$0.50")).toBeVisible();
   const trend = page.getByLabel("Last 24 hours", { exact: true });
   await expect(trend.getByText("$0.50", { exact: true })).toBeVisible();
+  await expect(
+    trend.getByRole("img", {
+      name: "Cumulative reported cost over the last 24 hours",
+    }),
+  ).toHaveCSS("height", "96px");
   const quota = page.getByLabel("Quota left", { exact: true });
   await expect(quota.getByText("opencode")).toBeVisible();
   await expect(quota.getByText("Go monthly")).toBeVisible();
+  const track = quota.locator("circle[data-track]");
+  await expect(track).toHaveCount(1);
+  await expect(track).not.toHaveAttribute("stroke-dasharray", /./);
   await expect(trend.getByText(/\+\$0\.25\s+\(100%\)/)).toBeVisible();
   await expect(
     page.getByLabel("Models", { exact: true }).getByText("fixture"),
@@ -3422,6 +3570,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
     }),
   );
   await login(page);
+  await page.getByRole("button", { name: "7 days" }).click();
   const refreshIcon = page
     .getByRole("button", { name: "Refresh status" })
     .locator('[data-ui="icon"]');

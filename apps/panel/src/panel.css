@@ -826,6 +826,10 @@ small,
 [data-ui="overview-grid"][data-order="swapped"] {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
 }
+[data-ui="overview-grid"][data-order="swapped"] > .panel-card {
+  padding-block: 16px;
+  gap: 12px;
+}
 :where([data-ui="main-navigation"], [data-page-card]) {
   --dust-step: 1px;
   --glow-dust:
@@ -1072,7 +1076,7 @@ small,
 }
 [data-ui="usage-trend"] {
   position: relative;
-  height: 160px;
+  height: 96px;
 }
 [data-ui="usage-trend"] svg {
   width: 100%;

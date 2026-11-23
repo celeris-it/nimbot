@@ -229,23 +229,40 @@ export function openAgentUsage(path: string, now = Date.now) {
         .all()) {
         const quota = readJson<QuotaStatus>(row.quota);
         if (!quota?.model) continue;
+        const { providerId } = quota.model;
         for (const window of quota.windows) {
-          const known = quotas.get(quota.model.providerId);
-          if (known && known.remainingPercent <= 100 - window.usedPercent)
+          const key = JSON.stringify([providerId, window.name]);
+          const known = quotas.get(key);
+          const remainingPercent = 100 - window.usedPercent;
+          if (
+            known &&
+            (known.remainingPercent < remainingPercent ||
+              (known.remainingPercent === remainingPercent &&
+                (known.exhausted || !window.exhausted)))
+          )
             continue;
-          quotas.set(quota.model.providerId, {
-            providerId: quota.model.providerId,
+          quotas.set(key, {
+            providerId,
             window: window.name,
-            remainingPercent: Math.round(100 - window.usedPercent),
+            remainingPercent,
             resetsAt: window.resetsAt,
             exhausted: window.exhausted,
           });
         }
       }
       return {
-        quotas: [...quotas.values()].sort(
-          (a, b) => a.remainingPercent - b.remainingPercent,
-        ),
+        quotas: [...quotas.values()]
+          .sort(
+            (a, b) =>
+              a.remainingPercent - b.remainingPercent ||
+              Number(b.exhausted) - Number(a.exhausted) ||
+              a.providerId.localeCompare(b.providerId) ||
+              a.window.localeCompare(b.window),
+          )
+          .map((quota) => ({
+            ...quota,
+            remainingPercent: Math.round(quota.remainingPercent),
+          })),
         hourly,
         days: [...perDay.values()],
         models: [...perModel.values()].sort(
@@ -370,7 +387,8 @@ export function createAgentUsage(
     const quota = quotaStatus.parse(response);
     if (
       quota.state === "checking" &&
-      previous?.windows.some((item) => item.exhausted)
+      (previous?.state === "exhausted" || previous?.state === "checking") &&
+      previous.windows.some((item) => item.exhausted)
     ) {
       quota.model = previous.model;
       quota.windows = previous.windows;

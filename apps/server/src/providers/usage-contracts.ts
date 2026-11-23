@@ -78,6 +78,10 @@ export const quotaStatus = z.object({
           "Go monthly",
           "Console monthly",
           "Console monthly (per model)",
+          "ChatGPT 5-hour",
+          "ChatGPT weekly",
+          "ChatGPT primary",
+          "ChatGPT secondary",
         ]),
         usedPercent: z.number().min(0).max(100),
         exhausted: z.boolean(),
@@ -129,7 +133,7 @@ export interface UsageOverview {
     tasks: number;
   })[];
   missingCost: number;
-  /** Tightest quota window per AI provider, from the latest agent checks. */
+  /** Tightest reading for each provider and quota window, from the agent checks. */
   quotas: {
     providerId: string;
     window: string;

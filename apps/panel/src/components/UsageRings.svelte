@@ -9,7 +9,6 @@
     detail,
   }: { rings: Ring[]; label: string; detail: string } = $props();
   const radii = [46, 39, 32, 25];
-  const circumference = (radius: number) => 2 * Math.PI * radius;
 </script>
 
 <div data-ui="usage-donut" data-rings="true">
@@ -21,9 +20,12 @@
           cx="50"
           cy="50"
           r={radius}
+          pathLength="100"
           data-slice={index}
           stroke-linecap="round"
-          stroke-dasharray={`${(Math.min(ring.percent, 100) / 100) * circumference(radius)} ${circumference(radius)}`}
+          stroke-dasharray={ring.percent >= 100
+            ? undefined
+            : `${ring.percent} 100`}
         />{/if}
     {/each}
   </svg>

@@ -205,7 +205,7 @@
   <section aria-labelledby="quota-heading">
     <div class="settings-section-description">
       <h2 id="quota-heading" class="card-title">
-        <Icon name="activity" size={20} />OpenCode quota
+        <Icon name="activity" size={20} />Provider quota
       </h2>
     </div>
     <div class="panel-card">
@@ -232,6 +232,11 @@
                 <strong>{window.name}</strong>
                 · {number.format(Math.round(window.usedPercent * 10) / 10)}%
                 used
+                {#if window.name.startsWith("ChatGPT ")}
+                  · {number.format(
+                    Math.round((100 - window.usedPercent) * 10) / 10,
+                  )}% left
+                {/if}
                 {#if window.spentUsd !== undefined && window.limitUsd !== undefined}
                   · {money(window.spentUsd)} of {money(window.limitUsd)}
                 {/if}

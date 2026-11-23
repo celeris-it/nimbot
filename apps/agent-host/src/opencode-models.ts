@@ -92,6 +92,13 @@ const providerList = z.object({
   ),
 });
 
+function isDirectOpenAI(endpoint: string | undefined) {
+  if (endpoint === undefined) return true;
+  return /^https:\/\/(?:api\.openai\.com(?:\/v1)?|chatgpt\.com\/backend-api(?:\/codex)?)\/?$/.test(
+    endpoint,
+  );
+}
+
 function quotaSource(
   providerId: string,
   endpoint: string | undefined,
@@ -199,6 +206,7 @@ export function createOpenCodeModels(
   request: OpenCodeRequest,
   isBusy: () => boolean,
   credentialRevision: () => string = () => "",
+  chatGptQuota?: (credentialId: string) => Promise<ModelCheck["windows"]>,
 ): EngineModels & {
   changed(): void;
   hasCost(model: ModelReference): Promise<boolean>;
@@ -264,34 +272,57 @@ export function createOpenCodeModels(
             ? await defaultEffort(request, model)
             : selected?.effort;
 
-        if (
-          credentials.some(
+        const endpoint = selectedEntry.settings?.baseURL;
+        const hasConsole = credentials.some(
+          (entry) =>
+            entry.active &&
+            entry.integrationID === "opencode" &&
+            entry.value.type === "oauth",
+        );
+        const openAI =
+          model.providerId === "openai" &&
+          credentials.find(
             (entry) =>
               entry.active &&
-              entry.integrationID === "opencode" &&
+              entry.integrationID === "openai" &&
               entry.value.type === "oauth",
-          )
+          );
+        let source = quotaSource(model.providerId, endpoint);
+        let provider: z.infer<typeof providerList>["data"][number] | undefined;
+        if (
+          !source &&
+          (hasConsole || (openAI && chatGptQuota && endpoint === undefined))
         ) {
-          const endpoint = selectedEntry.settings?.baseURL;
-          // Console can publish workspace providers under arbitrary IDs. Use its
-          // provider ownership metadata when the model does not identify its route.
-          const source =
-            quotaSource(model.providerId, endpoint) ??
-            quotaSource(
-              model.providerId,
-              endpoint,
+          // Console can publish aliases. Direct OpenAI can also inherit a provider URL.
+          provider = await request("/api/provider")
+            .then((value) =>
               providerList
-                .parse(await request("/api/provider"))
+                .parse(value)
                 .data.find((entry) => entry.id === model.providerId),
-            );
-          if (source) {
-            const rawLimits = await request("/api/experimental/usage/limits", {
-              timeout: 17_000,
+            )
+            .catch((error: unknown) => {
+              if (hasConsole) throw error;
+              return undefined;
             });
-            if (limits.parse(rawLimits).data === null)
-              return { ...result, failure: "quota_check_failed" };
-            result.windows = quotaWindows(rawLimits, model, source === "go");
-          }
+          if (provider)
+            source = quotaSource(model.providerId, endpoint, provider);
+        }
+        const enforcedQuota = hasConsole && source;
+        if (enforcedQuota) {
+          const rawLimits = await request("/api/experimental/usage/limits", {
+            timeout: 17_000,
+          });
+          if (limits.parse(rawLimits).data === null)
+            return { ...result, failure: "quota_check_failed" };
+          result.windows = quotaWindows(rawLimits, model, source === "go");
+        } else if (
+          !source &&
+          openAI &&
+          chatGptQuota &&
+          (endpoint !== undefined || provider) &&
+          isDirectOpenAI(endpoint ?? provider?.settings?.baseURL)
+        ) {
+          result.windows = await chatGptQuota(openAI.id);
         }
         if (
           revision !== generation ||
@@ -299,11 +330,12 @@ export function createOpenCodeModels(
           (issue && isBusy())
         )
           return result;
-        result.state = result.windows.some((window) => window.exhausted)
-          ? "exhausted"
-          : result.windows.length
-            ? "available"
-            : "unavailable";
+        result.state =
+          enforcedQuota && result.windows.some((window) => window.exhausted)
+            ? "exhausted"
+            : result.windows.length
+              ? "available"
+              : "unavailable";
         if (issue && result.state !== "exhausted") {
           result.admission = {
             model:

@@ -217,6 +217,95 @@ it("admits directly connected models when OpenCode has no account limit for the 
 });
 
 it.each([
+  { type: "oauth", baseURL: undefined, expected: "ChatGPT 5-hour" },
+  {
+    type: "oauth",
+    baseURL: "https://api.openai.com/v1",
+    expected: "ChatGPT 5-hour",
+  },
+  { type: "oauth", baseURL: "https://custom.test/v1", expected: undefined },
+  { type: "key", baseURL: undefined, expected: undefined },
+  {
+    type: "oauth",
+    baseURL: "https://opencode.ai/inference/v1",
+    expected: "Console monthly",
+  },
+])(
+  "checks quota only for the matching OpenAI connection (%j)",
+  async ({ type, baseURL, expected }) => {
+    const selected = { providerId: "openai", modelId: "model" };
+    const request: OpenCodeRequest = async (path) => {
+      switch (path) {
+        case "/api/model":
+          return {
+            data: [
+              {
+                id: selected.modelId,
+                providerID: selected.providerId,
+                enabled: true,
+                name: "OpenAI",
+              },
+            ],
+          };
+        case "/api/credential":
+          return {
+            data: [
+              {
+                id: "openai-device",
+                integrationID: "openai",
+                active: true,
+                value: { type },
+              },
+              {
+                id: "console",
+                integrationID: "opencode",
+                active: expected === "Console monthly",
+                value: { type: "oauth" },
+              },
+            ],
+          };
+        case "/api/provider":
+          return { data: [{ id: "openai", settings: { baseURL } }] };
+        case "/api/experimental/usage/limits":
+          return { data: { budgets: [{ ...budget, coverage: "all" }] } };
+        default:
+          throw new Error("Unexpected API request");
+      }
+    };
+    const chatGptQuota = vi.fn(async () => [
+      { name: "ChatGPT 5-hour", usedPercent: 100, exhausted: true, resetsAt },
+    ]);
+    const models = createOpenCodeModels(
+      request,
+      () => false,
+      undefined,
+      chatGptQuota,
+    );
+    const result = await models.check(selected, true);
+    expect(result.windows[0]?.name).toBe(expected);
+    if (expected === "Console monthly") {
+      expect(result.state).toBe("exhausted");
+      expect(result.admission).toBeUndefined();
+    } else {
+      expect(result.state).toBe(expected ? "available" : "unavailable");
+      expect(result.admission?.model).toEqual(selected);
+      expect(models.accept(result.admission!)).toBe(true);
+    }
+    if (expected === "ChatGPT 5-hour") {
+      expect(chatGptQuota).toHaveBeenCalledExactlyOnceWith("openai-device");
+      chatGptQuota.mockResolvedValueOnce([]);
+      const unavailable = await models.check(selected, true);
+      expect(unavailable).toMatchObject({
+        state: "unavailable",
+        admission: { model: selected },
+      });
+    } else {
+      expect(chatGptQuota).not.toHaveBeenCalled();
+    }
+  },
+);
+
+it.each([
   [{ integrationID: "opencode" }, "Console monthly"],
   [
     {

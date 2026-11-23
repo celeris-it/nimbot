@@ -205,9 +205,12 @@ budgets and the Go rolling, weekly, and monthly allowances come from OpenCode.
 An exhausted applicable limit or a temporary error checking a covered quota
 pauses new work. Chat, scheduled, and webhook tasks keep their normal enqueue
 rules and resume in order after OpenCode confirms that work can continue.
-Providers without published quota data remain usable, and the panel shows
-**Quota unavailable**. Limits apply at the start of a task and reflect a
-snapshot of a possibly shared account.
+For a direct OpenAI model connected through ChatGPT device login, the panel
+shows the account's reported usage windows and reset times. This read uses
+ChatGPT's internal usage endpoint and is informational. Console and Go limits
+apply at the start of a task. Quota readings reflect snapshots of possibly
+shared accounts. When quota data is unavailable for other connections or the
+ChatGPT read fails, the panel shows **Quota unavailable** and tasks can proceed.
 
 ### Scheduled tasks
 

@@ -48,7 +48,7 @@
   let configured = $derived(
     agents.filter((item) => item.process?.state === "running").length,
   );
-  let range = $state("7");
+  let range = $state("30");
   let overview = $state<UsageOverview>();
   let overviewFailed = $state(false);
   // Agent statuses refresh every few seconds, which also refreshes usage.
@@ -121,7 +121,13 @@
         : ""
     }`,
   );
-  let quotas = $derived((overview?.quotas ?? []).slice(0, 4));
+  const quotaRingCount = 4;
+  let quotas = $derived(
+    (overview?.quotas ?? []).map((item) => ({
+      ...item,
+      key: JSON.stringify([item.providerId, item.window]),
+    })),
+  );
   const resets = new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
@@ -323,7 +329,10 @@
 </div>
 
 <div data-ui="overview-grid" data-order="swapped">
-  <Surface title="Quota left" description="Tightest limit per AI provider.">
+  <Surface
+    title="Quota left"
+    description="Remaining allowance by quota window."
+  >
     {#if quotas.length === 0}
       <p data-ui="muted">
         No provider quota data yet. It appears once an agent’s model reports its
@@ -332,18 +341,19 @@
     {:else}
       <div data-ui="model-breakdown">
         <UsageRings
-          rings={quotas.map((item) => ({
-            key: item.providerId,
+          rings={quotas.slice(0, quotaRingCount).map((item) => ({
+            key: item.key,
             percent: item.remainingPercent,
           }))}
           label={`${quotas[0]!.remainingPercent}%`}
-          detail="left"
+          detail={quotas.length === 1 ? "left" : "lowest left"}
         />
         <ul>
-          {#each quotas as item, index (item.providerId)}
-            <li data-slice={index}>
+          {#each quotas as item, index (item.key)}
+            <li data-slice={index < quotaRingCount ? index : undefined}>
               <span data-ui="legend-name"
-                ><i></i><span title={`${item.providerId} · ${item.window}`}
+                ><i aria-hidden="true"></i><span
+                  title={`${item.providerId} · ${item.window}`}
                   >{item.providerId}</span
                 ></span
               >
@@ -356,6 +366,9 @@
           {/each}
         </ul>
       </div>
+      {#if quotas.length > quotaRingCount}
+        <p data-ui="muted">Rings show the four lowest remaining quotas.</p>
+      {/if}
     {/if}
   </Surface>
   <Surface

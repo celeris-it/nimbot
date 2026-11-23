@@ -279,7 +279,7 @@ it("requeues a task only when the Host explicitly rejects it before acceptance",
   }
 });
 
-it("reports the tightest quota window per provider across agents", async () => {
+it("keeps distinct quota windows and reports the tightest reading for each", async () => {
   const root = await mkdtemp(join(tmpdir(), "nimbot-usage-quota-"));
   const path = join(root, "server.sqlite");
   const tasks = openTaskStore(path);
@@ -297,11 +297,14 @@ it("reports the tightest quota window per provider across agents", async () => {
     windows,
   });
   try {
-    store.saveQuota("a", 0, quota([window("Go weekly", 30)]));
+    store.saveQuota("a", 0, quota([window("Go weekly", 29.9)]));
     store.saveQuota(
       "b",
       0,
-      quota([window("Go weekly", 10), window("Go monthly", 80)]),
+      quota([
+        { ...window("Go weekly", 30.4), resetsAt: 10 },
+        window("Go monthly", 80),
+      ]),
     );
     store.saveQuota("c", 0, { ...quota([]), model: null });
     expect(store.overview(7).quotas).toEqual([
@@ -310,6 +313,13 @@ it("reports the tightest quota window per provider across agents", async () => {
         window: "Go monthly",
         remainingPercent: 20,
         resetsAt: 5,
+        exhausted: false,
+      },
+      {
+        providerId: "opencode",
+        window: "Go weekly",
+        remainingPercent: 70,
+        resetsAt: 10,
         exhausted: false,
       },
     ]);

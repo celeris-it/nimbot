@@ -15,6 +15,7 @@ import {
   openCodeCredentialRevision,
 } from "./opencode-api.js";
 import { createOpenCodeModels } from "./opencode-models.js";
+import { createOpenCodeChatGptQuota } from "./opencode-chatgpt-quota.js";
 import { createOpenCodeUsage } from "./opencode-usage.js";
 import { openMemoryStore } from "./memory-store.js";
 import { createMemoryTools } from "./memory-tools.js";
@@ -44,6 +45,7 @@ try {
     openCode.request,
     () => isBusy(),
     openCodeCredentialRevision,
+    createOpenCodeChatGptQuota(process.env.NIMBOT_SHARED_ENGINE_DIR),
   );
   const runner = createTaskRunner(
     store,
