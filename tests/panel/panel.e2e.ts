@@ -2266,75 +2266,198 @@ test("shows a load failure without suggesting that the installation has zero age
   );
 });
 
-test("keeps forms within mobile widths and retains readable theme contrast", async ({
+test("follows system appearance and remembers explicit theme choices", async ({
+  page,
+}, info) => {
+  const root = page.locator("html");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/login");
+  await expect(page.getByLabel("Administrator password")).toBeVisible();
+  await expect(root).toHaveAttribute("data-theme", "light");
+  await expect(root).toHaveCSS("color-scheme", "light");
+  await expect(page.locator("body")).toHaveCSS(
+    "background-color",
+    "rgb(241, 244, 249)",
+  );
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(320);
+  await page.screenshot({ path: info.outputPath("sign-in-light-320.png") });
+
+  await login(page);
+  await page.goto("/settings");
+  const appearance = page.getByRole("combobox", { name: "Appearance" });
+  const timeZone = page.getByLabel("Schedule time zone");
+  await expect(appearance).toHaveValue("system");
+  await expect(timeZone).not.toHaveValue("");
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(320);
+  await page.screenshot({ path: info.outputPath("settings-light-320.png") });
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await timeZone.fill("Europe/Paris");
+  await appearance.focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(appearance).toHaveValue("light");
+  await expect(root).toHaveAttribute("data-theme", "light");
+  await expect(timeZone).toHaveValue("Europe/Paris");
+  await page.reload();
+  await expect(appearance).toHaveValue("light");
+  await expect(root).toHaveAttribute("data-theme", "light");
+  await expect(timeZone).not.toHaveValue("Europe/Paris");
+  await page.goto("/login");
+  await expect(page.getByLabel("Administrator password")).toBeVisible();
+  await expect(root).toHaveAttribute("data-theme", "light");
+
+  await page.goto("/settings");
+  await appearance.selectOption("dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await page.reload();
+  await expect(appearance).toHaveValue("dark");
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await page.evaluate(() =>
+    localStorage.setItem("nimbot-panel-appearance", "invalid"),
+  );
+  await page.reload();
+  await expect(appearance).toHaveValue("system");
+  await expect(root).toHaveAttribute("data-theme", "light");
+});
+
+test("can change appearance for the visit when browser storage is blocked", async ({
   page,
 }) => {
-  await login(page);
-  await page.goto("/agents/dev/settings");
-  await expect(page.getByLabel("Name", { exact: true })).toBeVisible();
-  for (const width of [320, 375]) {
-    await page.setViewportSize({ width, height: 800 });
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth), {
-        message: `page fits after navigation reflows at ${width}px`,
-      })
-      .toBeLessThanOrEqual(width);
-  }
-  const ratios = await page.evaluate(() => {
-    function rgb(color: string) {
-      const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = 1;
-      const context = canvas.getContext("2d")!;
-      context.fillStyle = color;
-      context.fillRect(0, 0, 1, 1);
-      return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
-    }
-    function luminance(color: string) {
-      const linear = rgb(color).map((channel) => {
-        const s = channel / 255;
-        return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-      });
-      return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
-    }
-    function ratio(first: string, second: string) {
-      const a = luminance(first),
-        b = luminance(second);
-      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-    }
-    return [
-      "body",
-      'section[aria-label="Agent settings"]',
-      'section[aria-label="Agent settings"] button[type="submit"]',
-      "input#name",
-    ].map((selector) => {
-      const element = document.querySelector(selector)!;
-      const style = getComputedStyle(element);
-      return {
-        selector,
-        text: ratio(style.color, style.backgroundColor),
-        border:
-          selector === "input#name"
-            ? ratio(style.borderColor, style.backgroundColor)
-            : undefined,
-      };
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new DOMException("Browser storage unavailable", "SecurityError");
+      },
     });
   });
-  for (const item of ratios) {
-    expect(item.text, `${item.selector} text contrast`).toBeGreaterThanOrEqual(
-      4.5,
-    );
-    if (item.border !== undefined)
-      expect(item.border).toBeGreaterThanOrEqual(3);
-  }
-  await test.info().attach("theme-contrast", {
-    body: JSON.stringify(ratios),
-    contentType: "application/json",
-  });
-  await page.screenshot({
-    path: "test-results/panel-mobile.png",
-    fullPage: true,
-  });
+  await login(page);
+  await page.goto("/settings");
+  const appearance = page.getByRole("combobox", { name: "Appearance" });
+  const root = page.locator("html");
+  await expect(appearance).toHaveValue("system");
+  await expect(root).toHaveAttribute("data-theme", "dark");
+  await appearance.selectOption("light");
+  await expect(root).toHaveAttribute("data-theme", "light");
+  await page.getByRole("link", { name: "AI providers" }).click();
+  await expect(root).toHaveAttribute("data-theme", "light");
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "dark");
 });
+
+for (const theme of ["dark", "light"] as const) {
+  test(`keeps forms within mobile widths and retains readable theme contrast in ${theme} mode`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await login(page);
+    await page.goto("/agents/dev/settings");
+    await expect(page.getByLabel("Name", { exact: true })).toBeVisible();
+    for (const width of [320, 375]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth), {
+          message: `page fits after navigation reflows at ${width}px`,
+        })
+        .toBeLessThanOrEqual(width);
+    }
+    const ratios = await page.evaluate(() => {
+      function rgb(color: string) {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d")!;
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+      }
+      function luminance(color: string) {
+        const linear = rgb(color).map((channel) => {
+          const s = channel / 255;
+          return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        });
+        return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+      }
+      function ratio(first: string, second: string) {
+        const a = luminance(first),
+          b = luminance(second);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      }
+      const fields = [
+        "body",
+        'section[aria-label="Agent settings"]',
+        'section[aria-label="Agent settings"] button[type="submit"]',
+        "input#name",
+      ].map((selector) => {
+        const element = document.querySelector(selector)!;
+        const style = getComputedStyle(element);
+        return {
+          selector,
+          text: ratio(style.color, style.backgroundColor),
+          border:
+            selector === "input#name"
+              ? ratio(style.borderColor, style.backgroundColor)
+              : undefined,
+        };
+      });
+      const root = getComputedStyle(document.documentElement);
+      const contrast = (foreground: string, background: string) =>
+        ratio(
+          root.getPropertyValue(foreground),
+          root.getPropertyValue(background),
+        );
+      const palette = [
+        ...[
+          "--glow-blue",
+          "--glow-teal",
+          "--glow-amber",
+          "--glow-violet",
+        ].flatMap((background) => [
+          { foreground: "--color-base-content", background, minimum: 4.5 },
+          { foreground: "--color-muted", background, minimum: 4.5 },
+          { foreground: "--color-primary", background, minimum: 3 },
+        ]),
+        ...["--chart-green", "--chart-amber", "--chart-magenta"].map(
+          (foreground) => ({
+            foreground,
+            background: "--color-base-100",
+            minimum: 3,
+          }),
+        ),
+      ].map(({ foreground, background, minimum }) => ({
+        pair: `${foreground} on ${background}`,
+        contrast: contrast(foreground, background),
+        minimum,
+      }));
+      return { fields, palette };
+    });
+    for (const item of ratios.fields) {
+      expect(
+        item.text,
+        `${item.selector} text contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+      if (item.border !== undefined)
+        expect(item.border).toBeGreaterThanOrEqual(3);
+    }
+    for (const item of ratios.palette)
+      expect(item.contrast, item.pair).toBeGreaterThanOrEqual(item.minimum);
+    await test.info().attach("theme-contrast", {
+      body: JSON.stringify(ratios),
+      contentType: "application/json",
+    });
+    await page.screenshot({
+      path: test.info().outputPath(`panel-${theme}-mobile.png`),
+      fullPage: true,
+    });
+  });
+}
 
 const dashboardUsage = {
   days: [
@@ -2474,6 +2597,7 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
 test("renders the reference-inspired dashboard across screen sizes without external assets", async ({
   page,
 }, info) => {
+  await page.emulateMedia({ colorScheme: "dark" });
   const violations: string[] = [];
   page.on("console", (message) => {
     if (
@@ -2609,20 +2733,28 @@ test("renders the reference-inspired dashboard across screen sizes without exter
         models.getByText("No model usage in the last 30 days."),
       ).toBeVisible();
     }
-    for (const width of [1440, 768, 375, 320]) {
-      await page.setViewportSize({ width, height: 1000 });
-      await expect
-        .poll(() => page.evaluate(() => document.documentElement.scrollWidth), {
-          message: `overflow in the ${state} dashboard at ${width}px`,
-        })
-        .toBeLessThanOrEqual(width);
-      await expect(
-        page.getByRole("link", { name: "Manage", exact: true }),
-      ).toBeVisible();
-      await page.screenshot({
-        path: info.outputPath(`dashboard-${state}-${width}.png`),
-        fullPage: true,
-      });
+    for (const theme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      for (const width of [1440, 768, 375, 320]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await expect
+          .poll(
+            () => page.evaluate(() => document.documentElement.scrollWidth),
+            {
+              message: `overflow in the ${theme} ${state} dashboard at ${width}px`,
+            },
+          )
+          .toBeLessThanOrEqual(width);
+        await expect(
+          page.getByRole("link", { name: "Manage", exact: true }),
+        ).toBeVisible();
+        const prefix = theme === "light" ? "dashboard-light" : "dashboard";
+        await page.screenshot({
+          path: info.outputPath(`${prefix}-${state}-${width}.png`),
+          fullPage: true,
+        });
+      }
     }
   }
   expect(violations).toEqual([]);

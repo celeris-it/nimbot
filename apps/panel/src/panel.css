@@ -44,6 +44,27 @@
 
 :root {
   color-scheme: dark;
+  --glow-blue: #2a405f;
+  --glow-violet: #403255;
+  --glow-teal: #25454d;
+  --glow-amber: #483a27;
+  --glow-dust-color: color-mix(
+    in srgb,
+    var(--color-base-content) 24%,
+    transparent
+  );
+  --glow-sparkle-color: color-mix(
+    in srgb,
+    var(--color-base-content) 44%,
+    transparent
+  );
+  --chart-green: oklch(0.8 0.15 130);
+  --chart-amber: oklch(0.78 0.13 70);
+  --chart-magenta: oklch(0.7 0.14 330);
+  --selected-row-muted: #bcc4d1;
+  --selected-row-border: #6a7382;
+  --telegram-icon: #27a7e7;
+  --discord-icon: #8c96ff;
   --screen-gutter: 16px;
   --pane-gap: 16px;
   --prose-width: 42ch;
@@ -51,6 +72,47 @@
   --app-bar-height: 112px;
   --focus-ring: 0 0 0 3px
     color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-base-100: #fff;
+  --color-base-200: #f1f4f9;
+  --color-base-300: #d4dce8;
+  --color-base-content: #182437;
+  --color-primary: #2055ac;
+  --color-primary-content: #fff;
+  --color-secondary: #e4ebf6;
+  --color-secondary-content: #24344b;
+  --color-accent: #dbe8fb;
+  --color-accent-content: #243958;
+  --color-neutral: #e1e8f3;
+  --color-neutral-content: #182437;
+  --color-info: #245984;
+  --color-info-content: #fff;
+  --color-success: #276331;
+  --color-success-content: #fff;
+  --color-warning: #80500e;
+  --color-warning-content: #fff;
+  --color-error: #a32241;
+  --color-error-content: #fff;
+  --color-muted: #4e5d72;
+  --color-field-border: #68788d;
+  --color-field: #f8fafe;
+  --button-border: var(--color-field-border);
+  --focus-ring: 0 0 0 2px var(--color-primary);
+  --glow-blue: #dceaff;
+  --glow-violet: #eee3fa;
+  --glow-teal: #d9f0eb;
+  --glow-amber: #f7e8c9;
+  --glow-dust-color: color-mix(in srgb, var(--color-primary) 26%, transparent);
+  --glow-sparkle-color: color-mix(in srgb, white 88%, transparent);
+  --chart-green: #357940;
+  --chart-amber: #955914;
+  --chart-magenta: #9b3b7c;
+  --selected-row-muted: #3c4b60;
+  --selected-row-border: #64758b;
+  --telegram-icon: #146787;
+  --discord-icon: #4555a5;
 }
 @media (width >= 600px) {
   :root {
@@ -528,7 +590,8 @@ small,
   gap: 8px;
 }
 .panel-button {
-  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-base-300 bg-base-100 text-xs font-[650] text-base-content no-underline;
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full border bg-base-100 text-xs font-[650] text-base-content no-underline;
+  border-color: var(--button-border, var(--color-base-300));
   padding: 8px 16px;
 }
 .panel-button:hover {
@@ -680,65 +743,60 @@ small,
 :where(.panel-card[data-glow], [data-ui="main-navigation"]) {
   --glow-edge: 0%;
   --dust-step: 1px;
-  --glow-blue: #2a405f;
-  --glow-violet: #403255;
-  --glow-teal: #25454d;
-  --dust: color-mix(in srgb, var(--color-base-content) 24%, transparent);
-  --sparkle: color-mix(in srgb, var(--color-base-content) 44%, transparent);
   --glow-dust:
     radial-gradient(
       circle at 94% calc(var(--glow-edge) + var(--dust-step) * 11),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 1.3px
     ),
     radial-gradient(
       circle at 73% calc(var(--glow-edge) + var(--dust-step) * 14),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 1px
     ),
     radial-gradient(
       circle at 84% calc(var(--glow-edge) + var(--dust-step) * 21),
-      var(--sparkle),
+      var(--glow-sparkle-color),
       transparent 1.6px
     ),
     radial-gradient(
       circle at 97% calc(var(--glow-edge) + var(--dust-step) * 30),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 1.2px
     ),
     radial-gradient(
       circle at 57% calc(var(--glow-edge) + var(--dust-step) * 32),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 0.9px
     ),
     radial-gradient(
       circle at 91% calc(var(--glow-edge) + var(--dust-step) * 39),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 1px
     ),
     radial-gradient(
       circle at 68% calc(var(--glow-edge) + var(--dust-step) * 44),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 1.4px
     ),
     radial-gradient(
       circle at 96% calc(var(--glow-edge) + var(--dust-step) * 52),
-      var(--sparkle),
+      var(--glow-sparkle-color),
       transparent 1.4px
     ),
     radial-gradient(
       circle at 79% calc(var(--glow-edge) + var(--dust-step) * 58),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 1px
     ),
     radial-gradient(
       circle at 90% calc(var(--glow-edge) + var(--dust-step) * 69),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 1.2px
     ),
     radial-gradient(
       circle at 97% calc(var(--glow-edge) + var(--dust-step) * 81),
-      var(--dust),
+      var(--glow-dust-color),
       transparent 1px
     );
 }
@@ -757,7 +815,7 @@ small,
   --card-glow: var(--glow-blue);
 }
 .panel-card[data-glow="amber"] {
-  --card-glow: #483a27;
+  --card-glow: var(--glow-amber);
 }
 .panel-card[data-glow="teal"] {
   --card-glow: var(--glow-teal);
@@ -972,6 +1030,10 @@ small,
   stroke-width: 1.5;
   opacity: 0.4;
 }
+:root[data-theme="light"] [data-ui="usage-trend"] path[data-line="previous"] {
+  opacity: 1;
+  stroke-dasharray: 4 4;
+}
 [data-ui="usage-trend"] path[data-line="area"] {
   fill: url(#trend-fill);
   stroke: none;
@@ -1112,15 +1174,15 @@ li[data-slice="0"] {
 }
 [data-ui="usage-donut"] circle[data-slice="1"],
 li[data-slice="1"] {
-  --slice: oklch(0.8 0.15 130);
+  --slice: var(--chart-green);
 }
 [data-ui="usage-donut"] circle[data-slice="2"],
 li[data-slice="2"] {
-  --slice: oklch(0.78 0.13 70);
+  --slice: var(--chart-amber);
 }
 [data-ui="usage-donut"] circle[data-slice="3"],
 li[data-slice="3"] {
-  --slice: oklch(0.7 0.14 330);
+  --slice: var(--chart-magenta);
 }
 [data-ui="usage-donut"] circle[data-slice="4"],
 li[data-slice="4"] {
@@ -1426,6 +1488,9 @@ li[data-slice="4"] {
   box-shadow: inset 0 0 0 1px var(--color-base-300);
   transition: background-color 150ms ease;
 }
+:root[data-theme="light"] [data-ui="switch-track"]:not(:has(input:checked)) {
+  box-shadow: inset 0 0 0 1px var(--color-field-border);
+}
 [data-ui="switch-track"]::after {
   content: "";
   position: absolute;
@@ -1501,7 +1566,15 @@ li[data-slice="4"] {
   border: 0;
   background: transparent;
 }
+:root[data-theme="light"] [data-ui="search"] {
+  border-width: 1px;
+  border-color: var(--color-field-border);
+}
 [data-ui="search"]:focus-within {
+  border-color: var(--color-primary);
+}
+:root[data-theme="light"] [data-ui="search"]:focus-within {
+  box-shadow: var(--focus-ring);
   border-color: var(--color-primary);
 }
 [data-ui="surface"][data-tone="muted"] {
@@ -1601,11 +1674,11 @@ li[data-slice="4"] {
   overflow-wrap: anywhere;
 }
 [data-ui="agent-row"][aria-pressed="true"] small {
-  color: #bcc4d1;
+  color: var(--selected-row-muted);
 }
 [data-ui="agent-row"][aria-pressed="true"] .panel-badge {
   color: inherit;
-  border-color: #6a7382;
+  border-color: var(--selected-row-border);
 }
 [data-ui="agent-row"] > .panel-badge {
   max-width: 110px;
@@ -2147,10 +2220,10 @@ main:focus {
   color: var(--color-muted);
 }
 .card-title[data-brand="telegram"] > [data-ui="icon"] {
-  color: #27a7e7;
+  color: var(--telegram-icon);
 }
 .card-title[data-brand="discord"] > [data-ui="icon"] {
-  color: #8c96ff;
+  color: var(--discord-icon);
 }
 [data-tone="danger"] .card-title > [data-ui="icon"] {
   color: var(--color-error);

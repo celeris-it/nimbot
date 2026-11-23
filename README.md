@@ -44,6 +44,7 @@ No Telegram or per-agent environment variables are required. `.env` contains adm
 ## Features
 
 - Create, list, configure, start, stop, restart, and delete agents through an authenticated web panel.
+- Choose **System**, **Light**, or **Dark** under **Settings → Appearance**. The panel follows the system theme by default and saves the choice in the current browser.
 - Give each agent a dedicated Agent Host and persistent workspace. Connect Telegram, Discord, or both from **Channels** after creating the agent.
 - Each connected platform uses its own bot and owner-bound private chat. Both platforms share the agent’s workspace, AI context, and durable task queue.
 - Run terminal commands, read and write files, and browse public websites through OpenCode over ACP.

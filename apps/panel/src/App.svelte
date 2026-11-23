@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import type {
     AgentDetail,
     DelegationHistory,
@@ -17,11 +17,19 @@
     ProviderSettings as ProviderSettingsState,
   } from "../../server/src/panel/panel-contracts.js";
   import { ApiError, post, request } from "./api.js";
+  import {
+    applyAppearance,
+    isAppearance,
+    saveAppearance,
+    systemAppearance,
+    type Appearance,
+  } from "./appearance.js";
   import Dashboard from "./Dashboard.svelte";
   import {
     Checkbox,
     Icon,
     PasswordField,
+    Select,
     TextField,
   } from "./components/index.js";
   import type { IconName } from "./components/icons.js";
@@ -50,6 +58,8 @@
   import Schedules from "./Schedules.svelte";
   import { scheduleText } from "./labels.js";
 
+  const { initialAppearance }: { initialAppearance: Appearance } = $props();
+  let appearance = $state(untrack(() => initialAppearance));
   let path = $state(location.pathname);
   let session = $state<PanelSession>();
   let status = $state<PanelStatus>({ agents: [] });
@@ -962,6 +972,11 @@
     syncNavigation();
     compactWidth.addEventListener("change", syncNavigation);
     railWidth.addEventListener("change", syncNavigation);
+    const syncAppearance = () => {
+      if (appearance === "system") applyAppearance(appearance);
+    };
+    systemAppearance.addEventListener("change", syncAppearance);
+    syncAppearance();
     document.addEventListener("click", click);
     const pop = () => navigate(location.pathname + location.search, true);
     const visible = () => {
@@ -990,6 +1005,7 @@
       clearInterval(timer);
       compactWidth.removeEventListener("change", syncNavigation);
       railWidth.removeEventListener("change", syncNavigation);
+      systemAppearance.removeEventListener("change", syncAppearance);
       controller?.abort();
       document.removeEventListener("click", click);
       window.removeEventListener("popstate", pop);
@@ -1207,6 +1223,24 @@
         />
       {:else if path === "/settings"}
         <h1 tabindex="-1">Settings</h1>
+        <div class="panel-card">
+          <label for="panel-appearance">Appearance</label>
+          <Select
+            id="panel-appearance"
+            value={appearance}
+            onchange={(event) => {
+              const value = event.currentTarget.value;
+              if (isAppearance(value)) {
+                appearance = value;
+                saveAppearance(value);
+              }
+            }}
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </Select>
+        </div>
         <form
           class="panel-card"
           aria-busy={busy}
