@@ -1499,6 +1499,7 @@
               {busy}
               createRule={createApprovalRule}
               revokeRule={revokeApprovalRule}
+              refresh={() => load()}
             />{/key}
         {:else if route[2] === "memory"}
           {#key agent.id}<Memory

@@ -169,6 +169,15 @@ const panel = createPanel(
     },
     approvals: { rules, history },
     memories,
+    memoryAccess: {
+      get: (id) => !!agents.get(id)?.memoryEnabled,
+      set: (id, enabled) => {
+        const agent = agents.get(id);
+        if (!agent) return false;
+        agent.memoryEnabled = enabled;
+        return true;
+      },
+    },
     mcp: {
       catalog: mcpCatalog,
       credentials: mcpCredentials,

@@ -233,31 +233,35 @@
   }
 </script>
 
-<h1 id="agent-schedules" tabindex="-1">{text.title(agent.name)}</h1>
 <div data-ui="schedules">
+  <div data-ui="page-heading" class="flex-wrap">
+    <h1 id="agent-schedules" tabindex="-1">{text.title(agent.name)}</h1>
+    <div data-ui="schedule-actions">
+      <ActionButton
+        variant="primary"
+        id="new-schedule"
+        disabled={busy || atLimit}
+        onclick={() => openForm()}
+        aria-describedby={atLimit ? "schedule-limit" : undefined}
+        >{text.new}</ActionButton
+      >
+      <ActionButton disabled={busy} onclick={refresh}
+        >{text.refresh}</ActionButton
+      >
+    </div>
+  </div>
   {#if webhookError}<p role="alert">{webhookError}</p>{/if}
   <p id="schedule-costs">{text.costs}</p>
   {#if !data.ownerLinked && !data.discordOwnerLinked}
     <p role="status" data-ui="schedule-warning">
-      Owner chat is not linked. Send the agent's bot a private message on the
-      delivery channel to link it.
+      Owner chat is not linked. <a
+        class="underline"
+        href={`/agents/${encodeURIComponent(agent.id)}/channels`}
+        >Open Channels</a
+      >
+      for linking instructions.
     </p>
   {/if}
-  <div data-ui="schedule-actions">
-    <ActionButton href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-      >{text.back}</ActionButton
-    >
-    <ActionButton
-      variant="primary"
-      id="new-schedule"
-      disabled={busy || atLimit}
-      onclick={() => openForm()}
-      aria-describedby={atLimit ? "schedule-limit" : undefined}
-      >{text.new}</ActionButton
-    >
-    <ActionButton disabled={busy} onclick={refresh}>{text.refresh}</ActionButton
-    >
-  </div>
   <p data-ui="muted">
     {text.count(data.schedules.length, data.limits.maxPerAgent)}
   </p>
@@ -414,7 +418,9 @@
       </form>
     </section>
   {/if}
-  {#if data.schedules.length === 0}<p>{text.none}</p>{/if}
+  {#if data.schedules.length === 0 && !formVisible}
+    <div class="panel-card"><p role="status">{text.none}</p></div>
+  {/if}
   {#each data.schedules as schedule (schedule.id)}
     <section class="panel-card" aria-labelledby={`schedule-${schedule.id}`}>
       <div data-ui="schedule-heading">
@@ -516,13 +522,21 @@
       {/if}
     </section>
   {/each}
-  <p data-ui="muted">{text.rules}</p>
+  <details>
+    <summary class="w-fit cursor-pointer py-1">How schedules run</summary>
+    <p data-ui="muted" class="mt-2">{text.rules}</p>
+  </details>
+  <div>
+    <ActionButton href={`/agents/${encodeURIComponent(agent.id)}/setup`}
+      >{text.back}</ActionButton
+    >
+  </div>
 </div>
 
 <style>
   [data-ui="schedules"] {
     display: grid;
-    gap: 24px;
+    gap: 16px;
   }
   [data-ui="schedules"] :global(.panel-button) {
     border-color: var(--color-field-border);

@@ -163,7 +163,7 @@ test("separates the destructive action and explains unavailable memory", async (
   await page.goto("/agents/dev/memory");
   await expect(page.getByText("Memory is unavailable")).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Open Overview to start it" }),
+    page.getByRole("link", { name: "Open Overview", exact: true }),
   ).toHaveAttribute("href", "/agents/dev/setup");
   await expect(
     page.getByRole("navigation", { name: "Memory pages" }),
@@ -865,9 +865,14 @@ test("manages peer grants, reads approval history and deletes private memory", a
     page.getByRole("heading", { name: "Research notes" }),
   ).toBeVisible();
   await expect(page.getByText("Primary source verified")).toBeVisible();
-  await page
-    .getByRole("button", { name: "Delete note Research notes" })
-    .click();
+  const deleteNote = page.getByRole("button", {
+    name: "Delete note Research notes",
+  });
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await deleteNote.click();
+  await expect(deleteNote).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await deleteNote.click();
   await expect(
     page.getByRole("status").filter({ hasText: "No saved notes" }),
   ).toBeVisible();
@@ -878,6 +883,64 @@ test("manages peer grants, reads approval history and deletes private memory", a
   await expect(
     page.getByRole("status").filter({ hasText: "No saved notes" }),
   ).toBeVisible();
+});
+
+test("opens agent settings and schedule help with the keyboard", async ({
+  page,
+  request,
+}, info) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await login(page);
+  await page.goto("/agents/dev/memory");
+  const tools = page.getByRole("region", { name: "Memory tools", exact: true });
+  const enable = tools.getByRole("button", { name: "Turn memory on" });
+  await enable.press("Enter");
+  await expect(
+    tools.getByRole("button", { name: "Turn memory off" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Memory pages" }),
+  ).toHaveCount(0);
+
+  const ruleAgent = randomUUID();
+  expect((await request.post(`/__test/agent/${ruleAgent}`)).ok()).toBe(true);
+  await page.goto(`/agents/${ruleAgent}/approvals`);
+  const capability = page.getByLabel("Capability", { exact: true });
+  await expect(capability).toBeHidden();
+  await page.getByText("Add a rule", { exact: true }).press("Enter");
+  await page.keyboard.press("Tab");
+  await expect(capability).toBeFocused();
+  await capability.fill("mcp.docs.write");
+  await page.getByLabel("Exact target").fill("document-42");
+  await page.getByLabel("Rule", { exact: true }).selectOption("deny");
+  await page.getByRole("button", { name: "Add rule", exact: true }).click();
+  await expect(
+    page.getByRole("button", {
+      name: "Revoke rule for mcp.docs.write on document-42",
+    }),
+  ).toBeVisible();
+
+  await page.goto("/agents/dev/schedules");
+  await expect(
+    page.getByRole("status").filter({ hasText: "No schedules yet." }),
+  ).toBeVisible();
+  for (const width of [1280, 375, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    await page.locator("[data-ui=schedules]").screenshot({
+      path: info.outputPath(`schedules-empty-${width}.png`),
+    });
+  }
+  const rules = page.getByText(/^Stopped or unavailable agents are skipped/);
+  await expect(rules).toBeHidden();
+  await page.getByText("How schedules run", { exact: true }).press("Enter");
+  await expect(rules).toBeVisible();
+  await page
+    .getByRole("button", { name: "New schedule", exact: true })
+    .press("Enter");
+  await expect(page.getByLabel("Schedule name")).toBeFocused();
 });
 
 test("pages through delegation history and cancels only the selected child", async ({
@@ -2599,7 +2662,8 @@ test("shares the split layout across agent configuration sections", async ({
   for (const [path, regions] of [
     ["access", ["Other agents", "MCP integrations"]],
     ["usage", ["Model", "OpenCode quota"]],
-    ["approvals", ["Rules"]],
+    ["approvals", ["Rules", "Decision history"]],
+    ["memory", ["Memory tools", "Saved notes"]],
   ] as const) {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(`/agents/dev/${path}`);
