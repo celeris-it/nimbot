@@ -12,6 +12,7 @@
     agents,
     options,
     current,
+    showSwitcher,
     section,
     loading,
     unavailable,
@@ -21,6 +22,7 @@
     agents: AgentSummary[];
     options: ConfigurationGroup[];
     current: AgentSummary | undefined;
+    showSwitcher: boolean;
     section: string;
     loading: boolean;
     unavailable: boolean;
@@ -28,8 +30,8 @@
     query?: string;
   } = $props();
 
-  let switcher: HTMLDetailsElement;
-  let summary: HTMLElement;
+  let switcher = $state<HTMLDetailsElement>();
+  let summary = $state<HTMLElement>();
   let search: HTMLFormElement;
   let switcherOpened = $state(false);
   let searching = $state(false);
@@ -40,20 +42,20 @@
 
   function dismissOutside(event: Event) {
     const path = event.composedPath();
-    if (!path.includes(switcher)) switcher.open = false;
+    if (switcher && !path.includes(switcher)) switcher.open = false;
     if (!path.includes(search)) searching = false;
   }
 
   function handleKeys(event: KeyboardEvent) {
     if (!(event.target instanceof Node)) return;
     if (
-      switcher.open &&
+      switcher?.open &&
       switcher.contains(event.target) &&
       event.key === "Escape"
     ) {
       event.preventDefault();
       switcher.open = false;
-      summary.focus();
+      summary?.focus();
     }
     if (!showResults || !search.contains(event.target)) return;
     if (event.key === "Escape") {
@@ -174,38 +176,38 @@
     {/if}
   </form>
 
-  <details
-    data-ui="agent-switcher"
-    bind:this={switcher}
-    ontoggle={() => {
-      if (switcher.open) {
-        switcherOpened = true;
-        refresh();
-      }
-    }}
-  >
-    <summary
-      bind:this={summary}
-      aria-label={current ? `Switch agent, ${current.name}` : "Switch agent"}
+  {#if showSwitcher}<details
+      data-ui="agent-switcher"
+      bind:this={switcher}
+      ontoggle={(event) => {
+        if (event.currentTarget.open) {
+          switcherOpened = true;
+          refresh();
+        }
+      }}
     >
-      {#if current}
-        {#key current.id}
-          <AgentAvatar agentId={current.id} name={current.name} small />
-        {/key}
-      {/if}
-      <span data-ui="agent-switcher-name"
-        >{current?.name ?? "Switch agent"}</span
+      <summary
+        bind:this={summary}
+        aria-label={current ? `Switch agent, ${current.name}` : "Switch agent"}
       >
-      <Icon name="chevron" size={16} />
-    </summary>
-    {#if switcherOpened}
-      <div data-ui="agent-header-popover">
-        {#if agents.length}
-          {@render agentLinks(agents, section)}
-        {:else}
-          {@render directoryStatus("No agents yet.")}
+        {#if current}
+          {#key current.id}
+            <AgentAvatar agentId={current.id} name={current.name} small />
+          {/key}
         {/if}
-      </div>
-    {/if}
-  </details>
+        <span data-ui="agent-switcher-name"
+          >{current?.name ?? "Switch agent"}</span
+        >
+        <Icon name="chevron" size={16} />
+      </summary>
+      {#if switcherOpened}
+        <div data-ui="agent-header-popover">
+          {#if agents.length}
+            {@render agentLinks(agents, section)}
+          {:else}
+            {@render directoryStatus("No agents yet.")}
+          {/if}
+        </div>
+      {/if}
+    </details>{/if}
 </div>

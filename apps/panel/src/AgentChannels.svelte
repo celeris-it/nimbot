@@ -148,11 +148,16 @@
             to link the chat.
           </p>
         {/if}
-        {#if agent.capabilities.replaceToken}<div class="button-row">
+        <div class="button-row">
+          <ActionButton href={`https://t.me/${agent.botUsername}`} icon="arrow">
+            Open chat in Telegram
+          </ActionButton>
+          {#if agent.capabilities.replaceToken}
             <ActionButton href={`${base}/token`}
               ><Icon name="key" size={16} />Replace bot token</ActionButton
             >
-          </div>{/if}
+          {/if}
+        </div>
       {:else}
         <p>Telegram is unavailable.</p>
       {/if}

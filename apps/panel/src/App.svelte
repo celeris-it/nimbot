@@ -1168,6 +1168,7 @@
       agents={status.agents}
       {options}
       current={currentAgent}
+      showSwitcher={path !== "/"}
       section={switchSection}
       loading={path === "/" ? !loaded : directoryLoading}
       unavailable={path === "/" ? !!updateError : directoryUnavailable}

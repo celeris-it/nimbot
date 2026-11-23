@@ -66,15 +66,16 @@ test("shows bot avatars in the dashboard and agent directory with initials as a 
     }),
   );
   await login(page);
-  const images = page.locator(
-    '.agent-avatar img[src="/api/agents/dev/avatar"]',
-  );
-  const preview = page.locator('[data-ui="preview-identity"] .agent-avatar');
-  await expect(images).toHaveCount(2);
-  await expect(images.first()).toBeVisible();
-  await expect(preview.locator("img")).toBeVisible();
+  const avatar = page
+    .getByRole("link", { name: "Open Developer settings", exact: true })
+    .locator(".agent-avatar");
+  await expect(avatar.locator("img")).toBeVisible();
 
-  const switcher = page.getByLabel("Switch agent", { exact: true });
+  await expect(page.getByLabel(/^Switch agent/)).toHaveCount(0);
+  await page
+    .getByRole("link", { name: "Open Developer settings", exact: true })
+    .click();
+  const switcher = page.getByLabel("Switch agent, Developer");
   await switcher.press("Enter");
   const option = page
     .locator('[data-ui="agent-switcher"]')
@@ -91,11 +92,12 @@ test("shows bot avatars in the dashboard and agent directory with initials as a 
   await page.reload();
   await expect(current.locator(".agent-avatar img")).toHaveCount(0);
   await expect(current.locator(".agent-avatar")).toHaveText("D");
-  await page.goto("/");
-  await expect(preview.locator("span")).toHaveText("D");
-  await expect(preview.locator("img")).toHaveCount(0);
   await switcher.press("Enter");
   await expect(option.locator(".agent-avatar")).toHaveText("D");
+  await page.goto("/");
+  await expect(avatar.locator("span")).toHaveText("D");
+  await expect(avatar.locator("img")).toHaveCount(0);
+  await expect(switcher).toHaveCount(0);
 });
 
 test("recovers an uncertain sign-in using the session", async ({ page }) => {
@@ -1119,7 +1121,10 @@ async function openProviders(page: Page) {
 
 async function openSchedules(page: Page) {
   await login(page);
-  await page.getByRole("link", { name: "Manage", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Open Developer settings", exact: true })
+    .click();
+  await openAgentSection(page, "Overview");
   await page.getByRole("button", { name: "Start agent", exact: true }).click();
   await openAgentSection(page, "Schedules");
   await expect(
@@ -1686,21 +1691,23 @@ test("logs in, follows deep links and browser history, and signs out", async ({
       violations.push(message.text());
   });
   await login(page);
-  await page.getByRole("link", { name: "Manage" }).click();
+  await page
+    .getByRole("link", { name: "Open Developer settings", exact: true })
+    .click();
+  await expect(page).toHaveURL("/agents/dev/settings");
   await expect(
-    page.getByRole("heading", { name: "Developer", exact: true }),
-  ).toBeVisible();
+    page.getByRole("heading", { name: "Edit agent." }),
+  ).toBeFocused();
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "Developer",
+  );
   await page.reload();
-  await expect(
-    page.getByRole("heading", { name: "Developer", exact: true }),
-  ).toBeVisible();
-  await openAgentSection(page, "Agent settings");
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
     "Developer",
   );
   await page.goBack();
   await expect(
-    page.getByRole("heading", { name: "Developer", exact: true }),
+    page.getByRole("heading", { name: "Your agents." }),
   ).toBeVisible();
   await page.goForward();
   await expect(
@@ -2311,12 +2318,13 @@ test("moves between agent pages with an expandable main navigation", async ({
 
   const agentNav = page.getByRole("navigation", { name: "Agent navigation" });
   await expect(agentNav).toHaveCount(0);
-  await page.getByRole("button", { name: "Select Developer" }).click();
-  await page.getByRole("link", { name: "Manage", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Open Developer settings", exact: true })
+    .click();
   await expect(agents).toHaveAttribute("aria-current", "location");
   await expect(hideLabels).toBeVisible();
   await expect(
-    agentNav.getByRole("link", { name: "Overview" }),
+    agentNav.getByRole("link", { name: "Agent settings" }),
   ).toHaveAttribute("aria-current", "page");
   const memory = agentNav.getByRole("link", { name: "Memory" });
   await openAgentSection(page, "Memory");
@@ -2329,8 +2337,9 @@ test("moves between agent pages with an expandable main navigation", async ({
   await expect(memory).toHaveAttribute("aria-current", "page");
 
   await agents.click();
-  await page.getByRole("button", { name: "Select Researcher" }).click();
-  await page.getByRole("link", { name: "Manage", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Open Researcher settings", exact: true })
+    .click();
   await expect(memory).toHaveAttribute("href", "/agents/research/memory");
   await expect(agentNav.locator('a[href^="/agents/dev/"]')).toHaveCount(0);
 
@@ -2471,7 +2480,7 @@ test("searches configuration options and opens the exact section", async ({
     "/settings#panel-appearance",
   );
   await expect(
-    page.getByRole("button", { name: "Select Developer" }),
+    page.getByRole("link", { name: "Open Developer settings", exact: true }),
   ).toBeAttached();
   await search.press("ArrowDown");
   await expect(appearance).toBeFocused();
@@ -3366,13 +3375,16 @@ test("draws rounded model usage segments with gaps and keeps single-model rings 
   await expect(track).toHaveCount(1);
 });
 
-test("filters and searches the fleet, selects previews, and reconciles removed agents", async ({
+test("filters and searches agent cards, opens settings with Enter, and reconciles removed agents", async ({
   page,
+  request,
 }) => {
+  await request.post("/__test/agent/research");
   let agents = [
     {
       id: "dev",
       name: "Developer",
+      optionCapabilities: { edit: true, discord: true },
       botUsername: "developer_bot",
       provisioning: "ready",
       process: { state: "running", desiredState: "running" },
@@ -3382,6 +3394,7 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
     {
       id: "writer",
       name: "Writer",
+      optionCapabilities: { edit: false, discord: true },
       botUsername: "writer_bot",
       provisioning: "pending",
       process: { state: "stopped", desiredState: "stopped" },
@@ -3390,8 +3403,9 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
     },
     {
       id: "research",
-      name: "Research",
-      botUsername: "research_bot",
+      name: "Analyst",
+      optionCapabilities: { edit: false, discord: true },
+      botUsername: "findings_bot",
       provisioning: "failed",
       process: { state: "failed", desiredState: "running" },
       botConnection: { status: "blocked" },
@@ -3434,48 +3448,50 @@ test("filters and searches the fleet, selects previews, and reconciles removed a
   await expect(
     page.getByLabel("Models", { exact: true }).getByText("fixture"),
   ).toBeVisible();
+  const cards = page.getByRole("list", { name: "Agent workspaces" });
+  const developer = cards.getByRole("link", {
+    name: "Open Developer settings",
+  });
+  const research = cards.getByRole("link", { name: "Open Analyst overview" });
+  const writer = cards.getByRole("link", { name: "Open Writer overview" });
+  const search = page.getByRole("searchbox", { name: "Search agents" });
   await filters.getByRole("button", { name: /Needs attention/ }).click();
-  await expect(
-    page.getByRole("button", { name: "Select Research" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Select Developer" }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("link", { name: "Manage", exact: true }),
-  ).toHaveAttribute("href", "/agents/research/setup");
-  await page.getByRole("searchbox", { name: "Search agents" }).fill("writer");
+  await expect(research).toHaveAttribute("href", "/agents/research/setup");
+  await expect(developer).toHaveCount(0);
+  await search.fill("writer");
   await expect(
     page.getByRole("heading", { name: "No matching agents." }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(
-    page.getByRole("searchbox", { name: "Search agents" }),
-  ).toHaveValue("");
-  await page.getByRole("button", { name: "Select Writer" }).focus();
+  await expect(search).toHaveValue("");
+  await expect(writer).toBeVisible();
+  await filters.getByRole("button", { name: /Needs attention/ }).focus();
+  await page.keyboard.press("Tab");
+  await expect(developer).toBeFocused();
+  await expect(developer).toHaveCSS("outline-style", "solid");
   await page.keyboard.press("Enter");
-  await expect(
-    page
-      .getByRole("article", { name: "Selected agent" })
-      .getByRole("heading", { name: "Writer" }),
-  ).toBeVisible();
+  await expect(page).toHaveURL("/agents/dev/settings");
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "Developer",
+  );
+  await page.goBack();
+  await expect(writer).toBeVisible();
   agents = agents.filter((agent) => agent.id !== "writer");
   await page.getByRole("button", { name: "Refresh status" }).click();
-  await expect(page.getByRole("button", { name: "Select Writer" })).toHaveCount(
-    0,
-  );
+  await expect(writer).toHaveCount(0);
+  await search.fill("@FINDINGS_BOT");
+  await expect(research).toBeVisible();
+  await expect(developer).toHaveCount(0);
+  await search.fill("dev");
+  await expect(developer).toBeVisible();
+  await expect(research).toHaveCount(0);
+  await search.fill("research");
+  await expect(research).toBeVisible();
+  await research.click();
+  await expect(page).toHaveURL("/agents/research/setup");
   await expect(
-    page.getByRole("button", { name: "Select Developer" }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await page
-    .getByRole("searchbox", { name: "Search agents" })
-    .fill("RESEARCH_BOT");
-  await expect(
-    page.getByRole("button", { name: "Select Research" }),
+    page.getByRole("heading", { name: "Researcher", exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Select Developer" }),
-  ).toHaveCount(0);
 });
 
 test("renders the reference-inspired dashboard across screen sizes without external assets", async ({
@@ -3523,6 +3539,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
           {
             id: "dev",
             name: "Developer",
+            optionCapabilities: { edit: true, discord: true },
             botUsername: "nimbot_developer_bot",
             provisioning: "ready",
             process: { state: "running", desiredState: "running" },
@@ -3558,8 +3575,8 @@ test("renders the reference-inspired dashboard across screen sizes without exter
           },
           {
             id: "personal",
-            name: "Personal assistant",
-            botUsername: "nimbot_personal_bot",
+            name: "Personal assistant with a long workspace name and AReallyLongUnbrokenWordThatNeedsToWrapOnSmallScreens",
+            botUsername: null,
             provisioning: "ready",
             process: { state: "running", desiredState: "running" },
             botConnection: { status: "polling" },
@@ -3570,6 +3587,11 @@ test("renders the reference-inspired dashboard across screen sizes without exter
     }),
   );
   await login(page);
+  const dashboard = page.locator("[data-page-card]");
+  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
+  expect((await dashboard.boundingBox())?.y).toBe(
+    (await sidebar.boundingBox())?.y,
+  );
   await page.getByRole("button", { name: "7 days" }).click();
   const refreshIcon = page
     .getByRole("button", { name: "Refresh status" })
@@ -3589,26 +3611,11 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   ).toBe(true);
   const models = page.getByRole("region", { name: "Models" });
   await expect(models.getByText("fixture", { exact: true })).toBeVisible();
-  const dashboard = page.locator("[data-page-card]");
-  const switcher = dashboard.getByLabel("Switch agent", { exact: true });
+  const switcher = dashboard.getByLabel(/^Switch agent/);
   const search = dashboard.getByRole("searchbox", { name: "Search options" });
-  await expect(switcher).toBeVisible();
+  await expect(switcher).toHaveCount(0);
   await expect(search).toBeVisible();
   await expect(page.getByRole("banner")).toHaveCount(0);
-  const sidebar = page.getByRole("navigation", { name: "Main navigation" });
-  expect((await dashboard.boundingBox())?.y).toBe(
-    (await sidebar.boundingBox())?.y,
-  );
-  await search.focus();
-  await page.keyboard.press("Tab");
-  await expect(switcher).toBeFocused();
-  await page.keyboard.press("Enter");
-  const destination = dashboard.getByRole("link", { name: /^Developer/ });
-  await expect(destination).toBeInViewport();
-  await destination.focus();
-  await page.keyboard.press("Escape");
-  await expect(destination).toBeHidden();
-  await expect(switcher).toBeFocused();
 
   const fleetSearch = page.getByRole("searchbox", {
     name: "Search agents",
@@ -3616,6 +3623,7 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   const fleet = dashboard
     .locator('[data-ui="surface"]')
     .filter({ has: fleetSearch });
+  const usage = dashboard.getByRole("region", { name: "Usage", exact: true });
   const fleetToolbar = fleet.locator('[data-ui="workspace-heading"]');
   await expect(
     fleetToolbar.getByRole("searchbox", { name: "Search agents" }),
@@ -3626,7 +3634,13 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   await expect(
     fleet.getByRole("heading", { name: /Agent workspaces/ }),
   ).toHaveCount(0);
-  const developer = fleet.getByRole("button", { name: "Select Developer" });
+  const cards = fleet.getByRole("list", { name: "Agent workspaces" });
+  const developer = cards.getByRole("link", {
+    name: "Open Developer settings",
+  });
+  const personal = cards.getByRole("link", {
+    name: /^Open Personal assistant/,
+  });
   const running = developer.getByText("Running", { exact: true });
   const identifier = developer.getByText("@nimbot_developer_bot", {
     exact: true,
@@ -3634,22 +3648,17 @@ test("renders the reference-inspired dashboard across screen sizes without exter
   await expect(identifier).toHaveAttribute("title", "@nimbot_developer_bot");
   await expect(identifier).toHaveCSS("text-overflow", "ellipsis");
   await expect(identifier).toHaveCSS("white-space", "nowrap");
-  const preview = fleet.getByRole("article", { name: "Selected agent" });
-  const manage = preview.getByRole("link", { name: "Manage", exact: true });
+  await expect(personal.locator("small")).toHaveCount(0);
   await expect(running).toHaveAttribute("data-tone", "good");
-  await expect(developer).toHaveAccessibleDescription("Running");
-  await expect(preview.locator('[data-ui="status"]')).toHaveCount(0);
-  await expect(
-    preview
-      .locator('[data-ui="preview-top"]')
-      .getByRole("link", { name: "Manage" }),
-  ).toHaveAttribute("href", "/agents/dev/setup");
+  await expect(developer).toHaveAccessibleDescription(
+    "Running @nimbot_developer_bot",
+  );
+  await expect(developer).toHaveAttribute("href", "/agents/dev/settings");
   const plainSurfaces = [
     ...["Usage", "Models", "Quota left", "Last 24 hours"].map((name) =>
       dashboard.getByRole("region", { name, exact: true }),
     ),
     fleet,
-    preview,
   ];
   await expect(dashboard.locator('[data-line="current"]')).toHaveCSS(
     "filter",
@@ -3688,12 +3697,21 @@ test("renders the reference-inspired dashboard across screen sizes without exter
       for (const width of [1440, 768, 375, 320]) {
         await page.setViewportSize({ width, height: 1000 });
         const title = dashboard.getByRole("heading", { name: "Your agents." });
-        const titleBox = (await title.boundingBox())!;
-        const switcherBox = (await switcher.boundingBox())!;
-        const searchBox = (await search.boundingBox())!;
-        expect(switcherBox.y).toBeLessThan(titleBox.y);
-        if (width === 320) expect(searchBox.y).toBeLessThan(switcherBox.y);
-        else expect(searchBox.x + searchBox.width).toBeLessThan(switcherBox.x);
+        const [titleBox, fleetBox, usageBox, searchBox] = await Promise.all(
+          [title, fleet, usage, search].map((element) =>
+            element.evaluate((node) => {
+              const { top, bottom } = node.getBoundingClientRect();
+              return {
+                y: top + window.scrollY,
+                bottom: bottom + window.scrollY,
+              };
+            }),
+          ),
+        );
+        expect(fleetBox.y).toBeGreaterThan(titleBox.bottom);
+        expect(usageBox.y).toBeGreaterThan(fleetBox.bottom);
+        expect(searchBox.bottom).toBeLessThan(titleBox.y);
+        await expect(switcher).toHaveCount(0);
         await expect
           .poll(
             () => page.evaluate(() => document.documentElement.scrollWidth),
@@ -3716,16 +3734,18 @@ test("renders the reference-inspired dashboard across screen sizes without exter
           "color",
           theme === "dark" ? "rgb(179, 255, 57)" : "rgb(39, 99, 49)",
         );
-        await expect(manage).toBeVisible();
-        await expect(manage).toHaveCSS(
-          "background-color",
-          theme === "dark" ? "rgb(91, 156, 255)" : "rgb(32, 85, 172)",
-        );
-        if (width === 320 && state === "populated") {
-          await switcher.click();
-          await destination.click({ trial: true });
-          await page.keyboard.press("Escape");
-          await expect(switcher).toBeFocused();
+        await expect(developer).toBeVisible();
+        const second = cards.getByRole("link", {
+          name: /^Open Research assistant/,
+        });
+        const firstCardBox = (await developer.boundingBox())!;
+        const secondCardBox = (await second.boundingBox())!;
+        if (width === 320 || width === 375) {
+          expect(secondCardBox.x).toBe(firstCardBox.x);
+          expect(secondCardBox.y).toBeGreaterThan(firstCardBox.y);
+        } else {
+          expect(secondCardBox.x).toBeGreaterThan(firstCardBox.x);
+          expect(secondCardBox.y).toBe(firstCardBox.y);
         }
         const prefix = theme === "light" ? "dashboard-light" : "dashboard";
         await page.screenshot({
@@ -3762,8 +3782,10 @@ test("configures, replaces, and removes Discord without changing Telegram", asyn
   page,
 }) => {
   await login(page);
-  await page.getByRole("link", { name: "Manage" }).click();
-  await page.getByRole("link", { name: "Manage channels" }).click();
+  await page
+    .getByRole("link", { name: "Open Developer settings", exact: true })
+    .click();
+  await openAgentSection(page, "Channels");
   const discord = page.getByRole("region", { name: "Discord connection" });
   await expect(discord.getByText("Discord is not configured.")).toBeVisible();
   const owner = discord.getByLabel("Owner's Discord user ID");
@@ -3910,11 +3932,16 @@ test("shows independent Discord conversation and owner-link status while Telegra
 }, info) => {
   await request.post("/__test/agent/research");
   await login(page);
-  const preview = page.getByRole("article", { name: "Selected agent" });
+  await page
+    .getByRole("link", { name: "Open Developer settings", exact: true })
+    .click();
+  await openAgentSection(page, "Channels");
+  const discord = page.getByRole("region", { name: "Discord connection" });
+  const telegram = page.getByRole("region", { name: "Telegram connection" });
+  await expect(discord.getByText("Discord is not configured.")).toBeVisible();
   await expect(
-    preview.getByText("Discord bot", { exact: false }),
-  ).toContainText("Not configured");
-  await page.goto("/agents/dev/channels");
+    telegram.getByRole("link", { name: "Open chat in Telegram" }),
+  ).toHaveAttribute("href", "https://t.me/developer_bot");
   await page.getByLabel("Owner's Discord user ID").fill("987654321098765432");
   await page
     .getByLabel("Discord bot token", { exact: true })
@@ -3949,59 +3976,34 @@ test("shows independent Discord conversation and owner-link status while Telegra
       .getByRole("region", { name: "Telegram connection" })
       .getByText("@developer_bot", { exact: true }),
   ).toBeVisible();
-  await page.goto("/");
+  await page.unroute("**/api/agents/dev");
+  await page.getByRole("button", { name: "Refresh channel status" }).click();
   await expect(
-    preview.getByText("Telegram bot", { exact: false }),
+    discord.getByText("notification_bot", { exact: true }),
   ).toBeVisible();
-  const discordBot = preview.getByText("Discord bot", { exact: false });
-  await expect(discordBot).toContainText("notification_bot");
-  await expect(discordBot).toContainText("Connected");
-  const ownerDm = preview.getByText("Discord owner DM", { exact: false });
-  await expect(ownerDm).toContainText(
-    "Waiting for the owner's first private message",
-  );
+  await expect(discord.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(
+    discord.getByText("Waiting for a reply", { exact: true }),
+  ).toBeVisible();
   await request.post("/__test/discord-owner/dev");
-  await page.getByRole("button", { name: "Refresh status" }).click();
-  await expect(ownerDm).toContainText("Linked");
-  await expect(
-    preview.getByText("Agent workspace", { exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    preview.locator('[data-ui="preview-identity"] > [data-ui="icon"]'),
-  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Refresh channel status" }).click();
+  await expect(discord.getByText("Linked", { exact: true })).toBeVisible();
   for (const width of [1280, 320]) {
     await page.setViewportSize({ width, height: 800 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
-    await preview.screenshot({
-      path: info.outputPath(`discord-preview-${width}.png`),
+    await discord.screenshot({
+      path: info.outputPath(`discord-channels-${width}.png`),
     });
   }
-  await page.unroute("**/api/agents/dev");
-  await page.route("**/api/status", async (route) => {
-    const response = await route.fetch();
-    const directory = await response.json();
-    await route.fulfill({
-      response,
-      json: {
-        agents: directory.agents.map((entry: Record<string, unknown>) => ({
-          ...entry,
-          discord: undefined,
-        })),
-      },
-    });
-  });
-  await page.reload();
-  await expect(discordBot).toContainText("notification_bot");
-  await expect(discordBot).toContainText("Connected");
-  await expect(ownerDm).toContainText("Linked");
-  await page.getByRole("button", { name: "Select Researcher" }).click();
-  await expect(
-    preview.getByRole("heading", { name: "Researcher" }),
-  ).toBeVisible();
-  await expect(discordBot).toContainText("Not configured");
-  await expect(ownerDm).toHaveCount(0);
+  await page.goto("/");
+  await page
+    .getByRole("link", { name: "Open Researcher settings", exact: true })
+    .click();
+  await openAgentSection(page, "Channels");
+  await expect(discord.getByText("Discord is not configured.")).toBeVisible();
+  await expect(discord.getByText("Owner DM", { exact: true })).toHaveCount(0);
 });
 
 test("creates a webhook schedule, shows credentials, triggers it, and revokes its token", async ({

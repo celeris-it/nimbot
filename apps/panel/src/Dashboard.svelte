@@ -1,16 +1,9 @@
 <script lang="ts">
   import type {
-    AgentDetail,
     AgentDirectoryEntry,
     AgentSummary,
   } from "../../server/src/panel/panel-contracts.js";
-  import {
-    botLabel,
-    botAccessLabels,
-    discordConversationLabels,
-    ownerLabels,
-    processLabels,
-  } from "./labels.js";
+  import { processLabels } from "./labels.js";
   import {
     ActionButton,
     AgentAvatar,
@@ -40,7 +33,6 @@
   } = $props();
   let filter = $state("all");
   let agentQuery = $state("");
-  let selectedId = $state("");
   const attention = (item: AgentSummary) =>
     item.process?.state === "failed" ||
     item.botConnection?.status === "failed" ||
@@ -177,58 +169,12 @@
       return matchesFilter && searchable.toLowerCase().includes(query);
     });
   });
-  // Selection is a local preview only; it never changes Telegram routing.
-  let selected = $derived(
-    filtered.find((item) => item.id === selectedId) ?? filtered[0],
-  );
-  let discordFromDetails = $state<{
-    agentId: string;
-    discord: AgentDirectoryEntry["discord"];
-  }>();
-  let selectedDiscordDetails = $derived(
-    discordFromDetails?.agentId === selected?.id
-      ? discordFromDetails
-      : undefined,
-  );
-  let previewDiscord = $derived(
-    selected?.discord ??
-      (selected?.optionCapabilities?.discord
-        ? selectedDiscordDetails?.discord
-        : undefined),
-  );
-  $effect(() => {
-    const item = selected;
-    // A running server may advertise Discord before its directory includes the summary.
-    if (!item?.optionCapabilities?.discord || item.discord) return;
-    const current = new AbortController();
-    void request<AgentDetail>(`/api/agents/${encodeURIComponent(item.id)}`, {
-      signal: current.signal,
-    }).then(
-      ({ discord }) => {
-        if (!current.signal.aborted)
-          discordFromDetails = {
-            agentId: item.id,
-            discord: discord?.connection
-              ? discord
-              : discord && { connection: null },
-          };
-      },
-      () => {
-        if (!current.signal.aborted)
-          discordFromDetails = { agentId: item.id, discord: undefined };
-      },
-    );
-    return () => current.abort();
-  });
-  const setupLabel = (item: AgentSummary) =>
+  const processLabel = (item: AgentSummary) =>
     item.process ? processLabels[item.process.state] : "Unavailable";
 </script>
 
 <div data-ui="page-heading">
-  <div>
-    <span data-ui="eyebrow">OVERVIEW</span>
-    <h1 tabindex="-1">Your agents.</h1>
-  </div>
+  <h1 tabindex="-1">Your agents.</h1>
   <div data-ui="heading-actions">
     <ActionButton
       variant="ghost"
@@ -242,6 +188,92 @@
       >{/if}
   </div>
 </div>
+
+<Surface tone="muted">
+  <div data-ui="workspace-heading">
+    <SearchField
+      label="Search agents"
+      placeholder="Search agents"
+      bind:value={agentQuery}
+    />
+    <FilterGroup
+      label="Filter agents"
+      bind:value={filter}
+      options={[
+        { value: "all", label: "All agents", count: agents.length },
+        {
+          value: "ready",
+          label: "Running",
+          count: configured,
+        },
+        { value: "attention", label: "Needs attention", count: needsAttention },
+      ]}
+    />
+  </div>
+  {#if agents.length === 0}
+    <EmptyState
+      title="A workspace for your next idea."
+      description={canCreate
+        ? "No agents yet. Create your first agent."
+        : "No agents yet. Agent creation is unavailable."}
+    />
+  {:else if filtered.length === 0}
+    <EmptyState
+      title="No matching agents."
+      description="Try another name, bot username, or filter."
+      icon="search"
+    >
+      {#snippet actions()}<ActionButton
+          onclick={() => {
+            agentQuery = "";
+            filter = "all";
+          }}>Clear filters</ActionButton
+        >{/snippet}
+    </EmptyState>
+  {:else}
+    <ul data-ui="agent-grid" aria-label="Agent workspaces">
+      {#each filtered as item (item.id)}
+        {@const id = encodeURIComponent(item.id)}
+        {@const editable = item.optionCapabilities?.edit}
+        {@const statusId = `fleet-status-${id}`}
+        {@const handleId = `fleet-handle-${id}`}
+        <li>
+          <ActionButton
+            variant="plain"
+            href={`/agents/${id}/${editable ? "settings" : "setup"}`}
+            data-ui="agent-profile"
+            aria-label={`Open ${item.name} ${editable ? "settings" : "overview"}`}
+            aria-describedby={item.botUsername
+              ? `${statusId} ${handleId}`
+              : statusId}
+          >
+            <span data-ui="agent-profile-top">
+              <AgentAvatar agentId={item.id} name={item.name} />
+              <Icon name="chevron" size={16} />
+            </span>
+            <span data-ui="agent-profile-identity">
+              <strong title={item.name}>{item.name}</strong>
+              {#if item.botUsername}
+                <small id={handleId} title={`@${item.botUsername}`}>
+                  @{item.botUsername}
+                </small>
+              {/if}
+            </span>
+            <StatusBadge
+              id={statusId}
+              label={processLabel(item)}
+              tone={attention(item)
+                ? "warning"
+                : item.process?.state === "running"
+                  ? "good"
+                  : "neutral"}
+            />
+          </ActionButton>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+</Surface>
 
 <div data-ui="overview-grid">
   <Surface
@@ -394,176 +426,6 @@
     />
   </Surface>
 </div>
-
-<div data-ui="workspace-toolbar">
-  <div>
-    <Icon name="grid" size={16} /><strong>Your fleet</strong><span
-      class="panel-badge">{agents.length}</span
-    >
-  </div>
-</div>
-
-<Surface tone="muted">
-  <div data-ui="workspace-heading">
-    <SearchField
-      label="Search agents"
-      placeholder="Search agents"
-      bind:value={agentQuery}
-    />
-    <FilterGroup
-      label="Filter agents"
-      bind:value={filter}
-      options={[
-        { value: "all", label: "All agents", count: agents.length },
-        {
-          value: "ready",
-          label: "Running",
-          count: configured,
-        },
-        { value: "attention", label: "Needs attention", count: needsAttention },
-      ]}
-    />
-  </div>
-  {#if agents.length === 0}
-    <EmptyState
-      title="A workspace for your next idea."
-      description={canCreate
-        ? "No agents yet. Create your first agent."
-        : "No agents yet. Agent creation is unavailable."}
-    />
-  {:else if !selected}
-    <EmptyState
-      title="No matching agents."
-      description="Try another name, bot username, or filter."
-      icon="search"
-    >
-      {#snippet actions()}<ActionButton
-          onclick={() => {
-            agentQuery = "";
-            filter = "all";
-          }}>Clear filters</ActionButton
-        >{/snippet}
-    </EmptyState>
-  {:else}
-    <div data-ui="fleet-layout">
-      <div data-ui="agent-list" role="group" aria-label="Agent workspaces">
-        {#each filtered as item (item.id)}
-          {@const identifier = item.botUsername
-            ? `@${item.botUsername}`
-            : item.id}
-          <ActionButton
-            variant="plain"
-            type="button"
-            data-ui="agent-row"
-            aria-label={`Select ${item.name}`}
-            aria-describedby={`fleet-status-${encodeURIComponent(item.id)}`}
-            aria-pressed={selected.id === item.id}
-            onclick={() => (selectedId = item.id)}
-          >
-            <AgentAvatar agentId={item.id} name={item.name} small /><span
-              ><strong title={item.name}>{item.name}</strong><small
-                title={identifier}>{identifier}</small
-              ></span
-            ><StatusBadge
-              id={`fleet-status-${encodeURIComponent(item.id)}`}
-              label={setupLabel(item)}
-              tone={attention(item)
-                ? "warning"
-                : item.process?.state === "running"
-                  ? "good"
-                  : "neutral"}
-            /><Icon name="chevron" size={14} />
-          </ActionButton>
-        {/each}
-      </div>
-      <article data-ui="agent-preview" aria-label="Selected agent">
-        <div data-ui="preview-top">
-          <div data-ui="preview-identity">
-            {#key selected.id}
-              <AgentAvatar agentId={selected.id} name={selected.name} />
-            {/key}
-            <div>
-              <h3>{selected.name}</h3>
-              <p>
-                {selected.botUsername
-                  ? `@${selected.botUsername}`
-                  : selected.id}
-              </p>
-            </div>
-          </div>
-          <ActionButton
-            variant="primary"
-            href={`/agents/${encodeURIComponent(selected.id)}/setup`}
-            icon="chevron">Manage</ActionButton
-          >
-        </div>
-        <div data-ui="preview-facts">
-          <div class:col-span-full={!selected.botUsername}>
-            <Icon name="telegram" /><span
-              >Telegram bot<strong>{botLabel(selected)}</strong></span
-            >
-          </div>
-          {#if selected.botUsername}<div>
-              <Icon name="shield" /><span
-                >Owner verification<strong
-                  >{selected.setupAccess
-                    ? ownerLabels[selected.setupAccess.owner]
-                    : "Unavailable"}</strong
-                ></span
-              >
-            </div>
-            <div class="col-span-full">
-              <Icon name="terminal" /><span
-                >Bot link<strong
-                  >{selected.setupAccess
-                    ? botAccessLabels[selected.setupAccess.bot]
-                    : "Unavailable"}</strong
-                ></span
-              >
-            </div>{/if}
-          {#if previewDiscord || selected.optionCapabilities?.discord}
-            <div class:col-span-full={!previewDiscord?.conversation}>
-              <Icon name="discord" /><span>
-                Discord bot
-                <strong
-                  >{previewDiscord
-                    ? (previewDiscord.connection?.botUsername ??
-                      "Not configured")
-                    : selectedDiscordDetails
-                      ? "Status unavailable"
-                      : "Loading…"}</strong
-                >
-                {#if previewDiscord?.conversation}
-                  {discordConversationLabels[previewDiscord.conversation.state]}
-                {/if}
-              </span>
-            </div>
-            {#if previewDiscord?.conversation}
-              <div>
-                <Icon name="shield" /><span>
-                  Discord owner DM
-                  <strong
-                    >{previewDiscord.conversation.ownerLinked
-                      ? "Linked"
-                      : "Waiting for the owner's first private message"}</strong
-                  >
-                </span>
-              </div>
-            {/if}
-          {/if}
-        </div>
-        {#if selected.botUsername}
-          <div data-ui="preview-actions">
-            <ActionButton
-              href={`https://t.me/${selected.botUsername}`}
-              icon="arrow">Open chat in Telegram</ActionButton
-            >
-          </div>
-        {/if}
-      </article>
-    </div>
-  {/if}
-</Surface>
 <footer data-ui="dashboard-footer">
   <span
     ><Icon name="shield" size={14} /> Your server. Your agents. Your control.</span
