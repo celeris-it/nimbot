@@ -144,6 +144,59 @@ test("selects an agent model and shows its published quota in the panel", async 
   await expect(model).toContainText("Automatic");
 });
 
+test("shows model maker icons for direct and shared providers", async ({
+  page,
+}) => {
+  await login(page);
+  const entries = [
+    [
+      "opencode",
+      "deepseek-v4.1-flash-free",
+      "DeepSeek Flash",
+      "simple-icons--deepseek",
+    ],
+    ["opencode", "mimo-v2.6-flash-free", "MiMo Flash", "simple-icons--xiaomi"],
+    [
+      "opencode",
+      "nemotron-3.5-lightning-free",
+      "Nemotron Lightning",
+      "simple-icons--nvidia",
+    ],
+    ["opencode", "beam-free", "Beam Free", "lucide--bot"],
+    ["openai", "gpt-6.2-sol", "GPT Sol", "simple-icons--openai"],
+    [
+      "openrouter",
+      "anthropic/claude-sonnet",
+      "Claude Sonnet",
+      "simple-icons--anthropic",
+    ],
+  ] as const;
+  const models = entries.map(([providerId, modelId, name]) => ({
+    providerId,
+    modelId,
+    name,
+  }));
+  await page.route("**/api/agents/dev/models", (route) =>
+    route.fulfill({
+      json: { selected: models[0], catalogAvailable: true, models },
+    }),
+  );
+  await page.goto("/agents/dev/usage");
+  const picker = page.getByRole("button", { name: /Model for new turns/ });
+  await expect(picker.locator('[data-ui="icon"]').first()).toHaveClass(
+    /simple-icons--deepseek/,
+  );
+  await picker.click();
+  for (const [, id, name, brand] of entries) {
+    const icon = page
+      .getByRole("option", { name: `${name} ${id}`, exact: true })
+      .locator('[data-ui="icon"]')
+      .first();
+    await expect(icon).toHaveClass(new RegExp(brand));
+    await expect(icon).toHaveCSS("mask-image", /url\("data:image\/svg\+xml/);
+  }
+});
+
 test("filters models and keeps an unavailable saved model visible", async ({
   page,
 }) => {
@@ -947,6 +1000,19 @@ test("manages global API keys with keyboard navigation and blank secret fields",
   request,
 }) => {
   await openProviders(page);
+  for (const [name, brand] of [
+    ["OpenAI", "openai"],
+    ["Anthropic", "anthropic"],
+    ["Google", "google"],
+    ["OpenRouter", "openrouter"],
+    ["OpenCode Console", "opencode"],
+  ]) {
+    const icon = page
+      .getByRole("heading", { name, exact: true })
+      .locator('[data-ui="icon"]');
+    await expect(icon).toHaveClass(new RegExp(`simple-icons--${brand}`));
+    await expect(icon).toHaveCSS("mask-image", /url\("data:image\/svg\+xml/);
+  }
   const openai = page.getByRole("region", { name: "OpenAI", exact: true });
   const key = page.getByLabel("OpenAI API key", { exact: true });
   await expect(

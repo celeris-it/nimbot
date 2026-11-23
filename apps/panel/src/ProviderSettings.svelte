@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { PasswordField, StatusBadge } from "./components/index.js";
+  import { Icon, PasswordField, StatusBadge } from "./components/index.js";
   import type { ProviderSettings } from "../../server/src/panel/panel-contracts.js";
   let {
     settings,
@@ -126,7 +126,9 @@
                 : "Not configured"}
         <section aria-labelledby={`provider-${provider.id}`}>
           <div class="settings-section-description provider-identity">
-            <h2 id={`provider-${provider.id}`}>{provider.name}</h2>
+            <h2 id={`provider-${provider.id}`} class="card-title">
+              <Icon name={provider.id} size={20} />{provider.name}
+            </h2>
             <StatusBadge
               label={state}
               tone={provider.reconnectRequired
