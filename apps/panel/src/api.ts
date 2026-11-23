@@ -1,10 +1,18 @@
+import { translateApiError } from "./i18n/errors.js";
+import type { Translate } from "./i18n/language.js";
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
     public code?: string,
+    public params?: unknown,
   ) {
     super(message);
+  }
+
+  display(t: Translate) {
+    return translateApiError(t, this.code, this.params, this.message);
   }
 }
 
@@ -19,12 +27,13 @@ export async function request<T>(
   });
   if (!response.ok) {
     const data = (await response.json().catch(() => undefined)) as
-      { error?: string; code?: string } | undefined;
+      { error?: string; code?: string; params?: unknown } | undefined;
     throw new ApiError(
       response.status,
       data?.error ??
         "The request could not be completed. Refresh the status before retrying.",
       data?.code,
+      data?.params,
     );
   }
   return response.json() as Promise<T>;

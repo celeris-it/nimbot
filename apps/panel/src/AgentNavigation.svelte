@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "./i18n/language.js";
   import { Icon } from "./components/index.js";
   import type { IconName } from "./components/icons.js";
 
@@ -48,14 +49,14 @@
   </ul>
 {/snippet}
 
-<nav aria-label="Agent navigation" data-ui="agent-navigation">
+<nav aria-label={$messages("Agent navigation")} data-ui="agent-navigation">
   <div data-ui="agent-nav-sidebar">
-    <p>Agent sections</p>
+    <p>{$messages("Agent sections")}</p>
     {@render options()}
   </div>
   <details bind:this={disclosure}>
     <summary bind:this={summary}>
-      Agent sections{current ? ` · ${current.label}` : ""}
+      {$messages("Agent sections")}{current ? ` · ${current.label}` : ""}
       <Icon name="chevron" size={16} />
     </summary>
     {@render options()}

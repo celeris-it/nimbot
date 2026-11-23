@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { numberFormat } from "../i18n/language.js";
   import ActionButton from "./ActionButton.svelte";
   let {
     label,
@@ -18,7 +19,8 @@
       class="fleet-filter"
       aria-pressed={value === option.value}
       onclick={() => (value = option.value)}
-      >{option.label}{#if option.count !== undefined}<span>{option.count}</span
+      >{option.label}{#if option.count !== undefined}<span
+          >{$numberFormat.format(option.count)}</span
         >{/if}</ActionButton
     >{/each}
 </div>

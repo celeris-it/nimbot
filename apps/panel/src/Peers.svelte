@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "./i18n/language.js";
   import { ActionButton, Icon, Select } from "./components/index.js";
   import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
   let {
@@ -20,7 +21,10 @@
   } = $props();
   let target = $state("");
   let permission = $state("note");
-  const label = { note: "Send notes", delegate: "Delegate tasks" } as const;
+  const label = $derived({
+    note: $messages("Send notes"),
+    delegate: $messages("Delegate tasks"),
+  });
   const name = (id: string) =>
     data?.candidates.find((candidate) => candidate.id === id)?.name ?? id;
   async function submit(event: SubmitEvent) {
@@ -33,23 +37,29 @@
 <section aria-labelledby="peer-access">
   <div class="settings-section-description">
     <h2 id="peer-access" tabindex="-1" class="card-title">
-      <Icon name="delegate" size={20} />Other agents
+      <Icon name="delegate" size={20} />{$messages("Other agents")}
     </h2>
     <p>
-      By default {agent.name} cannot reach any other agent. A grant lets this agent
-      send a note to, or delegate a task to, one other agent that has the same configured
-      owner. Grants stop working immediately if either agent's owner or binding changes.
+      {$messages("By default")}
+      {agent.name}
+      {$messages(
+        "cannot reach any other agent. A grant lets this agent send a note to, or delegate a task to, one other agent that has the same configured owner. Grants stop working immediately if either agent's owner or binding changes.",
+      )}
     </p>
   </div>
   <div class="panel-card">
     {#if !data}
-      <p role="status">Agent access unavailable.</p>
+      <p role="status">{$messages("Agent access unavailable.")}</p>
       <ActionButton class="self-start" onclick={refresh}
-        ><Icon name="refresh" size={16} />Retry loading agent access</ActionButton
+        ><Icon name="refresh" size={16} />{$messages(
+          "Retry loading agent access",
+        )}</ActionButton
       >
     {:else}
       {#if data.grants.length === 0}
-        <p role="status">No grants. This agent cannot contact other agents.</p>
+        <p role="status">
+          {$messages("No grants. This agent cannot contact other agents.")}
+        </p>
       {:else}
         <ul data-ui="peer-grant-list">
           {#each data.grants as item (item.targetAgentId + item.permission)}
@@ -58,9 +68,13 @@
               <strong>{name(item.targetAgentId)}</strong>
               <ActionButton
                 disabled={busy}
-                aria-label={`Revoke ${label[item.permission]} to ${name(item.targetAgentId)}`}
+                aria-label={$messages(
+                  "Revoke {0} to {1}",
+                  label[item.permission],
+                  name(item.targetAgentId),
+                )}
                 onclick={() => revoke(item.targetAgentId, item.permission)}
-                >Revoke</ActionButton
+                >{$messages("Revoke")}</ActionButton
               >
             </li>
           {/each}
@@ -68,30 +82,32 @@
       {/if}
       {#if data.candidates.length === 0}
         <p>
-          No other agent shares this agent's owner, so there is nobody to grant.
+          {$messages(
+            "No other agent shares this agent's owner, so there is nobody to grant.",
+          )}
         </p>
       {:else}
         <form onsubmit={submit} aria-describedby="form-error" aria-busy={busy}>
           <label>
-            Target agent
+            {$messages("Target agent")}
             <Select bind:value={target} required>
-              <option value="" disabled>Choose an agent</option>
+              <option value="" disabled>{$messages("Choose an agent")}</option>
               {#each data.candidates as candidate (candidate.id)}
                 <option value={candidate.id}>{candidate.name}</option>
               {/each}
             </Select>
           </label>
           <label>
-            Permission
+            {$messages("Permission")}
             <Select bind:value={permission}>
-              <option value="note">Send notes</option>
-              <option value="delegate">Delegate tasks</option>
+              <option value="note">{$messages("Send notes")}</option>
+              <option value="delegate">{$messages("Delegate tasks")}</option>
             </Select>
           </label>
           <ActionButton
             type="submit"
             variant="primary"
-            disabled={busy || !target}>Add grant</ActionButton
+            disabled={busy || !target}>{$messages("Add grant")}</ActionButton
           >
         </form>
       {/if}

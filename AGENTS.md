@@ -64,7 +64,7 @@ Run lint, type-check, and tests before finishing any change.
 
 ## Conventions
 
-- Write project-provided text (panel pages, built-in bot messages, CLI prompts, API errors), code, comments, tests, and documentation in English. Keep localization infrastructure out of scope.
+- Write project-provided text, code, comments, tests, and documentation in English. Maintain translations of panel pages and panel feedback in the panel catalogs. Keep built-in bot messages, CLI prompts, and API error text in English.
 - For model-generated replies, honor the user's requested language. Otherwise follow the language of the conversation and use English as the fallback.
 - Do not create standalone manual validation guides or test run reports unless the user explicitly requests them. If the user needs to run commands to test something, provide the commands and instructions directly in chat.
 - Never commit secrets. Configuration comes from environment variables; keep `.env.example` current once it exists.

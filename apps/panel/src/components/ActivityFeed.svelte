@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { formattingLocale, messages } from "../i18n/language.js";
   import Icon from "./Icon.svelte";
   import type { IconName } from "./icons.js";
   let {
-    label = "Recent activity",
+    label,
     items,
   }: {
     label?: string;
@@ -16,7 +17,7 @@
   } = $props();
 </script>
 
-<section data-ui="activity" aria-label={label}>
+<section data-ui="activity" aria-label={label ?? $messages("Recent activity")}>
   <h3>{label}</h3>
   <ol>
     {#each items as item (item.id)}<li>
@@ -25,9 +26,9 @@
           <strong>{item.title}</strong>{#if item.description}<p>
               {item.description}
             </p>{/if}<time datetime={item.at}
-            >{new Date(item.at).toLocaleString("en-US")}</time
+            >{new Date(item.at).toLocaleString($formattingLocale)}</time
           >
         </div>
-      </li>{:else}<li>No activity recorded.</li>{/each}
+      </li>{:else}<li>{$messages("No activity recorded.")}</li>{/each}
   </ol>
 </section>

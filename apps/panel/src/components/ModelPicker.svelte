@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "../i18n/language.js";
   import ActionButton from "./ActionButton.svelte";
   import { tick } from "svelte";
   import type {
@@ -28,12 +29,12 @@
   }
 
   const id = $props.id();
-  const automatic: Option = {
+  const automatic: Option = $derived({
     id: `${id}-automatic`,
-    label: "Automatic",
+    label: $messages("Automatic"),
     model: null,
-    searchText: "automatic",
-  };
+    searchText: $messages("Automatic").toLowerCase(),
+  });
   let root: HTMLDivElement;
   let trigger = $state<HTMLButtonElement>();
   let search = $state<HTMLInputElement>();
@@ -204,7 +205,9 @@
 {/snippet}
 
 <div class="picker" bind:this={root} onfocusout={dismissOnFocusOut}>
-  <label id={`${id}-label`} for={`${id}-trigger`}>Model for new turns</label>
+  <label id={`${id}-label`} for={`${id}-trigger`}
+    >{$messages("Model for new turns")}</label
+  >
   <div class="anchor">
     <ActionButton
       variant="plain"
@@ -228,7 +231,7 @@
           <span>{currentModel.name}</span>
           <small>{currentModel.providerId}/{currentModel.modelId}</small>
         {:else if value}
-          {value.providerId}/{value.modelId} (Unavailable)
+          {value.providerId}/{value.modelId} {$messages("(Unavailable)")}
         {:else}
           {automatic.label}
         {/if}
@@ -244,12 +247,12 @@
           <input
             type="text"
             role="combobox"
-            aria-label="Search models"
+            aria-label={$messages("Search models")}
             aria-autocomplete="list"
             aria-controls={`${id}-list`}
             aria-expanded="true"
             aria-activedescendant={active?.id}
-            placeholder="Search models…"
+            placeholder={$messages("Search models…")}
             autocomplete="off"
             bind:this={search}
             value={query}
@@ -262,7 +265,7 @@
           class="results"
           role="listbox"
           tabindex={-1}
-          aria-label="Models"
+          aria-label={$messages("Models")}
           bind:this={list}
         >
           {#if showAutomatic}
@@ -278,7 +281,9 @@
           {/each}
         </div>
         {#if !visibleOptions.length}
-          <div class="empty" role="status">No matching models</div>
+          <div class="empty" role="status">
+            {$messages("No matching models")}
+          </div>
         {/if}
       </div>
     {/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "./i18n/language.js";
   import {
     ActionButton,
     PasswordField,
@@ -32,29 +33,37 @@
 </script>
 
 {#if mode === "new"}
-  <h1 tabindex="-1">Create agent.</h1>
-  <p>Connect Telegram or Discord from Channels after creating the agent.</p>
-{:else if mode === "settings"}
-  <h1 id="agent-settings" tabindex="-1">Edit agent.</h1>
+  <h1 tabindex="-1">{$messages("Create agent.")}</h1>
   <p>
-    Changes apply to upcoming tasks. The name is local to Nimbot; it does not
-    change the bot's profile on Telegram.
+    {$messages(
+      "Connect Telegram or Discord from Channels after creating the agent.",
+    )}
+  </p>
+{:else if mode === "settings"}
+  <h1 id="agent-settings" tabindex="-1">{$messages("Edit agent.")}</h1>
+  <p>
+    {$messages(
+      "Changes apply to upcoming tasks. The name is local to Nimbot; it does not change the bot's profile on Telegram.",
+    )}
   </p>
 {:else}
-  <h1 tabindex="-1">Bot token.</h1>
-  <p>Agent: {agent?.name}</p>
+  <h1 tabindex="-1">{$messages("Bot token.")}</h1>
+  <p>{$messages("Agent:")} {agent?.name}</p>
   <p>
-    Only a new token for the same bot, created in BotFather, is accepted.
-    Restart this agent after saving to reconnect its bot.
+    {$messages(
+      "Only a new token for the same bot, created in BotFather, is accepted. Restart this agent after saving to reconnect its bot.",
+    )}
   </p>
 {/if}
 <section
   class="panel-card"
-  aria-label={mode === "token" ? "Bot credential" : "Agent settings"}
+  aria-label={mode === "token"
+    ? $messages("Bot credential")
+    : $messages("Agent settings")}
 >
   <form onsubmit={send} aria-describedby="form-error" aria-busy={busy}>
     {#if mode !== "token"}
-      <label for="name">Name</label>
+      <label for="name">{$messages("Name")}</label>
       <TextField
         id="name"
         name="name"
@@ -62,7 +71,7 @@
         required
         bind:value={name}
       />
-      <label for="instructions">Instructions (optional)</label>
+      <label for="instructions">{$messages("Instructions (optional)")}</label>
       <textarea
         class="panel-textarea"
         id="instructions"
@@ -72,12 +81,13 @@
         aria-describedby="instructions-help"
         bind:value={instructions}></textarea>
       <p id="instructions-help">
-        Up to 4000 characters. They are sent as context with every task. Do not
-        include passwords or tokens.
+        {$messages(
+          "Up to 4000 characters. They are sent as context with every task. Do not include passwords or tokens.",
+        )}
       </p>
     {/if}
     {#if mode === "token"}
-      <label for="token">New Telegram token</label>
+      <label for="token">{$messages("New Telegram token")}</label>
       <PasswordField
         id="token"
         name="token"
@@ -88,18 +98,19 @@
         bind:value={token}
       />
       <p id="token-help">
-        The token is saved privately without being shown in the panel. Enter it
-        again if the operation fails.
+        {$messages(
+          "The token is saved privately without being shown in the panel. Enter it again if the operation fails.",
+        )}
       </p>
     {/if}
     <ActionButton variant="primary" type="submit" disabled={busy}
       >{busy
-        ? "Saving…"
+        ? $messages("Saving…")
         : mode === "new"
-          ? "Create agent"
+          ? $messages("Create agent")
           : mode === "token"
-            ? "Save token"
-            : "Save changes"}</ActionButton
+            ? $messages("Save token")
+            : $messages("Save changes")}</ActionButton
     >
     <ActionButton
       variant="ghost"
@@ -107,10 +118,10 @@
         ? `/agents/${encodeURIComponent(agent.id)}/${mode === "token" ? "channels" : "setup"}`
         : "/"}
       >{mode === "new"
-        ? "Cancel"
+        ? $messages("Cancel")
         : mode === "token"
-          ? "Back to channels"
-          : "Back to agent"}</ActionButton
+          ? $messages("Back to channels")
+          : $messages("Back to agent")}</ActionButton
     >
   </form>
 </section>

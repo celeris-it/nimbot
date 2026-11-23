@@ -1,3 +1,4 @@
+import { describePanelError, panelError } from "../panel/panel-errors.js";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import {
@@ -72,11 +73,11 @@ export function createMcpPanel({
 }: McpPanelDeps) {
   const app = new Hono();
   const changed = (c: Context) =>
-    c.json({ error: "MCP settings changed. Refresh and try again." }, 409);
+    c.json(panelError("mcp_settings_changed"), 409);
   app.onError((error, c) =>
     error instanceof McpCatalogValidationError
-      ? c.json({ error: error.message }, 400)
-      : c.json({ error: "MCP settings are unavailable." }, 503),
+      ? c.json(describePanelError(error.message), 400)
+      : c.json(panelError("mcp_unavailable"), 503),
   );
 
   app.get("/mcp", (c) =>
@@ -89,7 +90,7 @@ export function createMcpPanel({
     const example = mcpExamples.find(
       ({ id }) => id === c.req.param("exampleId"),
     );
-    if (!example) return c.json({ error: "MCP example not found." }, 404);
+    if (!example) return c.json(panelError("mcp_example_not_found"), 404);
     return c.json(
       await discover(example.endpoint, undefined, c.req.raw.signal),
     );
@@ -101,7 +102,7 @@ export function createMcpPanel({
     const definition = catalog.get(c.req.param("definitionId"));
     return definition
       ? c.json(definition)
-      : c.json({ error: "MCP definition not found." }, 404);
+      : c.json(panelError("mcp_definition_not_found"), 404);
   });
   app.post("/mcp/:definitionId", async (c) => {
     const fields = await jsonFields(c);
@@ -116,7 +117,7 @@ export function createMcpPanel({
   app.get("/mcp/:definitionId/discovery-agents", (c) => {
     const id = c.req.param("definitionId");
     if (!catalog.get(id))
-      return c.json({ error: "MCP definition not found." }, 404);
+      return c.json(panelError("mcp_definition_not_found"), 404);
     return c.json({
       agents: listAgents().filter((agent) => credentials.has(agent.id, id)),
     });
@@ -166,7 +167,7 @@ export function createMcpPanel({
   for (const route of ["/agents/:agentId/mcp", "/agents/:agentId/mcp/*"])
     app.use(route, async (c, next) => {
       if (!agentExists(c.req.param("agentId")!))
-        return c.json({ error: "Agent not found." }, 404);
+        return c.json(panelError("agent_not_found"), 404);
       await next();
     });
   app.get("/agents/:agentId/mcp", (c) => {
@@ -199,10 +200,7 @@ export function createMcpPanel({
     const fields = await jsonFields(c);
     const parsed = credentialFields.safeParse(fields);
     if (!parsed.success)
-      return c.json(
-        { error: "Enter a bearer credential without whitespace." },
-        400,
-      );
+      return c.json(panelError("invalid_mcp_bearer_credential"), 400);
     const { token } = parsed.data;
     const result = await credentials.set(
       c.req.param("agentId"),

@@ -78,6 +78,7 @@ it("manages rules and shows history per agent, with session, Origin and validati
   expect(rejected.status).toBe(400);
   expect(await rejected.json()).toEqual({
     error: "Always allow is only available for read-only actions",
+    code: "approval_allow_requires_read_only",
   });
   const created = await post(
     "/api/agents/a/approvals/rules",

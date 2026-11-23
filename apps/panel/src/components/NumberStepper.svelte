@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "../i18n/language.js";
   import ActionButton from "./ActionButton.svelte";
   import type { HTMLInputAttributes } from "svelte/elements";
   import Icon from "./Icon.svelte";
@@ -26,14 +27,14 @@
       variant="plain"
       type="button"
       tabindex={-1}
-      aria-label="Increase"
+      aria-label={$messages("Increase")}
       {disabled}
       onclick={() => step(1)}><Icon name="chevronUp" size={12} /></ActionButton
     ><ActionButton
       variant="plain"
       type="button"
       tabindex={-1}
-      aria-label="Decrease"
+      aria-label={$messages("Decrease")}
       {disabled}
       onclick={() => step(-1)}
       ><Icon name="chevronDown" size={12} /></ActionButton

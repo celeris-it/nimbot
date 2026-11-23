@@ -1925,27 +1925,31 @@ dd {
   padding-block-start: 32px;
   padding-block-end: 80px;
 }
-section[aria-label="Sign in"] {
+[data-ui="sign-in"] {
   width: min(100%, 440px);
   justify-self: center;
   display: grid;
   gap: 16px;
 }
-section[aria-label="Sign in"] small {
+[data-ui="sign-in-language"] {
+  display: grid;
+  gap: 6px;
+}
+[data-ui="sign-in"] small {
   letter-spacing: 0.15em;
   font-size: 0.75rem;
 }
-section[aria-label="Sign in"] h1 {
+[data-ui="sign-in"] h1 {
   font-size: 3rem;
 }
-section[aria-label="Sign in"] > p {
+[data-ui="sign-in"] > p {
   color: var(--color-muted);
   font-size: 0.8rem;
 }
-section[aria-label="Sign in"] .panel-card {
+[data-ui="sign-in"] .panel-card {
   padding: 24px;
 }
-section[aria-label="Sign in"] .panel-button {
+[data-ui="sign-in"] .panel-button {
   width: 100%;
 }
 #form-error:empty {

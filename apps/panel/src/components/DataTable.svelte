@@ -1,4 +1,5 @@
 <script lang="ts" generics="T">
+  import { messages } from "../i18n/language.js";
   import type { Snippet } from "svelte";
 
   let {
@@ -7,7 +8,7 @@
     rows,
     row,
     rowKey,
-    empty = "No records yet.",
+    empty,
     footer,
   }: {
     caption: string;
@@ -29,7 +30,9 @@
   <div class="table-heading">
     <h3 {id}>{caption}</h3>
     {#if overflows}
-      <p id={`${id}-scroll`}>Scroll horizontally to see all columns.</p>
+      <p id={`${id}-scroll`}>
+        {$messages("Scroll horizontally to see all columns.")}
+      </p>
     {/if}
   </div>
   {#if rows.length}
@@ -63,7 +66,9 @@
       </table>
     </div>
   {:else}
-    <p class="table-empty" role="status">{empty}</p>
+    <p class="table-empty" role="status">
+      {empty ?? $messages("No records yet.")}
+    </p>
   {/if}
   {#if footer}
     <div class="table-footer">{@render footer()}</div>

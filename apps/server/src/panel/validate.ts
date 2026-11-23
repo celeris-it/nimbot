@@ -1,3 +1,4 @@
+import { panelError, type PanelErrorCode } from "./panel-errors.js";
 import { zValidator } from "@hono/zod-validator";
 import type { Context } from "hono";
 import type { ZodType, z } from "zod";
@@ -9,10 +10,10 @@ export const validated = <
 >(
   target: Target,
   schema: Schema,
-  message: string,
+  code: PanelErrorCode,
 ) =>
   zValidator(target, schema, (result, c) =>
-    result.success ? undefined : c.json({ error: message }, 400),
+    result.success ? undefined : c.json(panelError(code), 400),
   );
 
 /**
@@ -22,12 +23,12 @@ export const validated = <
 export async function parseForm<Schema extends ZodType>(
   c: Context,
   schema: Schema,
-  message: string,
+  code: PanelErrorCode,
 ): Promise<
   { data: z.infer<Schema>; response?: never } | { response: Response }
 > {
   const result = schema.safeParse(await c.req.parseBody({ all: true }));
   return result.success
     ? { data: result.data as z.infer<Schema> }
-    : { response: c.json({ error: message }, 400) };
+    : { response: c.json(panelError(code), 400) };
 }

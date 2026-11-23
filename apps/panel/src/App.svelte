@@ -1,4 +1,10 @@
 <script lang="ts">
+  import {
+    clearFieldValidation,
+    localizeInvalidField,
+  } from "./i18n/validation.js";
+  import LanguageSelect from "./components/LanguageSelect.svelte";
+  import { messages, translateDescription } from "./i18n/language.js";
   import { onMount, tick, untrack } from "svelte";
   import type {
     AgentDetail,
@@ -64,7 +70,8 @@
   import type { ApprovalRule } from "../../server/src/approvals/approval-rules.js";
   import type { MemoryEntry } from "../../server/src/memory/host-memories.js";
   import Schedules from "./Schedules.svelte";
-  import { scheduleText } from "./labels.js";
+  import { scheduleText as getScheduleText } from "./labels.js";
+  const scheduleText = $derived(getScheduleText($messages));
 
   const { initialAppearance }: { initialAppearance: Appearance } = $props();
   let appearance = $state(untrack(() => initialAppearance));
@@ -78,13 +85,19 @@
   let directoryAttempt = $state(0);
   let agent = $state<AgentDetail>();
   let providerSettings = $state<ProviderSettingsState>();
-  let providerSettingsError = $state("");
+  let providerSettingsErrorMessage = $state<() => string>();
+  const providerSettingsError = $derived(
+    providerSettingsErrorMessage?.() ?? "",
+  );
   let agentModels = $state<AgentModels>();
   let usage = $state<AgentUsage>();
   let usageBefore = $state(usageCursor(location.search));
   let schedules = $state<ScheduleList>();
   let scheduleTimeZone = $state("");
-  let scheduleTimeZoneError = $state("");
+  let scheduleTimeZoneErrorMessage = $state<() => string>();
+  const scheduleTimeZoneError = $derived(
+    scheduleTimeZoneErrorMessage?.() ?? "",
+  );
   let memories = $state<{ memories: MemoryEntry[]; hasMore: boolean }>();
   let memoryPage = $state(1);
   let delegations = $state<DelegationHistory>();
@@ -114,12 +127,15 @@
   let contentAvailable = $state(false);
   let missing = $state(false);
   let options = $derived(
-    configurationOptions(session?.capabilities, status.agents),
+    configurationOptions($messages, session?.capabilities, status.agents),
   );
   let busy = $state(false);
-  let error = $state("");
-  let updateError = $state("");
-  let notice = $state("");
+  let errorMessage = $state<() => string>();
+  const error = $derived(errorMessage?.() ?? "");
+  let updateErrorMessage = $state<() => string>();
+  const updateError = $derived(updateErrorMessage?.() ?? "");
+  let noticeMessage = $state<() => string>();
+  const notice = $derived(noticeMessage?.() ?? "");
   let password = $state("");
   let deleteData = $state(false);
   const labelsKey = "nimbot-panel-nav-labels";
@@ -138,30 +154,35 @@
   let mainLinks = $derived(
     (
       [
-        { href: "/", label: "Agents", icon: "grid", available: true },
+        {
+          href: "/",
+          label: $messages("Agents"),
+          icon: "grid",
+          available: true,
+        },
         {
           href: "/providers",
-          label: "AI providers",
+          label: $messages("AI providers"),
           icon: "shield",
           available: session?.capabilities.providers,
         },
         {
           href: "/mcp",
-          label: "MCP catalog",
+          label: $messages("MCP catalog"),
           icon: "plug",
           available: session?.capabilities.mcp,
         },
         {
           href: "/agents/new",
-          label: "New agent",
+          label: $messages("New agent"),
           icon: "plus",
           available: session?.capabilities.createAgent,
         },
         {
           href: "/settings",
-          label: "Settings",
+          label: $messages("Settings"),
           icon: "settings",
-          available: session?.capabilities.scheduleSettings,
+          available: true,
         },
       ] as const
     ).filter((link) => link.available),
@@ -171,23 +192,31 @@
   let agentLinks = $derived(
     (
       [
-        { view: "setup", label: "Overview", icon: "home" },
-        { view: "channels", label: "Channels", icon: "link" },
-        { view: "usage", label: "Model and usage", icon: "activity" },
-        { view: "memory", label: "Memory", icon: "notebook" },
-        { view: "approvals", label: "Approvals", icon: "shield" },
-        { view: "access", label: "Access", icon: "key" },
+        { view: "setup", label: $messages("Overview"), icon: "home" },
+        { view: "channels", label: $messages("Channels"), icon: "link" },
+        {
+          view: "usage",
+          label: $messages("Model and usage"),
+          icon: "activity",
+        },
+        { view: "memory", label: $messages("Memory"), icon: "notebook" },
+        { view: "approvals", label: $messages("Approvals"), icon: "shield" },
+        { view: "access", label: $messages("Access"), icon: "key" },
         {
           view: "executions",
-          label: "Executions",
+          label: $messages("Executions"),
           icon: "activity",
           hidden: !session?.capabilities.executions,
         },
-        { view: "delegations", label: "Delegations", icon: "delegate" },
+        {
+          view: "delegations",
+          label: $messages("Delegations"),
+          icon: "delegate",
+        },
         { view: "schedules", label: scheduleText.link, icon: "clock" },
         {
           view: "settings",
-          label: "Agent settings",
+          label: $messages("Agent settings"),
           icon: "settings",
           hidden: !agent?.capabilities.edit,
         },
@@ -238,48 +267,48 @@
   }
   let title = $derived(
     path === "/login"
-      ? "Sign in"
+      ? $messages("Sign in")
       : path === "/"
-        ? "Agents"
+        ? $messages("Agents")
         : path === "/providers"
-          ? "AI providers"
+          ? $messages("AI providers")
           : mcpRoute
-            ? "MCP catalog"
+            ? $messages("MCP catalog")
             : route?.[2] === "executions"
-              ? "Executions"
+              ? $messages("Executions")
               : route?.[2] === "channels"
-                ? "Channels"
+                ? $messages("Channels")
                 : route?.[2] === "access"
-                  ? "Access"
+                  ? $messages("Access")
                   : route?.[2] === "usage"
-                    ? "Model and usage"
+                    ? $messages("Model and usage")
                     : route?.[2] === "schedules"
                       ? scheduleText.pageTitle
                       : route?.[2] === "delegations"
-                        ? "Delegations"
+                        ? $messages("Delegations")
                         : route?.[2] === "approvals"
-                          ? "Approvals"
+                          ? $messages("Approvals")
                           : route?.[2] === "memory"
-                            ? "Memory"
+                            ? $messages("Memory")
                             : path === "/agents/new"
-                              ? "Create agent"
+                              ? $messages("Create agent")
                               : route?.[2] === "settings"
-                                ? "Edit agent"
+                                ? $messages("Edit agent")
                                 : route?.[2] === "token"
-                                  ? "Bot token"
+                                  ? $messages("Bot token")
                                   : route?.[2] === "delete"
-                                    ? "Delete agent"
+                                    ? $messages("Delete agent")
                                     : route?.[2] === "process/restart"
-                                      ? "Restart agent"
+                                      ? $messages("Restart agent")
                                       : route?.[2] === "process/stop"
-                                        ? "Stop agent"
-                                        : "Agent setup",
+                                        ? $messages("Stop agent")
+                                        : $messages("Agent setup"),
   );
   let viewLabel = $derived(
     path === "/settings"
-      ? "Settings"
+      ? $messages("Settings")
       : route?.[2] === "setup"
-        ? "Overview"
+        ? $messages("Overview")
         : title,
   );
 
@@ -298,10 +327,18 @@
       // Storage can be unavailable; the choice then lasts for this visit only.
     }
   }
-  async function focusDestination(fallback = true) {
+  async function focusDestination(
+    fallback = true,
+    previousFocus = document.activeElement,
+  ) {
     const url = location.href;
     await tick();
     if (location.href !== url) return;
+    if (
+      document.activeElement !== previousFocus &&
+      document.activeElement !== document.body
+    )
+      return;
     const main = document.getElementById("main");
     if (!main) return;
     const target = document.getElementById(location.hash.slice(1));
@@ -354,16 +391,16 @@
     )
       agent = undefined;
     providerSettings = undefined;
-    providerSettingsError = "";
+    providerSettingsErrorMessage = undefined;
     schedules = undefined;
     scheduleTimeZone = "";
-    scheduleTimeZoneError = "";
+    scheduleTimeZoneErrorMessage = undefined;
     loaded = false;
     contentAvailable = false;
     missing = false;
-    error = "";
-    updateError = "";
-    notice = "";
+    errorMessage = undefined;
+    updateErrorMessage = undefined;
+    noticeMessage = undefined;
     password = "";
     deleteData = false;
     menuOpen = false;
@@ -397,6 +434,7 @@
     const current = new AbortController();
     controller = current;
     const initial = !loaded;
+    const previousFocus = document.activeElement;
     try {
       if (!session)
         session = await request<PanelSession>("/api/session", {
@@ -408,8 +446,7 @@
           signal: current.signal,
         });
       else if (path === "/settings") {
-        if (!session.capabilities.scheduleSettings) missing = true;
-        else {
+        if (session.capabilities.scheduleSettings) {
           const defaults = await request<ScheduleDefaults>(
             "/api/settings/schedules",
             {
@@ -424,7 +461,7 @@
             "/api/providers",
             { signal: current.signal },
           );
-          providerSettingsError = "";
+          providerSettingsErrorMessage = undefined;
         } catch (cause) {
           if (
             current.signal.aborted ||
@@ -432,10 +469,12 @@
           )
             throw cause;
           providerSettings = undefined;
-          providerSettingsError =
+          providerSettingsErrorMessage = () =>
             cause instanceof ApiError
-              ? cause.message
-              : "Could not load provider settings from the Nimbot Server.";
+              ? cause.display($messages)
+              : $messages(
+                  "Could not load provider settings from the Nimbot Server.",
+                );
         }
       } else if (mcpRoute) {
         const id = mcpRoute[1];
@@ -589,10 +628,10 @@
           (view === "process/restart" && !agent.capabilities.process?.restart);
       } else
         missing = path !== "/agents/new" || !session.capabilities.createAgent;
-      updateError = "";
+      updateErrorMessage = undefined;
       contentAvailable = true;
       loaded = true;
-      if (initial) void focusDestination();
+      if (initial) void focusDestination(true, previousFocus);
     } catch (cause) {
       if (current.signal.aborted) return;
       if (cause instanceof ApiError && cause.status === 401) {
@@ -603,9 +642,13 @@
         missing = true;
         agent = undefined;
       } else {
-        updateError = contentAvailable
-          ? `Could not update this view (${viewLabel}). Showing the last loaded data.`
-          : `Could not load this view (${viewLabel}).`;
+        updateErrorMessage = () =>
+          contentAvailable
+            ? $messages(
+                "Could not update this view ({0}). Showing the last loaded data.",
+                viewLabel,
+              )
+            : $messages("Could not load this view ({0}).", viewLabel);
       }
       loaded = true;
     } finally {
@@ -623,8 +666,8 @@
   ) {
     if (busy) return;
     busy = true;
-    error = "";
-    notice = "";
+    errorMessage = undefined;
+    noticeMessage = undefined;
     const startedPath = path;
     try {
       const result = await post<T>(url, fields);
@@ -654,13 +697,17 @@
           navigate("/");
           return;
         }
-        error =
-          "Could not confirm sign-in. Check your connection and try signing in again.";
+        errorMessage = () =>
+          $messages(
+            "Could not confirm sign-in. Check your connection and try signing in again.",
+          );
       } else
-        error =
+        errorMessage = () =>
           cause instanceof ApiError
-            ? cause.message
-            : "The result could not be confirmed. Refresh the status before retrying.";
+            ? cause.display($messages)
+            : $messages(
+                "The result could not be confirmed. Refresh the status before retrying.",
+              );
       await tick();
       document.getElementById("form-error")?.focus();
     } finally {
@@ -689,10 +736,12 @@
         `/api/agents/${encodeURIComponent(agent.id)}/${mode}`,
         fields,
         () => {
-          notice =
+          noticeMessage = () =>
             mode === "token"
-              ? "Token saved. Restart this agent to reconnect its bot."
-              : "Changes saved.";
+              ? $messages(
+                  "Token saved. Restart this agent to reconnect its bot.",
+                )
+              : $messages("Changes saved.");
           if (mode === "settings") {
             directoryAttempt++;
             void load();
@@ -707,7 +756,7 @@
       `/api/agents/${encodeURIComponent(agent.id)}/telegram`,
       fields,
       () => {
-        notice = "Telegram connection saved.";
+        noticeMessage = () => $messages("Telegram connection saved.");
         void load();
       },
     );
@@ -725,18 +774,28 @@
         `/api/agents/${encodeURIComponent(agent.id)}/discord/test`,
         fields,
         (result) => {
-          notice =
+          noticeMessage = () =>
             result.status === "delivered"
-              ? "Discord test delivered."
+              ? $messages("Discord test delivered.")
               : result.status === "sending"
-                ? "Discord test is still sending. Check its status again."
+                ? $messages(
+                    "Discord test is still sending. Check its status again.",
+                  )
                 : result.status === "uncertain"
-                  ? "Discord delivery is uncertain. Check your DMs before sending a new test."
+                  ? $messages(
+                      "Discord delivery is uncertain. Check your DMs before sending a new test.",
+                    )
                   : result.reason === "rate_limited"
-                    ? "Discord test was rate limited. Wait before sending a new test."
+                    ? $messages(
+                        "Discord test was rate limited. Wait before sending a new test.",
+                      )
                     : result.reason === "rejected"
-                      ? "Discord rejected the test. Check your DM settings and whether the bot is blocked."
-                      : "Discord test failed. Check the saved connection and DM availability.";
+                      ? $messages(
+                          "Discord rejected the test. Check your DM settings and whether the bot is blocked.",
+                        )
+                      : $messages(
+                          "Discord test failed. Check the saved connection and DM availability.",
+                        );
         },
       );
       return;
@@ -745,12 +804,14 @@
       `/api/agents/${encodeURIComponent(agent.id)}/discord${kind === "remove" ? "/remove" : ""}`,
       fields,
       (result) => {
-        notice =
+        noticeMessage = () =>
           (kind === "remove"
-            ? "Discord removed."
-            : "Discord connection saved.") +
+            ? $messages("Discord removed.")
+            : $messages("Discord connection saved.")) +
           (result.cleanupPending
-            ? " An unused credential file could not be erased. Check server storage permissions."
+            ? $messages(
+                " An unused credential file could not be erased. Check server storage permissions.",
+              )
             : "");
         void load();
       },
@@ -768,12 +829,14 @@
         if (kind === "delete") navigate("/");
         else if (kind === "stop" || kind === "restart") {
           navigate(`/agents/${id}/setup`);
-          notice =
+          noticeMessage = () =>
             kind === "restart"
-              ? "Agent restarted. Active work may have been interrupted."
-              : "Agent stopped. Files and history were kept.";
+              ? $messages(
+                  "Agent restarted. Active work may have been interrupted.",
+                )
+              : $messages("Agent stopped. Files and history were kept.");
         } else {
-          notice = "Agent started.";
+          noticeMessage = () => $messages("Agent started.");
           controller?.abort();
           controller = undefined;
           inFlight = false;
@@ -790,7 +853,7 @@
       ({ selected }) => {
         if (agentModels) agentModels = { ...agentModels, selected };
         if (usage) usage = { ...usage, quota: null };
-        notice = "Model saved for new turns.";
+        noticeMessage = () => $messages("Model saved for new turns.");
         void load();
       },
     );
@@ -812,14 +875,16 @@
       `/api/providers/${encodeURIComponent(id)}${suffix}`,
       kind === "save" ? { key: value } : {},
       () => {
-        notice =
+        noticeMessage = () =>
           kind === "save"
-            ? "API key saved for all agents."
+            ? $messages("API key saved for all agents.")
             : kind === "remove"
-              ? "Provider disconnected for all agents."
+              ? $messages("Provider disconnected for all agents.")
               : kind === "cancel"
-                ? "Login status updated."
-                : "Device login started. Complete authorization using the link below.";
+                ? $messages("Login status updated.")
+                : $messages(
+                    "Device login started. Complete authorization using the link below.",
+                  );
         void load();
       },
     );
@@ -840,9 +905,10 @@
           controller?.abort();
           inFlight = false;
           void load();
-          notice = result.cleanupPending
-            ? "Integration saved. Credential cleanup is pending."
-            : "Integration saved.";
+          noticeMessage = () =>
+            result.cleanupPending
+              ? $messages("Integration saved. Credential cleanup is pending.")
+              : $messages("Integration saved.");
         },
       );
     } else {
@@ -851,7 +917,7 @@
         JSON.stringify(settings),
         (result) => {
           navigate(`/mcp/${encodeURIComponent(result.id)}`, true);
-          notice = "Integration saved.";
+          noticeMessage = () => $messages("Integration saved.");
         },
       );
     }
@@ -894,9 +960,10 @@
       `/api/agents/${encodeURIComponent(agent.id)}/mcp/${encodeURIComponent(definition.id)}/${command}`,
       JSON.stringify({ revision: definition.revision, token }),
       (result) => {
-        notice = result.cleanupPending
-          ? "MCP access updated. Credential cleanup is pending."
-          : "MCP access updated.";
+        noticeMessage = () =>
+          result.cleanupPending
+            ? $messages("MCP access updated. Credential cleanup is pending.")
+            : $messages("MCP access updated.");
       },
     );
     if (path === startedPath && session) {
@@ -912,7 +979,7 @@
       `/api/agents/${encodeURIComponent(agent.id)}/delegations/${encodeURIComponent(id)}/cancel`,
       {},
       () => {
-        notice = "Cancellation requested.";
+        noticeMessage = () => $messages("Cancellation requested.");
       },
     );
     if (path === startedPath && session) {
@@ -933,7 +1000,10 @@
       { target, permission },
       () => {
         done = true;
-        notice = kind === "grant" ? "Grant added." : "Grant revoked.";
+        noticeMessage = () =>
+          kind === "grant"
+            ? $messages("Grant added.")
+            : $messages("Grant revoked.");
         controller?.abort();
         inFlight = false;
         void load("peers");
@@ -951,7 +1021,7 @@
       fields,
       () => {
         saved = true;
-        notice = "Rule added.";
+        noticeMessage = () => $messages("Rule added.");
         void load();
       },
     );
@@ -963,7 +1033,7 @@
       `/api/agents/${encodeURIComponent(agent.id)}/approvals/rules/${encodeURIComponent(id)}/revoke`,
       {},
       () => {
-        notice = "Rule revoked.";
+        noticeMessage = () => $messages("Rule revoked.");
         void load();
       },
     );
@@ -974,7 +1044,7 @@
       `/api/agents/${encodeURIComponent(agent.id)}/memories/${encodeURIComponent(id)}/delete`,
       {},
       () => {
-        notice = "Note deleted.";
+        noticeMessage = () => $messages("Note deleted.");
         void load();
       },
     );
@@ -990,7 +1060,7 @@
       { ...settings, cadence: JSON.stringify(settings.cadence) },
       () => {
         saved = true;
-        notice = scheduleText.saved;
+        noticeMessage = () => scheduleText.saved;
         void load();
       },
     );
@@ -1009,7 +1079,7 @@
       {},
       (result) => {
         saved = true;
-        notice =
+        noticeMessage = () =>
           "outcome" in result
             ? scheduleText.outcomes[
                 result.outcome as keyof typeof scheduleText.outcomes
@@ -1119,12 +1189,12 @@
 </script>
 
 <svelte:head>
-  <title>{path === "/settings" ? "Settings" : title} · Nimbot</title>
+  <title>{path === "/settings" ? $messages("Settings") : title} · Nimbot</title>
   <link rel="icon" type="image/svg+xml" href={logo} />
 </svelte:head>
-<a id="skip" href="#main">Skip to main content</a>
+<a id="skip" href="#main">{$messages("Skip to main content")}</a>
 {#snippet wordmark()}
-  <a href="/" data-ui="wordmark" aria-label="Nimbot home">
+  <a href="/" data-ui="wordmark" aria-label={$messages("Nimbot home")}>
     <img src={logo} alt="" width="30" height="30" />
     <span data-ui="wordmark-text"
       >nimbot<span data-ui="wordmark-dot">.</span></span
@@ -1151,7 +1221,7 @@
   <ActionButton
     variant="ghost"
     type="button"
-    aria-label="Sign out"
+    aria-label={$messages("Sign out")}
     disabled={busy}
     onclick={() => mutate("/api/logout", {}, expired)}
   >
@@ -1160,7 +1230,7 @@
       aria-hidden="true"
       data-ui={inSidebar ? "navigation-label" : undefined}
     >
-      Sign out
+      {$messages("Sign out")}
     </span>
   </ActionButton>
 {/snippet}
@@ -1193,19 +1263,21 @@
             ><Icon
               name={menuOpen ? "collapsePanel" : "expandPanel"}
               size={16}
-            /> Menu</ActionButton
+            />
+            {$messages("Menu")}</ActionButton
           >{/if}
         {@render signOut(false)}
       </div>
     {:else}<span data-ui="installation"
-        ><Icon name="shield" size={15} /> SELF-HOSTED & PRIVATE</span
+        ><Icon name="shield" size={15} />
+        {$messages("SELF-HOSTED & PRIVATE")}</span
       >{/if}
   </header>
 {/if}
 <div data-ui="panel-shell">
   {#if session && path !== "/login" && (!compact || menuOpen)}
     <nav
-      aria-label="Main navigation"
+      aria-label={$messages("Main navigation")}
       data-ui="main-navigation"
       data-expanded={!rail || navigationExpanded}
     >
@@ -1214,13 +1286,15 @@
         <ActionButton
           variant="ghost"
           type="button"
-          aria-label={navigationExpanded ? "Hide labels" : "Show labels"}
+          aria-label={navigationExpanded
+            ? $messages("Hide labels")
+            : $messages("Show labels")}
           aria-expanded={navigationExpanded}
           aria-controls="main-navigation-links"
           onclick={toggleLabels}
         >
           <Icon name={navigationExpanded ? "collapsePanel" : "expandPanel"} />
-          {#if navigationExpanded}<span>Hide labels</span>{/if}
+          {#if navigationExpanded}<span>{$messages("Hide labels")}</span>{/if}
         </ActionButton>{/if}
       <div id="main-navigation-links">
         <ul class="panel-menu">
@@ -1258,6 +1332,8 @@
     <main
       id="main"
       tabindex="-1"
+      oninvalidcapture={(event) => localizeInvalidField(event, $messages)}
+      oninputcapture={clearFieldValidation}
       data-page={path === "/login"
         ? "login"
         : path === "/"
@@ -1270,20 +1346,27 @@
       {#if notice && path !== "/settings"}<p role="status">{notice}</p>{/if}
       {#if updateError}<p role="status">{updateError}</p>
         <ActionButton onclick={() => load()}
-          >Retry loading {viewLabel}</ActionButton
+          >{$messages("Retry loading")} {viewLabel}</ActionButton
         >{/if}
       {#if path === "/login"}
-        <section aria-label="Sign in">
-          <small>ADMINISTRATION</small>
-          <h1 tabindex="-1">Your agent workspace.</h1>
-          <p>Sign in to check the status of your installation.</p>
+        <section data-ui="sign-in" aria-label={$messages("Sign in")}>
+          <small>{$messages("ADMINISTRATION")}</small>
+          <h1 tabindex="-1">{$messages("Your agent workspace.")}</h1>
+          <p>
+            {$messages("Sign in to check the status of your installation.")}
+          </p>
+          <div data-ui="sign-in-language">
+            <label for="login-language">{$messages("Language")}</label>
+            <LanguageSelect id="login-language" />
+          </div>
           <div class="panel-card">
             <form
               onsubmit={login}
               aria-describedby="form-error"
               aria-busy={busy}
             >
-              <label for="password">Administrator password</label>
+              <label for="password">{$messages("Administrator password")}</label
+              >
               <PasswordField
                 aria-invalid={error ? "true" : undefined}
                 id="password"
@@ -1295,22 +1378,24 @@
                 bind:value={password}
               />
               <p id="password-help">
-                Use the password configured on your server.
+                {$messages("Use the password configured on your server.")}
               </p>
               <p id="form-error" role="alert" tabindex="-1">{error}</p>
               <ActionButton variant="primary" type="submit" disabled={busy}
-                >{busy ? "Signing in…" : "Sign in to the panel"}</ActionButton
+                >{busy
+                  ? $messages("Signing in…")
+                  : $messages("Sign in to the panel")}</ActionButton
               >
             </form>
           </div>
         </section>
-      {:else if !loaded}<p role="status">Loading…</p>
-      {:else if missing}<h1 tabindex="-1">Page not found.</h1>
-        <p>This agent or action is no longer available.</p>
-        <ActionButton href="/">All agents</ActionButton>
+      {:else if !loaded}<p role="status">{$messages("Loading…")}</p>
+      {:else if missing}<h1 tabindex="-1">{$messages("Page not found.")}</h1>
+        <p>{$messages("This agent or action is no longer available.")}</p>
+        <ActionButton href="/">{$messages("All agents")}</ActionButton>
       {:else if !contentAvailable}
-        <h1 tabindex="-1">Status unavailable.</h1>
-        <ActionButton href="/">All agents</ActionButton>
+        <h1 tabindex="-1">{$messages("Status unavailable.")}</h1>
+        <ActionButton href="/">{$messages("All agents")}</ActionButton>
       {:else if path === "/"}
         <Dashboard
           agents={status.agents}
@@ -1318,16 +1403,16 @@
           refresh={() => load()}
         />
       {:else if path === "/settings"}
-        <h1 tabindex="-1">Settings</h1>
+        <h1 tabindex="-1">{$messages("Settings")}</h1>
         <div class="settings-section-list">
           <section aria-labelledby="panel-appearance-heading">
             <div class="settings-section-description">
               <h2 id="panel-appearance-heading" class="card-title">
                 <Icon name="settings" size={20} />
-                <label for="panel-appearance">Appearance</label>
+                <label for="panel-appearance">{$messages("Appearance")}</label>
               </h2>
               <p id="panel-appearance-help">
-                Changes apply immediately in this browser.
+                {$messages("Changes apply immediately in this browser.")}
               </p>
             </div>
             <div class="panel-card settings-card">
@@ -1343,76 +1428,102 @@
                   }
                 }}
               >
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
+                <option value="system">{$messages("System")}</option>
+                <option value="light">{$messages("Light")}</option>
+                <option value="dark">{$messages("Dark")}</option>
               </Select>
             </div>
           </section>
-          <section aria-labelledby="schedule-default-zone-heading">
+          <section aria-labelledby="panel-language-heading">
             <div class="settings-section-description">
-              <h2 id="schedule-default-zone-heading" class="card-title">
-                <Icon name="clock" size={20} />
-                <label for="schedule-default-zone">Schedule time zone</label>
+              <h2 id="panel-language-heading" class="card-title">
+                <label for="panel-language">{$messages("Language")}</label>
               </h2>
-              <p id="schedule-default-zone-help">
-                Enter an IANA time zone such as America/New_York or UTC. This
-                applies to new schedules created in Telegram and prefills the
-                schedule form in the panel.
+              <p id="panel-language-help">
+                {$messages("Changes apply immediately in this browser.")}
               </p>
             </div>
-            <form
-              class="panel-card settings-card"
-              aria-busy={busy}
-              aria-describedby="form-error"
-              onsubmit={(event) => {
-                event.preventDefault();
-                if (busy) return;
-                scheduleTimeZoneError = "";
-                void mutate<ScheduleDefaults>(
-                  "/api/settings/schedules",
-                  { timeZone: scheduleTimeZone },
-                  (result) => {
-                    scheduleTimeZone = result.timeZone;
-                    notice = "Schedule time zone saved.";
-                  },
-                  (cause) => {
-                    if (cause.status !== 400) return false;
-                    scheduleTimeZoneError = cause.message;
-                    void tick().then(() => {
-                      document.getElementById("schedule-default-zone")?.focus();
-                    });
-                    return true;
-                  },
-                );
-              }}
-            >
-              <TextField
-                id="schedule-default-zone"
-                aria-describedby={scheduleTimeZoneError
-                  ? "schedule-default-zone-help schedule-default-zone-error"
-                  : "schedule-default-zone-help"}
-                aria-invalid={scheduleTimeZoneError ? "true" : undefined}
-                bind:value={scheduleTimeZone}
-                oninput={() => {
-                  scheduleTimeZoneError = "";
-                  notice = "";
-                }}
-                required
-                disabled={busy}
-                spellcheck="false"
+            <div class="panel-card settings-card">
+              <LanguageSelect
+                id="panel-language"
+                describedBy="panel-language-help"
               />
-              {#if scheduleTimeZoneError}
-                <p id="schedule-default-zone-error" role="alert">
-                  {scheduleTimeZoneError}
-                </p>
-              {/if}
-              <ActionButton type="submit" variant="primary" disabled={busy}
-                >{busy ? "Saving…" : "Save time zone"}</ActionButton
-              >
-              <p class="settings-save-status" role="status">{notice}</p>
-            </form>
+            </div>
           </section>
+          {#if session?.capabilities.scheduleSettings}
+            <section aria-labelledby="schedule-default-zone-heading">
+              <div class="settings-section-description">
+                <h2 id="schedule-default-zone-heading" class="card-title">
+                  <Icon name="clock" size={20} />
+                  <label for="schedule-default-zone"
+                    >{$messages("Schedule time zone")}</label
+                  >
+                </h2>
+                <p id="schedule-default-zone-help">
+                  {$messages(
+                    "Enter an IANA time zone such as America/New_York or UTC. This applies to new schedules created in Telegram and prefills the schedule form in the panel.",
+                  )}
+                </p>
+              </div>
+              <form
+                class="panel-card settings-card"
+                aria-busy={busy}
+                aria-describedby="form-error"
+                onsubmit={(event) => {
+                  event.preventDefault();
+                  if (busy) return;
+                  scheduleTimeZoneErrorMessage = undefined;
+                  void mutate<ScheduleDefaults>(
+                    "/api/settings/schedules",
+                    { timeZone: scheduleTimeZone },
+                    (result) => {
+                      scheduleTimeZone = result.timeZone;
+                      noticeMessage = () =>
+                        $messages("Schedule time zone saved.");
+                    },
+                    (cause) => {
+                      if (cause.status !== 400) return false;
+                      scheduleTimeZoneErrorMessage = () =>
+                        cause.display($messages);
+                      void tick().then(() => {
+                        document
+                          .getElementById("schedule-default-zone")
+                          ?.focus();
+                      });
+                      return true;
+                    },
+                  );
+                }}
+              >
+                <TextField
+                  id="schedule-default-zone"
+                  aria-describedby={scheduleTimeZoneError
+                    ? "schedule-default-zone-help schedule-default-zone-error"
+                    : "schedule-default-zone-help"}
+                  aria-invalid={scheduleTimeZoneError ? "true" : undefined}
+                  bind:value={scheduleTimeZone}
+                  oninput={() => {
+                    scheduleTimeZoneErrorMessage = undefined;
+                    noticeMessage = undefined;
+                  }}
+                  required
+                  disabled={busy}
+                  spellcheck="false"
+                />
+                {#if scheduleTimeZoneError}
+                  <p id="schedule-default-zone-error" role="alert">
+                    {scheduleTimeZoneError}
+                  </p>
+                {/if}
+                <ActionButton type="submit" variant="primary" disabled={busy}
+                  >{busy
+                    ? $messages("Saving…")
+                    : $messages("Save time zone")}</ActionButton
+                >
+                <p class="settings-save-status" role="status">{notice}</p>
+              </form>
+            </section>
+          {/if}
         </div>
       {:else if path === "/providers"}
         <ProviderSettings
@@ -1425,23 +1536,25 @@
       {:else if path === "/agents/new"}
         {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
       {:else if path === "/mcp"}
-        <h1 id="mcp-catalog" tabindex="-1">MCP catalog</h1>
+        <h1 id="mcp-catalog" tabindex="-1">{$messages("MCP catalog")}</h1>
         <ActionButton variant="primary" href="/mcp/new"
-          >Add integration</ActionButton
+          >{$messages("Add integration")}</ActionButton
         >
         {#if mcpDefinitions.length === 0}
-          <p>No integrations in the catalog.</p>
+          <p>{$messages("No integrations in the catalog.")}</p>
         {:else}
-          <section class="panel-card" aria-label="Integrations">
+          <section class="panel-card" aria-label={$messages("Integrations")}>
             <ul>
               {#each mcpDefinitions as definition (definition.id)}
                 <li>
                   <a href={`/mcp/${encodeURIComponent(definition.id)}`}
                     >{definition.label}</a
                   >
-                  · {definition.enabled ? "Enabled" : "Disabled"}
+                  · {definition.enabled
+                    ? $messages("Enabled")
+                    : $messages("Disabled")}
                   {#if definition.blockedTools?.length}<span class="panel-badge"
-                      >Review needed</span
+                      >{$messages("Review needed")}</span
                     >{/if}
                 </li>
               {/each}
@@ -1449,16 +1562,19 @@
           </section>
         {/if}
         <section class="grid gap-4" aria-labelledby="mcp-examples-heading">
-          <h2 id="mcp-examples-heading">Examples</h2>
+          <h2 id="mcp-examples-heading">{$messages("Examples")}</h2>
           <ul class="grid gap-4 sm:grid-cols-3">
             {#each mcpExamples as example (example.id)}
               <li class="panel-card">
                 <h3>{example.label}</h3>
-                <p class="grow">{example.description}</p>
+                <p class="grow">
+                  {translateDescription($messages, example.description)}
+                </p>
                 <ActionButton
                   class="self-start"
                   href={`/mcp/new?example=${encodeURIComponent(example.id)}`}
-                  aria-label={`Set up ${example.label}`}>Set up</ActionButton
+                  aria-label={$messages("Set up {0}", example.label)}
+                  >{$messages("Set up")}</ActionButton
                 >
               </li>
             {/each}
@@ -1467,12 +1583,12 @@
       {:else if mcpRoute}
         <h1 tabindex="-1">
           {mcpDefinition
-            ? `Edit ${mcpDefinition.label}`
+            ? $messages("Edit {0}", mcpDefinition.label)
             : mcpExample
-              ? `Set up ${mcpExample.label}`
-              : "Add MCP integration"}
+              ? $messages("Set up {0}", mcpExample.label)
+              : $messages("Add MCP integration")}
         </h1>
-        <ActionButton href="/mcp">Back to catalog</ActionButton>
+        <ActionButton href="/mcp">{$messages("Back to catalog")}</ActionButton>
         {#key path + (mcpDefinition?.revision ?? mcpExample?.id ?? "")}
           <McpDefinitionForm
             definition={mcpDefinition}
@@ -1495,7 +1611,7 @@
               refresh={() => load()}
             />{/key}
         {:else if route[2] === "access"}
-          <h1 tabindex="-1">Access for {agent.name}</h1>
+          <h1 tabindex="-1">{$messages("Access for")} {agent.name}</h1>
           {#key agent.id}
             <div class="settings-section-list">
               <Peers
@@ -1587,14 +1703,18 @@
           {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
         {:else if route[2] === "process/stop" || route[2] === "process/restart"}
           <h1 tabindex="-1">
-            {route[2] === "process/restart" ? "Restart" : "Stop"}
+            {route[2] === "process/restart"
+              ? $messages("Restart")
+              : $messages("Stop")}
             {agent.name}?
           </h1>
           <p>
-            The Agent Host process will be {route[2] === "process/restart"
-              ? "stopped and started again"
-              : "stopped"}. Active work may be interrupted. Files and
-            conversation history are kept.
+            {$messages("The Agent Host process will be")}
+            {route[2] === "process/restart"
+              ? $messages("stopped and started again")
+              : $messages("stopped")}{$messages(
+              ". Active work may be interrupted. Files and conversation history are kept.",
+            )}
           </p>
           <div class="button-row">
             <ActionButton
@@ -1603,27 +1723,29 @@
               onclick={() =>
                 action(route?.[2] === "process/restart" ? "restart" : "stop")}
               >{busy
-                ? "Working…"
+                ? $messages("Working…")
                 : route[2] === "process/restart"
-                  ? "Confirm restart"
-                  : "Confirm stop"}</ActionButton
+                  ? $messages("Confirm restart")
+                  : $messages("Confirm stop")}</ActionButton
             >
             <ActionButton
               variant="ghost"
               href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-              >Cancel</ActionButton
+              >{$messages("Cancel")}</ActionButton
             >
           </div>
         {:else if route[2] === "delete"}
-          <h1 tabindex="-1">Delete {agent.name}?</h1>
+          <h1 tabindex="-1">{$messages("Delete")} {agent.name}?</h1>
           <p>
-            Its Agent Host will stop. Agent data is kept unless you explicitly
-            delete it below.
+            {$messages(
+              "Its Agent Host will stop. Agent data is kept unless you explicitly delete it below.",
+            )}
           </p>
           {#if agent.botUsername}
             <p>
-              Local Telegram credentials and the chat binding will be erased.
-              The Telegram bot can be revoked separately in BotFather.
+              {$messages(
+                "Local Telegram credentials and the chat binding will be erased. The Telegram bot can be revoked separately in BotFather.",
+              )}
             </p>
           {/if}
           <form
@@ -1635,21 +1757,21 @@
             aria-busy={busy}
           >
             <Checkbox bind:checked={deleteData}
-              >Also permanently delete the agent data directory and AI
-              conversation history, including its workspace, task history and
-              browser profile.</Checkbox
+              >{$messages(
+                "Also permanently delete the agent data directory and AI conversation history, including its workspace, task history and browser profile.",
+              )}</Checkbox
             >
             <div class="button-row">
               <ActionButton variant="danger" type="submit" disabled={busy}
                 >{busy
-                  ? "Deleting…"
+                  ? $messages("Deleting…")
                   : deleteData
-                    ? "Delete agent and its data"
-                    : "Delete agent, keep its data"}</ActionButton
+                    ? $messages("Delete agent and its data")
+                    : $messages("Delete agent, keep its data")}</ActionButton
               ><ActionButton
                 variant="ghost"
                 href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-                >Cancel</ActionButton
+                >{$messages("Cancel")}</ActionButton
               >
             </div>
           </form>

@@ -116,6 +116,7 @@ it("protects global provider operations with zero agents", async () => {
   expect(rejected.status).toBe(422);
   expect(await rejected.json()).toEqual({
     error: "The provider rejected the API key.",
+    code: "provider_key_rejected",
   });
   settings.save.mockRejectedValueOnce(new HostProviderError(502));
   const unavailable = await post("/api/providers/openai", "key=private-key");
@@ -123,6 +124,7 @@ it("protects global provider operations with zero agents", async () => {
   expect(await unavailable.json()).toEqual({
     error:
       "Could not validate the API key. Try again when the provider is available.",
+    code: "provider_key_check_failed",
   });
   settings.save.mockRejectedValueOnce(new Error("private-key /secret/path"));
   const failure = await post("/api/providers/openai", "key=private-key");

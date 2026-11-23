@@ -269,6 +269,7 @@ it("rejects terminal cancellations and exposes only sanitized unavailable errors
   expect(result.status).toBe(503);
   expect(await result.json()).toEqual({
     error: "Delegation cancellation unavailable.",
+    code: "delegation_cancellation_unavailable",
   });
   const unavailable = createPanel(f.config, { getAgentSetup: f.setup });
   const login = await unavailable.request("/api/login", {

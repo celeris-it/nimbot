@@ -1331,6 +1331,9 @@ test("aligns Settings controls without overflow across viewport sizes", async ({
     }
     await appearance.focus();
     await appearance.press("Tab");
+    const language = page.getByRole("combobox", { name: "Language" });
+    await expect(language).toBeFocused();
+    await language.press("Tab");
     await expect(zone).toBeFocused();
     await expect(zone).toHaveCSS("outline-style", "solid");
     await zone.press("Tab");
@@ -2791,7 +2794,7 @@ test("keeps capability-gated links out of both navigation bars", async ({
     mainNav
       .getByRole("link")
       .filter({ hasNot: page.locator("[data-ui=wordmark-text]") }),
-  ).toHaveText(["Agents"]);
+  ).toHaveText(["Agents", "Settings"]);
   const agentNav = page.getByRole("navigation", { name: "Agent navigation" });
   await expect(agentNav.getByRole("link", { name: "Overview" })).toBeVisible();
   await expect(
@@ -2800,7 +2803,7 @@ test("keeps capability-gated links out of both navigation bars", async ({
   const search = page.getByRole("searchbox", { name: "Search options" });
   const results = page.getByRole("region", { name: "Matching options" });
   for (const query of [
-    "appearance",
+    "schedule time zone",
     "agent settings",
     "mcp",
     "OpenAI",
@@ -2837,6 +2840,11 @@ test("keeps capability-gated links out of both navigation bars", async ({
     page.getByRole("region", { name: "MCP integrations" }),
   ).toHaveCount(0);
   expect(mcpRequests).toBe(0);
+  await mainNav.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Language" })).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "Schedule time zone" }),
+  ).toHaveCount(0);
 });
 
 test("keeps the available Access section usable and retries only the failed section", async ({

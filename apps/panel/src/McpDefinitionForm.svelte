@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "./i18n/language.js";
   import {
     ActionButton,
     Checkbox,
@@ -58,7 +59,8 @@
     ),
   );
   let nextId = untrack(() => tools.length);
-  let parseError = $state("");
+  let parseErrorMessage = $state<() => string>();
+  const parseError = $derived(parseErrorMessage?.() ?? "");
   let discovery = $state<McpDiscoveryResult>();
   let credentialAgent = $state("");
   let checkingExample = $state(false);
@@ -69,13 +71,14 @@
   let saveDisabled = $derived(
     busy || (!!example && (checkingExample || tools.length === 0)),
   );
-  const discoveryStatus = {
-    timeout: "Connection timed out.",
-    redirect: "The endpoint attempted to redirect the connection.",
-    unauthorized:
+  const discoveryStatus = $derived({
+    timeout: $messages("Connection timed out."),
+    redirect: $messages("The endpoint attempted to redirect the connection."),
+    unauthorized: $messages(
       "The endpoint rejected the connection. Check the selected credential.",
-    unavailable: "The MCP endpoint is unavailable.",
-  };
+    ),
+    unavailable: $messages("The MCP endpoint is unavailable."),
+  });
 
   onMount(() => {
     if (!example) return;
@@ -139,20 +142,24 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (saveDisabled) return;
-    parseError = "";
+    parseErrorMessage = undefined;
     const parsed: McpCatalogTool[] = [];
     for (const tool of tools) {
       try {
         const schema: unknown = JSON.parse(tool.schema);
         if (typeof schema !== "object" || !schema || Array.isArray(schema))
-          throw new Error("Expected an object schema.");
+          throw new Error($messages("Expected an object schema."));
         parsed.push({
           name: tool.name,
           access: tool.access,
           inputSchema: schema as Record<string, unknown>,
         });
       } catch {
-        parseError = `Enter a valid JSON schema for ${tool.name || "the unnamed tool"}.`;
+        parseErrorMessage = () =>
+          $messages(
+            "Enter a valid JSON schema for {0}.",
+            tool.name || $messages("the unnamed tool"),
+          );
         return;
       }
     }
@@ -174,18 +181,19 @@
 <form aria-busy={busy} onsubmit={submit}>
   {#if definition?.blockedTools?.length}
     <p class="panel-alert" role="alert">
-      Some tools are disabled after a remote change. Review their schemas and
-      access before approving them again.
+      {$messages(
+        "Some tools are disabled after a remote change. Review their schemas and access before approving them again.",
+      )}
     </p>
   {/if}
-  <label for="integration-label">Integration name</label>
+  <label for="integration-label">{$messages("Integration name")}</label>
   <TextField
     id="integration-label"
     bind:value={label}
     maxlength={96}
     required
   />
-  <label for="integration-endpoint">HTTPS endpoint</label>
+  <label for="integration-endpoint">{$messages("HTTPS endpoint")}</label>
   <TextField
     id="integration-endpoint"
     type="url"
@@ -197,41 +205,47 @@
   />
   {#if !example}
     <p id="mcp-endpoint-help">
-      Use an endpoint you trust. Changing it removes current agent grants and
-      credentials.
+      {$messages(
+        "Use an endpoint you trust. Changing it removes current agent grants and credentials.",
+      )}
     </p>
-    <Switch bind:checked={enabled}>Enable integration</Switch>
+    <Switch bind:checked={enabled}>{$messages("Enable integration")}</Switch>
   {/if}
   {#if definition || example}
-    <h2>{example ? "Available tools" : "Connection test"}</h2>
+    <h2>
+      {example ? $messages("Available tools") : $messages("Connection test")}
+    </h2>
   {/if}
   {#if definition}
-    <label for="mcp-discovery-credential">Connection credential</label>
+    <label for="mcp-discovery-credential"
+      >{$messages("Connection credential")}</label
+    >
     <Select id="mcp-discovery-credential" bind:value={credentialAgent}>
-      <option value="">No credential</option>
+      <option value="">{$messages("No credential")}</option>
       {#each discoveryAgents as agent (agent.id)}
         <option value={agent.id}>{agent.name} ({agent.id})</option>
       {/each}
     </Select>
     {#if endpointChanged}<p>
-        Save the endpoint before testing the connection.
+        {$messages("Save the endpoint before testing the connection.")}
       </p>{/if}
     <ActionButton
       type="button"
       disabled={busy || endpointChanged}
-      onclick={testConnection}>Test connection</ActionButton
+      onclick={testConnection}>{$messages("Test connection")}</ActionButton
     >
   {/if}
   {#if example && checkingExample}
-    <p role="status">Finding tools…</p>
+    <p role="status">{$messages("Finding tools…")}</p>
   {/if}
   {#if definition || example}
     {#if discovery && !endpointChanged}
       {#if discovery.status === "connected"}
         <p role="status">
-          Connected. {discovery.tools.length
-            ? "Review the tools you want to approve."
-            : "No supported tools were found."}
+          {$messages("Connected.")}
+          {discovery.tools.length
+            ? $messages("Review the tools you want to approve.")
+            : $messages("No supported tools were found.")}
         </p>
         {#if discovery.tools.length}
           <ul class="discovered">
@@ -246,8 +260,8 @@
                   onclick={() => reviewTool(tool)}
                 >
                   {tools.some(({ name }) => name === tool.name)
-                    ? "Review schema"
-                    : "Review tool"}
+                    ? $messages("Review schema")
+                    : $messages("Review tool")}
                 </ActionButton>
               </li>
             {/each}
@@ -256,7 +270,9 @@
       {:else}
         <p role="status">
           {example && discovery.status === "unauthorized"
-            ? "The endpoint rejected the connection without credentials."
+            ? $messages(
+                "The endpoint rejected the connection without credentials.",
+              )
             : discoveryStatus[discovery.status]}
         </p>
       {/if}
@@ -266,16 +282,17 @@
     <ActionButton
       type="button"
       disabled={checkingExample}
-      onclick={testExampleConnection}>Retry connection</ActionButton
+      onclick={testExampleConnection}
+      >{$messages("Retry connection")}</ActionButton
     >
   {/if}
 
-  <h2>Approved tools</h2>
-  {#if tools.length === 0}<p>No tools selected.</p>{/if}
+  <h2>{$messages("Approved tools")}</h2>
+  {#if tools.length === 0}<p>{$messages("No tools selected.")}</p>{/if}
   {#each tools as tool (tool.id)}
     <fieldset class="panel-card">
-      <legend>{tool.name || "New tool"}</legend>
-      <label for={`mcp-tool-name-${tool.id}`}>Tool name</label>
+      <legend>{tool.name || $messages("New tool")}</legend>
+      <label for={`mcp-tool-name-${tool.id}`}>{$messages("Tool name")}</label>
       <TextField
         id={`mcp-tool-name-${tool.id}`}
         bind:value={tool.name}
@@ -284,16 +301,18 @@
         maxlength={128}
         required
       />
-      <label for={`mcp-tool-access-${tool.id}`}>Access</label>
+      <label for={`mcp-tool-access-${tool.id}`}>{$messages("Access")}</label>
       <Select
         id={`mcp-tool-access-${tool.id}`}
         bind:value={tool.access}
         onchange={() => (tool.reviewed = false)}
       >
-        <option value="write">Write or unknown</option>
-        <option value="read">Read only</option>
+        <option value="write">{$messages("Write or unknown")}</option>
+        <option value="read">{$messages("Read only")}</option>
       </Select>
-      <label for={`mcp-tool-schema-${tool.id}`}>Argument schema (JSON)</label>
+      <label for={`mcp-tool-schema-${tool.id}`}
+        >{$messages("Argument schema (JSON)")}</label
+      >
       <textarea
         class="panel-textarea"
         id={`mcp-tool-schema-${tool.id}`}
@@ -305,21 +324,23 @@
         required></textarea>
       {#if definition?.blockedTools?.includes(tool.name)}
         <p id={`mcp-tool-review-help-${tool.id}`}>
-          Disabled pending review. Test the connection to retrieve the current
-          schema, then review the schema and access above.
+          {$messages(
+            "Disabled pending review. Test the connection to retrieve the current schema, then review the schema and access above.",
+          )}
         </p>
         <Checkbox
           bind:checked={tool.reviewed}
           disabled={busy}
           aria-describedby={`mcp-tool-review-help-${tool.id}`}
-          >I reviewed the schema and access for {tool.name}</Checkbox
+          >{$messages("I reviewed the schema and access for")}
+          {tool.name}</Checkbox
         >
       {/if}
       <ActionButton
         type="button"
         disabled={busy}
         onclick={() => (tools = tools.filter((item) => item.id !== tool.id))}
-        >Remove tool</ActionButton
+        >{$messages("Remove tool")}</ActionButton
       >
     </fieldset>
   {/each}
@@ -329,11 +350,11 @@
       <ActionButton
         type="button"
         disabled={busy || tools.length >= 32}
-        onclick={addTool}>Add tool</ActionButton
+        onclick={addTool}>{$messages("Add tool")}</ActionButton
       >
     {/if}
     <ActionButton variant="primary" type="submit" disabled={saveDisabled}
-      >Save integration</ActionButton
+      >{$messages("Save integration")}</ActionButton
     >
   </div>
 </form>

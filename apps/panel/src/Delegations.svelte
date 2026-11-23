@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formattingLocale, messages } from "./i18n/language.js";
   import ActionButton from "./components/ActionButton.svelte";
   import type {
     DelegationHistory,
@@ -22,52 +23,60 @@
   } = $props();
 
   let base = $derived(`/agents/${encodeURIComponent(agent.id)}`);
-  const statuses: Record<DelegationHistoryEntry["status"], string> = {
-    pending: "Pending handoff",
-    discarded: "Discarded",
-    queued: "Queued",
-    running: "Running",
-    completed: "Completed",
-    failed: "Failed",
-    cancelled: "Cancelled",
-    interrupted: "Interrupted",
-    unavailable: "Child unavailable",
-  };
+  const statuses: Record<DelegationHistoryEntry["status"], string> = $derived({
+    pending: $messages("Pending handoff"),
+    discarded: $messages("Discarded"),
+    queued: $messages("Queued"),
+    running: $messages("Running"),
+    completed: $messages("Completed"),
+    failed: $messages("Failed"),
+    cancelled: $messages("Cancelled"),
+    interrupted: $messages("Interrupted"),
+    unavailable: $messages("Child unavailable"),
+  });
   const reasons = new Map([
-    ["parent_failed", "Parent task failed."],
-    ["parent_cancelled", "Parent task was cancelled."],
-    ["parent_interrupted", "Parent task was interrupted."],
-    ["access_revoked", "Delegation access was revoked."],
+    ["parent_failed", $messages("Parent task failed.")],
+    ["parent_cancelled", $messages("Parent task was cancelled.")],
+    ["parent_interrupted", $messages("Parent task was interrupted.")],
+    ["access_revoked", $messages("Delegation access was revoked.")],
   ]);
 </script>
 
-<h1 tabindex="-1">Delegations from {agent.name}</h1>
+<h1 tabindex="-1">{$messages("Delegations from")} {agent.name}</h1>
 <ActionButton disabled={busy} onclick={refresh}
-  >Refresh delegations</ActionButton
+  >{$messages("Refresh delegations")}</ActionButton
 >
-<ActionButton href={`${base}/setup`}>Back to agent</ActionButton>
+<ActionButton href={`${base}/setup`}>{$messages("Back to agent")}</ActionButton>
 {#if !data}
-  <p role="status">Delegation history is unavailable. Refresh to try again.</p>
+  <p role="status">
+    {$messages("Delegation history is unavailable. Refresh to try again.")}
+  </p>
 {:else if data.delegations.length === 0}
-  <p role="status">No delegations{page > 1 ? " on this page" : ""}.</p>
+  <p role="status">
+    {$messages(page > 1 ? "No delegations on this page" : "No delegations")}.
+  </p>
 {:else}
-  <ul class="history" aria-label="Delegation history" aria-busy={busy}>
+  <ul
+    class="history"
+    aria-label={$messages("Delegation history")}
+    aria-busy={busy}
+  >
     {#each data.delegations as entry (entry.id)}
       {@const reason = entry.reason ? reasons.get(entry.reason) : undefined}
       <li class="panel-card">
-        <h2>To {entry.targetAgentId}</h2>
+        <h2>{$messages("To")} {entry.targetAgentId}</h2>
         <p>
           <strong>{statuses[entry.status]}</strong>
           {#if entry.status === "running" && entry.cancellationRequested}
-            · Cancellation requested
+            {$messages("· Cancellation requested")}
           {/if}
-          · {new Date(entry.createdAt).toLocaleString()}
+          · {new Date(entry.createdAt).toLocaleString($formattingLocale)}
         </p>
         <p class="brief">{entry.briefPreview}</p>
         {#if reason}<p>{reason}</p>{/if}
         {#if entry.canCancel}
           <ActionButton disabled={busy} onclick={() => cancel(entry.id)}
-            >Cancel child</ActionButton
+            >{$messages("Cancel child")}</ActionButton
           >
         {/if}
       </li>
@@ -75,16 +84,16 @@
   </ul>
 {/if}
 {#if page > 1 || data?.hasMore}
-  <nav aria-label="Delegation pages">
+  <nav aria-label={$messages("Delegation pages")}>
     {#if page > 1}
       <ActionButton href={`${base}/delegations?page=${page - 1}`}
-        >Previous</ActionButton
+        >{$messages("Previous")}</ActionButton
       >
     {/if}
-    <span>Page {page}</span>
+    <span>{$messages("Page")} {page}</span>
     {#if data?.hasMore && page < 1000}
       <ActionButton href={`${base}/delegations?page=${page + 1}`}
-        >Next</ActionButton
+        >{$messages("Next")}</ActionButton
       >
     {/if}
   </nav>

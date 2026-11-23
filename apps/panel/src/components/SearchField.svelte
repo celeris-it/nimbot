@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { messages } from "../i18n/language.js";
   import Icon from "./Icon.svelte";
   let {
-    label = "Search",
-    placeholder = "Search…",
+    label,
+    placeholder,
     value = $bindable(""),
     onfocus,
     oninput,
@@ -18,8 +19,8 @@
 <label class="panel-input" data-ui="search"
   ><Icon name="search" size={17} /><input
     type="search"
-    aria-label={label}
-    {placeholder}
+    aria-label={label ?? $messages("Search")}
+    placeholder={placeholder ?? $messages("Search…")}
     {onfocus}
     {oninput}
     bind:value

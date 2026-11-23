@@ -243,6 +243,7 @@ export function openScheduleStore(
     } catch (error) {
       throw new ScheduleValidationError(
         error instanceof Error ? error.message : "Invalid cadence.",
+        { cause: error },
       );
     }
     return {

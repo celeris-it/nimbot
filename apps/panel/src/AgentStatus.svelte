@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formattingLocale, messages } from "./i18n/language.js";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   import { providers } from "../../server/src/providers/provider-contracts.js";
   import { ActionButton, Icon } from "./components/index.js";
@@ -14,15 +15,15 @@
     action: (kind: "start") => Promise<void>;
     refresh: () => void;
   } = $props();
-  const providerLabels = {
-    available: "Available",
-    rejected: "Reconnect required",
-    restricted: "Access restricted",
-    rate_limited: "Rate limited",
-    unavailable: "Unavailable",
-    unverified: "Unverified",
-    not_configured: "Not configured",
-  };
+  const providerLabels = $derived({
+    available: $messages("Available"),
+    rejected: $messages("Reconnect required"),
+    restricted: $messages("Access restricted"),
+    rate_limited: $messages("Rate limited"),
+    unavailable: $messages("Unavailable"),
+    unverified: $messages("Unverified"),
+    not_configured: $messages("Not configured"),
+  });
   let base = $derived(`/agents/${encodeURIComponent(agent.id)}`);
   let available = $derived(
     agent.hostState
@@ -31,54 +32,67 @@
   );
   let processMessage = $derived(
     agent.process?.state === "starting"
-      ? "The Agent Host is starting. Wait for the operation to finish."
+      ? $messages(
+          "The Agent Host is starting. Wait for the operation to finish.",
+        )
       : agent.process?.state === "stopping"
-        ? "The Agent Host is stopping. Wait for the operation to finish."
+        ? $messages(
+            "The Agent Host is stopping. Wait for the operation to finish.",
+          )
         : available
-          ? "The Agent Host is available."
+          ? $messages("The Agent Host is available.")
           : agent.process?.state === "running"
-            ? "The process is running, but its Host API is unavailable. Refresh status or restart the agent."
-            : "The agent is saved. Start the Agent Host to make it available.",
+            ? $messages(
+                "The process is running, but its Host API is unavailable. Refresh status or restart the agent.",
+              )
+            : $messages(
+                "The agent is saved. Start the Agent Host to make it available.",
+              ),
   );
 </script>
 
 <h1 class="sr-only" tabindex="-1">{agent.name}</h1>
 <ActionButton href={`${base}/channels`}>
-  <Icon name="link" size={16} />Manage channels
+  <Icon name="link" size={16} />{$messages("Manage channels")}
 </ActionButton>
 <div class="settings-section-list" data-ui="agent-overview">
   <section aria-labelledby="agent-host-heading">
     <div class="settings-section-description">
       <h2 id="agent-host-heading" class="card-title">
         <Icon name="server" size={20} />{agent.process
-          ? `Agent Host ${processLabels[agent.process.state].toLowerCase()}.`
-          : "Agent Host unavailable."}
+          ? $messages(
+              "Agent Host {0}.",
+              $messages(processLabels[agent.process.state]).toLowerCase(),
+            )
+          : $messages("Agent Host unavailable.")}
       </h2>
       <p>{processMessage}</p>
     </div>
     <div class="panel-card">
       <dl>
         {#if agent.process}
-          <dt>Process</dt>
-          <dd>{processLabels[agent.process.state]}</dd>
+          <dt>{$messages("Process")}</dt>
+          <dd>{$messages(processLabels[agent.process.state])}</dd>
         {/if}
         {#if agent.hostState}
-          <dt>Host API</dt>
+          <dt>{$messages("Host API")}</dt>
           <dd>
-            {{ ready: "Available", busy: "Busy", unavailable: "Offline" }[
-              agent.hostState
-            ]}
+            {{
+              ready: $messages("Available"),
+              busy: $messages("Busy"),
+              unavailable: $messages("Offline"),
+            }[agent.hostState]}
           </dd>
         {/if}
         {#if agent.process}
-          <dt>After a Server restart</dt>
+          <dt>{$messages("After a Server restart")}</dt>
           <dd>
             {agent.process.desiredState === "running"
-              ? "Restore this agent’s Host"
-              : "Leave this agent stopped"}
+              ? $messages("Restore this agent’s Host")
+              : $messages("Leave this agent stopped")}
           </dd>
         {/if}
-        <dt>Identifier</dt>
+        <dt>{$messages("Identifier")}</dt>
         <dd>{agent.id}</dd>
       </dl>
       <div class="button-row">
@@ -87,21 +101,27 @@
             disabled={busy}
             onclick={() => action("start")}
             ><Icon name="play" size={16} />{busy
-              ? "Starting…"
-              : "Start agent"}</ActionButton
+              ? $messages("Starting…")
+              : $messages("Start agent")}</ActionButton
           >{/if}
         {#if agent.process && agent.capabilities.process?.stop}<ActionButton
             variant="danger"
             href={`${base}/process/stop`}
-            ><Icon name="stop" size={16} />Stop agent…</ActionButton
+            ><Icon name="stop" size={16} />{$messages(
+              "Stop agent…",
+            )}</ActionButton
           >{/if}
         {#if agent.process && agent.capabilities.process?.restart}<ActionButton
             variant="warning"
             href={`${base}/process/restart`}
-            ><Icon name="restart" size={16} />Restart agent…</ActionButton
+            ><Icon name="restart" size={16} />{$messages(
+              "Restart agent…",
+            )}</ActionButton
           >{/if}
         <ActionButton variant="info" onclick={refresh}
-          ><Icon name="refresh" size={16} />Refresh status</ActionButton
+          ><Icon name="refresh" size={16} />{$messages(
+            "Refresh status",
+          )}</ActionButton
         >
       </div>
     </div>
@@ -110,7 +130,7 @@
     <section aria-labelledby="ai-provider-status">
       <div class="settings-section-description">
         <h2 id="ai-provider-status" class="card-title">
-          <Icon name="cpu" size={20} />AI provider status
+          <Icon name="cpu" size={20} />{$messages("AI provider status")}
         </h2>
       </div>
       <div class="panel-card">
@@ -124,7 +144,7 @@
                 {providerLabels[check.state]}
                 ·
                 <time datetime={new Date(check.checkedAt).toISOString()}>
-                  {new Date(check.checkedAt).toLocaleString()}
+                  {new Date(check.checkedAt).toLocaleString($formattingLocale)}
                 </time>
               </dd>
             {/each}
@@ -132,27 +152,30 @@
         {:else}
           <p>
             {agent.hostState === "unavailable"
-              ? "Agent Host is offline."
-              : "No provider check results yet."}
+              ? $messages("Agent Host is offline.")
+              : $messages("No provider check results yet.")}
           </p>
         {/if}
       </div>
     </section>
   {/if}
   {#if agent.capabilities.delete}
-    <section aria-label="Danger zone" data-tone="danger">
+    <section aria-label={$messages("Danger zone")} data-tone="danger">
       <div class="settings-section-description">
         <h2 class="card-title">
-          <Icon name="alert" size={20} />Danger zone
+          <Icon name="alert" size={20} />{$messages("Danger zone")}
         </h2>
         <p>
-          Deleting an agent stops its Host. Its data is kept unless you choose
-          to delete it on the next page.
+          {$messages(
+            "Deleting an agent stops its Host. Its data is kept unless you choose to delete it on the next page.",
+          )}
         </p>
       </div>
       <div class="panel-card" data-tone="danger">
         <ActionButton variant="danger" href={`${base}/delete`}
-          ><Icon name="trash" size={16} />Delete agent…</ActionButton
+          ><Icon name="trash" size={16} />{$messages(
+            "Delete agent…",
+          )}</ActionButton
         >
       </div>
     </section>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "./i18n/language.js";
   import { onMount, tick } from "svelte";
   import {
     ActionButton,
@@ -32,7 +33,8 @@
   });
   let disconnectDialog: HTMLDialogElement;
   let disconnecting = $state<ProviderSettings["providers"][number]>();
-  let copied = $state("");
+  let copiedMessage = $state<() => string>();
+  const copied = $derived(copiedMessage?.() ?? "");
   let interrupted = $state(false);
   let waiting = $derived(
     settings?.login?.state === "starting" ||
@@ -81,38 +83,43 @@
   async function copy() {
     try {
       await navigator.clipboard.writeText(settings?.login?.code ?? "");
-      copied = "Code copied.";
+      copiedMessage = () => $messages("Code copied.");
     } catch {
-      copied = "Select and copy the code shown above.";
+      copiedMessage = () => $messages("Select and copy the code shown above.");
     }
   }
 </script>
 
 <div class="provider-page">
   <div class="provider-heading">
-    <h1 id="ai-providers" tabindex="-1">AI providers</h1>
+    <h1 id="ai-providers" tabindex="-1">{$messages("AI providers")}</h1>
     <p id="provider-help">
-      All agents share these connections. Choose each agent’s model on its Model
-      and usage page.
+      {$messages(
+        "All agents share these connections. Choose each agent’s model on its Model and usage page.",
+      )}
     </p>
   </div>
 
   {#if !settings}
     <div class="panel-card provider-notice">
-      <p role="status">{loadError || "Provider settings unavailable."}</p>
+      <p role="status">
+        {loadError || $messages("Provider settings unavailable.")}
+      </p>
       <ActionButton onclick={refresh}
-        ><Icon name="refresh" size={16} />Refresh provider settings</ActionButton
+        ><Icon name="refresh" size={16} />{$messages(
+          "Refresh provider settings",
+        )}</ActionButton
       >
     </div>
   {:else}
     {#if settings.busy && !waiting}
       <p class="provider-message" role="status">
-        An authentication change is in progress.
+        {$messages("An authentication change is in progress.")}
       </p>
     {/if}
     {#if interrupted}
       <p class="provider-message" role="status">
-        The previous login was interrupted. Start a new login.
+        {$messages("The previous login was interrupted. Start a new login.")}
       </p>
     {/if}
     <div class="settings-section-list">
@@ -125,12 +132,15 @@
             : null}
         {@const state =
           provider.method === "device"
-            ? `Configured — ${consoleProvider ? "OpenCode Console" : "ChatGPT"} device login`
+            ? $messages(
+                "Configured — {0} device login",
+                consoleProvider ? "OpenCode Console" : "ChatGPT",
+              )
             : provider.reconnectRequired
-              ? "Reconnect required"
+              ? $messages("Reconnect required")
               : provider.method === "api_key"
-                ? "Configured — API key"
-                : "Not configured"}
+                ? $messages("Configured — API key")
+                : $messages("Not configured")}
         <section aria-labelledby={`provider-${provider.id}`}>
           <div class="settings-section-description provider-identity">
             <h2 id={`provider-${provider.id}`} tabindex="-1" class="card-title">
@@ -145,7 +155,11 @@
                   : "neutral"}
             />
             {#if provider.reconnectRequired}
-              <p>Connect this provider again to use it with your agents.</p>
+              <p>
+                {$messages(
+                  "Connect this provider again to use it with your agents.",
+                )}
+              </p>
             {/if}
           </div>
           <div class="panel-card">
@@ -156,7 +170,8 @@
                 aria-busy={busy}
                 aria-describedby="provider-help form-error"
               >
-                <label for={`key-${provider.id}`}>{provider.name} API key</label
+                <label for={`key-${provider.id}`}
+                  >{provider.name} {$messages("API key")}</label
                 >
                 <div class="key-actions">
                   <PasswordField
@@ -175,7 +190,9 @@
                     disabled={blocked}
                   >
                     <Icon name="key" size={16} />
-                    {provider.method ? "Replace with API key" : "Save API key"}
+                    {provider.method
+                      ? $messages("Replace with API key")
+                      : $messages("Save API key")}
                   </ActionButton>
                 </div>
               </form>
@@ -183,72 +200,92 @@
 
             {#if deviceLogin}
               <div class="device-settings" class:alternate={!consoleProvider}>
-                {#if !consoleProvider}<h3>ChatGPT device sign-in</h3>{/if}
+                {#if !consoleProvider}<h3>
+                    {$messages("ChatGPT device sign-in")}
+                  </h3>{/if}
                 {#if !login || !waiting}
                   <p>
                     {consoleProvider
-                      ? "Connect a workspace to use its models, Console budgets and Go allowance."
-                      : "A successful ChatGPT sign-in replaces the shared OpenAI credential. Failed or cancelled attempts keep it."}
+                      ? $messages(
+                          "Connect a workspace to use its models, Console budgets and Go allowance.",
+                        )
+                      : $messages(
+                          "A successful ChatGPT sign-in replaces the shared OpenAI credential. Failed or cancelled attempts keep it.",
+                        )}
                   </p>
                   <ActionButton
                     variant={consoleProvider ? "primary" : "default"}
                     disabled={blocked}
                     onclick={() => {
                       interrupted = false;
-                      copied = "";
+                      copiedMessage = undefined;
                       void action(provider.id, "login");
                     }}
                     >{consoleProvider
-                      ? "Sign in to OpenCode Console"
-                      : "Sign in with ChatGPT"}</ActionButton
+                      ? $messages("Sign in to OpenCode Console")
+                      : $messages("Sign in with ChatGPT")}</ActionButton
                   >
                 {/if}
                 {#if login}
                   <div class="device-status">
                     <div aria-live="polite">
                       {#if login.state === "starting"}
-                        <p>Starting device login…</p>
+                        <p>{$messages("Starting device login…")}</p>
                       {:else if login.state === "awaiting_authorization"}
-                        <p>Waiting for authorization.</p>
+                        <p>{$messages("Waiting for authorization.")}</p>
                       {:else if login.state === "completed"}
                         <p>
                           {consoleProvider
-                            ? "OpenCode Console login completed for all agents."
-                            : "ChatGPT login completed for all agents."}
+                            ? $messages(
+                                "OpenCode Console login completed for all agents.",
+                              )
+                            : $messages(
+                                "ChatGPT login completed for all agents.",
+                              )}
                         </p>
                       {:else if login.state === "cancelled"}
                         <p>
-                          Device login cancelled. The previous credential was
-                          kept.
+                          {$messages(
+                            "Device login cancelled. The previous credential was kept.",
+                          )}
                         </p>
                       {:else if login.state === "expired"}
                         <p>
-                          Device login exceeded its ten-minute time limit. Start
-                          a new login.
+                          {$messages(
+                            "Device login exceeded its ten-minute time limit. Start a new login.",
+                          )}
                         </p>
                       {:else}
                         <p>
                           {consoleProvider
-                            ? "Device login failed. Check your OpenCode Console workspace and try again."
-                            : "Device login failed. Check that device code login is enabled in your ChatGPT account or workspace, then try again."}
+                            ? $messages(
+                                "Device login failed. Check your OpenCode Console workspace and try again.",
+                              )
+                            : $messages(
+                                "Device login failed. Check that device code login is enabled in your ChatGPT account or workspace, then try again.",
+                              )}
                         </p>
                       {/if}
                     </div>
                     {#if login.state === "awaiting_authorization"}
                       <p>
-                        Enter this code on the <a
+                        {$messages("Enter this code on the")}
+                        <a
                           href={login.url}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
                           {consoleProvider
-                            ? "OpenCode Console device authorization"
-                            : "OpenAI device authorization"}</a
-                        > page (opens in a new tab).
+                            ? $messages("OpenCode Console device authorization")
+                            : $messages("OpenAI device authorization")}</a
+                        >
+                        {$messages("page (opens in a new tab).")}
                       </p>
                       <div class="device-code">
                         <code>{login.code}</code>
-                        <ActionButton onclick={copy}>Copy code</ActionButton>
+                        <ActionButton onclick={copy}
+                          >{$messages("Copy code")}</ActionButton
+                        >
                       </div>
                       <p aria-live="polite" class:sr-only={!copied}>{copied}</p>
                     {/if}
@@ -256,7 +293,7 @@
                       <ActionButton
                         disabled={busy}
                         onclick={() => action(provider.id, "cancel", login.id)}
-                        >Cancel device login</ActionButton
+                        >{$messages("Cancel device login")}</ActionButton
                       >
                     {/if}
                   </div>
@@ -270,7 +307,7 @@
                   disabled={blocked}
                   onclick={() => requestDisconnect(provider)}
                 >
-                  Disconnect provider
+                  {$messages("Disconnect provider")}
                 </ActionButton>
               </div>
             {/if}
@@ -286,19 +323,24 @@
   bind:this={disconnectDialog}
   aria-labelledby="provider-disconnect-title"
   aria-describedby="provider-disconnect-help"
-  onclose={() => (disconnecting = undefined)}
+  onclose={(event) => {
+    if (!event.currentTarget.open) disconnecting = undefined;
+  }}
 >
-  <h2 id="provider-disconnect-title">Disconnect {disconnecting?.name}?</h2>
+  <h2 id="provider-disconnect-title">
+    {$messages("Disconnect {0}?", disconnecting?.name ?? "")}
+  </h2>
   <p id="provider-disconnect-help">
-    This removes the shared credential for all agents. Agents using this
-    provider may be unable to run model tasks until it is reconnected.
+    {$messages(
+      "This removes the shared credential for all agents. Agents using this provider may be unable to run model tasks until it is reconnected.",
+    )}
   </p>
   <div class="dialog-actions">
     <ActionButton onclick={() => disconnectDialog.close()}
-      >Keep connected</ActionButton
+      >{$messages("Keep connected")}</ActionButton
     >
     <ActionButton variant="danger" disabled={blocked} onclick={disconnect}
-      >Disconnect provider</ActionButton
+      >{$messages("Disconnect provider")}</ActionButton
     >
   </div>
 </dialog>

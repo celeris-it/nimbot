@@ -377,6 +377,19 @@ it("rejects unsupported payload types and request bodies over the existing limit
   ).toBe(413);
 });
 
+it("returns structured parameters for a cron field validation error", async () => {
+  const response = await f.post(base, {
+    ...fields,
+    cadence: JSON.stringify({ kind: "cron", expression: "0 24 * * *" }),
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({
+    error: "Cron hour field: 24 is outside 0-23.",
+    code: "cron_value_outside_range",
+    params: ["hour", "24", 0, 23],
+  });
+});
+
 it("enforces the per-agent limit including paused schedules", async () => {
   for (let i = 0; i < 20; i++) await f.create();
   f.store.setEnabled(f.store.listByAgent("a")[0]!.id, false);
@@ -384,6 +397,7 @@ it("enforces the per-agent limit including paused schedules", async () => {
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({
     error: "An agent can have at most 20 schedules.",
+    code: "schedule_limit_reached",
   });
   expect(f.store.countByAgent("a")).toBe(20);
   await f.create("b");
@@ -478,6 +492,7 @@ it("rejects unexpected action fields and hides storage failures", async () => {
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({
     error: "The request could not be completed.",
+    code: "request_failed",
   });
 });
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formattingLocale, messages } from "./i18n/language.js";
   import type {
     ExecutionDetail,
     ExecutionEntry,
@@ -20,51 +21,67 @@
     selected: string | null;
   } = $props();
 
-  const origins = {
+  const origins = $derived({
     telegram: "Telegram",
     discord: "Discord",
-    schedule: "Schedule",
-    webhook: "Webhook",
-    delegated: "Delegation",
-  };
-  const statuses = {
-    queued: "Queued",
-    running: "Running",
-    completed: "Completed",
-    failed: "Failed",
-    cancelled: "Cancelled",
-    interrupted: "Interrupted",
-  };
-  const deliveries = {
-    pending: "Pending",
-    delivered: "Delivered",
-    not_sent: "Not sent",
-    unconfirmed: "Unconfirmed",
-    unknown: "Unknown",
-    not_applicable: "Not applicable",
-  };
-  const failureReasons = new Map([
-    ["attachment_unavailable", "The attachment could not be opened."],
-    ["busy", "The Agent Host was busy."],
-    ["failed", "The Agent Host reported a failure."],
-    ["interrupted", "The execution was interrupted."],
-    ["timeout", "The Server timed out waiting for the Agent Host."],
-    ["unavailable", "The Server could not confirm the Agent Host status."],
-    ["cancelled", "The execution was cancelled."],
-    ["not_ready", "The agent was no longer ready to run the task."],
-  ]);
-  const columns = [
-    { label: "Source" },
-    { label: "Execution" },
-    { label: "Created" },
-    { label: "Duration" },
-    { label: "Chat delivery" },
-    { label: "Details" },
-  ];
-  const dateFormat = new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "medium",
+    schedule: $messages("Schedule"),
+    webhook: $messages("Webhook"),
+    delegated: $messages("Delegation"),
   });
+  const statuses = $derived({
+    queued: $messages("Queued"),
+    running: $messages("Running"),
+    completed: $messages("Completed"),
+    failed: $messages("Failed"),
+    cancelled: $messages("Cancelled"),
+    interrupted: $messages("Interrupted"),
+  });
+  const deliveries = $derived({
+    pending: $messages("Pending"),
+    delivered: $messages("Delivered"),
+    not_sent: $messages("Not sent"),
+    unconfirmed: $messages("Unconfirmed"),
+    unknown: $messages("Unknown"),
+    not_applicable: $messages("Not applicable"),
+  });
+  const failureReasons = $derived(
+    new Map([
+      [
+        "attachment_unavailable",
+        $messages("The attachment could not be opened."),
+      ],
+      ["busy", $messages("The Agent Host was busy.")],
+      ["failed", $messages("The Agent Host reported a failure.")],
+      ["interrupted", $messages("The execution was interrupted.")],
+      [
+        "timeout",
+        $messages("The Server timed out waiting for the Agent Host."),
+      ],
+      [
+        "unavailable",
+        $messages("The Server could not confirm the Agent Host status."),
+      ],
+      ["cancelled", $messages("The execution was cancelled.")],
+      [
+        "not_ready",
+        $messages("The agent was no longer ready to run the task."),
+      ],
+    ]),
+  );
+  const columns = $derived([
+    { label: $messages("Source") },
+    { label: $messages("Execution") },
+    { label: $messages("Created") },
+    { label: $messages("Duration") },
+    { label: $messages("Chat delivery") },
+    { label: $messages("Details") },
+  ]);
+  const dateFormat = $derived(
+    new Intl.DateTimeFormat($formattingLocale, {
+      dateStyle: "medium",
+      timeStyle: "medium",
+    }),
+  );
   let base = $derived(`/agents/${encodeURIComponent(agentId)}/executions`);
 
   function href(cursor: string | null, task: string | null = null) {
@@ -81,7 +98,9 @@
       Math.floor((entry.finishedAt - entry.startedAt) / 1000),
     );
     const minutes = Math.floor(seconds / 60);
-    return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+    return minutes
+      ? $messages("{0}m {1}s", minutes, seconds % 60)
+      : `${seconds}s`;
   }
 </script>
 
@@ -102,7 +121,7 @@
         >{entry.scheduleName}</span
       >{/if}
     {#if entry.channel && entry.channel !== entry.origin}
-      <span class="block">To {origins[entry.channel]}</span>
+      <span class="block">{$messages("To")} {origins[entry.channel]}</span>
     {/if}
   </td>
   <td>
@@ -123,18 +142,21 @@
   <td>
     <ActionButton
       href={href(before, entry.id)}
-      aria-label={`View execution ${entry.id}`}>View</ActionButton
+      aria-label={$messages("View execution {0}", entry.id)}
+      >{$messages("View")}</ActionButton
     >
   </td>
 {/snippet}
 
 {#if selected}
-  <h1 tabindex="-1">Execution details</h1>
-  <ActionButton href={href(before)}>Back to executions</ActionButton>
+  <h1 tabindex="-1">{$messages("Execution details")}</h1>
+  <ActionButton href={href(before)}
+    >{$messages("Back to executions")}</ActionButton
+  >
   {#if detail}
     <dl class="panel-card grid grid-cols-2 gap-3 sm:grid-cols-3">
       <div>
-        <dt>Source</dt>
+        <dt>{$messages("Source")}</dt>
         <dd>
           {origins[detail.origin]}{detail.scheduleName
             ? ` · ${detail.scheduleName}`
@@ -142,38 +164,38 @@
         </dd>
       </div>
       <div>
-        <dt>Execution</dt>
+        <dt>{$messages("Execution")}</dt>
         <dd>{statuses[detail.status]}</dd>
       </div>
       <div>
-        <dt>Chat delivery</dt>
+        <dt>{$messages("Chat delivery")}</dt>
         <dd>
           {detail.channel
             ? `${origins[detail.channel]} · `
             : ""}{detail.finishedAt === null
-            ? "Awaiting execution"
+            ? $messages("Awaiting execution")
             : deliveries[detail.delivery]}
         </dd>
       </div>
       <div>
-        <dt>Created</dt>
+        <dt>{$messages("Created")}</dt>
         <dd>{@render timestamp(detail.createdAt)}</dd>
       </div>
       <div>
-        <dt>Started</dt>
+        <dt>{$messages("Started")}</dt>
         <dd>{@render timestamp(detail.startedAt)}</dd>
       </div>
       <div>
-        <dt>Finished</dt>
+        <dt>{$messages("Finished")}</dt>
         <dd>{@render timestamp(detail.finishedAt)}</dd>
       </div>
       <div>
-        <dt>Duration</dt>
+        <dt>{$messages("Duration")}</dt>
         <dd>{duration(detail)}</dd>
       </div>
       {#if detail.failureReason}
         <div class="col-span-full">
-          <dt>Reason</dt>
+          <dt>{$messages("Reason")}</dt>
           <dd>
             {failureReasons.get(detail.failureReason) ?? detail.failureReason}
           </dd>
@@ -181,32 +203,36 @@
       {/if}
     </dl>
     <section class="panel-card">
-      <h2>Request</h2>
+      <h2>{$messages("Request")}</h2>
       {#if detail.prompt}
         <pre>{detail.prompt}</pre>
       {:else}
-        <p>This execution has no request text.</p>
+        <p>{$messages("This execution has no request text.")}</p>
       {/if}
     </section>
     <section class="panel-card">
-      <h2>{detail.response?.partial ? "Partial response" : "Response"}</h2>
+      <h2>
+        {detail.response?.partial
+          ? $messages("Partial response")
+          : $messages("Response")}
+      </h2>
       {#if detail.response?.text}
         <pre>{detail.response.text}</pre>
       {:else if detail.response}
-        <p>The execution finished with an empty response.</p>
+        <p>{$messages("The execution finished with an empty response.")}</p>
       {:else}
         <p>
           {detail.finishedAt === null
-            ? "A response is not available yet."
-            : "No saved response is available."}
+            ? $messages("A response is not available yet.")
+            : $messages("No saved response is available.")}
         </p>
       {/if}
     </section>
   {:else if detail === null}
-    <p role="status">Execution not found.</p>
+    <p role="status">{$messages("Execution not found.")}</p>
   {/if}
 {:else}
-  <h1 tabindex="-1">Executions</h1>
+  <h1 tabindex="-1">{$messages("Executions")}</h1>
   {#if data}
     <DataTable
       caption="Running and queued"
@@ -214,7 +240,7 @@
       rows={data.active}
       {row}
       rowKey={(entry) => entry.id}
-      empty="No running or queued executions."
+      empty={$messages("No running or queued executions.")}
     />
     <DataTable
       caption="Execution history"
@@ -222,20 +248,20 @@
       rows={data.history}
       {row}
       rowKey={(entry) => entry.id}
-      empty="No finished executions on this page."
+      empty={$messages("No finished executions on this page.")}
     >
       {#snippet footer()}
         {#if before || data?.nextCursor}
           <nav
-            aria-label="Execution history pages"
+            aria-label={$messages("Execution history pages")}
             class="flex flex-wrap gap-2"
           >
             {#if before}<ActionButton href={base}
-                >Latest executions</ActionButton
+                >{$messages("Latest executions")}</ActionButton
               >{/if}
             {#if data?.nextCursor}
               <ActionButton href={href(data.nextCursor)}
-                >Older executions</ActionButton
+                >{$messages("Older executions")}</ActionButton
               >
             {/if}
           </nav>

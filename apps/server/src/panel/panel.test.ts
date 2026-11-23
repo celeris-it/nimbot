@@ -441,6 +441,18 @@ function apiSetup(overrides: PanelDeps = {}) {
   return { app, post, login, get, calls, records };
 }
 
+it("returns an actionable code alongside the existing sign-in error", async () => {
+  const { get, login, post } = apiSetup();
+  const response = await post("/api/login", { password: "incorrect" });
+  expect(response.status).toBe(401);
+  expect(await response.json()).toEqual({
+    error: "Incorrect password. Try again.",
+    code: "incorrect_password",
+  });
+  expect((await get("/settings", "")).headers.get("location")).toBe("/login");
+  expect((await get("/settings", await login())).status).not.toBe(404);
+});
+
 it("serves agent avatars only to authenticated panel requests", async () => {
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0xff, 0xd9]);
   const loadAvatar = vi.fn(async (id: string) =>

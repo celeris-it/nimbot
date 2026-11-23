@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formattingLocale, messages } from "./i18n/language.js";
   import {
     ActionButton,
     Icon,
@@ -65,90 +66,113 @@
     );
     effortValue = selectedEffort;
   }
-  const number = new Intl.NumberFormat();
-  const usd = new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  });
+  const number = $derived(new Intl.NumberFormat($formattingLocale));
+  const usd = $derived(
+    new Intl.NumberFormat($formattingLocale, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 6,
+    }),
+  );
   const money = (value: number | null) =>
     value === null
-      ? "Unavailable"
+      ? $messages("Unavailable")
       : value > 0 && value < 0.000001
-        ? "< $0.000001"
+        ? `< ${usd.format(0.000001)}`
         : usd.format(value);
-  const time = (timestamp: number) => new Date(timestamp).toLocaleString();
-  const quotaText = {
-    available: "Quota available",
-    unavailable: "Quota unavailable",
-    exhausted: "Queue paused for quota",
-    checking: "Waiting for a quota check",
-    model_unavailable: "Queue paused because the model is unavailable",
-    effort_unavailable:
+  const time = (timestamp: number) =>
+    new Date(timestamp).toLocaleString($formattingLocale);
+  const quotaText = $derived({
+    available: $messages("Quota available"),
+    unavailable: $messages("Quota unavailable"),
+    exhausted: $messages("Queue paused for quota"),
+    checking: $messages("Waiting for a quota check"),
+    model_unavailable: $messages(
+      "Queue paused because the model is unavailable",
+    ),
+    effort_unavailable: $messages(
       "Queue paused because the reasoning effort is unavailable",
-  };
-  const failureText: Record<NonNullable<QuotaStatus["failure"]>, string> = {
-    host_unavailable:
+    ),
+  });
+  const failureText: Record<
+    NonNullable<QuotaStatus["failure"]>,
+    string
+  > = $derived({
+    host_unavailable: $messages(
       "The Agent Host could not return its model status. Check the Host on the agent setup page.",
-    opencode_missing:
+    ),
+    opencode_missing: $messages(
       "OpenCode was not found on the Agent Host’s PATH. Install the version required by Nimbot and restart Nimbot.",
-    opencode_start_failed:
+    ),
+    opencode_start_failed: $messages(
       "OpenCode exited before it could serve models. Check that Nimbot is using OpenCode 2.2.7, then restart Nimbot.",
-    opencode_start_timeout:
+    ),
+    opencode_start_timeout: $messages(
       "OpenCode did not become ready in time. Check the OpenCode installation and restart the agent.",
-    opencode_check_failed:
+    ),
+    opencode_check_failed: $messages(
       "OpenCode could not check the model or quota. Check the AI provider connection and model settings.",
-    quota_check_failed:
+    ),
+    quota_check_failed: $messages(
       "OpenCode did not return quota data for the connected account. Check the OpenCode Console connection.",
-  };
-  const origins: Record<string, string> = {
+    ),
+  });
+  const origins: Record<string, string> = $derived({
     telegram: "Telegram",
     discord: "Discord",
-    delegated: "Delegation",
-    schedule: "Schedule",
-    webhook: "Webhook",
-  };
+    delegated: $messages("Delegation"),
+    schedule: $messages("Schedule"),
+    webhook: $messages("Webhook"),
+  });
 
-  const historyColumns = [
-    { label: "Started" },
-    { label: "Status" },
-    { label: "Origin" },
-    { label: "Model" },
-    { label: "Tokens", numeric: true },
-    { label: "Reported cost (USD)", numeric: true },
-  ];
-  const historyDate = new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-  });
-  const historyTime = new Intl.DateTimeFormat(undefined, {
-    timeStyle: "medium",
-  });
+  const historyColumns = $derived([
+    { label: $messages("Started") },
+    { label: $messages("Status") },
+    { label: $messages("Origin") },
+    { label: $messages("Model") },
+    { label: $messages("Tokens"), numeric: true },
+    { label: $messages("Reported cost (USD)"), numeric: true },
+  ]);
+  const historyDate = $derived(
+    new Intl.DateTimeFormat($formattingLocale, {
+      dateStyle: "medium",
+    }),
+  );
+  const historyTime = $derived(
+    new Intl.DateTimeFormat($formattingLocale, {
+      timeStyle: "medium",
+    }),
+  );
   const historyStatus: Record<
     string,
     { label: string; tone: "neutral" | "good" | "warning" | "danger" }
-  > = {
-    completed: { label: "Completed", tone: "good" },
-    failed: { label: "Failed", tone: "danger" },
-    interrupted: { label: "Interrupted", tone: "warning" },
-    cancelled: { label: "Cancelled", tone: "neutral" },
-    running: { label: "Running", tone: "neutral" },
-    queued: { label: "Queued", tone: "neutral" },
-  };
+  > = $derived({
+    completed: { label: $messages("Completed"), tone: "good" },
+    failed: { label: $messages("Failed"), tone: "danger" },
+    interrupted: { label: $messages("Interrupted"), tone: "warning" },
+    cancelled: { label: $messages("Cancelled"), tone: "neutral" },
+    running: { label: $messages("Running"), tone: "neutral" },
+    queued: { label: $messages("Queued"), tone: "neutral" },
+  });
 </script>
 
-<h1 tabindex="-1">Model and usage for {agent.name}</h1>
-<nav class="actions" aria-label="Agent actions">
-  <ActionButton href={`${base}/setup`}>Back to agent</ActionButton>
-  <ActionButton href="/providers">AI providers</ActionButton>
-  <ActionButton onclick={refresh} disabled={busy}>Refresh</ActionButton>
+<h1 tabindex="-1">{$messages("Model and usage for")} {agent.name}</h1>
+<nav class="actions" aria-label={$messages("Agent actions")}>
+  <ActionButton href={`${base}/setup`}
+    >{$messages("Back to agent")}</ActionButton
+  >
+  <ActionButton href="/providers">{$messages("AI providers")}</ActionButton>
+  <ActionButton onclick={refresh} disabled={busy}
+    >{$messages("Refresh")}</ActionButton
+  >
 </nav>
 
 <div class="settings-section-list">
   <section aria-labelledby="model-heading">
     <div class="settings-section-description">
       <h2 id="model-heading" tabindex="-1" class="card-title">
-        <Icon name="cpu" size={20} />Model
+        <Icon name="cpu" size={20} />{$messages("Model")}
       </h2>
     </div>
     <div class="panel-card">
@@ -161,7 +185,7 @@
         />
         {#if efforts.length || selectedEffort}
           <div class="effort-field">
-            <label for="model-effort">Reasoning effort</label>
+            <label for="model-effort">{$messages("Reasoning effort")}</label>
             <Select
               id="model-effort"
               bind:value={effortValue}
@@ -171,11 +195,11 @@
                 : undefined}
               onchange={changeEffort}
             >
-              <option value="">Default</option>
+              <option value="">{$messages("Default")}</option>
               {#if selectedEffort && !efforts.includes(selectedEffort)}
                 <option value={selectedEffort} disabled>
                   {effortLabel(selectedEffort)}{missingEffort
-                    ? " (Unavailable)"
+                    ? $messages(" (Unavailable)")
                     : ""}
                 </option>
               {/if}
@@ -186,18 +210,24 @@
             {#if missingEffort}
               <p id="model-effort-status" role="status">
                 {selectedModel
-                  ? "Choose another reasoning effort or Default to resume the queue."
-                  : "Choose an available model or Automatic to resume the queue."}
+                  ? $messages(
+                      "Choose another reasoning effort or Default to resume the queue.",
+                    )
+                  : $messages(
+                      "Choose an available model or Automatic to resume the queue.",
+                    )}
               </p>
             {/if}
           </div>
         {/if}
-        {#if busy}<p role="status">Saving model settings…</p>{/if}
+        {#if busy}<p role="status">
+            {$messages("Saving model settings…")}
+          </p>{/if}
         {#if !catalog.catalogAvailable}
-          <p role="status">Model catalog unavailable.</p>
+          <p role="status">{$messages("Model catalog unavailable.")}</p>
         {/if}
       {:else}
-        <p role="status">Model settings unavailable.</p>
+        <p role="status">{$messages("Model settings unavailable.")}</p>
       {/if}
     </div>
   </section>
@@ -205,7 +235,7 @@
   <section aria-labelledby="quota-heading">
     <div class="settings-section-description">
       <h2 id="quota-heading" class="card-title">
-        <Icon name="activity" size={20} />Provider quota
+        <Icon name="activity" size={20} />{$messages("Provider quota")}
       </h2>
     </div>
     <div class="panel-card">
@@ -214,7 +244,7 @@
         <p>
           <strong
             >{quota.failure
-              ? "Model or quota check failed"
+              ? $messages("Model or quota check failed")
               : quotaText[quota.state]}</strong
           >
           {#if quota.model}
@@ -223,75 +253,83 @@
         {#if quota.failure}
           <p role="status">{failureText[quota.failure]}</p>
         {/if}
-        {#if data.queued}<p>{number.format(data.queued)} queued</p>{/if}
-        <p>Last checked {time(quota.checkedAt)}</p>
+        {#if data.queued}<p>
+            {number.format(data.queued)}
+            {$messages("queued")}
+          </p>{/if}
+        <p>{$messages("Last checked")} {time(quota.checkedAt)}</p>
         {#if quota.windows.length}
           <ul class="windows">
             {#each quota.windows as window (window)}
               <li>
                 <strong>{window.name}</strong>
-                · {number.format(Math.round(window.usedPercent * 10) / 10)}%
-                used
-                {#if window.name.startsWith("ChatGPT ")}
+                · {number.format(
+                  Math.round(window.usedPercent * 10) / 10,
+                )}{$messages("% used")}
+                {#if window.name.startsWith($messages("ChatGPT "))}
                   · {number.format(
                     Math.round((100 - window.usedPercent) * 10) / 10,
-                  )}% left
+                  )}{$messages("% left")}
                 {/if}
                 {#if window.spentUsd !== undefined && window.limitUsd !== undefined}
-                  · {money(window.spentUsd)} of {money(window.limitUsd)}
+                  · {money(window.spentUsd)}
+                  {$messages("of")}
+                  {money(window.limitUsd)}
                 {/if}
                 {#if window.exhausted}
-                  · Limit reached{/if}
-                · Resets {time(window.resetsAt)}
+                  {$messages("· Limit reached")}{/if}
+                {$messages("· Resets")}
+                {time(window.resetsAt)}
               </li>
             {/each}
           </ul>
         {/if}
       {:else}
-        <p role="status">Waiting for the first quota check.</p>
+        <p role="status">{$messages("Waiting for the first quota check.")}</p>
       {/if}
     </div>
   </section>
 </div>
 
 <section aria-labelledby="usage-heading">
-  <h2 id="usage-heading">Usage</h2>
+  <h2 id="usage-heading">{$messages("Usage")}</h2>
   {#if data}
     <div class="totals">
-      {#each [{ name: "Today (UTC)", value: data.today }, { name: "This month (UTC)", value: data.month }] as total (total.name)}
+      {#each [{ name: $messages("Today (UTC)"), value: data.today }, { name: $messages("This month (UTC)"), value: data.month }] as total (total.name)}
         <div class="panel-card">
           <h3>{total.name}</h3>
           <dl>
             <div>
-              <dt>Tokens</dt>
+              <dt>{$messages("Tokens")}</dt>
               <dd>{number.format(total.value.tokens)}</dd>
             </div>
             <div>
-              <dt>Reported cost (USD)</dt>
+              <dt>{$messages("Reported cost (USD)")}</dt>
               <dd>{total.value.tasks ? money(total.value.costUsd) : "—"}</dd>
             </div>
             <div>
-              <dt>Tasks</dt>
+              <dt>{$messages("Tasks")}</dt>
               <dd>{number.format(total.value.tasks)}</dd>
             </div>
           </dl>
           {#if total.value.incomplete || total.value.missingCost}
             <p>
-              {number.format(total.value.incomplete)} with incomplete usage · {number.format(
-                total.value.missingCost,
-              )} without cost
+              {number.format(total.value.incomplete)}
+              {$messages("with incomplete usage ·")}
+              {number.format(total.value.missingCost)}
+              {$messages("without cost")}
             </p>
           {/if}
         </div>
       {/each}
     </div>
     {#snippet historyPages()}
-      <nav class="actions" aria-label="Usage history pages">
+      <nav class="actions" aria-label={$messages("Usage history pages")}>
         {#if before}<ActionButton href={`${base}/usage`}
-            >Newest tasks</ActionButton
+            >{$messages("Newest tasks")}</ActionButton
           >{/if}
         {#if data?.next}<ActionButton href={`${base}/usage?before=${data.next}`}
-            >Older tasks</ActionButton
+            >{$messages("Older tasks")}</ActionButton
           >{/if}
       </nav>
     {/snippet}
@@ -300,7 +338,7 @@
       columns={historyColumns}
       rows={data.tasks}
       rowKey={(task) => task.id}
-      empty="No model tasks on this page."
+      empty={$messages("No model tasks on this page.")}
       footer={before || data.next ? historyPages : undefined}
     >
       {#snippet row(task)}
@@ -325,7 +363,7 @@
             tone={status?.tone}
           />
           {#if usage?.state === "partial"}<small class="history-detail"
-              >Partial usage</small
+              >{$messages("Partial usage")}</small
             >{/if}
         </td>
         <td class="usage-origin">
@@ -341,7 +379,7 @@
               >{usage.model.providerId}</small
             >
           {:else}
-            <span class="text-muted">Unavailable</span>
+            <span class="text-muted">{$messages("Unavailable")}</span>
           {/if}
         </td>
         <td data-numeric>
@@ -355,12 +393,13 @@
               )}</span
             >
             <small class="history-detail">
-              In {number.format(usage.tokens.input)} · Out {number.format(
-                usage.tokens.output,
-              )}
+              {$messages("In")}
+              {number.format(usage.tokens.input)}
+              {$messages("· Out")}
+              {number.format(usage.tokens.output)}
             </small>
           {:else}
-            <span class="text-muted">Unavailable</span>
+            <span class="text-muted">{$messages("Unavailable")}</span>
           {/if}
         </td>
         <td data-numeric>
@@ -371,7 +410,9 @@
       {/snippet}
     </DataTable>
   {:else}
-    <p role="status">Usage history unavailable. Refresh to try again.</p>
+    <p role="status">
+      {$messages("Usage history unavailable. Refresh to try again.")}
+    </p>
   {/if}
 </section>
 

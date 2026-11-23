@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "../i18n/language.js";
   import ActionButton from "./ActionButton.svelte";
   import type { HTMLInputAttributes } from "svelte/elements";
   import Icon from "./Icon.svelte";
@@ -23,7 +24,7 @@
     variant="plain"
     type="button"
     data-ui="field-action"
-    aria-label={visible ? "Hide value" : "Show value"}
+    aria-label={visible ? $messages("Hide value") : $messages("Show value")}
     aria-pressed={visible}
     {disabled}
     onclick={() => (visible = !visible)}

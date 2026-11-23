@@ -1,3 +1,4 @@
+import type { Translate } from "./i18n/language.js";
 import type {
   AgentDirectoryEntry,
   PanelSession,
@@ -18,6 +19,7 @@ export interface ConfigurationGroup {
 }
 
 export function configurationOptions(
+  t: Translate,
   capabilities: PanelSession["capabilities"] | undefined,
   agents: readonly AgentDirectoryEntry[],
 ): ConfigurationGroup[] {
@@ -25,44 +27,55 @@ export function configurationOptions(
 
   const installation: ConfigurationGroup = {
     key: "installation",
-    label: "Installation",
+    label: t("Installation"),
     options: [],
   };
   const add = (label: string, context: string, href: string, keywords = "") =>
     installation.options.push({ label, context, href, keywords });
 
+  add(
+    t("Appearance"),
+    t("Settings"),
+    "/settings#panel-appearance",
+    t("theme light dark"),
+  );
+  add(
+    t("Language"),
+    t("Settings"),
+    "/settings#panel-language",
+    t("language Spanish English"),
+  );
   if (capabilities.scheduleSettings) {
     add(
-      "Appearance",
-      "Settings",
-      "/settings#panel-appearance",
-      "theme light dark",
-    );
-    add(
-      "Schedule time zone",
-      "Settings",
+      t("Schedule time zone"),
+      t("Settings"),
       "/settings#schedule-default-zone",
-      "timezone default",
+      t("timezone default"),
     );
   }
   if (capabilities.providers) {
     add(
-      "AI providers",
+      t("AI providers"),
       "",
       "/providers#ai-providers",
-      "credentials authentication API keys",
+      t("credentials authentication API keys"),
     );
     for (const provider of providers) {
       add(
         provider.name,
-        "AI providers",
+        t("AI providers"),
         `/providers#provider-${provider.id}`,
-        "connection credentials API key",
+        t("connection credentials API key"),
       );
     }
   }
   if (capabilities.mcp) {
-    add("MCP catalog", "", "/mcp#mcp-catalog", "external tools integrations");
+    add(
+      t("MCP catalog"),
+      "",
+      "/mcp#mcp-catalog",
+      t("external tools integrations"),
+    );
   }
 
   const groups = [installation];
@@ -95,71 +108,75 @@ export function configurationOptions(
 
     if (agent.optionCapabilities?.edit) {
       addAgentOption(
-        "Agent settings",
+        t("Agent settings"),
         "settings#agent-settings",
-        "name instructions edit",
+        t("name instructions edit"),
       );
     }
     addAgentOption(
-      "Telegram connection",
+      t("Telegram connection"),
       "channels#telegram-connection",
-      "channels bot token owner",
+      t("channels bot token owner"),
     );
     if (agent.optionCapabilities?.discord) {
       addAgentOption(
-        "Discord connection",
+        t("Discord connection"),
         "channels#discord-connection",
-        "channels bot token owner",
+        t("channels bot token owner"),
       );
     }
     addAgentOption(
-      "Model",
+      t("Model"),
       "usage#model-heading",
-      "model selection reasoning effort",
+      t("model selection reasoning effort"),
     );
-    addAgentOption("Saved notes", "memory#memory-notes", "memory");
+    addAgentOption(t("Saved notes"), "memory#memory-notes", t("memory"));
     addAgentOption(
-      "Approval rules",
+      t("Approval rules"),
       "approvals#approval-rules-heading",
-      "permissions allow deny",
+      t("permissions allow deny"),
     );
     addAgentOption(
-      "Other agents",
+      t("Other agents"),
       "access#peer-access",
-      "peer access grants delegation",
+      t("peer access grants delegation"),
     );
     if (capabilities.mcp) {
       addAgentOption(
-        "MCP integrations",
+        t("MCP integrations"),
         "access#mcp-access",
-        "access grants credentials",
+        t("access grants credentials"),
       );
     }
     addAgentOption(
-      "Schedules",
+      t("Schedules"),
       "schedules#agent-schedules",
-      "cron webhook scheduled tasks",
+      t("cron webhook scheduled tasks"),
     );
     groups.push(group);
   }
   return groups;
 }
 
+const searchText = (value: string) =>
+  value.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+
 export function matchingOptions(groups: ConfigurationGroup[], query: string) {
-  const terms = query.toLowerCase().trim().split(/\s+/);
+  const terms = searchText(query).trim().split(/\s+/);
   if (!terms[0]) return [];
   const phrase = terms.join(" ");
   return groups.flatMap((group) => {
     const options = group.options.filter(({ label, context, keywords }) => {
-      const searchable =
-        `${label} ${context} ${keywords} ${group.label}`.toLowerCase();
+      const searchable = searchText(
+        `${label} ${context} ${keywords} ${group.label}`,
+      );
       return terms.every((term) => searchable.includes(term));
     });
     if (!options.length) return [];
     options.sort(
       (a, b) =>
-        Number(b.label.toLowerCase().includes(phrase)) -
-        Number(a.label.toLowerCase().includes(phrase)),
+        Number(searchText(b.label).includes(phrase)) -
+        Number(searchText(a.label).includes(phrase)),
     );
     return [{ ...group, options }];
   });

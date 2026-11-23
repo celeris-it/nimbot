@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formattingLocale, messages } from "./i18n/language.js";
   import ActionButton from "./components/ActionButton.svelte";
   import type { MemoryEntry } from "../../server/src/memory/host-memories.js";
   let {
@@ -20,19 +21,21 @@
   function deleteNote(memory: MemoryEntry) {
     if (
       busy ||
-      !window.confirm(`Delete “${memory.title}” from memory and search?`)
+      !window.confirm(
+        $messages("Delete “{0}” from memory and search?", memory.title),
+      )
     )
       return;
     notesHeading.focus();
     void remove(memory.id);
   }
-  const date = (at: number) => new Date(at).toLocaleString();
+  const date = (at: number) => new Date(at).toLocaleString($formattingLocale);
 </script>
 
 <div data-ui="page-heading" class="flex-wrap">
-  <h1 tabindex="-1">Memory of {agent.name}</h1>
+  <h1 tabindex="-1">{$messages("Memory of")} {agent.name}</h1>
   <ActionButton href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-    >Back to agent</ActionButton
+    >{$messages("Back to agent")}</ActionButton
   >
 </div>
 
@@ -45,29 +48,35 @@
         tabindex="-1"
         class="card-title"
       >
-        Saved notes
+        {$messages("Saved notes")}
       </h2>
       <p>
-        Notes stay in the agent’s private volume and are read as untrusted
-        context. Copies may remain in chat history and backups after deletion.
+        {$messages(
+          "Notes stay in the agent’s private volume and are read as untrusted context. Copies may remain in chat history and backups after deletion.",
+        )}
       </p>
     </div>
     <div class="panel-card">
       {#if !memories}
         <p role="status" data-tone="warning">
-          Memory is unavailable. Check whether the Agent Host is running, then
-          refresh.
+          {$messages(
+            "Memory is unavailable. Check whether the Agent Host is running, then refresh.",
+          )}
         </p>
         <div class="button-row">
           <ActionButton href={`/agents/${encodeURIComponent(agent.id)}/setup`}
-            >Open Overview</ActionButton
+            >{$messages("Open Overview")}</ActionButton
           >
           <ActionButton disabled={busy} onclick={() => go(page)}
-            >Refresh memory</ActionButton
+            >{$messages("Refresh memory")}</ActionButton
           >
         </div>
       {:else if memories.memories.length === 0}
-        <p role="status">No saved notes{page > 1 ? " on this page" : ""}.</p>
+        <p role="status">
+          {$messages(
+            page > 1 ? "No saved notes on this page" : "No saved notes",
+          )}.
+        </p>
       {:else}
         <ul class="memory-list">
           {#each memories.memories as memory (memory.id)}
@@ -75,30 +84,36 @@
               <h3>{memory.title}</h3>
               <p>{memory.preview}</p>
               <p data-ui="muted">
-                {#if memory.tags.length}Tags: {memory.tags.join(", ")} ·
-                {/if}Updated {date(memory.updatedAt)}{#if memory.expiresAt}
-                  · Expires {date(memory.expiresAt)}{/if}
+                {#if memory.tags.length}{$messages("Tags:")}
+                  {memory.tags.join(", ")} ·
+                {/if}{$messages("Updated")}
+                {date(memory.updatedAt)}{#if memory.expiresAt}
+                  {$messages("· Expires")} {date(memory.expiresAt)}{/if}
               </p>
               <ActionButton
                 variant="danger"
                 disabled={busy}
-                aria-label={`Delete note ${memory.title}`}
-                onclick={() => deleteNote(memory)}>Delete</ActionButton
+                aria-label={$messages("Delete note {0}", memory.title)}
+                onclick={() => deleteNote(memory)}
+                >{$messages("Delete")}</ActionButton
               >
             </li>
           {/each}
         </ul>
       {/if}
       {#if memories && (page > 1 || memories.hasMore)}
-        <nav class="button-row items-center" aria-label="Memory pages">
+        <nav
+          class="button-row items-center"
+          aria-label={$messages("Memory pages")}
+        >
           <ActionButton
             disabled={busy || page <= 1}
-            onclick={() => go(page - 1)}>Previous</ActionButton
+            onclick={() => go(page - 1)}>{$messages("Previous")}</ActionButton
           >
-          <span data-ui="muted">Page {page}</span>
+          <span data-ui="muted">{$messages("Page")} {page}</span>
           <ActionButton
             disabled={busy || !memories.hasMore}
-            onclick={() => go(page + 1)}>Next</ActionButton
+            onclick={() => go(page + 1)}>{$messages("Next")}</ActionButton
           >
         </nav>
       {/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formattingLocale, messages } from "./i18n/language.js";
   import {
     ActionButton,
     Checkbox,
@@ -7,7 +8,8 @@
     Select,
     TextField,
   } from "./components/index.js";
-  import { request, post } from "./api.js";
+  import { ApiError, request, post } from "./api.js";
+  import { translateScheduleError } from "./i18n/errors.js";
   import { tick } from "svelte";
   import {
     nextRuns,
@@ -21,7 +23,7 @@
     ScheduleSettings,
   } from "../../server/src/panel/panel-contracts.js";
   import {
-    scheduleText as text,
+    scheduleText,
     scheduleKinds,
     scheduleWeekdays,
     scheduleCadenceLabel,
@@ -51,12 +53,13 @@
   // Polling updates the list, never an open form's draft.
   let webhook = $state<{ id: string; url: string; token: string }>();
   let webhookBusy = $state(false);
-  let webhookError = $state("");
+  let webhookErrorMessage = $state<() => string>();
+  const webhookError = $derived(webhookErrorMessage?.() ?? "");
   async function loadWebhook(id: string, rotate = false) {
     if (webhookBusy || busy) return;
     if (rotate && !window.confirm(text.webhookRotateConfirm)) return;
     webhookBusy = true;
-    webhookError = "";
+    webhookErrorMessage = undefined;
     try {
       const path = `/api/agents/${encodeURIComponent(agent.id)}/schedules/${encodeURIComponent(id)}/webhook`;
       const result = rotate
@@ -64,7 +67,10 @@
         : await request<{ url: string; token: string }>(path);
       webhook = { id, ...result };
     } catch (error) {
-      webhookError = error instanceof Error ? error.message : text.webhookError;
+      webhookErrorMessage = () =>
+        error instanceof ApiError
+          ? error.display($messages)
+          : text.webhookError;
     } finally {
       webhookBusy = false;
     }
@@ -85,8 +91,15 @@
   const channelLabel = { telegram: "Telegram", discord: "Discord" };
   const linked = (channel: ScheduleSettings["deliveryChannel"]) =>
     channel === "telegram" ? data.ownerLinked : data.discordOwnerLinked;
-  let localError = $state("");
+  const text = $derived(scheduleText($messages));
   let invalid = $state<"weekdays" | "zone" | undefined>();
+  const localError = $derived(
+    invalid === "weekdays"
+      ? text.weekdayError
+      : invalid === "zone"
+        ? text.zoneError
+        : "",
+  );
   let atLimit = $derived(data.schedules.length >= data.limits.maxPerAgent);
 
   const cronPreview = $derived.by(() => {
@@ -94,7 +107,7 @@
     try {
       parseCronExpression(expression);
     } catch (error) {
-      return { error: (error as Error).message };
+      return { error: translateScheduleError($messages, error) };
     }
     try {
       validateTimeZone(timeZone);
@@ -109,18 +122,16 @@
     );
     return runs.length
       ? { runs }
-      : { error: "Schedule must have an occurrence in the future." };
+      : { error: $messages("Schedule must have an occurrence in the future.") };
   });
 
   $effect(() => {
     if (invalid === "weekdays" && (kind !== "weekly" || weekdays.length > 0)) {
       invalid = undefined;
-      localError = "";
     } else if (invalid === "zone") {
       try {
         validateTimeZone(timeZone);
         invalid = undefined;
-        localError = "";
       } catch {
         /* Keep the explanation until the time zone is valid. */
       }
@@ -148,7 +159,7 @@
       schedule?.deliveryChannel ??
       (data.discordOwnerLinked && !data.ownerLinked ? "discord" : "telegram");
     timeZone = schedule?.timeZone ?? data.defaultTimeZone;
-    localError = "";
+
     invalid = undefined;
     formVisible = true;
     await tick();
@@ -157,7 +168,7 @@
   async function closeForm() {
     formVisible = false;
     editId = undefined;
-    localError = "";
+
     invalid = undefined;
     await tick();
     const button = document.getElementById(
@@ -171,16 +182,14 @@
   async function send(event: SubmitEvent) {
     event.preventDefault();
     if (busy) return;
-    localError = "";
+
     invalid = undefined;
     if (kind === "weekly" && weekdays.length === 0) {
-      localError = text.weekdayError;
       invalid = "weekdays";
     } else if (kind !== "webhook") {
       try {
         validateTimeZone(timeZone);
       } catch {
-        localError = text.zoneError;
         invalid = "zone";
       }
     }
@@ -254,12 +263,13 @@
   <p id="schedule-costs">{text.costs}</p>
   {#if !data.ownerLinked && !data.discordOwnerLinked}
     <p role="status" data-ui="schedule-warning">
-      Owner chat is not linked. <a
+      {$messages("Owner chat is not linked.")}
+      <a
         class="underline"
         href={`/agents/${encodeURIComponent(agent.id)}/channels`}
-        >Open Channels</a
+        >{$messages("Open Channels")}</a
       >
-      for linking instructions.
+      {$messages("for linking instructions.")}
     </p>
   {/if}
   <p data-ui="muted">
@@ -296,14 +306,16 @@
             aria-describedby="schedule-prompt-help"
             bind:value={prompt}></textarea>
           <p id="schedule-prompt-help">{text.promptHelp}</p>
-          <label for="schedule-delivery">Delivery channel</label>
+          <label for="schedule-delivery">{$messages("Delivery channel")}</label>
           <Select id="schedule-delivery" bind:value={deliveryChannel}>
             <option value="telegram">Telegram</option>
             <option value="discord">Discord</option>
           </Select>
           {#if !linked(deliveryChannel)}
             <p role="status" data-ui="schedule-warning">
-              Link the {channelLabel[deliveryChannel]} owner chat to run this schedule.
+              {$messages("Link the")}
+              {channelLabel[deliveryChannel]}
+              {$messages("owner chat to run this schedule.")}
             </p>
           {/if}
           <label for="schedule-kind">{text.kind}</label>
@@ -324,7 +336,7 @@
             <p id="schedule-date-help">{text.dateHelp}</p>
           {/if}
           {#if kind === "cron"}
-            <label for="schedule-cron">{scheduleKinds.cron}</label>
+            <label for="schedule-cron">{$messages(scheduleKinds.cron)}</label>
             <TextField
               class="font-mono"
               id="schedule-cron"
@@ -376,7 +388,7 @@
                 {#each scheduleWeekdays as day, index (day)}<Checkbox
                     aria-invalid={invalid === "weekdays"}
                     value={index}
-                    bind:group={weekdays}>{day}</Checkbox
+                    bind:group={weekdays}>{$messages(day)}</Checkbox
                   >{/each}
               </div>
             </fieldset>
@@ -397,7 +409,7 @@
               <h3 id="schedule-cron-preview">{text.cronNextRuns}</h3>
               <ul>
                 {#each cronPreview.runs as run (run)}
-                  <li>{scheduleTimeLabel(run, timeZone)}</li>
+                  <li>{scheduleTimeLabel($formattingLocale, run, timeZone)}</li>
                 {/each}
               </ul>
             </section>
@@ -425,28 +437,37 @@
     <section class="panel-card" aria-labelledby={`schedule-${schedule.id}`}>
       <div data-ui="schedule-heading">
         <h2 id={`schedule-${schedule.id}`}>{schedule.name}</h2>
-        <span class="panel-badge">{scheduleStateLabel(schedule)}</span>
+        <span class="panel-badge"
+          >{scheduleStateLabel($messages, schedule)}</span
+        >
       </div>
-      <p>{scheduleCadenceLabel(schedule.cadence)}</p>
+      <p>{scheduleCadenceLabel($messages, schedule.cadence)}</p>
       <p>
-        Delivery via {channelLabel[schedule.deliveryChannel]}{linked(
+        {$messages("Delivery via")}
+        {channelLabel[schedule.deliveryChannel]}{linked(
           schedule.deliveryChannel,
         )
           ? ""
-          : " (owner chat unlinked)"}
+          : $messages(" (owner chat unlinked)")}
       </p>
       <dl>
         <dt>{text.next}</dt>
         <dd>
           {#if schedule.nextRunAt !== null}<time
               datetime={new Date(schedule.nextRunAt).toISOString()}
-              >{scheduleTimeLabel(schedule.nextRunAt, schedule.timeZone)}</time
+              >{scheduleTimeLabel(
+                $formattingLocale,
+                schedule.nextRunAt,
+                schedule.timeZone,
+              )}</time
             >{:else if schedule.cadence.kind === "webhook"}{text.webhookWaiting}{:else}{text.noNext}
             ({schedule.timeZone}){/if}
         </dd>
         <dt>{text.last}</dt>
         <dd>
-          {schedule.lastRun ? scheduleRunLabel(schedule.lastRun) : text.noRuns}
+          {schedule.lastRun
+            ? scheduleRunLabel($messages, schedule.lastRun)
+            : text.noRuns}
         </dd>
       </dl>
       <div data-ui="schedule-actions">
@@ -512,10 +533,11 @@
             {#each schedule.recentRuns as run (run.id)}<li>
                 <time datetime={new Date(run.scheduledFor).toISOString()}
                   >{scheduleTimeLabel(
+                    $formattingLocale,
                     run.scheduledFor,
                     schedule.timeZone,
                   )}</time
-                ><br />{scheduleRunLabel(run)}
+                ><br />{scheduleRunLabel($messages, run)}
               </li>{/each}
           </ol>
         </details>
@@ -523,7 +545,9 @@
     </section>
   {/each}
   <details>
-    <summary class="w-fit cursor-pointer py-1">How schedules run</summary>
+    <summary class="w-fit cursor-pointer py-1"
+      >{$messages("How schedules run")}</summary
+    >
     <p data-ui="muted" class="mt-2">{text.rules}</p>
   </details>
   <div>

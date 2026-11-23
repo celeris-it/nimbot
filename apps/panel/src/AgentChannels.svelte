@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "./i18n/language.js";
   import type { AgentDetail } from "../../server/src/panel/panel-contracts.js";
   import {
     ActionButton,
@@ -45,14 +46,14 @@
 </script>
 
 <div data-ui="page-heading" class="flex-wrap">
-  <h1 tabindex="-1">Channels for {agent.name}</h1>
+  <h1 tabindex="-1">{$messages("Channels for")} {agent.name}</h1>
   <ActionButton disabled={busy} onclick={refresh}>
-    <Icon name="refresh" size={16} />Refresh channel status
+    <Icon name="refresh" size={16} />{$messages("Refresh channel status")}
   </ActionButton>
 </div>
 <div class="settings-section-list" data-ui="agent-channels">
   <section
-    aria-label="Telegram connection"
+    aria-label={$messages("Telegram connection")}
     data-configured={!!agent.botUsername}
   >
     <div class="settings-section-description max-w-[72ch]">
@@ -62,35 +63,41 @@
         class="card-title"
         data-brand="telegram"
       >
-        <Icon name="telegram" size={20} />Telegram connection
+        <Icon name="telegram" size={20} />{$messages("Telegram connection")}
       </h2>
       {#if agent.capabilities.connectTelegram}
-        <h3>Set up a Telegram bot</h3>
+        <h3>{$messages("Set up a Telegram bot")}</h3>
         <ol class="list-decimal space-y-2 ps-5">
           <li>
-            Open
+            {$messages("Open")}
             <a
               class="underline"
               href="https://t.me/BotFather"
               target="_blank"
               rel="noopener noreferrer">@BotFather</a
-            >, send <code>/newbot</code>, and choose a username ending in
-            <code>bot</code>. Copy the bot token.
+            >{$messages(", send")} <code>/newbot</code>{$messages(
+              ", and choose a username ending in",
+            )}
+            <code>bot</code>{$messages(". Copy the bot token.")}
           </li>
           <li>
-            Copy your personal account's numeric Telegram user ID. You can use
+            {$messages(
+              "Copy your personal account's numeric Telegram user ID. You can use",
+            )}
             <a
               class="underline"
               href="https://t.me/userinfobot"
               target="_blank"
               rel="noopener noreferrer">@userinfobot</a
-            >, a third-party bot, to find it. Paste the bot token only into
-            Nimbot.
+            >{$messages(
+              ", a third-party bot, to find it. Paste the bot token only into Nimbot.",
+            )}
           </li>
           <li>
-            Enter both values and select <strong>Connect Telegram</strong>. Open
-            your new bot in Telegram and send it a private message from the
-            configured owner account to link the chat.
+            {$messages("Enter both values and select")}
+            <strong>{$messages("Connect Telegram")}</strong>{$messages(
+              ". Open your new bot in Telegram and send it a private message from the configured owner account to link the chat.",
+            )}
           </li>
         </ol>
       {/if}
@@ -102,7 +109,7 @@
           aria-describedby="form-error"
           aria-busy={busy}
         >
-          <label for="telegram-owner">Owner's Telegram ID</label>
+          <label for="telegram-owner">{$messages("Owner's Telegram ID")}</label>
           <TextField
             id="telegram-owner"
             inputmode="numeric"
@@ -110,7 +117,7 @@
             required
             bind:value={telegramOwner}
           />
-          <label for="telegram-token">Telegram bot token</label>
+          <label for="telegram-token">{$messages("Telegram bot token")}</label>
           <PasswordField
             id="telegram-token"
             maxlength={256}
@@ -120,46 +127,49 @@
           />
           <ActionButton variant="primary" type="submit" disabled={busy}
             ><Icon name="link" size={16} />{busy
-              ? "Saving…"
-              : "Connect Telegram"}</ActionButton
+              ? $messages("Saving…")
+              : $messages("Connect Telegram")}</ActionButton
           >
         </form>
       {:else if agent.botUsername}
         <dl>
-          <dt>Bot</dt>
+          <dt>{$messages("Bot")}</dt>
           <dd data-ui="channel-identifier" title={`@${agent.botUsername}`}>
             @{agent.botUsername}
           </dd>
-          <dt>Connection</dt>
-          <dd>{botLabel(agent)}</dd>
+          <dt>{$messages("Connection")}</dt>
+          <dd>{botLabel($messages, agent)}</dd>
           {#if agent.setupAccess}
-            <dt>Bot link</dt>
-            <dd>{botAccessLabels[agent.setupAccess.bot]}</dd>
-            <dt>Owner verification</dt>
-            <dd>{ownerLabels[agent.setupAccess.owner]}</dd>
+            <dt>{$messages("Bot link")}</dt>
+            <dd>{$messages(botAccessLabels[agent.setupAccess.bot])}</dd>
+            <dt>{$messages("Owner verification")}</dt>
+            <dd>{$messages(ownerLabels[agent.setupAccess.owner])}</dd>
           {/if}
         </dl>
         {#if agent.botConnection?.failure}<p>
-            {failureLabels[agent.botConnection.failure]}
+            {$messages(failureLabels[agent.botConnection.failure])}
           </p>{/if}
         {#if agent.botConnection?.status === "polling" && agent.setupAccess?.owner === "pending"}
           <p>
-            Send the bot a private message from the configured owner's account
-            to link the chat.
+            {$messages(
+              "Send the bot a private message from the configured owner's account to link the chat.",
+            )}
           </p>
         {/if}
         <div class="button-row">
           <ActionButton href={`https://t.me/${agent.botUsername}`} icon="arrow">
-            Open chat in Telegram
+            {$messages("Open chat in Telegram")}
           </ActionButton>
           {#if agent.capabilities.replaceToken}
             <ActionButton href={`${base}/token`}
-              ><Icon name="key" size={16} />Replace bot token</ActionButton
+              ><Icon name="key" size={16} />{$messages(
+                "Replace bot token",
+              )}</ActionButton
             >
           {/if}
         </div>
       {:else}
-        <p>Telegram is unavailable.</p>
+        <p>{$messages("Telegram is unavailable.")}</p>
       {/if}
     </div>
   </section>

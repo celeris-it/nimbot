@@ -24,6 +24,10 @@ See the [first-agent setup guide](docs/INSTALL.md#create-your-first-agent) for s
 - Run saved prompts on a schedule or trigger them from another service with a webhook. [Scheduled tasks](docs/SCHEDULES.md)
 - Give agents access to approved external tools or let them hand off work to other agents with owner approval. [Application tools](docs/ARCHITECTURE.md#application-tools)
 
+## Panel language
+
+The web panel supports English and Spanish. It uses the first supported language in your browser preferences and defaults to English. Choose a language on the sign-in page or in **Settings → Language** to save it for this browser.
+
 ## Architecture
 
 Docker runs the panel, server, and one process per agent in a single non-root container. SQLite and agent workspaces are stored in a persistent Docker volume. [Architecture and storage](docs/ARCHITECTURE.md)

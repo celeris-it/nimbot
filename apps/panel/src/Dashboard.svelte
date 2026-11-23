@@ -1,4 +1,10 @@
 <script lang="ts">
+  import {
+    formattingLocale,
+    messages,
+    numberFormat,
+    pluralRules,
+  } from "./i18n/language.js";
   import type {
     AgentDirectoryEntry,
     AgentSummary,
@@ -35,9 +41,9 @@
   let agentQuery = $state("");
   const telegramIssue = (item: AgentSummary) =>
     item.botConnection?.status === "blocked"
-      ? "Telegram blocked"
+      ? $messages("Telegram blocked")
       : item.botConnection?.status === "failed"
-        ? "Telegram connection failed"
+        ? $messages("Telegram connection failed")
         : undefined;
   const attention = (item: AgentSummary) =>
     item.process?.state === "failed" || Boolean(telegramIssue(item));
@@ -65,23 +71,31 @@
     );
     return () => current.abort();
   });
-  const usd = new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  });
+  const usd = $derived(
+    new Intl.NumberFormat($formattingLocale, {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 2,
+    }),
+  );
   const money = (value: number) =>
-    value > 0 && value < 0.01 ? "< $0.01" : usd.format(value);
-  const count = new Intl.NumberFormat(undefined, { notation: "compact" });
-  const weekday = new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    timeZone: "UTC",
-  });
-  const monthDay = new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+    value > 0 && value < 0.01 ? `< ${usd.format(0.01)}` : usd.format(value);
+  const count = $derived(
+    new Intl.NumberFormat($formattingLocale, { notation: "compact" }),
+  );
+  const weekday = $derived(
+    new Intl.DateTimeFormat($formattingLocale, {
+      weekday: "short",
+      timeZone: "UTC",
+    }),
+  );
+  const monthDay = $derived(
+    new Intl.DateTimeFormat($formattingLocale, {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }),
+  );
   let totalCost = $derived(
     overview?.days.reduce((sum, day) => sum + day.costUsd, 0) ?? 0,
   );
@@ -95,7 +109,16 @@
         key: day.day,
         label: (range === "7" ? weekday : monthDay).format(date),
         value: day.costUsd,
-        title: `${monthDay.format(date)} (UTC): ${money(day.costUsd)}, ${count.format(day.tokens)} tokens, ${day.tasks} ${day.tasks === 1 ? "task" : "tasks"}`,
+        title: $messages(
+          "{0} (UTC): {1}, {2} tokens, {3}",
+          monthDay.format(date),
+          money(day.costUsd),
+          count.format(day.tokens),
+          $messages(
+            $pluralRules.select(day.tasks) === "one" ? "{0} task" : "{0} tasks",
+            $numberFormat.format(day.tasks),
+          ),
+        ),
       };
     }),
   );
@@ -124,12 +147,14 @@
       key: JSON.stringify([item.providerId, item.window]),
     })),
   );
-  const resets = new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const resets = $derived(
+    new Intl.DateTimeFormat($formattingLocale, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+  );
   const shown = 4;
   let modelRows = $derived.by(() => {
     const models = overview?.models ?? [];
@@ -144,7 +169,12 @@
     if (rest.length)
       rows.push({
         key: "other",
-        label: `${rest.length} other ${rest.length === 1 ? "model" : "models"}`,
+        label: $messages(
+          $pluralRules.select(rest.length) === "one"
+            ? "{0} other model"
+            : "{0} other models",
+          $numberFormat.format(rest.length),
+        ),
         icon: "bot" as const,
         value: rest.reduce((sum, model) => sum + model.costUsd, 0),
         tokens: rest.reduce((sum, model) => sum + model.tokens, 0),
@@ -174,21 +204,23 @@
     });
   });
   const processLabel = (item: AgentSummary) =>
-    item.process ? processLabels[item.process.state] : "Unavailable";
+    item.process
+      ? $messages(processLabels[item.process.state])
+      : $messages("Unavailable");
 </script>
 
 <div data-ui="page-heading">
-  <h1 tabindex="-1">Your agents.</h1>
+  <h1 tabindex="-1">{$messages("Your agents.")}</h1>
   <div data-ui="heading-actions">
     <ActionButton
       variant="ghost"
       iconOnly
-      aria-label="Refresh status"
+      aria-label={$messages("Refresh status")}
       onclick={refresh}><Icon name="refresh" /></ActionButton
     >{#if canCreate}<ActionButton
         variant="primary"
         href="/agents/new"
-        icon="plus">Create agent</ActionButton
+        icon="plus">{$messages("Create agent")}</ActionButton
       >{/if}
   </div>
 </div>
@@ -196,46 +228,50 @@
 <Surface tone="muted">
   <div data-ui="workspace-heading">
     <SearchField
-      label="Search agents"
-      placeholder="Search agents"
+      label={$messages("Search agents")}
+      placeholder={$messages("Search agents")}
       bind:value={agentQuery}
     />
     <FilterGroup
-      label="Filter agents"
+      label={$messages("Filter agents")}
       bind:value={filter}
       options={[
-        { value: "all", label: "All agents", count: agents.length },
+        { value: "all", label: $messages("All agents"), count: agents.length },
         {
           value: "ready",
-          label: "Running",
+          label: $messages("Running"),
           count: configured,
         },
-        { value: "attention", label: "Needs attention", count: needsAttention },
+        {
+          value: "attention",
+          label: $messages("Needs attention"),
+          count: needsAttention,
+        },
       ]}
     />
   </div>
   {#if agents.length === 0}
     <EmptyState
-      title="A workspace for your next idea."
+      title={$messages("A workspace for your next idea.")}
       description={canCreate
-        ? "No agents yet. Create your first agent."
-        : "No agents yet. Agent creation is unavailable."}
+        ? $messages("No agents yet. Create your first agent.")
+        : $messages("No agents yet. Agent creation is unavailable.")}
     />
   {:else if filtered.length === 0}
     <EmptyState
-      title="No matching agents."
-      description="Try another name, bot username, or filter."
+      title={$messages("No matching agents.")}
+      description={$messages("Try another name, bot username, or filter.")}
       icon="search"
     >
       {#snippet actions()}<ActionButton
           onclick={() => {
             agentQuery = "";
             filter = "all";
-          }}>Clear filters</ActionButton
+          }}>{$messages("Clear filters")}</ActionButton
         >{/snippet}
     </EmptyState>
   {:else}
-    <ul data-ui="agent-grid" aria-label="Agent workspaces">
+    <ul data-ui="agent-grid" aria-label={$messages("Agent workspaces")}>
       {#each filtered as item (item.id)}
         {@const id = encodeURIComponent(item.id)}
         {@const editable = item.optionCapabilities?.edit}
@@ -247,7 +283,10 @@
             variant="plain"
             href={`/agents/${id}/${editable ? "settings" : "setup"}`}
             data-ui="agent-profile"
-            aria-label={`Open ${item.name} ${editable ? "settings" : "overview"}`}
+            aria-label={$messages(
+              editable ? "Open {0} settings" : "Open {0} overview",
+              item.name,
+            )}
             aria-describedby={item.botUsername
               ? `${statusId} ${handleId}`
               : statusId}
@@ -273,7 +312,7 @@
               {#if issue}<StatusBadge label={issue} tone="warning" />{/if}
             </span>
             <span data-ui="agent-profile-destination">
-              {editable ? "Settings" : "Overview"}
+              {editable ? $messages("Settings") : $messages("Overview")}
               <Icon name="chevron" size={16} />
             </span>
           </ActionButton>
@@ -285,55 +324,69 @@
 
 <div data-ui="overview-grid">
   <Surface
-    title="Usage"
-    description="Reported model cost per day across all agents (UTC)."
+    title={$messages("Usage")}
+    description={$messages(
+      "Reported model cost per day across all agents (UTC).",
+    )}
   >
     {#snippet actions()}<FilterGroup
-        label="Usage range"
+        label={$messages("Usage range")}
         bind:value={range}
         options={[
-          { value: "7", label: "7 days" },
-          { value: "30", label: "30 days" },
+          { value: "7", label: $messages("7 days") },
+          { value: "30", label: $messages("30 days") },
         ]}
       />{/snippet}
     {#if overviewFailed && !overview}
-      <p data-ui="muted">Usage is unavailable right now.</p>
+      <p data-ui="muted">{$messages("Usage is unavailable right now.")}</p>
     {:else}
       <div data-ui="usage-totals">
         <strong>{money(totalCost)}</strong>
         <span
-          >reported cost<small
-            >{count.format(totalTokens)} tokens in the last {range} days</small
+          >{$messages("reported cost")}<small
+            >{$messages(
+              "{0} tokens in the last {1} days",
+              count.format(totalTokens),
+              range,
+            )}</small
           ></span
         >
       </div>
       <UsageChart
         {bars}
-        caption={`Reported cost per day for the last ${range} days`}
+        caption={$messages(
+          "Reported cost per day for the last {0} days",
+          range,
+        )}
       />
       {#if overview?.missingCost}<p data-ui="muted">
-          {overview.missingCost}
-          {overview.missingCost === 1 ? "task has" : "tasks have"} no reported cost
-          and {overview.missingCost === 1 ? "is" : "are"} counted as $0.
+          {$messages(
+            $pluralRules.select(overview.missingCost) === "one"
+              ? "{0} task has no reported cost and is counted as $0."
+              : "{0} tasks have no reported cost and are counted as $0.",
+            $numberFormat.format(overview.missingCost),
+          )}
         </p>{/if}
     {/if}
   </Surface>
   <Surface
-    title="Models"
-    description={`Share of ${byTokens ? "tokens" : "cost"}.`}
+    title={$messages("Models")}
+    description={$messages(byTokens ? "Share of tokens." : "Share of cost.")}
   >
     {#if modelRows.length === 0}
       <p data-ui="muted">
         {overviewFailed
-          ? "Usage is unavailable right now."
-          : `No model usage in the last ${range} days.`}
+          ? $messages("Usage is unavailable right now.")
+          : $messages("No model usage in the last {0} days.", range)}
       </p>
     {:else}
       <div data-ui="model-breakdown">
         <UsageDonut
           {slices}
           label={byTokens ? count.format(totalTokens) : money(totalCost)}
-          detail={byTokens ? "tokens" : `last ${range} days`}
+          detail={byTokens
+            ? $messages("tokens")
+            : $messages("last {0} days", range)}
         />
         <ul>
           {#each modelRows as row, index (row.key)}
@@ -352,7 +405,7 @@
               >
               <small
                 >{byTokens
-                  ? `${count.format(row.tokens)} tokens`
+                  ? $messages("{0} tokens", count.format(row.tokens))
                   : money(row.value)}</small
               >
             </li>
@@ -361,22 +414,23 @@
       </div>
     {/if}
     <p data-ui="muted">
-      Costs are the amounts reported by each provider after a task finishes.
-      Tasks without a reported cost are counted as $0, and the model share falls
-      back to tokens when no cost was reported.
+      {$messages(
+        "Costs are the amounts reported by each provider after a task finishes. Tasks without a reported cost are counted as $0, and the model share falls back to tokens when no cost was reported.",
+      )}
     </p>
   </Surface>
 </div>
 
 <div data-ui="overview-grid" data-order="swapped">
   <Surface
-    title="Quota left"
-    description="Remaining allowance by quota window."
+    title={$messages("Quota left")}
+    description={$messages("Remaining allowance by quota window.")}
   >
     {#if quotas.length === 0}
       <p data-ui="muted">
-        No provider quota data yet. It appears once an agent’s model reports its
-        limits.
+        {$messages(
+          "No provider quota data yet. It appears once an agent’s model reports its limits.",
+        )}
       </p>
     {:else}
       <div data-ui="model-breakdown">
@@ -386,7 +440,7 @@
             percent: item.remainingPercent,
           }))}
           label={`${quotas[0]!.remainingPercent}%`}
-          detail={quotas.length === 1 ? "left" : "lowest left"}
+          detail={$messages(quotas.length === 1 ? "left" : "lowest left")}
         />
         <ul>
           {#each quotas as item, index (item.key)}
@@ -399,21 +453,28 @@
               >
               <strong>{item.remainingPercent}%</strong>
               <small
-                title={`${item.window}, resets ${resets.format(item.resetsAt)}`}
-                >{item.window}</small
+                title={$messages(
+                  "{0}, resets {1}",
+                  item.window,
+                  resets.format(item.resetsAt),
+                )}>{item.window}</small
               >
             </li>
           {/each}
         </ul>
       </div>
       {#if quotas.length > quotaRingCount}
-        <p data-ui="muted">Rings show the four lowest remaining quotas.</p>
+        <p data-ui="muted">
+          {$messages("Rings show the four lowest remaining quotas.")}
+        </p>
       {/if}
     {/if}
   </Surface>
   <Surface
-    title="Last 24 hours"
-    description="Cumulative reported cost by hour, compared with the 24 hours before."
+    title={$messages("Last 24 hours")}
+    description={$messages(
+      "Cumulative reported cost by hour, compared with the 24 hours before.",
+    )}
   >
     <div data-ui="trend-summary">
       <strong>{money(hourTotal)}</strong>
@@ -425,7 +486,11 @@
               ? "down"
               : "flat"}>{deltaText}</span
         >{/if}
-      <small>vs {money(hourBefore)} in the previous 24 hours</small>
+      <small
+        >{$messages("vs")}
+        {money(hourBefore)}
+        {$messages("in the previous 24 hours")}</small
+      >
     </div>
     <UsageTrend
       current={hourCurrent}
@@ -436,6 +501,7 @@
 </div>
 <footer data-ui="dashboard-footer">
   <span
-    ><Icon name="shield" size={14} /> Your server. Your agents. Your control.</span
-  ><span>States refresh every 5 seconds while visible.</span>
+    ><Icon name="shield" size={14} />
+    {$messages("Your server. Your agents. Your control.")}</span
+  ><span>{$messages("States refresh every 5 seconds while visible.")}</span>
 </footer>

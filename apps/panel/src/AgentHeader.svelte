@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "./i18n/language.js";
   import type { AgentSummary } from "../../server/src/panel/panel-contracts.js";
   import { matchingOptions, type ConfigurationGroup } from "./option-search.js";
   import {
@@ -98,11 +99,11 @@
 
 {#snippet directoryStatus(empty: string)}
   {#if loading}
-    <p role="status">Loading agents…</p>
+    <p role="status">{$messages("Loading agents…")}</p>
   {:else if unavailable}
-    <p role="status">Agent list unavailable.</p>
+    <p role="status">{$messages("Agent list unavailable.")}</p>
     <ActionButton type="button" onclick={refresh}
-      >Retry loading agents</ActionButton
+      >{$messages("Retry loading agents")}</ActionButton
     >
   {:else}
     <p role="status">{empty}</p>
@@ -114,15 +115,15 @@
     data-ui="agent-header-search"
     bind:this={search}
     role="search"
-    aria-label="Configuration options"
+    aria-label={$messages("Configuration options")}
     onsubmit={(event) => {
       event.preventDefault();
       if (showResults) search.querySelector("a")?.click();
     }}
   >
     <SearchField
-      label="Search options"
-      placeholder="Search options"
+      label={$messages("Search options")}
+      placeholder={$messages("Search options")}
       bind:value={query}
       onfocus={() => {
         if (!searching && !unavailable) refresh();
@@ -134,7 +135,7 @@
       <div
         data-ui="agent-header-popover"
         role="region"
-        aria-label="Matching options"
+        aria-label={$messages("Matching options")}
       >
         {#each matches as group (group.key)}
           <div
@@ -159,18 +160,20 @@
           </div>
         {/each}
         {#if loading}
-          <p role="status">Loading agents…</p>
+          <p role="status">{$messages("Loading agents…")}</p>
         {:else if unavailable}
-          <p role="status">Could not load the latest agent list.</p>
+          <p role="status">
+            {$messages("Could not load the latest agent list.")}
+          </p>
           <ActionButton
             type="button"
             onclick={() => {
               search.querySelector("input")?.focus();
               refresh();
-            }}>Retry loading agents</ActionButton
+            }}>{$messages("Retry loading agents")}</ActionButton
           >
         {:else if !matches.length}
-          <p role="status">No matching options.</p>
+          <p role="status">{$messages("No matching options.")}</p>
         {/if}
       </div>
     {/if}
@@ -188,7 +191,9 @@
     >
       <summary
         bind:this={summary}
-        aria-label={current ? `Switch agent, ${current.name}` : "Switch agent"}
+        aria-label={current
+          ? $messages("Switch agent, {0}", current.name)
+          : $messages("Switch agent")}
       >
         {#if current}
           {#key current.id}
@@ -196,7 +201,7 @@
           {/key}
         {/if}
         <span data-ui="agent-switcher-name"
-          >{current?.name ?? "Switch agent"}</span
+          >{current?.name ?? $messages("Switch agent")}</span
         >
         <Icon name="chevron" size={16} />
       </summary>
@@ -205,7 +210,7 @@
           {#if agents.length}
             {@render agentLinks(agents, section)}
           {:else}
-            {@render directoryStatus("No agents yet.")}
+            {@render directoryStatus($messages("No agents yet."))}
           {/if}
         </div>
       {/if}

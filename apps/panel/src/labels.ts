@@ -1,3 +1,4 @@
+import type { Translate, MessageKey } from "./i18n/language.js";
 import type {
   AgentSummary,
   DiscordConversationStatus,
@@ -12,95 +13,114 @@ export const discordConversationLabels = {
   reconnecting: "Reconnecting",
   failed: "Connection failed",
   stopped: "Disconnected",
-} satisfies Record<DiscordConversationStatus["state"], string>;
+} as const satisfies Record<DiscordConversationStatus["state"], MessageKey>;
 
-export const scheduleText = {
-  title: (name: string) => `Schedules for ${name}`,
-  pageTitle: "Schedules",
-  link: "Schedules",
-  back: "Back to agent",
-  new: "New schedule",
-  create: "Create schedule",
-  edit: "Edit",
-  editTitle: "Edit schedule",
-  save: "Save schedule",
-  saving: "Saving…",
-  cancel: "Cancel",
-  pause: "Pause",
-  resume: "Resume",
-  run: "Run now",
-  remove: "Delete",
-  refresh: "Refresh schedules",
-  name: "Schedule name",
-  prompt: "Prompt",
-  kind: "Activation",
-  date: "Date",
-  time: "Time of day",
-  minutes: "Interval in minutes",
-  zone: "Time zone",
-  weekdays: "Weekdays",
-  next: "Next run",
-  last: "Last run",
-  history: "Recent runs",
-  none: "No schedules yet. Create one to run a saved prompt automatically.",
-  noRuns: "No runs yet",
-  noNext: "Not scheduled",
-  enabled: "Enabled",
-  paused: "Paused",
-  finished: "Finished",
-  count: (count: number, max: number) => `${count} of ${max} schedules`,
-  limit: "Schedule limit reached. Delete a schedule to create another.",
-  costs:
+export const scheduleText = (t: Translate) => ({
+  title: (name: string) => t("Schedules for {0}", name),
+  pageTitle: t("Schedules"),
+  link: t("Schedules"),
+  back: t("Back to agent"),
+  new: t("New schedule"),
+  create: t("Create schedule"),
+  edit: t("Edit"),
+  editTitle: t("Edit schedule"),
+  save: t("Save schedule"),
+  saving: t("Saving…"),
+  cancel: t("Cancel"),
+  pause: t("Pause"),
+  resume: t("Resume"),
+  run: t("Run now"),
+  remove: t("Delete"),
+  refresh: t("Refresh schedules"),
+  name: t("Schedule name"),
+  prompt: t("Prompt"),
+  kind: t("Activation"),
+  date: t("Date"),
+  time: t("Time of day"),
+  minutes: t("Interval in minutes"),
+  zone: t("Time zone"),
+  weekdays: t("Weekdays"),
+  next: t("Next run"),
+  last: t("Last run"),
+  history: t("Recent runs"),
+  none: t("No schedules yet. Create one to run a saved prompt automatically."),
+  noRuns: t("No runs yet"),
+  noNext: t("Not scheduled"),
+  enabled: t("Enabled"),
+  paused: t("Paused"),
+  finished: t("Finished"),
+  count: (count: number, max: number) => t("{0} of {1} schedules", count, max),
+  limit: t("Schedule limit reached. Delete a schedule to create another."),
+  costs: t(
     "Every run uses this agent's AI provider credits. Results arrive in the owner's private chat on the selected channel.",
-  rules:
+  ),
+  rules: t(
     "Stopped or unavailable agents are skipped; schedules never start agents automatically. Runs more than 10 minutes late are missed, and overlapping timed or manual runs are skipped. Webhook requests queue instead.",
-  promptHelp:
+  ),
+  promptHelp: t(
     "Describe what the agent should do. Scheduled runs share its existing conversation context.",
-  zoneHelp:
+  ),
+  zoneHelp: t(
     "Use an IANA time zone, for example Europe/Madrid. Dates and times use this zone.",
-  zoneError: "Enter a valid IANA time zone, for example Europe/Madrid.",
-  weekdayError: "Select at least one weekday.",
+  ),
+  zoneError: t("Enter a valid IANA time zone, for example Europe/Madrid."),
+  weekdayError: t("Select at least one weekday."),
   intervalHelp: (min: number) =>
-    `At least ${min} minutes. Intervals stay anchored to creation time.`,
-  dateHelp: "Choose a future local date and time.",
-  dstHelp:
+    t("At least {0} minutes. Intervals stay anchored to creation time.", min),
+  dateHelp: t("Choose a future local date and time."),
+  dstHelp: t(
     "A time skipped by daylight saving runs at the next valid instant; a repeated time runs only once.",
-  editHelp:
+  ),
+  editHelp: t(
     "Changes apply to future tasks. Already queued or running tasks keep their saved prompt and name.",
-  pausedHelp:
+  ),
+  pausedHelp: t(
     "Pausing stops timed and webhook runs. You can still use Run now.",
-  webhookWaiting: "Waiting for webhook",
-  webhookFormHelp:
+  ),
+  webhookWaiting: t("Waiting for webhook"),
+  webhookFormHelp: t(
     "Save this schedule to get its webhook URL and token. An optional JSON payload is appended to the prompt. Pausing blocks webhook requests.",
-  webhookShow: "Show webhook details",
-  webhookHide: "Hide webhook details",
-  webhookUrl: "Webhook URL",
-  webhookToken: "Bearer token",
-  webhookRotate: "Regenerate token",
-  webhookRotateConfirm:
+  ),
+  webhookShow: t("Show webhook details"),
+  webhookHide: t("Hide webhook details"),
+  webhookUrl: t("Webhook URL"),
+  webhookToken: t("Bearer token"),
+  webhookRotate: t("Regenerate token"),
+  webhookRotateConfirm: t(
     "Regenerate this webhook token? The previous token will stop working immediately.",
-  webhookHelp:
+  ),
+  webhookHelp: t(
     "Send a POST request with Authorization: Bearer TOKEN. Keep the token private. Optional body: application/json, up to 16 KiB. Limit: five requests per minute. Requests received while a run is in progress are queued, up to 20 unfinished runs.",
-  cronHelp:
+  ),
+  cronHelp: t(
     "Five fields in the schedule time zone: minute hour day-of-month month day-of-week. Minutes must be at least 15 minutes apart.",
-  cronNextRuns: "Next runs",
-  webhookError: "Could not load webhook details.",
-  saved: "Schedule saved.",
-  removed: "Schedule deleted. Already queued or running tasks are kept.",
-  pauseDone: "Schedule paused.",
-  resumeDone: "Schedule resumed.",
-  expired:
+  ),
+  cronNextRuns: t("Next runs"),
+  webhookError: t("Could not load webhook details."),
+  saved: t("Schedule saved."),
+  removed: t("Schedule deleted. Already queued or running tasks are kept."),
+  pauseDone: t("Schedule paused."),
+  resumeDone: t("Schedule resumed."),
+  expired: t(
     "This schedule has no future occurrence. Edit its date before resuming.",
+  ),
   confirm: (name: string) =>
-    `Delete schedule "${name}" and its run history? Already queued or running tasks are kept.`,
+    t(
+      'Delete schedule "{0}" and its run history? Already queued or running tasks are kept.',
+      name,
+    ),
   outcomes: {
-    enqueued: "Task queued. Its result will arrive in the selected owner chat.",
-    skipped_not_ready:
+    enqueued: t(
+      "Task queued. Its result will arrive in the selected owner chat.",
+    ),
+    skipped_not_ready: t(
       "Not run: the agent is unavailable or its owner chat is not linked.",
-    skipped_overlap:
+    ),
+    skipped_overlap: t(
       "Not run: a previous task from this schedule is still queued or running.",
+    ),
   },
-};
+});
 export const scheduleKinds = {
   once: "Once",
   daily: "Daily",
@@ -108,7 +128,7 @@ export const scheduleKinds = {
   interval: "Interval",
   cron: "Cron expression",
   webhook: "Webhook",
-};
+} as const;
 export const scheduleWeekdays = [
   "Sunday",
   "Monday",
@@ -117,50 +137,61 @@ export const scheduleWeekdays = [
   "Thursday",
   "Friday",
   "Saturday",
-];
-export function scheduleCadenceLabel(cadence: Schedule["cadence"]) {
+] as const;
+export function scheduleCadenceLabel(
+  t: Translate,
+  cadence: Schedule["cadence"],
+) {
   switch (cadence.kind) {
     case "webhook":
-      return "On webhook request";
+      return t("On webhook request");
     case "once":
-      return `Once on ${cadence.date} at ${cadence.time}`;
+      return t("Once on {0} at {1}", cadence.date, cadence.time);
     case "daily":
-      return `Daily at ${cadence.time}`;
+      return t("Daily at {0}", cadence.time);
     case "weekly":
-      return `Every ${cadence.weekdays.map((day) => scheduleWeekdays[day]).join(", ")} at ${cadence.time}`;
+      return t(
+        "Every {0} at {1}",
+        cadence.weekdays.map((day) => t(scheduleWeekdays[day]!)).join(", "),
+        cadence.time,
+      );
     case "interval":
-      return `Every ${cadence.minutes} minutes`;
+      return t("Every {0} minutes", cadence.minutes);
     case "cron":
-      return `Cron ${cadence.expression}`;
+      return t("Cron {0}", cadence.expression);
   }
 }
-export function scheduleTimeLabel(at: number, timeZone: string) {
-  return `${new Intl.DateTimeFormat("en", { timeZone, dateStyle: "medium", timeStyle: "short" }).format(at)} (${timeZone})`;
+export function scheduleTimeLabel(
+  locale: string,
+  at: number,
+  timeZone: string,
+) {
+  return `${new Intl.DateTimeFormat(locale, { timeZone, dateStyle: "medium", timeStyle: "short" }).format(at)} (${timeZone})`;
 }
-export function scheduleStateLabel(schedule: Schedule) {
-  if (schedule.enabled) return scheduleText.enabled;
+export function scheduleStateLabel(t: Translate, schedule: Schedule) {
+  if (schedule.enabled) return t("Enabled");
   return schedule.cadence.kind === "once" &&
     nextRun(schedule.cadence, schedule.timeZone, Date.now()) === undefined
-    ? scheduleText.finished
-    : scheduleText.paused;
+    ? t("Finished")
+    : t("Paused");
 }
-export function scheduleRunLabel(run: ScheduleRun) {
+export function scheduleRunLabel(t: Translate, run: ScheduleRun) {
   if (run.outcome !== "enqueued")
     return {
-      skipped_overlap: "Skipped: previous run still queued or running",
-      skipped_not_ready: "Skipped: agent unavailable or owner chat unlinked",
-      missed: "Missed: more than 10 minutes late",
+      skipped_overlap: t("Skipped: previous run still queued or running"),
+      skipped_not_ready: t("Skipped: agent unavailable or owner chat unlinked"),
+      missed: t("Missed: more than 10 minutes late"),
     }[run.outcome];
   return run.taskStatus
     ? {
-        queued: "Queued",
-        running: "Running",
-        completed: "Completed",
-        failed: "Failed",
-        interrupted: "Interrupted",
-        cancelled: "Cancelled",
+        queued: t("Queued"),
+        running: t("Running"),
+        completed: t("Completed"),
+        failed: t("Failed"),
+        interrupted: t("Interrupted"),
+        cancelled: t("Cancelled"),
       }[run.taskStatus]
-    : "Task status unavailable";
+    : t("Task status unavailable");
 }
 
 export const connectionLabels = {
@@ -170,7 +201,7 @@ export const connectionLabels = {
   blocked: "Blocked by incomplete setup",
   failed: "Connection failed",
   stopped: "Stopped",
-};
+} as const;
 export const failureLabels = {
   setup_incomplete: "Start the Agent Host before connecting this bot.",
   credentials_unavailable:
@@ -181,27 +212,27 @@ export const failureLabels = {
     "Telegram rejected the bot token. Replace it and restart the agent.",
   telegram_unavailable:
     "Telegram polling could not continue. Check connectivity and whether another instance is polling this bot.",
-};
-export function botLabel(agent: AgentSummary) {
-  if (!agent.botUsername) return "Not configured";
+} as const;
+export function botLabel(t: Translate, agent: AgentSummary) {
+  if (!agent.botUsername) return t("Not configured");
   return agent.botConnection
-    ? connectionLabels[agent.botConnection.status]
-    : "Not connected yet";
+    ? t(connectionLabels[agent.botConnection.status])
+    : t("Not connected yet");
 }
 export const botAccessLabels = {
   linked: "Bot verified and linked",
   unlinked: "Bot not linked",
   unavailable: "Unavailable",
-};
+} as const;
 export const ownerLabels = {
   pending: "Pending: waiting for the owner’s first message",
   verified: "Verified through a private message",
   unavailable: "Unavailable",
-};
+} as const;
 export const processLabels = {
   starting: "Starting",
   running: "Running",
   stopping: "Stopping",
   stopped: "Stopped",
   failed: "Failed",
-};
+} as const;

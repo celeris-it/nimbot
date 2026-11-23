@@ -24,38 +24,87 @@ const cronMacros = new Map([
 const cronMonths = "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split(" ");
 const cronWeekdays = "SUN MON TUE WED THU FRI SAT".split(" ");
 
+type CronField = "minute" | "hour" | "day of month" | "month" | "day of week";
+
+export type CronErrorDetails =
+  | { code: "cron_too_long"; params: [max: number] }
+  | {
+      code: "cron_invalid_value" | "cron_invalid_item";
+      params: [field: CronField, value: string];
+    }
+  | {
+      code: "cron_value_outside_range";
+      params: [field: CronField, value: string, min: number, max: number];
+    }
+  | {
+      code:
+        | "cron_step_requires_range"
+        | "cron_invalid_step"
+        | "cron_reversed_range";
+      params: [field: CronField];
+    };
+
+export class CronValidationError extends Error {
+  constructor(
+    message: string,
+    readonly details: CronErrorDetails,
+  ) {
+    super(message);
+  }
+}
+
 function parseCronField(
   field: string,
-  name: string,
+  name: CronField,
   min: number,
   max: number,
   names: string[] = [],
 ): number[] {
-  const error = (message: string) =>
-    new Error(`Cron ${name} field: ${message}`);
+  const error = (message: string, details: CronErrorDetails) =>
+    new CronValidationError(`Cron ${name} field: ${message}`, details);
   const parseValue = (token: string) => {
     const index = names.indexOf(token);
     if (index >= 0) return index + min;
-    if (!/^\d+$/.test(token)) throw error(`Invalid value "${token}".`);
+    if (!/^\d+$/.test(token))
+      throw error(`Invalid value "${token}".`, {
+        code: "cron_invalid_value",
+        params: [name, token],
+      });
     const value = Number(token);
     if (value < min || value > max)
-      throw error(`${token} is outside ${min}-${max}.`);
+      throw error(`${token} is outside ${min}-${max}.`, {
+        code: "cron_value_outside_range",
+        params: [name, token, min, max],
+      });
     return value;
   };
   const values = new Set<number>();
   for (const item of field.split(",")) {
     const match = /^(\*|[A-Z0-9]+)(?:-([A-Z0-9]+))?(?:\/(\d+))?$/.exec(item);
     if (!match || (match[1] === "*" && match[2]))
-      throw error(`Invalid item "${item}".`);
+      throw error(`Invalid item "${item}".`, {
+        code: "cron_invalid_item",
+        params: [name, item],
+      });
     const [, start, end, stride] = match;
     if (stride !== undefined && start !== "*" && end === undefined)
-      throw error("Steps require a range or *.");
+      throw error("Steps require a range or *.", {
+        code: "cron_step_requires_range",
+        params: [name],
+      });
     const step = stride === undefined ? 1 : Number(stride);
     if (!Number.isSafeInteger(step) || step < 1)
-      throw error("Step must be a positive whole number.");
+      throw error("Step must be a positive whole number.", {
+        code: "cron_invalid_step",
+        params: [name],
+      });
     const first = start === "*" ? min : parseValue(start!);
     const last = start === "*" ? max : end ? parseValue(end) : first;
-    if (last < first) throw error("Range must start at or before its end.");
+    if (last < first)
+      throw error("Range must start at or before its end.", {
+        code: "cron_reversed_range",
+        params: [name],
+      });
     for (let value = first; value <= last; value += step)
       values.add(name === "day of week" && value === 7 ? 0 : value);
   }
@@ -64,8 +113,9 @@ function parseCronField(
 
 export function parseCronExpression(input: string) {
   if (input.length > MAX_CRON_EXPRESSION_LENGTH)
-    throw new Error(
+    throw new CronValidationError(
       `Cron expression must be at most ${MAX_CRON_EXPRESSION_LENGTH} characters.`,
+      { code: "cron_too_long", params: [MAX_CRON_EXPRESSION_LENGTH] },
     );
   const normalized = input.trim().replace(/\s+/g, " ").toUpperCase();
   const macro = normalized.toLowerCase();

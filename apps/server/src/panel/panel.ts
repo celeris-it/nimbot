@@ -1,3 +1,4 @@
+import { describePanelError, panelError } from "./panel-errors.js";
 import type { ProviderCheck } from "../providers/provider-contracts.js";
 import { HostProviderError } from "../providers/host-providers.js";
 import type { createAgentUsage } from "../providers/agent-usage.js";
@@ -302,14 +303,14 @@ export function createPanel(
       !["GET", "HEAD"].includes(c.req.method) &&
       c.req.header("Origin") !== config.origin
     )
-      return c.json({ error: "Origin not allowed." }, 403);
+      return c.json(panelError("origin_not_allowed"), 403);
     await next();
   });
   app.use(
     "*",
     bodyLimit({
       maxSize: 65536,
-      onError: (c) => c.json({ error: "Request too large." }, 413),
+      onError: (c) => c.json(panelError("request_too_large"), 413),
     }),
   );
   const entry = async (c: Context) => {
@@ -348,10 +349,7 @@ export function createPanel(
     }
     if (attempts >= 5) {
       c.header("Retry-After", String(Math.ceil((windowEnd - now()) / 1000)));
-      return c.json(
-        { error: "Too many attempts. Try again in 15 minutes." },
-        429,
-      );
+      return c.json(panelError("login_rate_limited"), 429);
     }
     attempts++;
     const body = await c.req.parseBody({ all: true });
@@ -360,7 +358,7 @@ export function createPanel(
       body.password.length > 256 ||
       !(await verifyPassword(body.password, config.passwordHash))
     )
-      return c.json({ error: "Incorrect password. Try again." }, 401);
+      return c.json(panelError("incorrect_password"), 401);
     attempts = 0;
     for (const [id, expires] of sessions)
       if (expires <= now()) sessions.delete(id);
@@ -381,7 +379,7 @@ export function createPanel(
       path,
       bodyLimit({
         maxSize: 4096,
-        onError: (c) => c.json({ error: "Request too large." }, 413),
+        onError: (c) => c.json(panelError("request_too_large"), 413),
       }),
       signIn,
     );
@@ -391,7 +389,7 @@ export function createPanel(
     if (!expires || expires <= now()) {
       if (id) sessions.delete(id);
       return c.req.path.startsWith("/api/")
-        ? c.json({ error: "Unauthorized" }, 401)
+        ? c.json(panelError("unauthorized"), 401)
         : c.redirect("/login", 303);
     }
     await next();
@@ -425,9 +423,9 @@ export function createPanel(
   ]) {
     app.use(path, async (c, next) => {
       if (!getAgentSetup?.(c.req.param("id")!))
-        return c.json({ error: "Agent not found." }, 404);
+        return c.json(panelError("agent_not_found"), 404);
       if (!deps.schedules)
-        return c.json({ error: "Schedules unavailable." }, 503);
+        return c.json(panelError("schedules_unavailable"), 503);
       await next();
     });
   }
@@ -512,6 +510,7 @@ export function createPanel(
     } catch (error) {
       throw new ScheduleValidationError(
         error instanceof Error ? error.message : "Invalid cadence.",
+        { cause: error },
       );
     }
   }
@@ -532,7 +531,7 @@ export function createPanel(
   app.post("/api/agents/:id/schedules", async (c) => {
     const input = await scheduleInput(c);
     if (!getAgentSetup?.(c.req.param("id")))
-      return c.json({ error: "Agent not found." }, 404);
+      return c.json(panelError("agent_not_found"), 404);
     const schedule = deps.schedules!.store.create({
       ...input,
       agentId: c.req.param("id"),
@@ -541,17 +540,17 @@ export function createPanel(
   });
   app.post("/api/agents/:id/schedules/:scheduleId", async (c) => {
     const schedule = ownedSchedule(c);
-    if (!schedule) return c.json({ error: "Schedule not found." }, 404);
+    if (!schedule) return c.json(panelError("schedule_not_found"), 404);
     const input = await scheduleInput(c);
     const updated = deps.schedules!.store.update(schedule.id, input);
     return updated
       ? c.json({ schedule: updated })
-      : c.json({ error: "Schedule not found." }, 404);
+      : c.json(panelError("schedule_not_found"), 404);
   });
   app.get("/api/agents/:id/schedules/:scheduleId/webhook", (c) => {
     const schedule = ownedSchedule(c);
     if (!schedule || schedule.cadence.kind !== "webhook")
-      return c.json({ error: "Webhook schedule not found." }, 404);
+      return c.json(panelError("webhook_schedule_not_found"), 404);
     return c.json({
       url: `${config.origin}/hooks/schedules/${schedule.id}`,
       token: deps.schedules!.store.webhookToken(schedule.id),
@@ -562,13 +561,13 @@ export function createPanel(
     async (c) => {
       const schedule = ownedSchedule(c);
       if (!schedule || schedule.cadence.kind !== "webhook")
-        return c.json({ error: "Webhook schedule not found." }, 404);
+        return c.json(panelError("webhook_schedule_not_found"), 404);
       if (Object.keys(await scheduleFields(c)).length)
         throw new ScheduleValidationError(
           "This action does not accept form fields.",
         );
       const token = deps.schedules!.store.rotateWebhookToken(schedule.id);
-      if (!token) return c.json({ error: "Webhook schedule not found." }, 404);
+      if (!token) return c.json(panelError("webhook_schedule_not_found"), 404);
       return c.json({
         url: `${config.origin}/hooks/schedules/${schedule.id}`,
         token,
@@ -578,13 +577,13 @@ export function createPanel(
   for (const action of ["pause", "resume", "remove", "run"] as const) {
     app.post(`/api/agents/:id/schedules/:scheduleId/${action}`, async (c) => {
       let schedule = ownedSchedule(c);
-      if (!schedule) return c.json({ error: "Schedule not found." }, 404);
+      if (!schedule) return c.json(panelError("schedule_not_found"), 404);
       if (Object.keys(await scheduleFields(c)).length)
         throw new ScheduleValidationError(
           "This action does not accept form fields.",
         );
       schedule = ownedSchedule(c);
-      if (!schedule) return c.json({ error: "Schedule not found." }, 404);
+      if (!schedule) return c.json(panelError("schedule_not_found"), 404);
       if (action === "remove")
         return c.json({ removed: deps.schedules!.store.remove(schedule.id) });
       if (action === "run") {
@@ -593,7 +592,7 @@ export function createPanel(
           return c.json(
             {
               ...result,
-              error: "Schedule changed. Refresh before running it again.",
+              ...panelError("schedule_changed"),
             },
             409,
           );
@@ -601,8 +600,7 @@ export function createPanel(
           return c.json(
             {
               ...result,
-              error:
-                "Scheduled execution is unavailable. Refresh and try again.",
+              ...panelError("scheduled_execution_unavailable"),
             },
             503,
           );
@@ -636,7 +634,7 @@ export function createPanel(
   });
   app.post(
     "/api/providers/:provider/device-login/:attempt/cancel",
-    validated("param", loginAttemptParams.loose(), "Invalid login attempt."),
+    validated("param", loginAttemptParams.loose(), "invalid_login_attempt"),
     async (c) => {
       const { provider, attempt } = c.req.param();
       if (provider !== "openai" && provider !== "opencode") return c.notFound();
@@ -649,12 +647,8 @@ export function createPanel(
   app.post("/api/providers/:provider", async (c) => {
     const provider = c.req.param("provider");
     if (!isProviderId(provider))
-      return c.json({ error: "Unknown provider." }, 400);
-    const form = await parseForm(
-      c,
-      providerKeyForm,
-      "Enter an API key of 1–4096 characters without whitespace.",
-    );
+      return c.json(panelError("unknown_provider"), 400);
+    const form = await parseForm(c, providerKeyForm, "invalid_api_key_format");
     if (form.response) return form.response;
     await deps.providers!.save(provider, form.data.key);
     return c.json({ saved: true });
@@ -662,16 +656,16 @@ export function createPanel(
   app.post("/api/providers/:provider/remove", async (c) => {
     const provider = c.req.param("provider");
     if (!isProviderId(provider))
-      return c.json({ error: "Unknown provider." }, 400);
+      return c.json(panelError("unknown_provider"), 400);
     await deps.providers!.remove(provider);
     return c.json({ removed: true });
   });
   for (const suffix of ["models", "model", "usage"])
     app.use(`/api/agents/:id/${suffix}`, async (c, next) => {
       if (!getAgentSetup?.(c.req.param("id")!))
-        return c.json({ error: "Agent not found." }, 404);
+        return c.json(panelError("agent_not_found"), 404);
       if (!deps.usage)
-        return c.json({ error: "Model settings unavailable." }, 503);
+        return c.json(panelError("model_settings_unavailable"), 503);
       await next();
     });
   app.get("/api/agents/:id/models", async (c) =>
@@ -683,26 +677,17 @@ export function createPanel(
       .strictObject({ model: modelSelection.nullable() })
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success)
-      return c.json({ error: "Invalid model selection." }, 400);
+      return c.json(panelError("invalid_model_selection"), 400);
     let saved;
     try {
       saved = await deps.usage!.setModel(id, parsed.data.model);
     } catch {
-      return c.json(
-        { error: "Model catalog unavailable. Start the agent and try again." },
-        503,
-      );
+      return c.json(panelError("model_catalog_unavailable"), 503);
     }
     if (saved === "effort_unavailable")
-      return c.json(
-        { error: "That reasoning effort is unavailable for this model." },
-        409,
-      );
+      return c.json(panelError("reasoning_effort_unavailable"), 409);
     if (saved === "model_unavailable")
-      return c.json(
-        { error: "That model is unavailable for this agent." },
-        409,
-      );
+      return c.json(panelError("model_unavailable"), 409);
     void deps.usage!.wake(id).catch(() => {});
     return c.json({ selected: parsed.data.model });
   });
@@ -713,12 +698,12 @@ export function createPanel(
       z.object({
         days: z.enum(["7", "30"]).transform(Number).default(7),
       }),
-      "Invalid usage range.",
+      "invalid_usage_range",
     ),
     (c) =>
       deps.usage
         ? c.json(deps.usage.overview(c.req.valid("query").days))
-        : c.json({ error: "Usage unavailable." }, 503),
+        : c.json(panelError("usage_unavailable"), 503),
   );
   app.get(
     "/api/agents/:id/usage",
@@ -732,7 +717,7 @@ export function createPanel(
           .pipe(z.int().positive())
           .optional(),
       }),
-      "Invalid usage page.",
+      "invalid_usage_page",
     ),
     (c) => {
       const id = c.req.param("id");
@@ -743,8 +728,8 @@ export function createPanel(
   for (const path of ["/api/agents/:id/peers", "/api/agents/:id/peers/*"])
     app.use(path, async (c, next) => {
       if (!getAgentSetup?.(c.req.param("id")!))
-        return c.json({ error: "Agent not found." }, 404);
-      if (!deps.peers) return c.json({ error: "Peers unavailable." }, 503);
+        return c.json(panelError("agent_not_found"), 404);
+      if (!deps.peers) return c.json(panelError("peers_unavailable"), 503);
       await next();
     });
   app.get("/api/agents/:id/peers", (c) =>
@@ -755,35 +740,32 @@ export function createPanel(
   );
   for (const action of ["grant", "revoke"] as const)
     app.post(`/api/agents/:id/peers/${action}`, async (c) => {
-      const form = await parseForm(c, peerGrantForm, "Invalid grant.");
+      const form = await parseForm(c, peerGrantForm, "invalid_grant");
       if (form.response) return form.response;
       const { target, permission } = form.data;
       const id = c.req.param("id");
       if (action === "revoke")
         return deps.peers!.grants.revoke(id, target, permission)
           ? c.json({ revoked: true })
-          : c.json({ error: "Grant not found." }, 404);
+          : c.json(panelError("grant_not_found"), 404);
       try {
         return c.json(deps.peers!.grants.grant(id, target, permission), 201);
       } catch {
-        return c.json(
-          { error: "Choose a different agent that shares the same owner." },
-          400,
-        );
+        return c.json(panelError("grant_owner_mismatch"), 400);
       }
     });
   app.use("/api/agents/:id/approvals", async (c, next) => {
     if (!getAgentSetup?.(c.req.param("id")!))
-      return c.json({ error: "Agent not found." }, 404);
+      return c.json(panelError("agent_not_found"), 404);
     if (!deps.approvals)
-      return c.json({ error: "Approvals unavailable." }, 503);
+      return c.json(panelError("approvals_unavailable"), 503);
     await next();
   });
   app.use("/api/agents/:id/approvals/*", async (c, next) => {
     if (!getAgentSetup?.(c.req.param("id")!))
-      return c.json({ error: "Agent not found." }, 404);
+      return c.json(panelError("agent_not_found"), 404);
     if (!deps.approvals)
-      return c.json({ error: "Approvals unavailable." }, 503);
+      return c.json(panelError("approvals_unavailable"), 503);
     await next();
   });
   const pageOf = (value: string | undefined) => {
@@ -796,9 +778,9 @@ export function createPanel(
   ])
     app.use(path, async (c, next) => {
       if (!getAgentSetup?.(c.req.param("id")!))
-        return c.json({ error: "Agent not found." }, 404);
+        return c.json(panelError("agent_not_found"), 404);
       if (!deps.delegations)
-        return c.json({ error: "Delegations unavailable." }, 503);
+        return c.json(panelError("delegations_unavailable"), 503);
       await next();
     });
   app.get("/api/agents/:id/delegations", (c) =>
@@ -811,23 +793,23 @@ export function createPanel(
   );
   app.post(
     "/api/agents/:id/delegations/:delegationId/cancel",
-    validated("param", delegationParams.loose(), "Invalid delegation ID."),
+    validated("param", delegationParams.loose(), "invalid_delegation_id"),
     async (c) => {
       const id = c.req.param("delegationId");
       const source = c.req.param("id");
       const saved = deps.delegations!.store.getDelegation(source, id);
-      if (!saved) return c.json({ error: "Delegation not found." }, 404);
+      if (!saved) return c.json(panelError("delegation_not_found"), 404);
       if (
         saved.cancellationRequested ||
         !["queued", "running"].includes(saved.childStatus ?? "")
       )
-        return c.json({ error: "Delegation is no longer cancellable." }, 409);
+        return c.json(panelError("delegation_not_cancellable"), 409);
       try {
         return (await deps.delegations!.cancel(source, id))
           ? c.json({ cancellationRequested: true })
-          : c.json({ error: "Delegation is no longer cancellable." }, 409);
+          : c.json(panelError("delegation_not_cancellable"), 409);
       } catch {
-        return c.json({ error: "Delegation cancellation unavailable." }, 503);
+        return c.json(panelError("delegation_cancellation_unavailable"), 503);
       }
     },
   );
@@ -848,7 +830,7 @@ export function createPanel(
     ),
   );
   app.post("/api/agents/:id/approvals/rules", async (c) => {
-    const form = await parseForm(c, approvalRuleForm, "Invalid rule.");
+    const form = await parseForm(c, approvalRuleForm, "invalid_rule");
     if (form.response) return form.response;
     const { actionType, target, effect, ttlDays: days } = form.data;
     try {
@@ -864,12 +846,11 @@ export function createPanel(
       );
     } catch (error) {
       return c.json(
-        {
-          error:
-            error instanceof Error && /read-only|Too many/.test(error.message)
-              ? error.message
-              : "Invalid rule.",
-        },
+        describePanelError(
+          error instanceof Error && /read-only|Too many/.test(error.message)
+            ? error.message
+            : "Invalid rule.",
+        ),
         400,
       );
     }
@@ -877,18 +858,18 @@ export function createPanel(
   app.post("/api/agents/:id/approvals/rules/:ruleId/revoke", (c) =>
     deps.approvals!.rules.revoke(c.req.param("id"), c.req.param("ruleId"))
       ? c.json({ revoked: true })
-      : c.json({ error: "Rule not found." }, 404),
+      : c.json(panelError("rule_not_found"), 404),
   );
   app.use("/api/agents/:id/memories", async (c, next) => {
     if (!getAgentSetup?.(c.req.param("id")!))
-      return c.json({ error: "Agent not found." }, 404);
-    if (!deps.memories) return c.json({ error: "Memory unavailable." }, 503);
+      return c.json(panelError("agent_not_found"), 404);
+    if (!deps.memories) return c.json(panelError("memory_unavailable"), 503);
     await next();
   });
   app.use("/api/agents/:id/memories/*", async (c, next) => {
     if (!getAgentSetup?.(c.req.param("id")!))
-      return c.json({ error: "Agent not found." }, 404);
-    if (!deps.memories) return c.json({ error: "Memory unavailable." }, 503);
+      return c.json(panelError("agent_not_found"), 404);
+    if (!deps.memories) return c.json(panelError("memory_unavailable"), 503);
     await next();
   });
   app.get("/api/agents/:id/memories", async (c) =>
@@ -908,7 +889,7 @@ export function createPanel(
     app.get("/api/agents/:id/executions", (c) => {
       const id = c.req.param("id");
       if (!getAgentSetup?.(id))
-        return c.json({ error: "Agent not found." }, 404);
+        return c.json(panelError("agent_not_found"), 404);
       const raw = c.req.query("before");
       if (raw === undefined) return c.json(executions.list(id));
       const [finishedAt, seq] = raw.split(".").map(Number);
@@ -917,7 +898,7 @@ export function createPanel(
         !Number.isSafeInteger(finishedAt) ||
         !Number.isSafeInteger(seq)
       )
-        return c.json({ error: "Invalid execution cursor." }, 400);
+        return c.json(panelError("invalid_execution_cursor"), 400);
       return c.json(
         executions.list(id, { finishedAt: finishedAt!, seq: seq! }),
       );
@@ -925,18 +906,18 @@ export function createPanel(
     app.get("/api/agents/:id/executions/:taskId", (c) => {
       const { id, taskId } = c.req.param();
       if (!getAgentSetup?.(id))
-        return c.json({ error: "Agent not found." }, 404);
+        return c.json(panelError("agent_not_found"), 404);
       const execution = executions.detail(id, taskId);
       return execution
         ? c.json(execution)
-        : c.json({ error: "Execution not found." }, 404);
+        : c.json(panelError("execution_not_found"), 404);
     });
   }
   app.get("/api/agents/:id/avatar", async (c) => {
     const id = c.req.param("id");
-    if (!getAgentSetup?.(id)) return c.json({ error: "Agent not found." }, 404);
+    if (!getAgentSetup?.(id)) return c.json(panelError("agent_not_found"), 404);
     const avatar = await deps.loadAvatar?.(id);
-    if (!avatar) return c.json({ error: "Avatar unavailable." }, 503);
+    if (!avatar) return c.json(panelError("avatar_unavailable"), 503);
     return c.body(new Uint8Array(avatar), 200, {
       "Content-Type": "image/jpeg",
     });
@@ -944,7 +925,7 @@ export function createPanel(
   app.get("/api/agents/:id", async (c) => {
     const id = c.req.param("id");
     const setup = getAgentSetup?.(id);
-    if (!setup) return c.json({ error: "Agent not found." }, 404);
+    if (!setup) return c.json(panelError("agent_not_found"), 404);
     const hostState = await agentSettings?.hostStatus?.(id);
     const settings = agentSettings?.get(id);
     const discordConnection = deps.discord?.get(id);
@@ -992,24 +973,20 @@ export function createPanel(
   app.post("/api/agents/:id/settings", async (c) => {
     const id = c.req.param("id");
     if (!agentSettings?.get(id))
-      return c.json({ error: "Agent not found." }, 404);
-    const form = await parseForm(
-      c,
-      settingsForm,
-      "Enter a name of up to 128 characters and instructions of up to 4000 characters.",
-    );
+      return c.json(panelError("agent_not_found"), 404);
+    const form = await parseForm(c, settingsForm, "invalid_agent_details");
     if (form.response) return form.response;
     try {
       agentSettings.save(id, form.data.name, form.data.instructions);
       return c.json({ saved: true });
     } catch {
-      return c.json({ error: "Could not save the changes. Try again." }, 500);
+      return c.json(panelError("agent_save_failed"), 500);
     }
   });
   app.get("/api/agents/:id/discord", (c) => {
     const id = c.req.param("id");
     if (!deps.discord || !getAgentSetup?.(id))
-      return c.json({ error: "Agent not found." }, 404);
+      return c.json(panelError("agent_not_found"), 404);
     const connection = deps.discord.get(id);
     return c.json({
       connection: connection
@@ -1024,28 +1001,14 @@ export function createPanel(
   app.post("/api/agents/:id/discord", async (c) => {
     const id = c.req.param("id");
     if (!deps.discord || !getAgentSetup?.(id))
-      return c.json({ error: "Agent not found." }, 404);
+      return c.json(panelError("agent_not_found"), 404);
     const form = discordConfigureForm.safeParse(
       await c.req.parseBody({ all: true }),
     );
     if (!form.success) {
       if (form.error.issues.some((issue) => issue.path[0] === "ownerId"))
-        return c.json(
-          {
-            code: "discord_owner_id_invalid",
-            error:
-              "Copy the user ID from your personal Discord profile and paste it here.",
-          },
-          400,
-        );
-      return c.json(
-        {
-          code: "discord_token_invalid",
-          error:
-            "Paste the bot token from your app’s Bot settings in the Discord Developer Portal.",
-        },
-        400,
-      );
+        return c.json(panelError("discord_owner_id_invalid"), 400);
+      return c.json(panelError("discord_token_invalid"), 400);
     }
     try {
       const result = await deps.discord.configure(
@@ -1056,117 +1019,73 @@ export function createPanel(
       return c.json({ saved: true, cleanupPending: result.cleanupPending });
     } catch (error) {
       if (error instanceof InvalidDiscordBotToken)
-        return c.json(
-          {
-            code: "discord_token_rejected",
-            error:
-              "Discord rejected the bot token. Copy the current token from your app’s Bot settings and try again.",
-          },
-          400,
-        );
+        return c.json(panelError("discord_token_rejected"), 400);
       if (error instanceof DiscordBotAlreadyAssigned)
-        return c.json(
-          {
-            code: "discord_bot_already_assigned",
-            error:
-              "This Discord bot is linked to another agent. Use a different bot or disconnect it from the other agent first.",
-          },
-          409,
-        );
-      return c.json(
-        {
-          error: "Could not save Discord. Wait a moment and try again.",
-        },
-        400,
-      );
+        return c.json(panelError("discord_bot_already_assigned"), 409);
+      return c.json(panelError("discord_save_failed"), 400);
     }
   });
   app.post("/api/agents/:id/discord/test", async (c) => {
     const id = c.req.param("id");
     if (!deps.discord?.test || !getAgentSetup?.(id))
-      return c.json({ error: "Agent not found." }, 404);
+      return c.json(panelError("agent_not_found"), 404);
     const form = await parseForm(
       c,
       discordTestForm,
-      "Enter a valid notification request ID.",
+      "invalid_notification_request_id",
     );
     if (form.response) return form.response;
     try {
       return c.json(await deps.discord.test(id, form.data.requestId));
     } catch {
-      return c.json(
-        {
-          error:
-            "Delivery could not be confirmed. Retry with the same request ID to check its status.",
-        },
-        500,
-      );
+      return c.json(panelError("discord_delivery_unconfirmed"), 500);
     }
   });
   app.post("/api/agents/:id/discord/remove", async (c) => {
     const id = c.req.param("id");
     if (!deps.discord || !getAgentSetup?.(id))
-      return c.json({ error: "Agent not found." }, 404);
+      return c.json(panelError("agent_not_found"), 404);
     const form = await parseForm(
       c,
       confirmForm(id),
-      "Confirm the agent ID to remove Discord.",
+      "discord_remove_confirmation",
     );
     if (form.response) return form.response;
     try {
       const result = await deps.discord.remove(id);
       return c.json({ removed: true, cleanupPending: result.cleanupPending });
     } catch {
-      return c.json(
-        { error: "Could not remove Discord. Refresh and try again." },
-        500,
-      );
+      return c.json(panelError("discord_remove_failed"), 500);
     }
   });
   app.post("/api/agents/:id/telegram", async (c) => {
     const id = c.req.param("id");
     if (!deps.connectTelegram || !getAgentSetup?.(id))
-      return c.json({ error: "Agent not found." }, 404);
+      return c.json(panelError("agent_not_found"), 404);
     const form = await parseForm(
       c,
       telegramConfigureForm,
-      "Enter a valid Telegram owner ID and bot token.",
+      "invalid_telegram_credentials",
     );
     if (form.response) return form.response;
     try {
       await deps.connectTelegram(id, form.data.ownerId, form.data.token);
       return c.json({ saved: true });
     } catch {
-      return c.json(
-        {
-          error:
-            "Could not connect Telegram. Check the owner ID, token, and whether the bot is already linked.",
-        },
-        400,
-      );
+      return c.json(panelError("telegram_connect_failed"), 400);
     }
   });
   app.post("/api/agents/:id/token", async (c) => {
     const id = c.req.param("id");
     if (!agentSettings?.get(id) || !agentSettings.saveToken)
-      return c.json({ error: "Agent not found." }, 404);
-    const form = await parseForm(
-      c,
-      tokenForm,
-      "Enter a valid token for the same bot.",
-    );
+      return c.json(panelError("agent_not_found"), 404);
+    const form = await parseForm(c, tokenForm, "invalid_replacement_token");
     if (form.response) return form.response;
     try {
       await agentSettings.saveToken(id, form.data.token);
       return c.json({ saved: true });
     } catch {
-      return c.json(
-        {
-          error:
-            "Could not save the token. Enter a valid token for the same bot.",
-        },
-        400,
-      );
+      return c.json(panelError("token_save_failed"), 400);
     }
   });
   app.post("/api/agents", async (c) => {
@@ -1174,20 +1093,14 @@ export function createPanel(
     const form = await parseForm(
       c,
       registerAgentForm,
-      "Invalid agent settings",
+      "invalid_agent_settings",
     );
     if (form.response) return form.response;
     try {
       const result = await registerAgent(form.data);
       return c.json(result, 201);
     } catch {
-      return c.json(
-        {
-          error:
-            "Could not create the agent. Check its settings and any supplied Telegram connection.",
-        },
-        400,
-      );
+      return c.json(panelError("agent_create_failed"), 400);
     }
   });
   app.post("/api/agents/:id/delete", async (c) => {
@@ -1196,7 +1109,7 @@ export function createPanel(
     const form = await parseForm(
       c,
       deleteAgentForm(id),
-      "Confirm the agent ID and explicitly select whether to delete data",
+      "agent_delete_confirmation",
     );
     if (form.response) return form.response;
     const deleteData = form.data.deleteData === "true";
@@ -1204,22 +1117,15 @@ export function createPanel(
       await deleteAgent(id, deleteData);
       return c.json({ agentId: id, deleted: true, dataDeleted: deleteData });
     } catch {
-      return c.json(
-        { error: "Deletion failed; retry after checking the agent" },
-        409,
-      );
+      return c.json(panelError("agent_delete_failed"), 409);
     }
   });
   app.post("/api/agents/:id/process", async (c) => {
     if (!deps.processAction) return c.notFound();
     const id = c.req.param("id");
     if (!getAgentSetup?.(id)?.process)
-      return c.json({ error: "Agent not found." }, 404);
-    const form = await parseForm(
-      c,
-      processForm(id),
-      "Select start, stop or restart; stopping and restarting require confirmation of the agent ID",
-    );
+      return c.json(panelError("agent_not_found"), 404);
+    const form = await parseForm(c, processForm(id), "invalid_process_action");
     if (form.response) return form.response;
     try {
       await deps.processAction(id, form.data.action);
@@ -1229,13 +1135,7 @@ export function createPanel(
         status: "completed",
       });
     } catch {
-      return c.json(
-        {
-          error:
-            "Agent Host action failed. Refresh its status before trying again.",
-        },
-        409,
-      );
+      return c.json(panelError("process_action_failed"), 409);
     }
   });
   app.get("/api/status", async (c) =>
@@ -1309,7 +1209,7 @@ export function createPanel(
     app.get("/providers", entry);
     app.get("/agents/:id/providers", (c) => c.redirect("/providers", 303));
   }
-  if (deps.schedules) app.get("/settings", entry);
+  app.get("/settings", entry);
   if (deps.mcp) {
     app.get("/mcp", entry);
     app.get("/mcp/:definitionId", entry);
@@ -1358,48 +1258,39 @@ export function createPanel(
       return entry(c);
     });
   }
-  app.onError((error, c) =>
-    error instanceof ScheduleValidationError
-      ? c.json({ error: error.message }, 400)
-      : error instanceof HostMemoryError
-        ? c.json(
-            {
-              error: {
-                400: "Invalid memory request.",
-                404: "Memory not found. Refresh the list.",
-                503: "Memory unavailable. Start the agent and refresh to try again.",
-              }[error.status],
-            },
-            error.status,
-          )
-        : error instanceof HostProviderError
-          ? c.json(
-              {
-                error: {
-                  400: "Invalid provider request.",
-                  403: "The provider denied access with this API key.",
-                  422: "The provider rejected the API key.",
-                  429: "The provider rate limited the API key check. Try again shortly.",
-                  502: "Could not validate the API key. Try again when the provider is available.",
-                  404: "Login attempt not found. Start a new login.",
-                  409: "An authentication change is in progress. Try again when it finishes.",
-                  503: error.reason
-                    ? {
-                        opencode_missing:
-                          "OpenCode is missing from Nimbot’s PATH. Install OpenCode 2.2.7 and restart Nimbot.",
-                        opencode_start_failed:
-                          "OpenCode failed to start. Check that Nimbot is using OpenCode 2.2.7, then restart Nimbot.",
-                        opencode_start_timeout:
-                          "OpenCode did not become ready in time. Check the OpenCode installation and refresh.",
-                        opencode_check_failed:
-                          "OpenCode could not read provider settings. Check that Nimbot is using OpenCode 2.2.7.",
-                      }[error.reason]
-                    : "Provider settings unavailable. Check the Nimbot Server logs and refresh.",
-                }[error.status],
-              },
-              error.status,
-            )
-          : c.json({ error: "The request could not be completed." }, 500),
-  );
+  app.onError((error, c) => {
+    if (error instanceof ScheduleValidationError)
+      return c.json(describePanelError(error.message, error.cause), 400);
+    if (error instanceof HostMemoryError) {
+      const code = {
+        400: "invalid_memory_request",
+        404: "memory_not_found",
+        503: "host_memory_unavailable",
+      } as const;
+      return c.json(panelError(code[error.status]), error.status);
+    }
+    if (error instanceof HostProviderError) {
+      const reason = {
+        opencode_missing: "provider_opencode_missing",
+        opencode_start_failed: "provider_opencode_start_failed",
+        opencode_start_timeout: "provider_opencode_start_timeout",
+        opencode_check_failed: "provider_opencode_check_failed",
+      } as const;
+      const code = {
+        400: "invalid_provider_request",
+        403: "provider_key_denied",
+        404: "login_attempt_not_found",
+        409: "authentication_change_in_progress",
+        422: "provider_key_rejected",
+        429: "provider_key_rate_limited",
+        502: "provider_key_check_failed",
+        503: error.reason
+          ? reason[error.reason]
+          : "provider_settings_unavailable",
+      } as const;
+      return c.json(panelError(code[error.status]), error.status);
+    }
+    return c.json(panelError("request_failed"), 500);
+  });
   return app;
 }

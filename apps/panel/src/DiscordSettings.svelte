@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { messages } from "./i18n/language.js";
   import { tick, untrack } from "svelte";
   import {
     ActionButton,
@@ -25,7 +26,7 @@
   let ownerId = $state(untrack(() => agent.discord?.connection?.ownerId ?? ""));
   let token = $state("");
   let tokenVisible = $state(false);
-  let fieldError = $state<{ field: "owner" | "token"; message: string }>();
+  let fieldError = $state<{ field: "owner" | "token"; error: ApiError }>();
   let requestId = $state("");
   let section: HTMLElement;
   let heading: HTMLHeadingElement;
@@ -55,14 +56,14 @@
     const saved = await action("save", { ownerId, token }, (error) => {
       switch (error.code) {
         case "discord_owner_id_invalid":
-          fieldError = { field: "owner", message: error.message };
+          fieldError = { field: "owner", error };
           return true;
         case "discord_token_rejected":
           token = "";
         // Fall through to show the error next to the token field.
         case "discord_token_invalid":
         case "discord_bot_already_assigned":
-          fieldError = { field: "token", message: error.message };
+          fieldError = { field: "token", error };
           return true;
         default:
           return false;
@@ -86,43 +87,51 @@
 
 {#snippet troubleshooting()}
   <details>
-    <summary class="cursor-pointer">Trouble opening a Discord DM?</summary>
+    <summary class="cursor-pointer"
+      >{$messages("Trouble opening a Discord DM?")}</summary
+    >
     <p class="mt-2">
-      If you still can't open a DM, open your app's
-      <strong>Installation</strong> settings, enable
-      <strong>Guild Install</strong>, and select
-      <strong>Discord Provided Link</strong>. Add the <code>bot</code> scope
-      under <strong>Guild Install</strong> and use the install link to add the
-      bot to a private server you manage. See
+      {$messages("If you still can't open a DM, open your app's")}
+      <strong>Installation</strong>
+      {$messages("settings, enable")}
+      <strong>Guild Install</strong>{$messages(", and select")}
+      <strong>Discord Provided Link</strong>{$messages(". Add the")}
+      <code>bot</code>
+      {$messages("scope under")} <strong>Guild Install</strong>
+      {$messages(
+        "and use the install link to add the bot to a private server you manage. See",
+      )}
       <a
         class="underline"
         href="https://docs.discord.com/developers/quick-start/getting-started#installing-your-app"
         target="_blank"
-        rel="noopener noreferrer">Discord's installation guide</a
+        rel="noopener noreferrer">{$messages("Discord's installation guide")}</a
       >
-      and check that your
+      {$messages("and check that your")}
       <a
         class="underline"
         href="https://support.discord.com/hc/en-us/articles/217916488-Blocking-Privacy-Settings"
         target="_blank"
-        rel="noopener noreferrer">Discord DM settings</a
+        rel="noopener noreferrer">{$messages("Discord DM settings")}</a
       >
-      allow messages from members of that server.
+      {$messages("allow messages from members of that server.")}
     </p>
   </details>
 {/snippet}
 
 {#snippet credentials()}
   <form onsubmit={save} aria-busy={busy} aria-describedby="form-error">
-    <label for="discord-owner">Owner's Discord user ID</label>
+    <label for="discord-owner">{$messages("Owner's Discord user ID")}</label>
     <p id="discord-owner-help">
-      Copy the user ID from your personal Discord profile. Nimbot accepts DMs
-      from this account only.
+      {$messages(
+        "Copy the user ID from your personal Discord profile. Nimbot accepts DMs from this account only.",
+      )}
       <a
         class="underline"
         href="https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID"
         target="_blank"
-        rel="noopener noreferrer">Discord's user ID instructions</a
+        rel="noopener noreferrer"
+        >{$messages("Discord's user ID instructions")}</a
       >.
     </p>
     <TextField
@@ -144,10 +153,10 @@
     />
     {#if fieldError?.field === "owner"}
       <p id="discord-owner-error" class="discord-field-error" role="alert">
-        {fieldError.message}
+        {fieldError.error.display($messages)}
       </p>
     {/if}
-    <label for="discord-token">Discord bot token</label>
+    <label for="discord-token">{$messages("Discord bot token")}</label>
     <PasswordField
       id="discord-token"
       name="token"
@@ -167,22 +176,22 @@
     />
     {#if fieldError?.field === "token"}
       <p id="discord-token-error" class="discord-field-error" role="alert">
-        {fieldError.message}
+        {fieldError.error.display($messages)}
       </p>
     {/if}
     <ActionButton variant="primary" type="submit" disabled={busy}
       ><Icon name="link" size={16} />{busy
-        ? "Saving…"
+        ? $messages("Saving…")
         : agent.discord?.connection
-          ? "Replace Discord connection"
-          : "Connect Discord"}</ActionButton
+          ? $messages("Replace Discord connection")
+          : $messages("Connect Discord")}</ActionButton
     >
   </form>
 {/snippet}
 
 <section
   bind:this={section}
-  aria-label="Discord connection"
+  aria-label={$messages("Discord connection")}
   data-configured={!!agent.discord?.connection}
 >
   <div class="settings-section-description max-w-[72ch]">
@@ -193,45 +202,60 @@
       class="card-title"
       data-brand="discord"
     >
-      <Icon name="discord" size={20} />Discord connection
+      <Icon name="discord" size={20} />{$messages("Discord connection")}
     </h2>
     {#if !agent.discord?.connection}
-      <h3>Set up a Discord bot</h3>
-      <p>You'll need a bot token and your personal Discord user ID.</p>
+      <h3>{$messages("Set up a Discord bot")}</h3>
+      <p>
+        {$messages(
+          "You'll need a bot token and your personal Discord user ID.",
+        )}
+      </p>
       <ol class="list-decimal space-y-2 ps-5">
         <li>
-          <strong>Create a bot and copy its token.</strong>
-          Open the
+          <strong>{$messages("Create a bot and copy its token.")}</strong>
+          {$messages("Open the")}
           <a
             class="underline"
             href="https://discord.com/developers/applications"
             target="_blank"
-            rel="noopener noreferrer">Discord Developer Portal</a
-          >, choose <strong>New Application</strong>, then open
-          <strong>Bot</strong>
-          and select <strong>Reset Token</strong>. Copy the bot token and leave
-          privileged intents off.
+            rel="noopener noreferrer">{$messages("Discord Developer Portal")}</a
+          >{$messages(", choose")} <strong>New Application</strong>{$messages(
+            ", then open",
+          )}
+          <strong>{$messages("Bot")}</strong>
+          {$messages("and select")} <strong>Reset Token</strong>{$messages(
+            ". Copy the bot token and leave privileged intents off.",
+          )}
         </li>
         <li>
-          <strong>Copy your Discord user ID.</strong>
-          Enable Developer Mode in Discord and choose
-          <strong>Copy User ID</strong> from your personal profile.
+          <strong>{$messages("Copy your Discord user ID.")}</strong>
+          {$messages("Enable Developer Mode in Discord and choose")}
+          <strong>Copy User ID</strong>
+          {$messages("from your personal profile.")}
         </li>
         <li>
-          <strong>Install the app on your Discord account.</strong>
-          In your app's <strong>Installation</strong> settings, enable
-          <strong>User Install</strong> and select
-          <strong>Discord Provided Link</strong>. Under
-          <strong>Default Install Settings</strong>, add the
+          <strong
+            >{$messages("Install the app on your Discord account.")}</strong
+          >
+          {$messages("In your app's")} <strong>Installation</strong>
+          {$messages("settings, enable")}
+          <strong>User Install</strong>
+          {$messages("and select")}
+          <strong>Discord Provided Link</strong>{$messages(". Under")}
+          <strong>Default Install Settings</strong>{$messages(", add the")}
           <code class="wrap-anywhere">applications.commands</code>
-          scope to <strong>User Install</strong>. Open the install link as the
-          owner and choose <strong>Add to my apps</strong>. This lets you open a
-          DM without a shared server. See
+          {$messages("scope to")} <strong>User Install</strong>{$messages(
+            ". Open the install link as the owner and choose",
+          )} <strong>Add to my apps</strong>{$messages(
+            ". This lets you open a DM without a shared server. See",
+          )}
           <a
             class="underline"
             href="https://docs.discord.com/developers/quick-start/getting-started#install-to-user-account"
             target="_blank"
-            rel="noopener noreferrer">Discord's account installation guide</a
+            rel="noopener noreferrer"
+            >{$messages("Discord's account installation guide")}</a
           >.
         </li>
       </ol>
@@ -240,14 +264,14 @@
   <div class="panel-card">
     {#if agent.discord?.connection}
       <dl>
-        <dt>Discord bot</dt>
+        <dt>{$messages("Discord bot")}</dt>
         <dd
           data-ui="channel-identifier"
           title={agent.discord.connection.botUsername}
         >
           {agent.discord.connection.botUsername}
         </dd>
-        <dt>Discord owner</dt>
+        <dt>{$messages("Discord owner")}</dt>
         <dd
           data-ui="channel-identifier"
           title={agent.discord.connection.ownerId}
@@ -255,51 +279,66 @@
           {agent.discord.connection.ownerId}
         </dd>
         {#if agent.discord.conversation}
-          <dt>Discord conversation</dt>
-          <dd>{discordConversationLabels[agent.discord.conversation.state]}</dd>
-          <dt>Owner DM</dt>
+          <dt>{$messages("Discord conversation")}</dt>
+          <dd>
+            {$messages(
+              discordConversationLabels[agent.discord.conversation.state],
+            )}
+          </dd>
+          <dt>{$messages("Owner DM")}</dt>
           <dd>
             {agent.discord.conversation.ownerLinked
-              ? "Linked"
-              : "Waiting for a reply"}
+              ? $messages("Linked")
+              : $messages("Waiting for a reply")}
           </dd>
         {/if}
       </dl>
       {#if agent.discord.conversation && !agent.discord.conversation.ownerLinked}
         <p>
-          Select <strong>Send Discord test</strong>, then reply to the bot in
-          Discord from the owner's account to link the DM.
+          {$messages("Select")}
+          <strong>{$messages("Send Discord test")}</strong>{$messages(
+            ", then reply to the bot in Discord from the owner's account to link the DM.",
+          )}
         </p>
       {/if}
       <div class="button-row">
         <ActionButton disabled={busy} onclick={() => testDelivery(true)}
-          ><Icon name="send" size={16} />Send Discord test</ActionButton
+          ><Icon name="send" size={16} />{$messages(
+            "Send Discord test",
+          )}</ActionButton
         >
         {#if requestId}
           <ActionButton disabled={busy} onclick={() => testDelivery(false)}
-            ><Icon name="refresh" size={16} />Check last test status</ActionButton
+            ><Icon name="refresh" size={16} />{$messages(
+              "Check last test status",
+            )}</ActionButton
           >
         {/if}
       </div>
       {#if requestId}
         <p>
-          Check the last status before sending another test if delivery is
-          uncertain.
+          {$messages(
+            "Check the last status before sending another test if delivery is uncertain.",
+          )}
         </p>
       {/if}
       {@render troubleshooting()}
       <details class="channel-settings">
-        <summary>Change Discord credentials</summary>
+        <summary>{$messages("Change Discord credentials")}</summary>
         {@render credentials()}
       </details>
       <details class="channel-settings">
-        <summary>Disconnect Discord</summary>
+        <summary>{$messages("Disconnect Discord")}</summary>
         <p>
-          Disconnecting Discord keeps the agent and its files. The bot remains
-          in Discord.
+          {$messages(
+            "Disconnecting Discord keeps the agent and its files. The bot remains in Discord.",
+          )}
         </p>
         <form onsubmit={remove} aria-busy={busy} aria-describedby="form-error">
-          <label for="discord-confirm">Type {agent.id} to confirm removal</label
+          <label for="discord-confirm"
+            >{$messages("Type")}
+            {agent.id}
+            {$messages("to confirm removal")}</label
           >
           <TextField
             id="discord-confirm"
@@ -312,12 +351,14 @@
             variant="danger"
             type="submit"
             disabled={busy || confirmation !== agent.id}
-            ><Icon name="trash" size={16} />Remove Discord connection</ActionButton
+            ><Icon name="trash" size={16} />{$messages(
+              "Remove Discord connection",
+            )}</ActionButton
           >
         </form>
       </details>
     {:else}
-      <p>Discord is not configured.</p>
+      <p>{$messages("Discord is not configured.")}</p>
       {@render credentials()}
       {@render troubleshooting()}
     {/if}
