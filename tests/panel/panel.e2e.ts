@@ -703,9 +703,9 @@ test("sets up an MCP example with one save after reviewing a discovered tool", a
 
   await page.getByRole("link", { name: "MCP catalog" }).click();
   const examples = page.getByRole("region", { name: "Examples" });
-  await expect(examples.getByRole("link")).toHaveCount(23);
+  await expect(examples.getByRole("link")).toHaveCount(24);
   const cards = examples.getByRole("listitem");
-  await expect(cards).toHaveCount(23);
+  await expect(cards).toHaveCount(24);
   for (const card of await cards.all())
     await expect(card).toHaveCSS("background-image", "none");
   const pageCard = page.locator("[data-page-card]");
@@ -716,7 +716,7 @@ test("sets up an MCP example with one save after reviewing a discovered tool", a
     pageCard.getByRole("searchbox", { name: "Search options" }),
   ).toBeVisible();
   await page.reload();
-  await expect(cards).toHaveCount(23);
+  await expect(cards).toHaveCount(24);
   for (const width of [320, 375, 1280]) {
     await page.setViewportSize({ width, height: 800 });
     expect(
@@ -725,8 +725,29 @@ test("sets up an MCP example with one save after reviewing a discovered tool", a
       ),
     ).toBe(true);
   }
+  const search = examples.getByRole("searchbox", { name: "Search examples" });
+  const results = examples.getByRole("status");
+  await search.fill("  GITHUB  ");
+  await expect(
+    examples.getByRole("link", { name: "Set up DeepWiki" }),
+  ).toBeVisible();
+  await expect(
+    examples.getByRole("link", { name: "Set up Context7" }),
+  ).toHaveCount(0);
+  await search.fill("xyzzy");
+  await expect(results).toHaveText(
+    "No matching examples. Try a different search or clear the field.",
+  );
+  await expect(cards).toHaveCount(0);
+  await search.clear();
+  await expect(cards).toHaveCount(24);
+  await search.fill("OpenAI Docs");
+  await expect(results).toHaveText("1 matching example");
+  await expect(cards).toHaveCount(1);
+  await expect(search).toBeFocused();
   const setup = examples.getByRole("link", { name: "Set up OpenAI Docs" });
-  await setup.focus();
+  await page.keyboard.press("Tab");
+  await expect(setup).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(
     page.getByRole("heading", { name: "Set up OpenAI Docs" }),
@@ -772,6 +793,46 @@ test("sets up an MCP example with one save after reviewing a discovered tool", a
   await expect(
     integration.getByRole("button", { name: "Grant access" }),
   ).toBeVisible();
+});
+
+test("sets up GitHub before adding an agent credential for tool discovery", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "MCP catalog" }).click();
+  const examples = page.getByRole("region", { name: "Examples" });
+  await examples
+    .getByRole("link", { name: "Set up GitHub", exact: true })
+    .click();
+  await expect(page.getByLabel("HTTPS endpoint")).toHaveValue(
+    "https://api.githubcopilot.com/mcp/",
+  );
+  await expect(page.getByText(/save your personal access token/)).toBeVisible();
+  const save = page.getByRole("button", { name: "Save integration" });
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(
+    page.getByRole("heading", { name: "Edit GitHub" }),
+  ).toBeVisible();
+  const editUrl = page.url();
+  await expect(page.getByLabel("Tool name")).toHaveCount(0);
+
+  await page.goto("/agents/dev/access");
+  const integration = page.getByRole("region", { name: "GitHub", exact: true });
+  await integration.getByRole("button", { name: "Grant access" }).click();
+  await integration
+    .getByLabel("Bearer credential")
+    .fill("example-github-credential");
+  await integration.getByRole("button", { name: "Save credential" }).click();
+  await expect(
+    integration.getByRole("button", { name: "Replace credential" }),
+  ).toBeVisible();
+
+  await page.goto(editUrl);
+  await page.getByLabel("Connection credential").selectOption("dev");
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await page.getByRole("button", { name: "Review tool" }).click();
+  await expect(page.getByLabel("Tool name")).toHaveValue("lookup");
 });
 
 test("edits the MCP catalog and manages an agent's grant and write-only credential", async ({

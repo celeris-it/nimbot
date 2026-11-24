@@ -1,4 +1,7 @@
-import { createMcpConnection } from "./mcp-connection.js";
+import {
+  createMcpConnection,
+  type McpConnectionFailure,
+} from "./mcp-connection.js";
 
 export interface McpDiscoveredTool {
   name: string;
@@ -7,7 +10,7 @@ export interface McpDiscoveredTool {
 
 export type McpDiscoveryResult =
   | { status: "connected"; tools: McpDiscoveredTool[] }
-  | { status: "timeout" | "redirect" | "unauthorized" | "unavailable" };
+  | { status: "timeout" | "unavailable" | McpConnectionFailure };
 
 const MAX_SCHEMA_BYTES = 16 * 1024;
 const MAX_VISIBLE_TOOLS = 64;

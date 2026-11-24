@@ -91,6 +91,8 @@ export function createMcpPanel({
       ({ id }) => id === c.req.param("exampleId"),
     );
     if (!example) return c.json(panelError("mcp_example_not_found"), 404);
+    if (example.requiresBearerCredential)
+      return c.json({ status: "unauthorized" });
     return c.json(
       await discover(example.endpoint, undefined, c.req.raw.signal),
     );

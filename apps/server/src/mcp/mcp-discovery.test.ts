@@ -108,15 +108,47 @@ it("rejects redirects, credential errors and non-HTTPS endpoints without returni
   expect(await discover(endpoint, token)).toEqual({ status: "unauthorized" });
 });
 
+it("lists tools when GitHub-sized metadata exceeds 128 KiB", async () => {
+  const tools = Array.from({ length: 48 }, (_, index) => ({
+    name: `tool_${index}`,
+    description: "x".repeat(3 * 1024),
+    inputSchema: schema,
+  }));
+  const request = vi.fn<typeof fetch>(async (_url, init) => {
+    const message = JSON.parse(String(init?.body)) as {
+      id: number;
+      method: string;
+    };
+    if (message.method === "notifications/initialized")
+      return new Response(null, { status: 202 });
+    const result =
+      message.method === "initialize"
+        ? {
+            protocolVersion: "2025-11-25",
+            capabilities: { tools: {} },
+            serverInfo: { name: "fixture", version: "1" },
+          }
+        : { tools };
+    return new Response(
+      `data: ${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n\n`,
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+  });
+  expect(await createMcpDiscovery(request)(endpoint, token)).toEqual({
+    status: "connected",
+    tools: tools.map(({ name, inputSchema }) => ({ name, inputSchema })),
+  });
+});
+
 it("enforces response limits and deadlines during negotiation", async () => {
   const oversized = vi.fn<typeof fetch>(
     async () =>
-      new Response("x".repeat(129 * 1024), {
+      new Response("x".repeat(257 * 1024), {
         headers: { "Content-Type": "application/json" },
       }),
   );
   expect(await createMcpDiscovery(oversized)(endpoint)).toEqual({
-    status: "unavailable",
+    status: "response_too_large",
   });
   const hung = vi.fn<typeof fetch>(
     async (_url, init) =>

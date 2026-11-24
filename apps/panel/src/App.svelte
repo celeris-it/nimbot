@@ -4,7 +4,7 @@
     localizeInvalidField,
   } from "./i18n/validation.js";
   import LanguageSelect from "./components/LanguageSelect.svelte";
-  import { messages, translateDescription } from "./i18n/language.js";
+  import { messages } from "./i18n/language.js";
   import { onMount, tick, untrack } from "svelte";
   import type {
     AgentDetail,
@@ -65,6 +65,7 @@
   import Executions from "./Executions.svelte";
   import Delegations from "./Delegations.svelte";
   import McpAgentAccess from "./McpAgentAccess.svelte";
+  import McpCatalog from "./McpCatalog.svelte";
   import McpDefinitionForm from "./McpDefinitionForm.svelte";
   import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
   import type { ApprovalRequest } from "../../server/src/approvals/approval-store.js";
@@ -1556,50 +1557,7 @@
       {:else if path === "/agents/new"}
         {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
       {:else if path === "/mcp"}
-        <h1 id="mcp-catalog" tabindex="-1">{$messages("MCP catalog")}</h1>
-        <ActionButton variant="primary" href="/mcp/new"
-          >{$messages("Add integration")}</ActionButton
-        >
-        {#if mcpDefinitions.length === 0}
-          <p>{$messages("No integrations in the catalog.")}</p>
-        {:else}
-          <section class="panel-card" aria-label={$messages("Integrations")}>
-            <ul>
-              {#each mcpDefinitions as definition (definition.id)}
-                <li>
-                  <a href={`/mcp/${encodeURIComponent(definition.id)}`}
-                    >{definition.label}</a
-                  >
-                  · {definition.enabled
-                    ? $messages("Enabled")
-                    : $messages("Disabled")}
-                  {#if definition.blockedTools?.length}<span class="panel-badge"
-                      >{$messages("Review needed")}</span
-                    >{/if}
-                </li>
-              {/each}
-            </ul>
-          </section>
-        {/if}
-        <section class="grid gap-4" aria-labelledby="mcp-examples-heading">
-          <h2 id="mcp-examples-heading">{$messages("Examples")}</h2>
-          <ul class="grid gap-4 sm:grid-cols-3">
-            {#each mcpExamples as example (example.id)}
-              <li class="panel-card">
-                <h3>{example.label}</h3>
-                <p class="grow">
-                  {translateDescription($messages, example.description)}
-                </p>
-                <ActionButton
-                  class="self-start"
-                  href={`/mcp/new?example=${encodeURIComponent(example.id)}`}
-                  aria-label={$messages("Set up {0}", example.label)}
-                  >{$messages("Set up")}</ActionButton
-                >
-              </li>
-            {/each}
-          </ul>
-        </section>
+        <McpCatalog definitions={mcpDefinitions} examples={mcpExamples} />
       {:else if mcpRoute}
         <h1 tabindex="-1">
           {mcpDefinition

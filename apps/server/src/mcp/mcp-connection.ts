@@ -3,7 +3,8 @@ import {
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 
-export type McpConnectionFailure = "redirect" | "unauthorized";
+export type McpConnectionFailure =
+  "redirect" | "unauthorized" | "response_too_large";
 
 /** One bounded connection, restricted to exactly one administrator-approved URL. */
 export function createMcpConnection(config: {
@@ -25,7 +26,7 @@ export function createMcpConnection(config: {
     signal ? [budget.signal, deadline, signal] : [budget.signal, deadline],
   );
   let requests = 0;
-  let remaining = 128 * 1024;
+  let remaining = 256 * 1024;
   let failed: McpConnectionFailure | undefined;
   const transport = new StreamableHTTPClientTransport(url, {
     redirectPolicy: "follow",
@@ -68,6 +69,7 @@ export function createMcpConnection(config: {
           transform(chunk, controller) {
             remaining -= chunk.byteLength;
             if (remaining < 0) {
+              failed = "response_too_large";
               budget.abort();
               throw new Error("MCP response exceeded its size limit.");
             }

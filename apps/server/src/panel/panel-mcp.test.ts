@@ -82,7 +82,7 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
       await get("/api/mcp")
     ).json()) as McpCatalogList;
     expect(definitions).toEqual([]);
-    expect(examples).toHaveLength(23);
+    expect(examples).toHaveLength(24);
     expect(new Set(examples.map(({ id }) => id)).size).toBe(examples.length);
     expect(new Set(examples.map(({ endpoint }) => endpoint)).size).toBe(
       examples.length,
@@ -102,11 +102,21 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
           endpoint: "https://huggingface.co/mcp",
         }),
         expect.objectContaining({
+          id: "github",
+          endpoint: "https://api.githubcopilot.com/mcp/",
+          requiresBearerCredential: true,
+        }),
+        expect.objectContaining({
           id: "openai-docs",
           endpoint: "https://developers.openai.com/mcp",
         }),
       ]),
     );
+    const githubDiscovery = await post("/api/mcp/examples/github/discover", {});
+    expect(githubDiscovery.status).toBe(200);
+    expect(await githubDiscovery.json()).toEqual({ status: "unauthorized" });
+    expect(discover).not.toHaveBeenCalled();
+
     const exampleDiscovery = await post(examplePath, {
       endpoint: "https://ignored.example.test/mcp",
       agentId: "a",

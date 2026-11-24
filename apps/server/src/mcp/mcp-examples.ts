@@ -3,6 +3,7 @@ export interface McpExample {
   label: string;
   description: string;
   endpoint: string;
+  requiresBearerCredential?: true;
 }
 
 export const mcpExamples: readonly McpExample[] = [
@@ -70,6 +71,14 @@ export const mcpExamples: readonly McpExample[] = [
     label: "Firecrawl Docs",
     description: "Look up Firecrawl API guides and web extraction examples.",
     endpoint: "https://docs.firecrawl.dev/mcp",
+  },
+  {
+    id: "github",
+    label: "GitHub",
+    description:
+      "Work with GitHub repositories, issues, and pull requests. Requires a personal access token.",
+    endpoint: "https://api.githubcopilot.com/mcp/",
+    requiresBearerCredential: true,
   },
   {
     id: "gitmcp",

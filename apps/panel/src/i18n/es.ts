@@ -233,6 +233,15 @@ export const spanish = {
   Disabled: "Deshabilitada",
   "Review needed": "Requiere revisión",
   Examples: "Ejemplos",
+  "Add tools here, then grant access from an agent’s Access page.":
+    "Agrega herramientas aquí y luego concede acceso desde la página Acceso de cada agente.",
+  "No integrations yet. Set up an example below or add your own.":
+    "Todavía no hay integraciones. Configura un ejemplo de abajo o agrega una propia.",
+  "Search examples": "Buscar ejemplos",
+  "No matching examples. Try a different search or clear the field.":
+    "No hay ejemplos que coincidan. Prueba otra búsqueda o borra el texto.",
+  "1 matching example": "1 ejemplo encontrado",
+  "{0} matching examples": "{0} ejemplos encontrados",
   "Set up {0}": "Configurar {0}",
   "Set up": "Configurar",
   "Edit {0}": "Editar {0}",
@@ -609,6 +618,8 @@ export const spanish = {
     "El servidor intentó redirigir la conexión.",
   "The endpoint rejected the connection. Check the selected credential.":
     "El servidor rechazó la conexión. Revisa la credencial seleccionada.",
+  "The MCP response exceeded Nimbot’s 256 KiB limit. If the provider offers a smaller toolset, use its endpoint.":
+    "La respuesta MCP superó el límite de 256 KiB de Nimbot. Si el proveedor ofrece un conjunto de herramientas más pequeño, usa su punto de conexión.",
   "The MCP endpoint is unavailable.": "El servidor MCP no está disponible.",
   "Expected an object schema.": "Se esperaba un esquema de objeto.",
   "Enter a valid JSON schema for {0}.":
@@ -1200,6 +1211,10 @@ export const spanish = {
     "Busca en la web y recupera contenido de páginas.",
   "Look up Firecrawl API guides and web extraction examples.":
     "Consulta las guías de la API de Firecrawl y ejemplos de extracción web.",
+  "Work with GitHub repositories, issues, and pull requests. Requires a personal access token.":
+    "Trabaja con repositorios, incidencias y solicitudes de cambios de GitHub. Requiere un token de acceso personal.",
+  "Save this integration, then open an agent’s Access page. Grant access and save your personal access token as the bearer credential. Return here to test the connection and review tools before enabling them for the agent.":
+    "Guarda esta integración y abre la página Acceso del agente. Concede acceso y guarda tu token de acceso personal como credencial de portador. Vuelve aquí para probar la conexión y revisar las herramientas antes de habilitarlas para el agente.",
   "Search code and documentation in public GitHub repositories.":
     "Busca código y documentación en repositorios públicos de GitHub.",
   "Find guides for LangChain, LangGraph, and related tools.":

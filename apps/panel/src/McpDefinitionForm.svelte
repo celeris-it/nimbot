@@ -68,8 +68,11 @@
   let endpointChanged = $derived(
     endpoint.trim() !== (definition?.endpoint ?? example?.endpoint),
   );
+  const discoverAnonymously = $derived(
+    !!example && !example.requiresBearerCredential,
+  );
   let saveDisabled = $derived(
-    busy || (!!example && (checkingExample || tools.length === 0)),
+    busy || (discoverAnonymously && (checkingExample || tools.length === 0)),
   );
   const discoveryStatus = $derived({
     timeout: $messages("Connection timed out."),
@@ -77,11 +80,14 @@
     unauthorized: $messages(
       "The endpoint rejected the connection. Check the selected credential.",
     ),
+    response_too_large: $messages(
+      "The MCP response exceeded Nimbot’s 256 KiB limit. If the provider offers a smaller toolset, use its endpoint.",
+    ),
     unavailable: $messages("The MCP endpoint is unavailable."),
   });
 
   onMount(() => {
-    if (!example) return;
+    if (!discoverAnonymously) return;
     const connection = new AbortController();
     exampleConnection = connection;
     void testExampleConnection();
@@ -201,9 +207,15 @@
     maxlength={2048}
     readonly={!!example}
     required
-    aria-describedby={example ? undefined : "mcp-endpoint-help"}
+    aria-describedby={discoverAnonymously ? undefined : "mcp-endpoint-help"}
   />
-  {#if !example}
+  {#if example?.requiresBearerCredential}
+    <p id="mcp-endpoint-help">
+      {$messages(
+        "Save this integration, then open an agent’s Access page. Grant access and save your personal access token as the bearer credential. Return here to test the connection and review tools before enabling them for the agent.",
+      )}
+    </p>
+  {:else if !example}
     <p id="mcp-endpoint-help">
       {$messages(
         "Use an endpoint you trust. Changing it removes current agent grants and credentials.",
@@ -211,7 +223,7 @@
     </p>
     <Switch bind:checked={enabled}>{$messages("Enable integration")}</Switch>
   {/if}
-  {#if definition || example}
+  {#if definition || discoverAnonymously}
     <h2>
       {example ? $messages("Available tools") : $messages("Connection test")}
     </h2>
@@ -235,10 +247,10 @@
       onclick={testConnection}>{$messages("Test connection")}</ActionButton
     >
   {/if}
-  {#if example && checkingExample}
+  {#if discoverAnonymously && checkingExample}
     <p role="status">{$messages("Finding tools…")}</p>
   {/if}
-  {#if definition || example}
+  {#if definition || discoverAnonymously}
     {#if discovery && !endpointChanged}
       {#if discovery.status === "connected"}
         <p role="status">
@@ -278,7 +290,7 @@
       {/if}
     {/if}
   {/if}
-  {#if example && discovery && (discovery.status !== "connected" || !discovery.tools.length)}
+  {#if discoverAnonymously && discovery && (discovery.status !== "connected" || !discovery.tools.length)}
     <ActionButton
       type="button"
       disabled={checkingExample}
