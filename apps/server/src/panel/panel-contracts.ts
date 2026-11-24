@@ -21,11 +21,14 @@ export type DelegationHistory = ReturnType<
   import("../tasks/task-queue.js").TaskStore["listDelegations"]
 >;
 export type { McpDefinition } from "../mcp/mcp-catalog.js";
-export type { McpDiscoveryResult } from "../mcp/mcp-discovery.js";
+export type {
+  McpActivationResult,
+  McpDiscoveryResult,
+} from "../mcp/mcp-discovery.js";
 export type { McpExample } from "../mcp/mcp-examples.js";
 export type McpDefinitionSummary = Pick<
   import("../mcp/mcp-catalog.js").McpDefinition,
-  "id" | "label" | "enabled" | "revision" | "blockedTools"
+  "id" | "label" | "enabled" | "revision" | "blockedTools" | "toolSetup"
 >;
 export interface McpCatalogList {
   definitions: McpDefinitionSummary[];

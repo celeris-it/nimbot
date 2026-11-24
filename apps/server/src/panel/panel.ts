@@ -309,12 +309,11 @@ export function createPanel(
       return c.json(panelError("origin_not_allowed"), 403);
     await next();
   });
-  app.use(
-    "*",
+  app.use("*", (c, next) =>
     bodyLimit({
-      maxSize: 65536,
+      maxSize: /^\/api\/mcp\/[^/]+$/.test(c.req.path) ? 1024 * 1024 : 65536,
       onError: (c) => c.json(panelError("request_too_large"), 413),
-    }),
+    })(c, next),
   );
   const entry = async (c: Context) => {
     try {

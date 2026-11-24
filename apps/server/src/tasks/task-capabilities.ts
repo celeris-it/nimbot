@@ -81,6 +81,7 @@ export function createTaskCapabilities(config: {
   policy?: {
     canExecute(task: RoutedTask): boolean;
     allowedOperations(task: RoutedTask): readonly string[];
+    onIssue?(task: RoutedTask): (() => void) | undefined;
     remoteTools?(task: RoutedTask): readonly RemoteToolDefinition[];
   };
   now?: () => number;
@@ -95,6 +96,7 @@ export function createTaskCapabilities(config: {
     expiresAt: number;
     signal: AbortSignal;
     onAbort: () => void;
+    cleanup?: () => void;
     timer: ReturnType<typeof setTimeout>;
   };
   const leases = new Map<string, Lease>();
@@ -103,6 +105,7 @@ export function createTaskCapabilities(config: {
     if (leases.get(lease.taskId) === lease) leases.delete(lease.taskId);
     lease.signal.removeEventListener("abort", lease.onAbort);
     clearTimeout(lease.timer);
+    lease.cleanup?.();
   }
   return {
     /** Called only by the Server executor, before submitting its task to the Host. */
@@ -165,6 +168,7 @@ export function createTaskCapabilities(config: {
           operations: allowed,
           expiresAt: at + lifetimeMs,
           signal,
+          cleanup: config.policy.onIssue?.(task),
           onAbort: () => revoke(lease),
           timer: setTimeout(() => revoke(lease), lifetimeMs),
         };

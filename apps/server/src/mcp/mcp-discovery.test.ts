@@ -78,6 +78,7 @@ it.each(["json", "sse"] as const)(
     expect(await createMcpDiscovery(request)(endpoint, token)).toEqual({
       status: "connected",
       tools: [{ name: "search", inputSchema: schema }],
+      omitted: ["write"],
     });
     expect(methods).toEqual([
       "initialize",

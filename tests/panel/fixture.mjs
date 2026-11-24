@@ -189,23 +189,34 @@ const panel = createPanel(
       agentExists: (id) => agents.has(id),
       listAgents: () =>
         [...agents].map(([id, agent]) => ({ id, name: agent.name })),
-      discover: async (endpoint) => ({
-        status: "connected",
-        tools: [
-          ...(
-            mcpCatalog
-              .list()
-              .find((definition) => definition.endpoint === endpoint)?.tools ??
-            []
-          )
-            .filter((tool) => tool.name !== "lookup")
-            .map(({ name, inputSchema }) => ({ name, inputSchema })),
-          {
-            name: "lookup",
-            inputSchema: { type: "object", required: ["query"] },
-          },
-        ],
-      }),
+      discover: async (endpoint, credential) =>
+        endpoint === "https://api.githubcopilot.com/mcp/"
+          ? credential
+            ? {
+                status: "connected",
+                tools: Array.from({ length: 46 }, (_, index) => ({
+                  name: `github_tool_${index + 1}`,
+                  inputSchema: { type: "object" },
+                })),
+              }
+            : { status: "unauthorized" }
+          : {
+              status: "connected",
+              tools: [
+                ...(
+                  mcpCatalog
+                    .list()
+                    .find((definition) => definition.endpoint === endpoint)
+                    ?.tools ?? []
+                )
+                  .filter((tool) => tool.name !== "lookup")
+                  .map(({ name, inputSchema }) => ({ name, inputSchema })),
+                {
+                  name: "lookup",
+                  inputSchema: { type: "object", required: ["query"] },
+                },
+              ],
+            },
     },
     delegations: {
       store: tasks,

@@ -681,17 +681,8 @@ test("keeps usage history readable and keyboard-scrollable on narrow screens", a
   await expect(page.getByRole("link", { name: "Newest tasks" })).toBeVisible();
 });
 
-test("sets up an MCP example with one save after reviewing a discovered tool", async ({
-  page,
-}) => {
+test("enables discovered MCP tools with one save", async ({ page }) => {
   await login(page);
-  let attempts = 0;
-  await page.route("**/api/mcp/examples/openai-docs/discover", (route) => {
-    attempts++;
-    return attempts === 1
-      ? route.fulfill({ json: { status: "timeout" } })
-      : route.continue();
-  });
   const saves: unknown[] = [];
   page.on("request", (request) => {
     if (
@@ -757,36 +748,17 @@ test("sets up an MCP example with one save after reviewing a discovered tool", a
   await expect(endpoint).toHaveValue("https://developers.openai.com/mcp");
   await expect(endpoint).not.toBeEditable();
   const save = page.getByRole("button", { name: "Save integration" });
-  await expect(save).toBeDisabled();
-  await expect(page.getByText("Connection timed out.")).toBeVisible();
-  expect(saves).toHaveLength(0);
-
-  await page.getByRole("button", { name: "Retry connection" }).click();
-  await expect(page.getByText("Connected.", { exact: false })).toBeVisible();
-  await expect(save).toBeDisabled();
-  await page.getByRole("button", { name: "Review tool" }).click();
-  await expect(page.getByLabel("Argument schema (JSON)")).toBeFocused();
-  await page.getByLabel("Access", { exact: true }).selectOption("read");
+  await expect(save).toBeEnabled();
   await save.click();
   await expect(
     page.getByRole("heading", { name: "Edit OpenAI Docs" }),
   ).toBeVisible();
-  expect(attempts).toBe(2);
-  expect(saves).toEqual([
-    {
-      label: "OpenAI Docs",
-      endpoint: "https://developers.openai.com/mcp",
-      enabled: true,
-      tools: [
-        {
-          name: "lookup",
-          access: "read",
-          inputSchema: { type: "object", required: ["query"] },
-        },
-      ],
-      reviewedTools: [],
-    },
-  ]);
+  await expect(page.getByText("Enabled 1 new MCP tools.")).toBeVisible();
+  await expect(page.getByLabel("Tool name")).toHaveValue("lookup");
+  await expect(
+    page.getByRole("switch", { name: "Enable tool", exact: true }),
+  ).toBeChecked();
+  expect(saves).toMatchObject([{ label: "OpenAI Docs", tools: [] }]);
   await page.goto("/agents/dev/access");
   const integration = page.getByRole("region", { name: "OpenAI Docs" });
   await expect(integration.getByText(/Access withheld/)).toBeVisible();
@@ -795,7 +767,7 @@ test("sets up an MCP example with one save after reviewing a discovered tool", a
   ).toBeVisible();
 });
 
-test("sets up GitHub before adding an agent credential for tool discovery", async ({
+test("enables all GitHub tools when the agent credential is saved", async ({
   page,
 }) => {
   await login(page);
@@ -828,11 +800,34 @@ test("sets up GitHub before adding an agent credential for tool discovery", asyn
     integration.getByRole("button", { name: "Replace credential" }),
   ).toBeVisible();
 
+  await expect(page.getByText(/Enabled 46 new MCP tools/)).toBeVisible();
   await page.goto(editUrl);
+  await expect(page.getByLabel("Tool name")).toHaveCount(46);
+  for (const width of [320, 375, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await expect(page.getByText("github_tool_46", { exact: true })).toBeVisible();
+  const tool = page.getByRole("group", { name: "github_tool_46" });
+  await page.getByText("github_tool_46", { exact: true }).press("Enter");
+  await tool
+    .getByRole("switch", { name: "Enable tool", exact: true })
+    .uncheck();
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(page.getByText("Integration saved.")).toBeVisible();
   await page.getByLabel("Connection credential").selectOption("dev");
-  await page.getByRole("button", { name: "Test connection" }).click();
-  await page.getByRole("button", { name: "Review tool" }).click();
-  await expect(page.getByLabel("Tool name")).toHaveValue("lookup");
+  await page.getByRole("button", { name: "Update tools" }).click();
+  await expect(
+    page.getByText("No new compatible MCP tools were found."),
+  ).toBeVisible();
+  await page.getByText(/github_tool_46 · Disabled/).click();
+  await expect(
+    tool.getByRole("switch", { name: "Enable tool", exact: true }),
+  ).not.toBeChecked();
 });
 
 test("edits the MCP catalog and manages an agent's grant and write-only credential", async ({

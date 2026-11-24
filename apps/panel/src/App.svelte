@@ -11,6 +11,7 @@
     DelegationHistory,
     ExecutionDetail,
     ExecutionPage,
+    McpActivationResult,
     McpAgentDefinition,
     McpCatalogList,
     McpDefinition,
@@ -65,6 +66,7 @@
   import Executions from "./Executions.svelte";
   import Delegations from "./Delegations.svelte";
   import McpAgentAccess from "./McpAgentAccess.svelte";
+  import { mcpActivationMessage } from "./mcp-activation-message.js";
   import McpCatalog from "./McpCatalog.svelte";
   import McpDefinitionForm from "./McpDefinitionForm.svelte";
   import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
@@ -931,12 +933,15 @@
         },
       );
     } else {
-      await mutate<McpDefinition>(
+      await mutate<McpDefinition & { activation?: McpActivationResult }>(
         "/api/mcp",
         JSON.stringify(settings),
         (result) => {
           navigate(`/mcp/${encodeURIComponent(result.id)}`, true);
-          noticeMessage = () => $messages("Integration saved.");
+          noticeMessage = () =>
+            result.activation
+              ? mcpActivationMessage($messages, result.activation)
+              : $messages("Integration saved.");
         },
       );
     }
@@ -953,20 +958,20 @@
     );
     return result;
   }
-  async function discoverMcpExample(id: string, signal: AbortSignal) {
-    try {
-      return await request<McpDiscoveryResult>(
-        `/api/mcp/examples/${encodeURIComponent(id)}/discover`,
-        { method: "POST", signal },
-      );
-    } catch (cause) {
-      if (signal.aborted) return undefined;
-      if (cause instanceof ApiError && cause.status === 401) {
-        expired();
-        return undefined;
-      }
-      return { status: "unavailable" } as const;
-    }
+  async function activateMcpTools(agentId?: string) {
+    if (!mcpDefinition) return;
+    await mutate<{
+      definition: McpDefinition;
+      activation: McpActivationResult;
+    }>(
+      `/api/mcp/${encodeURIComponent(mcpDefinition.id)}/activate-tools`,
+      JSON.stringify({ revision: mcpDefinition.revision, agentId }),
+      (result) => {
+        mcpDefinition = result.definition;
+        noticeMessage = () =>
+          mcpActivationMessage($messages, result.activation);
+      },
+    );
   }
   async function mcpAgentAction(
     definition: McpAgentDefinition,
@@ -975,14 +980,24 @@
   ) {
     if (!agent) return;
     const startedPath = path;
-    await mutate<{ cleanupPending?: boolean }>(
+    await mutate<{
+      cleanupPending?: boolean;
+      activation?: McpActivationResult;
+    }>(
       `/api/agents/${encodeURIComponent(agent.id)}/mcp/${encodeURIComponent(definition.id)}/${command}`,
       JSON.stringify({ revision: definition.revision, token }),
       (result) => {
         noticeMessage = () =>
-          result.cleanupPending
-            ? $messages("MCP access updated. Credential cleanup is pending.")
-            : $messages("MCP access updated.");
+          [
+            result.cleanupPending
+              ? $messages("MCP access updated. Credential cleanup is pending.")
+              : $messages("MCP access updated."),
+            result.activation
+              ? mcpActivationMessage($messages, result.activation)
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
       },
     );
     if (path === startedPath && session) {
@@ -1575,7 +1590,7 @@
             save={saveMcp}
             discoveryAgents={mcpDiscoveryAgents}
             discover={discoverMcp}
-            discoverExample={discoverMcpExample}
+            activate={activateMcpTools}
           />
         {/key}
       {:else if agent && route}

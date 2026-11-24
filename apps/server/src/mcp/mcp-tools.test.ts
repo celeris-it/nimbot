@@ -34,14 +34,27 @@ const settings = {
   })),
 };
 
-async function fixture(platform: "telegram" | "discord" = "telegram") {
+async function fixture(
+  platform: "telegram" | "discord" = "telegram",
+  useCatalog = false,
+) {
   const directory = await mkdtemp(join(tmpdir(), "nimbot-mcp-tools-"));
   const path = join(directory, "server.sqlite");
   let tasks = openTaskStore(path);
   let approvals = openApprovalStore(path, () => Date.now());
   let rules = openApprovalRules(path, () => false);
   const catalog = openMcpCatalog(path, (id) => id === "a");
-  const definition = catalog.create(settings);
+  const definition = catalog.create(
+    useCatalog
+      ? {
+          ...settings,
+          tools: Array.from({ length: 46 }, (_, index) => ({
+            ...settings.tools[1],
+            name: `catalog_tool_${String(index + 1).padStart(2, "0")}`,
+          })),
+        }
+      : settings,
+  );
   catalog.grant("a", definition.id, 1);
   const queued =
     platform === "telegram"
@@ -105,8 +118,10 @@ async function fixture(platform: "telegram" | "discord" = "telegram") {
       store: tasks,
       policy: {
         canExecute: canReach,
-        allowedOperations: () => [],
-        remoteTools: tools.descriptors,
+        allowedOperations: useCatalog ? tools.operations : () => [],
+        ...(useCatalog
+          ? { onIssue: tools.snapshot }
+          : { remoteTools: tools.descriptors }),
       },
     });
     const lease = capabilities.issue(
@@ -120,7 +135,9 @@ async function fixture(platform: "telegram" | "discord" = "telegram") {
       authorize: capabilities.verify,
       handlers: [],
       resolveHandler: (current, operation) =>
-        tools.resolve(current, operation, gate.guard),
+        useCatalog
+          ? tools.resolveCatalog(current, operation, gate.guard)
+          : tools.resolve(current, operation, gate.guard),
     });
     return { tools, gate, capabilities, lease, dispatcher };
   };
@@ -144,6 +161,16 @@ async function fixture(platform: "telegram" | "discord" = "telegram") {
         arguments: args,
       },
       signal,
+    );
+  const catalogCall = (
+    operation: string,
+    args: unknown,
+    invocationId = randomUUID(),
+  ) =>
+    pipeline.dispatcher.dispatch(
+      { agentId: "a", serverTaskId: task.id, token: pipeline.lease.token },
+      { hostTaskId, invocationId, operation, arguments: args },
+      new AbortController().signal,
     );
   const answer = (allow = true) => {
     const keys = deliveries.at(-1)!.keys;
@@ -181,6 +208,7 @@ async function fixture(platform: "telegram" | "discord" = "telegram") {
     task,
     operation,
     call,
+    catalogCall,
     answer,
     history,
     tools: () => pipeline.tools,
@@ -442,4 +470,50 @@ it("does not expose tools to scheduled, webhook, delegated or foreign tasks", as
     expect(f.tools().descriptors(current)).toEqual([]);
   f.setReachable(false);
   expect(f.tools().descriptors(f.task)).toEqual([]);
+});
+
+it("lists and invokes a tool beyond the individual turn limit using the same lease", async () => {
+  const f = await fixture("discord", true);
+  const tools: { id: string; name: string }[] = [];
+  let cursor: number | undefined;
+  do {
+    const listing = await f.catalogCall(
+      "catalog-mcp.list",
+      cursor === undefined ? {} : { cursor },
+    );
+    expect(listing).toMatchObject({ ok: true });
+    const page = (
+      listing as { result: { tools: typeof tools; nextCursor?: number } }
+    ).result;
+    tools.push(...page.tools);
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  expect(tools).toHaveLength(46);
+  expect(tools.at(-1)?.name).toBe("catalog_tool_46");
+  const toolId = tools.at(-1)!.id;
+  expect(await f.catalogCall("catalog-mcp.list", { toolId })).toMatchObject({
+    ok: true,
+    result: { inputSchema: settings.tools[1]!.inputSchema },
+  });
+  const invocationId = randomUUID();
+  const args = { toolId, arguments: { text: "hello" } };
+  const pending = f.catalogCall("catalog-mcp.call", args, invocationId);
+  await vi.waitFor(() => expect(f.deliveries).toHaveLength(1));
+  expect(f.execute).not.toHaveBeenCalled();
+  await f.answer();
+  const outcome = await pending;
+  expect(outcome).toMatchObject({ ok: true });
+  expect(await f.catalogCall("catalog-mcp.call", args, invocationId)).toEqual(
+    outcome,
+  );
+  expect(f.execute).toHaveBeenCalledOnce();
+  f.catalog.revoke("a", f.definition.id);
+  expect(await f.catalogCall("catalog-mcp.list", {})).toEqual({
+    ok: true,
+    result: { tools: [] },
+  });
+  expect(
+    await f.catalogCall("catalog-mcp.call", args, invocationId),
+  ).toMatchObject({ ok: false });
+  expect(f.execute).toHaveBeenCalledOnce();
 });

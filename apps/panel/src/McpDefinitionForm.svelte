@@ -7,7 +7,7 @@
     Switch,
     TextField,
   } from "./components/index.js";
-  import { onMount, tick, untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import type {
     McpDiscoveryResult,
     McpExample,
@@ -29,7 +29,7 @@
     save,
     discoveryAgents,
     discover,
-    discoverExample,
+    activate,
   }: {
     definition?: McpDefinition;
     example?: McpExample;
@@ -37,22 +37,23 @@
     save: (settings: Settings) => Promise<void>;
     discoveryAgents: { id: string; name: string }[];
     discover: (agentId?: string) => Promise<McpDiscoveryResult | undefined>;
-    discoverExample: (
-      id: string,
-      signal: AbortSignal,
-    ) => Promise<McpDiscoveryResult | undefined>;
+    activate: (agentId?: string) => Promise<void>;
   } = $props();
   let label = $state(untrack(() => definition?.label ?? example?.label ?? ""));
   let endpoint = $state(
     untrack(() => definition?.endpoint ?? example?.endpoint ?? ""),
   );
-  let enabled = $state(untrack(() => definition?.enabled ?? !!example));
+  let enabled = $state(untrack(() => definition?.enabled ?? true));
   let tools = $state(
     untrack(() =>
       (definition?.tools ?? []).map((tool, id) => ({
         id,
         name: tool.name,
         access: tool.access,
+        enabled: tool.enabled !== false,
+        expanded:
+          (definition?.tools.length ?? 0) <= 4 ||
+          !!definition?.blockedTools?.includes(tool.name),
         schema: JSON.stringify(tool.inputSchema, null, 2),
         reviewed: false,
       })),
@@ -63,16 +64,26 @@
   const parseError = $derived(parseErrorMessage?.() ?? "");
   let discovery = $state<McpDiscoveryResult>();
   let credentialAgent = $state("");
-  let checkingExample = $state(false);
-  let exampleConnection: AbortController | undefined;
   let endpointChanged = $derived(
     endpoint.trim() !== (definition?.endpoint ?? example?.endpoint),
   );
-  const discoverAnonymously = $derived(
-    !!example && !example.requiresBearerCredential,
-  );
-  let saveDisabled = $derived(
-    busy || (discoverAnonymously && (checkingExample || tools.length === 0)),
+  const draftChanged = $derived(
+    !!definition &&
+      (label !== definition.label ||
+        endpointChanged ||
+        enabled !== definition.enabled ||
+        tools.length !== definition.tools.length ||
+        tools.some((tool, index) => {
+          const saved = definition.tools[index];
+          return (
+            !saved ||
+            tool.name !== saved.name ||
+            tool.access !== saved.access ||
+            tool.enabled !== (saved.enabled !== false) ||
+            tool.schema !== JSON.stringify(saved.inputSchema, null, 2) ||
+            tool.reviewed
+          );
+        })),
   );
   const discoveryStatus = $derived({
     timeout: $messages("Connection timed out."),
@@ -80,30 +91,14 @@
     unauthorized: $messages(
       "The endpoint rejected the connection. Check the selected credential.",
     ),
+    pagination_limit: $messages(
+      "The MCP endpoint exceeded the four-page tool listing limit.",
+    ),
     response_too_large: $messages(
       "The MCP response exceeded Nimbot’s 256 KiB limit. If the provider offers a smaller toolset, use its endpoint.",
     ),
     unavailable: $messages("The MCP endpoint is unavailable."),
   });
-
-  onMount(() => {
-    if (!discoverAnonymously) return;
-    const connection = new AbortController();
-    exampleConnection = connection;
-    void testExampleConnection();
-    return () => connection.abort();
-  });
-
-  async function testExampleConnection() {
-    if (!example || !exampleConnection || checkingExample) return;
-    checkingExample = true;
-    discovery = undefined;
-    try {
-      discovery = await discoverExample(example.id, exampleConnection.signal);
-    } finally {
-      checkingExample = false;
-    }
-  }
 
   async function testConnection() {
     if (busy || endpointChanged) return;
@@ -119,14 +114,16 @@
     if (existing) {
       existing.schema = schema;
       existing.reviewed = false;
+      existing.expanded = true;
       id = existing.id;
     } else {
-      if (tools.length >= 32) return;
       id = nextId++;
       tools.push({
         id,
         name: tool.name,
         access: "write",
+        enabled: true,
+        expanded: true,
         schema,
         reviewed: false,
       });
@@ -140,6 +137,8 @@
       id: nextId++,
       name: "",
       access: "write",
+      enabled: true,
+      expanded: true,
       schema: '{\n  "type": "object"\n}',
       reviewed: false,
     });
@@ -147,7 +146,7 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (saveDisabled) return;
+    if (busy) return;
     parseErrorMessage = undefined;
     const parsed: McpCatalogTool[] = [];
     for (const tool of tools) {
@@ -158,6 +157,7 @@
         parsed.push({
           name: tool.name,
           access: tool.access,
+          ...(!tool.enabled ? { enabled: false as const } : {}),
           inputSchema: schema as Record<string, unknown>,
         });
       } catch {
@@ -184,7 +184,13 @@
   }
 </script>
 
-<form aria-busy={busy} onsubmit={submit}>
+<form
+  aria-busy={busy}
+  onsubmit={submit}
+  oninvalidcapture={(event) => {
+    (event.target as HTMLElement).closest("details")?.setAttribute("open", "");
+  }}
+>
   {#if definition?.blockedTools?.length}
     <p class="panel-alert" role="alert">
       {$messages(
@@ -207,12 +213,12 @@
     maxlength={2048}
     readonly={!!example}
     required
-    aria-describedby={discoverAnonymously ? undefined : "mcp-endpoint-help"}
+    aria-describedby="mcp-endpoint-help"
   />
   {#if example?.requiresBearerCredential}
     <p id="mcp-endpoint-help">
       {$messages(
-        "Save this integration, then open an agent’s Access page. Grant access and save your personal access token as the bearer credential. Return here to test the connection and review tools before enabling them for the agent.",
+        "Save this integration, then grant access and save your personal access token from the agent’s Access page. Compatible tools are enabled when the connection succeeds.",
       )}
     </p>
   {:else if !example}
@@ -223,12 +229,15 @@
     </p>
     <Switch bind:checked={enabled}>{$messages("Enable integration")}</Switch>
   {/if}
-  {#if definition || discoverAnonymously}
-    <h2>
-      {example ? $messages("Available tools") : $messages("Connection test")}
-    </h2>
-  {/if}
   {#if definition}
+    <h2>{$messages("Connection test")}</h2>
+    {#if definition.toolSetup === "pending"}
+      <p>
+        {$messages(
+          "Tool setup is pending. Add a credential if required, or retry the connection.",
+        )}
+      </p>
+    {/if}
     <label for="mcp-discovery-credential"
       >{$messages("Connection credential")}</label
     >
@@ -241,16 +250,32 @@
     {#if endpointChanged}<p>
         {$messages("Save the endpoint before testing the connection.")}
       </p>{/if}
-    <ActionButton
-      type="button"
-      disabled={busy || endpointChanged}
-      onclick={testConnection}>{$messages("Test connection")}</ActionButton
-    >
+    <div class="actions">
+      <ActionButton
+        type="button"
+        disabled={busy || endpointChanged}
+        onclick={testConnection}>{$messages("Test connection")}</ActionButton
+      >
+      <ActionButton
+        type="button"
+        disabled={busy || draftChanged}
+        onclick={() => activate(credentialAgent || undefined)}
+        >{definition.toolSetup === "ready"
+          ? $messages("Update tools")
+          : definition.toolSetup === "pending"
+            ? $messages("Retry tool setup")
+            : $messages("Enable all tools")}</ActionButton
+      >
+    </div>
+    {#if draftChanged}<p>
+        {$messages("Save your changes before updating tools.")}
+      </p>{/if}
+  {:else if !example?.requiresBearerCredential}
+    <p>
+      {$messages("Compatible tools are enabled when the connection succeeds.")}
+    </p>
   {/if}
-  {#if discoverAnonymously && checkingExample}
-    <p role="status">{$messages("Finding tools…")}</p>
-  {/if}
-  {#if definition || discoverAnonymously}
+  {#if definition}
     {#if discovery && !endpointChanged}
       {#if discovery.status === "connected"}
         <p role="status">
@@ -266,9 +291,7 @@
                 <code>{tool.name}</code>
                 <ActionButton
                   type="button"
-                  disabled={busy ||
-                    (tools.length >= 32 &&
-                      !tools.some(({ name }) => name === tool.name))}
+                  disabled={busy}
                   onclick={() => reviewTool(tool)}
                 >
                   {tools.some(({ name }) => name === tool.name)
@@ -290,82 +313,90 @@
       {/if}
     {/if}
   {/if}
-  {#if discoverAnonymously && discovery && (discovery.status !== "connected" || !discovery.tools.length)}
-    <ActionButton
-      type="button"
-      disabled={checkingExample}
-      onclick={testExampleConnection}
-      >{$messages("Retry connection")}</ActionButton
-    >
-  {/if}
-
   <h2>{$messages("Approved tools")}</h2>
   {#if tools.length === 0}<p>{$messages("No tools selected.")}</p>{/if}
   {#each tools as tool (tool.id)}
-    <fieldset class="panel-card">
-      <legend>{tool.name || $messages("New tool")}</legend>
-      <label for={`mcp-tool-name-${tool.id}`}>{$messages("Tool name")}</label>
-      <TextField
-        id={`mcp-tool-name-${tool.id}`}
-        bind:value={tool.name}
-        readonly={!!example}
-        oninput={() => (tool.reviewed = false)}
-        maxlength={128}
-        required
-      />
-      <label for={`mcp-tool-access-${tool.id}`}>{$messages("Access")}</label>
-      <Select
-        id={`mcp-tool-access-${tool.id}`}
-        bind:value={tool.access}
-        onchange={() => (tool.reviewed = false)}
+    <details
+      class="rounded-panel border border-base-300 bg-base-100 p-3"
+      bind:open={tool.expanded}
+    >
+      <summary
+        class="min-h-8 cursor-pointer font-semibold [overflow-wrap:anywhere]"
       >
-        <option value="write">{$messages("Write or unknown")}</option>
-        <option value="read">{$messages("Read only")}</option>
-      </Select>
-      <label for={`mcp-tool-schema-${tool.id}`}
-        >{$messages("Argument schema (JSON)")}</label
-      >
-      <textarea
-        class="panel-textarea"
-        id={`mcp-tool-schema-${tool.id}`}
-        bind:value={tool.schema}
-        readonly={!!example}
-        oninput={() => (tool.reviewed = false)}
-        rows="6"
-        maxlength={16384}
-        required></textarea>
-      {#if definition?.blockedTools?.includes(tool.name)}
-        <p id={`mcp-tool-review-help-${tool.id}`}>
-          {$messages(
-            "Disabled pending review. Test the connection to retrieve the current schema, then review the schema and access above.",
-          )}
-        </p>
-        <Checkbox
-          bind:checked={tool.reviewed}
-          disabled={busy}
-          aria-describedby={`mcp-tool-review-help-${tool.id}`}
-          >{$messages("I reviewed the schema and access for")}
-          {tool.name}</Checkbox
+        {tool.name || $messages("New tool")}
+        {#if !tool.enabled || definition?.blockedTools?.includes(tool.name)}
+          · {$messages("Disabled")}
+        {/if}
+      </summary>
+      <fieldset aria-label={tool.name || $messages("New tool")}>
+        <label for={`mcp-tool-name-${tool.id}`}>{$messages("Tool name")}</label>
+        <TextField
+          id={`mcp-tool-name-${tool.id}`}
+          bind:value={tool.name}
+          readonly={!!example}
+          oninput={() => (tool.reviewed = false)}
+          maxlength={128}
+          required
+        />
+        <label for={`mcp-tool-access-${tool.id}`}>{$messages("Access")}</label>
+        <Select
+          id={`mcp-tool-access-${tool.id}`}
+          bind:value={tool.access}
+          onchange={() => (tool.reviewed = false)}
         >
-      {/if}
-      <ActionButton
-        type="button"
-        disabled={busy}
-        onclick={() => (tools = tools.filter((item) => item.id !== tool.id))}
-        >{$messages("Remove tool")}</ActionButton
-      >
-    </fieldset>
+          <option value="write">{$messages("Write or unknown")}</option>
+          <option value="read">{$messages("Read only")}</option>
+        </Select>
+        <label for={`mcp-tool-schema-${tool.id}`}
+          >{$messages("Argument schema (JSON)")}</label
+        >
+        <textarea
+          class="panel-textarea"
+          id={`mcp-tool-schema-${tool.id}`}
+          bind:value={tool.schema}
+          readonly={!!example}
+          oninput={() => (tool.reviewed = false)}
+          rows="6"
+          maxlength={16384}
+          required></textarea>
+        {#if definition?.blockedTools?.includes(tool.name)}
+          <p id={`mcp-tool-review-help-${tool.id}`}>
+            {$messages(
+              "Disabled pending review. Test the connection to retrieve the current schema, then review the schema and access above.",
+            )}
+          </p>
+          <Checkbox
+            bind:checked={tool.reviewed}
+            disabled={busy}
+            aria-describedby={`mcp-tool-review-help-${tool.id}`}
+            >{$messages("I reviewed the schema and access for")}
+            {tool.name}</Checkbox
+          >
+        {/if}
+        {#if definition?.tools.some(({ name }) => name === tool.name)}
+          <Switch bind:checked={tool.enabled} disabled={busy}
+            >{$messages("Enable tool")}</Switch
+          >
+        {:else}
+          <ActionButton
+            type="button"
+            disabled={busy}
+            onclick={() =>
+              (tools = tools.filter((item) => item.id !== tool.id))}
+            >{$messages("Remove tool")}</ActionButton
+          >
+        {/if}
+      </fieldset>
+    </details>
   {/each}
   {#if parseError}<p role="alert">{parseError}</p>{/if}
   <div class="actions">
     {#if !example}
-      <ActionButton
-        type="button"
-        disabled={busy || tools.length >= 32}
-        onclick={addTool}>{$messages("Add tool")}</ActionButton
+      <ActionButton type="button" disabled={busy} onclick={addTool}
+        >{$messages("Add tool")}</ActionButton
       >
     {/if}
-    <ActionButton variant="primary" type="submit" disabled={saveDisabled}
+    <ActionButton variant="primary" type="submit" disabled={busy}
       >{$messages("Save integration")}</ActionButton
     >
   </div>

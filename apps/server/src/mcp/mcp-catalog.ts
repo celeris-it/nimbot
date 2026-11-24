@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
+import type { McpDiscoveredTool } from "./mcp-discovery.js";
 import { compileMcpArguments } from "./mcp-arguments.js";
 
 export interface McpCatalogTool {
   name: string;
   access: "read" | "write";
+  enabled?: false;
   inputSchema: Record<string, unknown>;
 }
 
@@ -18,6 +21,7 @@ interface McpDefinitionSettings {
 export interface McpDefinition extends McpDefinitionSettings {
   id: string;
   revision: number;
+  toolSetup?: "pending" | "ready";
   /** Approved tools disabled after a remote change, pending explicit administrator review. */
   blockedTools?: string[];
 }
@@ -29,9 +33,9 @@ interface CredentialBinding {
 }
 
 const MAX_DEFINITIONS = 64;
-const MAX_TOOLS = 32;
+const MAX_TOOLS = 4096;
 const MAX_SCHEMA_BYTES = 16_384;
-const MAX_TOOLS_BYTES = 65_536;
+const MAX_TOOLS_BYTES = 512 * 1024;
 
 export class McpCatalogValidationError extends Error {}
 
@@ -71,6 +75,7 @@ function settings(input: unknown) {
       !/^[A-Za-z0-9_.-]{1,128}$/.test(tool.name) ||
       names.has(tool.name) ||
       (tool.access !== "read" && tool.access !== "write") ||
+      (tool.enabled !== undefined && tool.enabled !== false) ||
       !record(tool.inputSchema) ||
       tool.inputSchema.type !== "object"
     )
@@ -85,6 +90,7 @@ function settings(input: unknown) {
     return {
       name: tool.name,
       access: tool.access,
+      ...(tool.enabled === false ? { enabled: false as const } : {}),
       inputSchema: tool.inputSchema,
     };
   });
@@ -118,6 +124,9 @@ function definition(row: Record<string, unknown>): McpDefinition {
     enabled: row.enabled === 1,
     tools: JSON.parse(String(row.tools_json)) as McpCatalogTool[],
     revision: Number(row.revision),
+    ...(row.tool_setup === "pending" || row.tool_setup === "ready"
+      ? { toolSetup: row.tool_setup }
+      : {}),
   };
 }
 
@@ -136,7 +145,9 @@ export function openMcpCatalog(
         endpoint TEXT NOT NULL,
         enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
         tools_json TEXT NOT NULL CHECK(json_valid(tools_json) AND json_type(tools_json) = 'array'),
-        revision INTEGER NOT NULL DEFAULT 1
+        revision INTEGER NOT NULL DEFAULT 1,
+        tool_setup TEXT NOT NULL DEFAULT 'manual'
+          CHECK (tool_setup IN ('manual', 'pending', 'ready'))
       );
       CREATE TABLE IF NOT EXISTS mcp_grants (
         agent_id TEXT NOT NULL,
@@ -186,12 +197,12 @@ export function openMcpCatalog(
   }
 
   return {
-    create(input: unknown): McpDefinition {
+    create(input: unknown, pending = false): McpDefinition {
       const { label, endpoint, enabled, toolsJson } = settings(input);
       const row = db
         .prepare(
-          `INSERT INTO mcp_definitions (id, label, endpoint, enabled, tools_json)
-         SELECT ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM mcp_definitions) < ?
+          `INSERT INTO mcp_definitions (id, label, endpoint, enabled, tools_json, tool_setup)
+         SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM mcp_definitions) < ?
          RETURNING *`,
         )
         .get(
@@ -200,6 +211,7 @@ export function openMcpCatalog(
           endpoint,
           enabled,
           toolsJson,
+          pending ? "pending" : "manual",
           MAX_DEFINITIONS,
         );
       if (!row) throw new McpCatalogValidationError("MCP catalog is full.");
@@ -230,6 +242,63 @@ export function openMcpCatalog(
           ).run(id, reviewedToolsJson, toolsJson);
         db.exec("COMMIT");
         return row && readDefinition(row);
+      } catch (error) {
+        if (db.isTransaction) db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    activate(
+      definition: McpDefinition,
+      discovered: readonly McpDiscoveredTool[],
+    ) {
+      const tools = new Map(definition.tools.map((tool) => [tool.name, tool]));
+      const changed: string[] = [];
+      const omitted: string[] = [];
+      let added = 0;
+      for (const { name, inputSchema } of discovered) {
+        const existing = tools.get(name);
+        if (
+          existing &&
+          !definition.blockedTools?.includes(name) &&
+          !isDeepStrictEqual(existing.inputSchema, inputSchema)
+        )
+          changed.push(name);
+        if (!compileMcpArguments(inputSchema)) {
+          omitted.push(name);
+          continue;
+        }
+        if (!existing) {
+          tools.set(name, { name, inputSchema, access: "write" });
+          added++;
+        }
+      }
+      if (
+        !tools.size ||
+        (definition.toolSetup === "ready" && !added && !changed.length)
+      )
+        return this.get(definition.id)?.revision === definition.revision
+          ? { definition, added, omitted }
+          : undefined;
+      const { toolsJson } = settings({
+        ...definition,
+        tools: [...tools.values()],
+      });
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const row = db
+          .prepare(
+            `UPDATE mcp_definitions SET tools_json = ?, tool_setup = 'ready', revision = revision + 1
+           WHERE id = ? AND revision = ? RETURNING *`,
+          )
+          .get(toolsJson, definition.id, definition.revision);
+        if (row) {
+          const block = db.prepare(
+            "INSERT OR IGNORE INTO mcp_tool_blocks (definition_id, tool_name) VALUES (?, ?)",
+          );
+          for (const name of changed) block.run(definition.id, name);
+        }
+        db.exec("COMMIT");
+        return row && { definition: readDefinition(row), added, omitted };
       } catch (error) {
         if (db.isTransaction) db.exec("ROLLBACK");
         throw error;

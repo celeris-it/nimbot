@@ -1213,8 +1213,35 @@ export const spanish = {
     "Consulta las guías de la API de Firecrawl y ejemplos de extracción web.",
   "Work with GitHub repositories, issues, and pull requests. Requires a personal access token.":
     "Trabaja con repositorios, incidencias y solicitudes de cambios de GitHub. Requiere un token de acceso personal.",
-  "Save this integration, then open an agent’s Access page. Grant access and save your personal access token as the bearer credential. Return here to test the connection and review tools before enabling them for the agent.":
-    "Guarda esta integración y abre la página Acceso del agente. Concede acceso y guarda tu token de acceso personal como credencial de portador. Vuelve aquí para probar la conexión y revisar las herramientas antes de habilitarlas para el agente.",
+  "Save this integration, then grant access and save your personal access token from the agent’s Access page. Compatible tools are enabled when the connection succeeds.":
+    "Guarda la integración. Luego concede acceso y guarda tu token de acceso personal desde la página Acceso del agente. Las herramientas compatibles se habilitan cuando se establece la conexión.",
+  "Compatible tools are enabled when the connection succeeds.":
+    "Las herramientas compatibles se habilitan cuando se establece la conexión.",
+  "Enabled {0} new MCP tools.": "Se habilitaron {0} herramientas MCP nuevas.",
+  "No new compatible MCP tools were found.":
+    "No se encontraron herramientas MCP nuevas compatibles.",
+  "Skipped incompatible tools ({0}).":
+    "Se omitieron herramientas incompatibles ({0}).",
+  "The MCP endpoint exceeded the four-page tool listing limit.":
+    "El punto de conexión MCP superó el límite de cuatro páginas para listar herramientas.",
+  "Tool setup is pending. Save a valid credential or retry with another credential.":
+    "La configuración está pendiente. Guarda una credencial válida o inténtalo con otra.",
+  "Tool setup is pending. Add a credential if required, or retry the connection.":
+    "La configuración está pendiente. Agrega una credencial si hace falta o vuelve a intentar la conexión.",
+  "Tool discovery timed out. Retry from the integration settings.":
+    "Se agotó el tiempo para encontrar herramientas. Vuelve a intentarlo desde la configuración de la integración.",
+  "Tool discovery stopped because the endpoint attempted to redirect.":
+    "La búsqueda de herramientas se detuvo porque el punto de conexión intentó redirigir la solicitud.",
+  "Tool discovery failed. Retry from the integration settings.":
+    "No se pudieron encontrar herramientas. Vuelve a intentarlo desde la configuración de la integración.",
+  "The tools exceed the catalog storage limit. Try a smaller toolset.":
+    "Las herramientas superan el límite de almacenamiento del catálogo. Prueba con un conjunto más pequeño.",
+  "Update tools": "Actualizar herramientas",
+  "Retry tool setup": "Reintentar la configuración",
+  "Enable all tools": "Habilitar todas las herramientas",
+  "Enable tool": "Habilitar herramienta",
+  "Save your changes before updating tools.":
+    "Guarda tus cambios antes de actualizar las herramientas.",
   "Search code and documentation in public GitHub repositories.":
     "Busca código y documentación en repositorios públicos de GitHub.",
   "Find guides for LangChain, LangGraph, and related tools.":

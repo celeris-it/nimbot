@@ -23,7 +23,7 @@ See the [first-agent setup guide](docs/INSTALL.md#create-your-first-agent) for s
 - Queue tasks, follow progress, and review results or cancel active work. The panel shows recent executions and model usage.
 - Write Markdown rules shared by every agent in **Rules**, or rules for one agent in its own **Rules** section. Agent rules take precedence over shared rules, and changes apply from the next task. Rules guide the model; tool approvals still apply.
 - Run saved prompts on a schedule or trigger them from another service with a webhook. [Scheduled tasks](docs/SCHEDULES.md)
-- Give agents access to approved external tools or let them hand off work to other agents with owner approval. [Application tools](docs/ARCHITECTURE.md#application-tools)
+- Connect external MCP tools, grant access per agent, and approve writes in chat. Agents can also hand off work to other agents with owner approval. [Application tools](docs/ARCHITECTURE.md#application-tools)
 
 ## Panel language
 

@@ -258,6 +258,7 @@ export function createBotTasks(config: {
                 : []),
             ],
             remoteTools: config.toolPolicy?.remoteTools,
+            onIssue: config.toolPolicy?.onIssue,
           },
         }
       : {}),

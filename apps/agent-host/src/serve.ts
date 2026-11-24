@@ -18,6 +18,7 @@ import { createOpenCodeModels } from "./opencode-models.js";
 import { createOpenCodeChatGptQuota } from "./opencode-chatgpt-quota.js";
 import { createOpenCodeUsage } from "./opencode-usage.js";
 import { openMemoryStore } from "./memory-store.js";
+import { createMcpCatalogToolDefinitions } from "./mcp-catalog-tools.js";
 import { createMemoryTools } from "./memory-tools.js";
 import { createPeerToolDefinitions } from "./peer-tools.js";
 import { createScheduleToolDefinitions } from "./schedule-tools.js";
@@ -55,6 +56,7 @@ try {
       undefined,
       [
         ...createMemoryTools(memory),
+        ...createMcpCatalogToolDefinitions(),
         ...createPeerToolDefinitions(),
         ...createScheduleToolDefinitions(),
         attachments.tool,

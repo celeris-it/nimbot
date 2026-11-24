@@ -66,7 +66,7 @@ it.each([
       prepareStateSchema(path, kind);
       prepareStateSchema(path, kind);
       expect(read(path, "PRAGMA user_version")).toEqual({
-        user_version: kind === "server" ? 2 : 1,
+        user_version: kind === "server" ? 3 : 1,
       });
     }
     expect(read(database, select)).toEqual({ data: "saved" });
@@ -106,7 +106,7 @@ it("migrates subprocess state with saved Telegram and Discord connections to opt
   );
   prepareStateSchema(path, "server-process");
   prepareStateSchema(path, "server-process");
-  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 6 });
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
   expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   expect(
     read(path, "SELECT owner_id, bot_id, credential_ref FROM agents"),
@@ -232,7 +232,7 @@ it("upgrades subprocess v2 schedules and run history to the fresh v3 schema", ()
   const run = read(migrated, "SELECT * FROM schedule_runs");
   for (const path of [migrated, fresh]) {
     prepareStateSchema(path, kind);
-    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 6 });
+    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
     expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   }
   expect(read(migrated, "SELECT * FROM schedules")).toEqual({
@@ -269,7 +269,7 @@ it("migrates version 3 task history without changing execution identity or infer
   );
   const previous = read(path, "SELECT * FROM tasks");
   prepareStateSchema(path, kind);
-  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 6 });
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
   expect(read(path, "SELECT * FROM tasks")).toEqual(previous);
   expect(read(path, "SELECT * FROM task_execution_details")).toBeUndefined();
   expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
@@ -312,7 +312,7 @@ it("retires the memory switch in fresh and upgraded Server state while preservin
   for (const path of [existing, fixture(kind)]) {
     prepareStateSchema(path, kind);
     prepareStateSchema(path, kind);
-    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 6 });
+    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
     expect(
       read(
         path,
@@ -364,7 +364,7 @@ it("adds an empty rule list to fresh and upgraded Server state while preserving 
           name: "Agent A",
           instructions: "Be brief",
         });
-      expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 6 });
+      expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
       expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
       expect(registry.get("a")?.instructions).toBe("Be brief");
       expect(registry.rules.list(null)).toEqual([]);
@@ -380,4 +380,39 @@ it("adds an empty rule list to fresh and upgraded Server state while preserving 
       registry.close();
     }
   }
+});
+
+it("preserves MCP catalog tool selections and grants through the setup migration", () => {
+  const version6 = [1, 2, 3, 4, 5, 6]
+    .map((version) =>
+      readFileSync(
+        new URL(
+          `../scripts/state-schema/server-process-v${version}.sql`,
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    )
+    .join("\n");
+  const path = fixture(
+    "server-process",
+    `${version6}
+    PRAGMA application_id = 0x4e494d50;
+    PRAGMA user_version = 6;
+    INSERT INTO mcp_definitions (id, label, endpoint, enabled, tools_json)
+    VALUES ('github', 'GitHub', 'https://api.githubcopilot.com/mcp/', 1, '[]');
+    INSERT INTO mcp_grants (agent_id, definition_id, scope, secret_ref)
+    VALUES ('a', 'github', 'scope', 'credential-reference');
+  `,
+  );
+  prepareStateSchema(path, "server-process");
+  expect(
+    read(path, "SELECT tool_setup, tools_json FROM mcp_definitions"),
+  ).toEqual({
+    tool_setup: "manual",
+    tools_json: "[]",
+  });
+  expect(read(path, "SELECT secret_ref FROM mcp_grants")).toEqual({
+    secret_ref: "credential-reference",
+  });
 });

@@ -26,6 +26,10 @@ const serverProcessV6 = readFileSync(
   new URL("./state-schema/server-process-v6.sql", import.meta.url),
   "utf8",
 );
+const mcpToolSetup = readFileSync(
+  new URL("./state-schema/mcp-tool-setup.sql", import.meta.url),
+  "utf8",
+);
 function migrateReferencedTable(db, sql) {
   db.exec(sql);
   if (db.prepare("PRAGMA foreign_key_check").get())
@@ -33,7 +37,7 @@ function migrateReferencedTable(db, sql) {
 }
 const definitions = {
   "server-process": {
-    version: 6,
+    version: 7,
     applicationId: 0x4e494d50,
     get current() {
       return [
@@ -43,6 +47,7 @@ const definitions = {
         taskExecutionSchema,
         serverProcessV5,
         serverProcessV6,
+        mcpToolSetup,
       ].join("\n");
     },
     migrations: {
@@ -61,16 +66,22 @@ const definitions = {
       6(db) {
         db.exec(serverProcessV6);
       },
+      7(db) {
+        db.exec(mcpToolSetup);
+      },
     },
   },
   server: {
-    version: 2,
+    version: 3,
     get current() {
-      return baseline("server") + "\n" + serverV2;
+      return [baseline("server"), serverV2, mcpToolSetup].join("\n");
     },
     migrations: {
       2(db) {
         migrateReferencedTable(db, serverV2);
+      },
+      3(db) {
+        db.exec(mcpToolSetup);
       },
     },
   },

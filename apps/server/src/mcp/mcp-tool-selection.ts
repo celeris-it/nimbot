@@ -6,6 +6,7 @@ import { compileMcpArguments } from "./mcp-arguments.js";
 interface SelectedTool {
   descriptor: RemoteToolDefinition;
   definitionId: string;
+  label: string;
   revision: number;
   endpoint: string;
   tool: McpCatalogTool;
@@ -24,7 +25,7 @@ const MAX_METADATA_BYTES = 16_384;
  * endpoint and credential bindings must never be attached to Host submissions.
  */
 export function createMcpToolSelection(catalog: McpCatalog) {
-  function select(agentId: string): SelectedTool[] {
+  function select(agentId: string, individual = false): SelectedTool[] {
     const selected: SelectedTool[] = [];
     const descriptors: RemoteToolDefinition[] = [];
     // Stable ordering prevents label edits from changing the bounded selection.
@@ -33,12 +34,17 @@ export function createMcpToolSelection(catalog: McpCatalog) {
       const binding = catalog.credentialBinding(agentId, definitionId);
       if (!definition?.enabled || !binding) continue;
       for (const tool of definition.tools) {
-        if (definition.blockedTools?.includes(tool.name)) continue;
+        if (
+          tool.enabled === false ||
+          definition.blockedTools?.includes(tool.name)
+        )
+          continue;
         if (!compileMcpArguments(tool.inputSchema)) continue;
         const descriptor: RemoteToolDefinition = {
           operation: `mcp.${hash({
             agentId,
-            definition,
+            definitionId,
+            revision: definition.revision,
             scope: binding.scope,
             credential: binding.reference,
             tool: tool.name,
@@ -51,19 +57,21 @@ export function createMcpToolSelection(catalog: McpCatalog) {
           inputSchema: tool.inputSchema,
         };
         if (
+          individual &&
           Buffer.byteLength(JSON.stringify([...descriptors, descriptor])) >
-          MAX_METADATA_BYTES
+            MAX_METADATA_BYTES
         )
           continue;
-        descriptors.push(descriptor);
+        if (individual) descriptors.push(descriptor);
         selected.push({
           descriptor,
           definitionId,
+          label: definition.label,
           revision: definition.revision,
           endpoint: definition.endpoint,
           tool,
         });
-        if (selected.length === MAX_TOOLS) return selected;
+        if (individual && selected.length === MAX_TOOLS) return selected;
       }
     }
     return selected;
@@ -71,7 +79,10 @@ export function createMcpToolSelection(catalog: McpCatalog) {
 
   return {
     descriptors(agentId: string): RemoteToolDefinition[] {
-      return select(agentId).map(({ descriptor }) => descriptor);
+      return select(agentId, true).map(({ descriptor }) => descriptor);
+    },
+    available(agentId: string) {
+      return select(agentId);
     },
     /** Re-read all authority; a stale or model-invented operation resolves to nothing. */
     resolve(agentId: string, operation: string): SelectedTool | undefined {

@@ -283,6 +283,107 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
         .status,
     ).toBe(200);
     expect(catalog.get(id)!.blockedTools).toBeUndefined();
+
+    discover.mockResolvedValueOnce({ status: "timeout" });
+    const pending = await post("/api/mcp", {
+      ...draft,
+      label: "Pending",
+      tools: [],
+    });
+    expect(pending.status).toBe(201);
+    const pendingDefinition = await pending.json();
+    expect(pendingDefinition).toMatchObject({
+      toolSetup: "pending",
+      tools: [],
+      activation: { status: "timeout" },
+    });
+    const pendingPath = `/api/mcp/${pendingDefinition.id}`;
+    const discoverTools = [
+      { name: "lookup", inputSchema: { type: "object" } },
+      {
+        name: "unsupported",
+        inputSchema: { type: "object", unknownKeyword: true },
+      },
+    ];
+    discover.mockResolvedValueOnce({
+      status: "connected",
+      tools: discoverTools,
+    });
+    const retry = await post(`${pendingPath}/activate-tools`, {
+      revision: pendingDefinition.revision,
+    });
+    expect(await retry.json()).toMatchObject({
+      definition: {
+        toolSetup: "ready",
+        tools: [{ name: "lookup", access: "write" }],
+      },
+      activation: { status: "connected", added: 1, omitted: ["unsupported"] },
+    });
+
+    const alreadyConfigured = catalog.get(id)!;
+    const result = await post(`${path}/activate-tools`, {
+      revision: alreadyConfigured.revision,
+    });
+    expect(result.status).toBe(200);
+    expect(catalog.get(id)).toMatchObject({
+      toolSetup: "ready",
+      tools: draft.tools,
+    });
+
+    const protectedDefinition = await (
+      await post("/api/mcp", {
+        ...draft,
+        label: "GitHub",
+        endpoint: "https://api.githubcopilot.com/mcp/",
+        tools: [],
+      })
+    ).json();
+    const protectedPath = `/api/agents/a/mcp/${protectedDefinition.id}`;
+    expect(
+      (
+        await post(`${protectedPath}/grant`, {
+          revision: protectedDefinition.revision,
+        })
+      ).status,
+    ).toBe(201);
+    let signalEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+    let finishDiscovery!: (
+      result: Awaited<ReturnType<typeof discover>>,
+    ) => void;
+    const discovery = new Promise<Awaited<ReturnType<typeof discover>>>(
+      (resolve) => {
+        finishDiscovery = resolve;
+      },
+    );
+    discover.mockImplementationOnce(async () => {
+      signalEntered();
+      return discovery;
+    });
+    const staleRequest = post(`${protectedPath}/credential`, {
+      token: "stale-github-token",
+      revision: protectedDefinition.revision,
+    });
+    await entered;
+    discover.mockResolvedValueOnce({
+      status: "connected",
+      tools: discoverTools.slice(0, 1),
+    });
+    const winning = await post(`${protectedPath}/credential`, {
+      token: "current-github-token",
+      revision: protectedDefinition.revision,
+    });
+    expect(await winning.json()).toMatchObject({ activation: { added: 1 } });
+    finishDiscovery({
+      status: "connected",
+      tools: [{ name: "stale_tool", inputSchema: { type: "object" } }],
+    });
+    expect(await (await staleRequest).json()).not.toHaveProperty("activation");
+    expect(catalog.get(protectedDefinition.id)?.tools).toMatchObject([
+      { name: "lookup" },
+    ]);
   } finally {
     catalog.close();
     await rm(dir, { recursive: true, force: true });

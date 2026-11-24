@@ -336,11 +336,12 @@ async function main(): Promise<void> {
           allowedOperations: (task) => [
             ...memoryOperationsForTask(task),
             ...peerTools.operations(task),
+            ...mcpTools.operations(task),
           ],
-          remoteTools: mcpTools.descriptors,
+          onIssue: mcpTools.snapshot,
         },
         toolHandlers: peerTools.handlers,
-        resolveToolHandler: mcpTools.resolve,
+        resolveToolHandler: mcpTools.resolveCatalog,
         delegation: {
           canHandoff,
           canExecute: delegatedExecution.canExecute,
