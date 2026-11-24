@@ -413,11 +413,6 @@
         </ul>
       </div>
     {/if}
-    <p data-ui="muted">
-      {$messages(
-        "Costs are the amounts reported by each provider after a task finishes. Tasks without a reported cost are counted as $0, and the model share falls back to tokens when no cost was reported.",
-      )}
-    </p>
   </Surface>
 </div>
 

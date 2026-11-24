@@ -353,7 +353,7 @@ async function main(): Promise<void> {
             undefined,
             taskWaitMs(taskTimeoutSeconds),
           ),
-          () => registry.get(id)?.instructions ?? "",
+          () => registry.taskInstructions(id),
         ),
         attachments: createTelegramAttachments(host),
         decide: createHostApprovals(host),
@@ -557,6 +557,7 @@ async function main(): Promise<void> {
   });
   const panel = createPanel(panelConfig, {
     deploymentMode: serverMode.mode,
+    rules: registry.rules,
     loadAvatar: avatars.get,
     processAction: async (id, action) => {
       await processAgents![action](id);

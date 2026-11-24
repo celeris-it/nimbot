@@ -392,8 +392,6 @@ export const spanish = {
     "No hubo uso de modelos en los últimos {0} días.",
   "last {0} days": "últimos {0} días",
   "{0} tokens": "{0} tokens",
-  "Costs are the amounts reported by each provider after a task finishes. Tasks without a reported cost are counted as $0, and the model share falls back to tokens when no cost was reported.":
-    "Los costos son los montos que informa cada proveedor al finalizar una tarea. Las tareas sin costo informado se contabilizan como $0. Si no se informó ningún costo, la distribución por modelo se calcula con los tokens.",
   "Quota left": "Cuota restante",
   "Remaining allowance by quota window.": "Cuota restante por período.",
   "No provider quota data yet. It appears once an agent’s model reports its limits.":
@@ -1107,6 +1105,38 @@ export const spanish = {
   "connection credentials API key": "conexión credenciales clave de API",
   "external tools integrations": "herramientas externas integraciones",
   "name instructions edit": "nombre instrucciones editar",
+  "global rules defaults": "global reglas valores predeterminados",
+  "agent rules markdown": "agente reglas markdown",
+  Retry: "Reintentar",
+  Markdown: "Markdown",
+  Remove: "Eliminar",
+  "Agent rules": "Reglas del agente",
+  "Shared rules": "Reglas compartidas",
+  "Manage shared rules": "Administrar reglas compartidas",
+  "These rules apply to this agent and take precedence over shared rules.":
+    "Estas reglas se aplican a este agente y tienen prioridad sobre las reglas compartidas.",
+  "Shared rules apply to every agent on every task. Agent rules take precedence when they conflict.":
+    "Las reglas compartidas se aplican a todos los agentes en cada tarea. Si hay un conflicto, las reglas del agente tienen prioridad.",
+  "Edit rule": "Editar regla",
+  "Edit rule {0}": "Editar la regla {0}",
+  "Remove rule {0}": "Eliminar la regla {0}",
+  "Remove the rule “{0}”?": "¿Eliminar la regla «{0}»?",
+  "Save rule": "Guardar regla",
+  "Rule saved.": "Se guardó la regla.",
+  "Rule removed.": "Se eliminó la regla.",
+  "No rules yet.": "Todavía no hay reglas.",
+  "No shared rules yet.": "Todavía no hay reglas compartidas.",
+  "Could not load rules.": "No se pudieron cargar las reglas.",
+  "Could not save rule.": "No se pudo guardar la regla.",
+  "Could not remove rule.": "No se pudo eliminar la regla.",
+  "Use up to 4000 characters. Keep passwords and tokens out of rules.":
+    "Usa hasta 4000 caracteres. Evita incluir contraseñas o tokens en las reglas.",
+  "Enter Markdown of up to 4000 characters.":
+    "Ingresa contenido Markdown de hasta 4000 caracteres.",
+  "Rules in this list may use up to 16000 characters combined, including spacing between rules.":
+    "Las reglas de esta lista pueden sumar hasta 16000 caracteres, incluidos los espacios entre reglas.",
+  "This rule or agent is no longer available.":
+    "Esta regla o agente ya no está disponible.",
   "channels bot token owner": "canales bot token propietario",
   "model selection reasoning effort":
     "selección de modelo esfuerzo de razonamiento",

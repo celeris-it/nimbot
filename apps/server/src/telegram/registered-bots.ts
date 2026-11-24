@@ -94,7 +94,7 @@ export function createRegisteredBots(
             ownerId: () => registry.get(id)?.ownerId ?? ownerId,
             run: withAgentInstructions(
               createHostTasks(host, request, undefined, config.taskWaitMs),
-              () => registry.get(id)?.instructions ?? "",
+              () => registry.taskInstructions(id),
             ),
             attachments: createTelegramAttachments(host, request),
             decide: createHostApprovals(host, request),

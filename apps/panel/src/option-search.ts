@@ -45,6 +45,14 @@ export function configurationOptions(
     "/settings#panel-language",
     t("language Spanish English"),
   );
+  if (capabilities.rules) {
+    add(
+      t("Rules"),
+      t("Shared rules"),
+      "/rules#rules",
+      t("global rules defaults"),
+    );
+  }
   if (capabilities.scheduleSettings) {
     add(
       t("Schedule time zone"),
@@ -106,6 +114,8 @@ export function configurationOptions(
         keywords,
       });
 
+    if (capabilities.rules)
+      addAgentOption(t("Rules"), "rules#rules", t("agent rules markdown"));
     if (agent.optionCapabilities?.edit) {
       addAgentOption(
         t("Agent settings"),

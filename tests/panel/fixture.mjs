@@ -28,6 +28,7 @@ import { createPanel } from "../../apps/server/dist/panel/panel.js";
 import { hashPassword } from "../../apps/server/dist/panel/panel-auth.js";
 import { providers } from "../../apps/server/dist/providers/provider-contracts.js";
 import { InvalidDiscordBotToken } from "../../apps/server/dist/discord/discord-identity.js";
+import { openAgentRegistry } from "../../apps/server/dist/agents/agent-registry.js";
 
 const agents = new Map();
 let nativeMode = false;
@@ -37,6 +38,7 @@ let providerBusy;
 let providersOffline;
 const stateDir = mkdtempSync(join(tmpdir(), "nimbot-panel-fixture-"));
 const statePath = join(stateDir, "server.sqlite");
+const registry = openAgentRegistry(statePath);
 const tasks = openTaskStore(statePath);
 const usageStore = openAgentUsage(statePath);
 const fixtureModel = { providerId: "opencode", modelId: "fixture/model" };
@@ -127,6 +129,12 @@ function reset() {
   nativeMode = false;
   for (const id of agents.keys()) schedules.removeByAgent(id);
   schedules.setDefaultTimeZone("UTC");
+  for (const id of [null, ...registry.listIds()])
+    for (const rule of registry.rules.list(id))
+      registry.rules.remove(id, rule.id);
+  // Agent rules reference a registered agent.
+  if (!registry.get("dev"))
+    registry.createPending({ id: "dev", name: "Developer" });
   keys.clear();
   providerLogin = undefined;
   providerBusy = false;
@@ -155,6 +163,7 @@ const panel = createPanel(
     get deploymentMode() {
       return nativeMode ? "native" : "docker";
     },
+    rules: registry.rules,
     processAction: async (id, action) => {
       const agent = agents.get(id);
       agent.processState = action === "stop" ? "stopped" : "running";
@@ -497,6 +506,7 @@ const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 3199 });
 process.once("SIGTERM", () => {
   void scheduler.close();
   server.close(() => {
+    registry.close();
     schedules.close();
     mcpCatalog.close();
     grants.close();

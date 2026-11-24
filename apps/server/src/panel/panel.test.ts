@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { openAgentRegistry } from "../agents/agent-registry.js";
 import { hashPassword } from "./panel-auth.js";
 import { createPanel, type PanelDeps } from "./panel.js";
 
@@ -901,5 +902,78 @@ it("removes legacy container, provisioning, resource and recovery routes in both
     expect(
       await (await f.get("/api/status", cookie)).json(),
     ).not.toHaveProperty("resources");
+  }
+});
+
+it("authenticates rule edits, isolates scopes, and validates each list", async () => {
+  const registry = openAgentRegistry(":memory:");
+  try {
+    for (const id of ["a", "b"]) registry.createPending({ id, name: id });
+    const { app, login, post } = setup({
+      rules: registry.rules,
+      getAgentSetup: (id) =>
+        registry.get(id)
+          ? { name: id, botUsername: null, provisioning: "ready" }
+          : undefined,
+    });
+    const shared = "/api/rules";
+    const own = "/api/agents/a/rules";
+    const other = "/api/agents/b/rules";
+    const form = (markdown: string) =>
+      new URLSearchParams({ markdown }).toString();
+    expect((await app.request(shared)).status).toBe(401);
+    expect((await post(shared, form("Default"))).status).toBe(401);
+    const { cookie } = await login();
+    const get = (path: string) =>
+      app.request(path, { headers: { Cookie: cookie } });
+    const save = (path: string, markdown: string) =>
+      post(path, form(markdown), cookie);
+
+    const defaults = await (await save(shared, "**Default**")).json();
+    const longest = "字".repeat(4000);
+    const first = await (await save(own, longest)).json();
+    const second = await (await save(own, longest)).json();
+    const third = await (await save(own, longest)).json();
+    expect(await (await get(own)).json()).toEqual({
+      rules: [first, second, third],
+      sharedRules: [defaults],
+    });
+    expect(await (await get(other)).json()).toEqual({
+      rules: [],
+      sharedRules: [defaults],
+    });
+
+    expect((await save(other + "/" + first.id, "No")).status).toBe(404);
+    expect(
+      (await post(shared + "/" + first.id + "/remove", "", cookie)).status,
+    ).toBe(404);
+    expect((await save(own, " \n")).status).toBe(400);
+    expect((await save(own, longest + "字")).status).toBe(400);
+    expect((await post(own, "markdown=One&markdown=Two", cookie)).status).toBe(
+      400,
+    );
+    const overflow = await save(own, longest);
+    expect(overflow.status).toBe(400);
+    expect(await overflow.json()).toMatchObject({
+      code: "agent_rule_scope_limit",
+    });
+    expect(registry.rules.list("a")).toEqual([first, second, third]);
+
+    const secondEdit = await (
+      await save(own + "/" + second.id, "  ## Markdown\n")
+    ).json();
+    expect(secondEdit).toEqual({
+      id: second.id,
+      markdown: "  ## Markdown\n",
+    });
+    expect(registry.rules.list("a")).toEqual([first, secondEdit, third]);
+    expect(
+      (await post(own + "/" + first.id + "/remove", "", cookie)).status,
+    ).toBe(200);
+    expect(registry.rules.list("a")).toEqual([secondEdit, third]);
+    expect((await get("/api/agents/deleted/rules")).status).toBe(404);
+    expect((await save("/api/agents/deleted/rules", "Text")).status).toBe(404);
+  } finally {
+    registry.close();
   }
 });

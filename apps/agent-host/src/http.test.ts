@@ -305,3 +305,39 @@ describe("Agent Host request validation order", () => {
     expect(accepted.status).toBe(202);
   });
 });
+
+it("adds shared and agent instructions within a separate task request budget", async () => {
+  const submit = vi.fn().mockResolvedValue("task-id");
+  const app = createHostApi({ token, workspace: "/unused" }, {
+    submit,
+  } as unknown as ReturnType<typeof createTaskRunner>);
+  const send = (body: Record<string, string>) =>
+    app.request("/tasks", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  const prompt = "字".repeat(16_000);
+  const sharedRules = "\u0001".repeat(16_000);
+  const agentRules = "\u0002".repeat(16_000);
+  const instructions = "\u0003".repeat(4000);
+  expect(
+    (await send({ prompt, sharedRules, instructions, agentRules })).status,
+  ).toBe(202);
+  expect(submit.mock.calls[0]?.[0]).toBe(
+    `Follow the agent instructions and agent rules wherever they conflict with the shared rules.\n\nShared rules (defaults):\n${sharedRules}\n\nAgent instructions:\n${instructions}\n\nAgent rules:\n${agentRules}\n\nUser task:\n${prompt}`,
+  );
+  expect(
+    (await send({ prompt: "x", sharedRules: "x".repeat(16_001) })).status,
+  ).toBe(400);
+  expect(
+    (await send({ prompt: "x", agentRules: "x".repeat(16_001) })).status,
+  ).toBe(400);
+  expect(
+    (await send({ prompt: prompt + "字", sharedRules: "Default" })).status,
+  ).toBe(400);
+  expect(submit).toHaveBeenCalledTimes(1);
+});

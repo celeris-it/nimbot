@@ -72,6 +72,7 @@ export interface PanelSession {
     createAgent: boolean;
     mcp?: boolean;
     scheduleSettings?: boolean;
+    rules?: boolean;
     executions?: boolean;
   };
 }

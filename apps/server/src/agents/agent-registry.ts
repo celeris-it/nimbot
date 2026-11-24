@@ -1,4 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
+import type { HostTaskInstructions } from "../host/host-tasks.js";
+import { agentRules, formatRules } from "./agent-rules.js";
 import { isDiscordId } from "../discord/discord-identity.js";
 import { prepareStateSchema } from "../../../../scripts/state-schema.mjs";
 
@@ -53,7 +55,17 @@ export function openAgentRegistry(path: string) {
       .get(botId, id);
     if (other) throw new Error("Bot is already assigned to another agent");
   }
+  const rules = agentRules(db);
   return {
+    rules,
+    /** Everything the owner configured to guide this agent's next task. */
+    taskInstructions(id: string): HostTaskInstructions {
+      return {
+        sharedRules: formatRules(rules.list(null)),
+        instructions: this.get(id)?.instructions ?? "",
+        agentRules: formatRules(rules.list(id)),
+      };
+    },
     getDiscordConnection(id: string): DiscordConnection | undefined {
       return db
         .prepare(

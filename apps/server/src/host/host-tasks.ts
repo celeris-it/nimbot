@@ -25,6 +25,12 @@ export class HostTaskError extends Error {
   }
 }
 
+export interface HostTaskInstructions {
+  sharedRules: string;
+  instructions: string;
+  agentRules: string;
+}
+
 export interface HostApproval {
   taskId: string;
   id: string;
@@ -165,6 +171,7 @@ export function createHostTasks(
     /** The agent wants the owner's permission for one action; decide via createHostApprovals. */
     onApproval?: (approval: HostApproval) => void,
     execution?: HostTaskExecution,
+    instructions?: HostTaskInstructions,
   ): Promise<string> => {
     if (cancelSignal?.aborted) throw new HostTaskError("cancelled");
     const deadline = AbortSignal.timeout(waitMs);
@@ -201,6 +208,15 @@ export function createHostTasks(
         "/tasks",
         JSON.stringify({
           prompt,
+          ...(instructions?.sharedRules
+            ? { sharedRules: instructions.sharedRules }
+            : {}),
+          ...(instructions?.instructions
+            ? { instructions: instructions.instructions }
+            : {}),
+          ...(instructions?.agentRules
+            ? { agentRules: instructions.agentRules }
+            : {}),
           ...(execution ? { execution: execution.identity } : {}),
           ...(execution?.tools ? { tools: execution.tools } : {}),
           ...(execution?.admission ? { admission: execution.admission } : {}),

@@ -37,6 +37,7 @@ import {
   isApiKey,
   type EngineAuth,
 } from "./engine-auth.js";
+import { taskPromptWithInstructions } from "./task-instructions.js";
 
 const PROMPT_ERROR = "prompt must contain 1–16000 characters";
 /** Fields are listed in check order: the first failure is the one reported. */
@@ -48,6 +49,9 @@ const taskRequest = z
         .refine((prompt) => prompt.trim() && prompt.length <= 16_000, {
           error: PROMPT_ERROR,
         }),
+      sharedRules: z.string().max(16_000).optional(),
+      instructions: z.string().max(4000).optional(),
+      agentRules: z.string().max(16_000).optional(),
       credentials: z
         .never({
           error: "Configure providers from AI providers in the Nimbot panel",
@@ -140,7 +144,8 @@ export function createHostApi(
   app.use(
     "/tasks",
     bodyLimit({
-      maxSize: 49_152,
+      // Preserve the task payload budget and allow the JSON-escaped rules and instructions.
+      maxSize: 384 * 1024,
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );
@@ -240,11 +245,11 @@ export function createHostApi(
       malformed: "Invalid JSON",
     });
     if (parsed.response) return parsed.response;
-    const { prompt, execution, tools, sessionMode, admission } = parsed.data;
+    const { execution, tools, sessionMode, admission } = parsed.data;
     if (admission && (runner!.isBusy() || !models?.accept(admission)))
       return c.json({ error: "Model admission expired" }, 412);
     const id = await runner!.submit(
-      prompt,
+      taskPromptWithInstructions(parsed.data),
       execution,
       tools as TaskToolAccess | undefined,
       sessionMode as "fresh" | undefined,

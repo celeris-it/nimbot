@@ -114,6 +114,9 @@ async function fixture(
     url: string;
     authorization: string | null;
     prompt?: string;
+    sharedRules?: string;
+    instructions?: string;
+    agentRules?: string;
   }[] = [];
   const down = new Set<string>();
   const hostTaskIds = new Map<string, string>();
@@ -124,9 +127,7 @@ async function fixture(
     calls.push({
       url,
       authorization: new Headers(init?.headers).get("Authorization"),
-      ...(init?.body
-        ? { prompt: JSON.parse(String(init.body)).prompt as string }
-        : {}),
+      ...(init?.body ? JSON.parse(String(init.body)) : {}),
     });
     if (url.endsWith("/health"))
       return Response.json({
@@ -360,6 +361,10 @@ it("runs real grammY polling loops with isolated identities, owner activation, H
     expect(f.registry.getOwnerChat("a")).toBe(42);
     expect(f.registry.getOwnerChat("b")).toBe(73);
     f.registry.updateSettings("a", "Edited A", "Updated instructions");
+    const shared = f.registry.rules.save(null, {
+      markdown: "Shared defaults",
+    })!;
+    f.registry.rules.save("a", { markdown: "Rule for A" });
     await f.send("a", "/help", 42);
     expect(f.sent.at(-1)?.text).toContain("Edited A");
     await f.send("a", "Task A", 42);
@@ -372,15 +377,28 @@ it("runs real grammY polling loops with isolated identities, owner activation, H
       {
         url: "http://nimbot-a:3001/tasks",
         authorization: `Bearer ${"a".repeat(64)}`,
+        sharedRules: "Shared defaults",
+        instructions: "Updated instructions",
+        agentRules: "Rule for A",
         prompt: expect.stringMatching(
-          /^Agent instructions:\nUpdated instructions\n\nUser task:\nTask A\n\nIf the owner explicitly asks for a file, place the file in exports\/[a-f0-9-]+\//,
+          /^Task A\n\nIf the owner explicitly asks for a file, place the file in exports\/[a-f0-9-]+\//,
         ),
       },
       {
         url: "http://nimbot-b:3001/tasks",
         authorization: `Bearer ${"b".repeat(64)}`,
+        sharedRules: "Shared defaults",
+        instructions: "Instructions for b",
       },
     ]);
+    expect(f.calls.filter((call) => call.prompt)[1]).not.toHaveProperty(
+      "agentRules",
+    );
+    expect(f.registry.rules.remove(null, shared.id)).toBe(true);
+    await f.send("a", "Task after removing defaults", 42);
+    expect(
+      f.calls.filter((call) => call.prompt).at(-1)?.sharedRules,
+    ).toBeUndefined();
     f.processes.setDesiredState("a", "stopped");
     const count = f.calls.filter((call) => call.prompt).length;
     await f.send("a", "Must not run", 42);

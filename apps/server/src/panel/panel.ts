@@ -48,10 +48,12 @@ import {
   providerKeyForm,
   registerAgentForm,
   settingsForm,
+  ruleForm,
   tokenForm,
   telegramConfigureForm,
 } from "./panel-schemas.js";
 import { createMcpPanel, type McpPanelDeps } from "../mcp/mcp-panel.js";
+import { agentRules, RuleLimitError } from "../agents/agent-rules.js";
 import { DiscordBotAlreadyAssigned } from "../agents/agent-registry.js";
 import { InvalidDiscordBotToken } from "../discord/discord-identity.js";
 
@@ -175,6 +177,7 @@ export interface PanelDeps {
       }
     | undefined;
   agentSettings?: RegisteredAgentSettings;
+  rules?: ReturnType<typeof agentRules>;
   listAgentIds?: () => string[];
   loadAvatar?: (id: string) => Promise<Buffer | undefined>;
   deleteAgent?: (agentId: string, deleteData: boolean) => Promise<void>;
@@ -403,6 +406,7 @@ export function createPanel(
         ...(deps.providers ? { providers: true } : {}),
         ...(deps.mcp ? { mcp: true } : {}),
         ...(deps.schedules ? { scheduleSettings: true } : {}),
+        ...(deps.rules ? { rules: true } : {}),
         ...(deps.executions ? { executions: true } : {}),
       },
     } satisfies PanelSession),
@@ -464,6 +468,58 @@ export function createPanel(
         throw new ScheduleValidationError("Enter a schedule time zone.");
       return c.json({ timeZone: store.setDefaultTimeZone(timeZone) });
     });
+  }
+  if (deps.rules) {
+    const rules = deps.rules;
+    for (const path of ["/api/rules", "/api/agents/:id/rules"]) {
+      const scope = (c: Context) => c.req.param("id") ?? null;
+      const available = (id: string | null) =>
+        id === null || !!getAgentSetup?.(id);
+      const missing = (c: Context) =>
+        c.json(panelError("agent_rule_not_found"), 404);
+      const save = async (c: Context, ruleId?: number) => {
+        const form = await parseForm(c, ruleForm, "invalid_agent_rule");
+        const id = scope(c);
+        if (!available(id)) return missing(c);
+        if (form.response) return form.response;
+        try {
+          const rule = rules.save(id, form.data, ruleId);
+          return rule
+            ? c.json(rule, ruleId === undefined ? 201 : 200)
+            : missing(c);
+        } catch (error) {
+          if (error instanceof RuleLimitError)
+            return c.json(panelError("agent_rule_scope_limit"), 400);
+          throw error;
+        }
+      };
+      const ruleId = (c: Context) => {
+        const value = c.req.param("ruleId");
+        if (!value || !/^[1-9]\d*$/.test(value)) return undefined;
+        const id = Number(value);
+        return Number.isSafeInteger(id) ? id : undefined;
+      };
+      app.get(path, (c) => {
+        const id = scope(c);
+        if (!available(id)) return missing(c);
+        return c.json({
+          rules: rules.list(id),
+          ...(id === null ? {} : { sharedRules: rules.list(null) }),
+        });
+      });
+      app.post(path, (c) => save(c));
+      app.post(`${path}/:ruleId`, (c) => {
+        const id = ruleId(c);
+        return id === undefined ? missing(c) : save(c, id);
+      });
+      app.post(`${path}/:ruleId/remove`, (c) => {
+        const id = ruleId(c);
+        const agent = scope(c);
+        return id !== undefined && available(agent) && rules.remove(agent, id)
+          ? c.json({ removed: true })
+          : missing(c);
+      });
+    }
   }
   async function scheduleInput(c: Context): Promise<ScheduleInput> {
     const fields = scheduleForm.safeParse(await scheduleFields(c));
@@ -1210,6 +1266,7 @@ export function createPanel(
     app.get("/agents/:id/providers", (c) => c.redirect("/providers", 303));
   }
   app.get("/settings", entry);
+  if (deps.rules) app.get("/rules", entry);
   if (deps.mcp) {
     app.get("/mcp", entry);
     app.get("/mcp/:definitionId", entry);
@@ -1228,6 +1285,7 @@ export function createPanel(
     "mcp",
     "schedules",
     "settings",
+    "rules",
     "token",
     "process/stop",
     "process/restart",
@@ -1245,6 +1303,7 @@ export function createPanel(
         (suffix === "delegations" && !deps.delegations) ||
         (suffix === "executions" && !deps.executions) ||
         (suffix === "mcp" && !deps.mcp) ||
+        (suffix === "rules" && !deps.rules) ||
         (suffix === "settings" && !agentSettings?.get(id)) ||
         (suffix === "token" &&
           (!agentSettings?.get(id) || !agentSettings.saveToken)) ||

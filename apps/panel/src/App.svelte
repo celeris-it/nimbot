@@ -51,6 +51,7 @@
   import AgentHeader from "./AgentHeader.svelte";
   import { configurationOptions } from "./option-search.js";
   import AgentNavigation from "./AgentNavigation.svelte";
+  import Rules from "./Rules.svelte";
   import ProviderSettings from "./ProviderSettings.svelte";
   import AgentUsageView from "./AgentUsage.svelte";
   import type {
@@ -147,7 +148,7 @@
   let inFlight = false;
   let route = $derived(
     path.match(
-      /^\/agents\/([^/]+)\/(setup|channels|settings|usage|memory|approvals|access|delegations|executions|schedules|token|delete|process\/(?:stop|restart))$/,
+      /^\/agents\/([^/]+)\/(setup|channels|settings|rules|usage|memory|approvals|access|delegations|executions|schedules|token|delete|process\/(?:stop|restart))$/,
     ),
   );
   let mcpRoute = $derived(path.match(/^\/mcp(?:\/([^/]+))?$/));
@@ -171,6 +172,12 @@
           label: $messages("MCP catalog"),
           icon: "plug",
           available: session?.capabilities.mcp,
+        },
+        {
+          href: "/rules",
+          label: $messages("Rules"),
+          icon: "check",
+          available: session?.capabilities.rules,
         },
         {
           href: "/agents/new",
@@ -198,6 +205,12 @@
           view: "usage",
           label: $messages("Model and usage"),
           icon: "activity",
+        },
+        {
+          view: "rules",
+          label: $messages("Rules"),
+          icon: "check",
+          hidden: !session?.capabilities.rules,
         },
         { view: "memory", label: $messages("Memory"), icon: "notebook" },
         { view: "approvals", label: $messages("Approvals"), icon: "shield" },
@@ -302,7 +315,10 @@
                                       ? $messages("Restart agent")
                                       : route?.[2] === "process/stop"
                                         ? $messages("Stop agent")
-                                        : $messages("Agent setup"),
+                                        : path === "/rules" ||
+                                            route?.[2] === "rules"
+                                          ? $messages("Rules")
+                                          : $messages("Agent setup"),
   );
   let viewLabel = $derived(
     path === "/settings"
@@ -445,6 +461,7 @@
         status = await request<PanelStatus>("/api/status", {
           signal: current.signal,
         });
+      else if (path === "/rules") missing = !session.capabilities.rules;
       else if (path === "/settings") {
         if (session.capabilities.scheduleSettings) {
           const defaults = await request<ScheduleDefaults>(
@@ -621,6 +638,7 @@
             { signal: current.signal },
           );
         missing =
+          (view === "rules" && !session.capabilities.rules) ||
           (view === "settings" && !agent.capabilities.edit) ||
           (view === "token" && !agent.capabilities.replaceToken) ||
           (view === "delete" && !agent.capabilities.delete) ||
@@ -1402,6 +1420,8 @@
           canCreate={session?.capabilities.createAgent ?? false}
           refresh={() => load()}
         />
+      {:else if path === "/rules"}
+        <Rules expireSession={expired} />
       {:else if path === "/settings"}
         <h1 tabindex="-1">{$messages("Settings")}</h1>
         <div class="settings-section-list">
@@ -1699,6 +1719,10 @@
               {connectTelegram}
               refresh={() => load()}
             />{/key}
+        {:else if route[2] === "rules"}
+          {#key agent.id}
+            <Rules agentId={agent.id} expireSession={expired} />
+          {/key}
         {:else if route[2] === "settings" || route[2] === "token"}
           {#key path}<AgentForm mode={route[2]} {agent} {busy} {submit} />{/key}
         {:else if route[2] === "process/stop" || route[2] === "process/restart"}

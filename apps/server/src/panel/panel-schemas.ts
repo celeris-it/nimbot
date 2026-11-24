@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RULE_MARKDOWN_LIMIT } from "../agents/agent-rules.js";
 import { isDiscordId } from "../discord/discord-identity.js";
 import { isApiKey } from "../providers/provider-contracts.js";
 
@@ -26,6 +27,13 @@ export const approvalRuleForm = z.object({
 export const settingsForm = z.object({
   name: z.string().trim().min(1).max(128),
   instructions: z.string().max(4000),
+});
+
+export const ruleForm = z.strictObject({
+  markdown: z
+    .string()
+    .max(RULE_MARKDOWN_LIMIT)
+    .refine((value) => Boolean(value.trim())),
 });
 
 export const discordConfigureForm = z.object({

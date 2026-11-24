@@ -2280,33 +2280,10 @@ test("keeps the floating desktop sidebar fixed with Sign out below Settings", as
   ).toBeVisible();
 });
 
-test("keeps dashboard body copy readable on a wide screen", async ({
-  page,
-}) => {
+test("caps the dashboard width on a wide screen", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 920 });
   await login(page);
   await expect(page.locator("[data-page-card]")).toHaveCSS("width", "1200px");
-  const copy = page.getByText(/^Costs are the amounts reported/);
-  await expect(copy).toBeVisible();
-  await page.evaluate(() => document.fonts.ready);
-  const lineLengths = await copy.evaluate((paragraph) => {
-    const content = paragraph.firstChild;
-    if (!(content instanceof Text)) throw new Error("Expected body copy");
-    const range = document.createRange();
-    const lines = new Map<number, string>();
-    for (let index = 0; index < content.length; index++) {
-      range.setStart(content, index);
-      range.setEnd(content, index + 1);
-      const { top } = range.getBoundingClientRect();
-      lines.set(top, (lines.get(top) ?? "") + content.data[index]);
-    }
-    return [...lines.values()].map((line) => line.trim().length);
-  });
-  expect(lineLengths.length).toBeGreaterThan(1);
-  for (const length of lineLengths.slice(0, -1)) {
-    expect(length).toBeGreaterThanOrEqual(40);
-    expect(length).toBeLessThanOrEqual(60);
-  }
 });
 
 test("mirrors panel rails, popovers, and the switch in RTL", async ({
@@ -3046,7 +3023,10 @@ test("organizes agent overview sections in rows and stacks their contents on pho
       expect(globalBox.x + globalBox.width).toBeLessThan(mainBox.x);
       expect(agentBox.x - (mainBox.x + mainBox.width)).toBeCloseTo(24);
       await expect(main).toHaveCSS("border-inline-end-width", "1px");
-      await expect(agentNav.getByRole("link")).toHaveCount(10);
+      await expect(agentNav.getByRole("link")).toHaveCount(11);
+      await expect(
+        agentNav.getByRole("link", { name: "Rules", exact: true }),
+      ).toBeVisible();
       const selected = agentNav.getByRole("link", { name: "Overview" });
       await expect(selected).toHaveAttribute("aria-current", "page");
       const mainLink = globalNav.getByRole("link", {
@@ -4410,4 +4390,87 @@ test("opens saved execution details and shows delivery separately on a narrow pa
   ).toBeVisible();
   await page.getByRole("link", { name: "Back to executions" }).click();
   await expect(link).toBeVisible();
+});
+
+test("manages shared and per-agent Markdown rules independently", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Rules", exact: true })
+    .click();
+  await expect(page).toHaveURL("/rules");
+  const markdown = page.getByRole("textbox", { name: "Markdown" });
+  const save = page.getByRole("button", { name: "Save rule" });
+  const add = async (body: string) => {
+    await page.getByRole("button", { name: "Add rule" }).click();
+    await expect(markdown).toBeFocused();
+    await markdown.fill(body);
+    await save.click();
+    await expect(page.getByText("Rule saved.")).toBeVisible();
+  };
+  await add("\n## Style\n\n- Use short paragraphs.");
+  await add("- Verify quotations.");
+  await page.getByRole("button", { name: "Edit rule ## Style" }).click();
+  await expect(markdown).toHaveValue("\n## Style\n\n- Use short paragraphs.");
+  await markdown.fill("## Writing style\n\n- Use plain English.");
+  await save.click();
+  await expect(page.getByText("Rule saved.")).toBeVisible();
+  await page.reload();
+  await page.getByText("## Writing style", { exact: true }).click();
+  await expect(
+    page.getByText("- Use plain English.", { exact: false }),
+  ).toBeVisible();
+
+  await page.goto("/agents/dev/setup");
+  await openAgentSection(page, "Rules");
+  await expect(page).toHaveURL("/agents/dev/rules");
+  const inherited = page.getByRole("region", { name: "Shared rules" });
+  await expect(
+    inherited.getByText("## Writing style", { exact: true }),
+  ).toBeVisible();
+  await expect(inherited.getByRole("button")).toHaveCount(0);
+  await add("- Use Spanish.");
+  for (const width of [320, 375]) {
+    await page.setViewportSize({ width, height: 800 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("- Use Spanish.");
+    await dialog.accept();
+  });
+  await page
+    .getByRole("button", { name: "Remove rule - Use Spanish." })
+    .click();
+  await expect(page.getByText("Rule removed.")).toBeVisible();
+  await expect(
+    inherited.getByText("## Writing style", { exact: true }),
+  ).toBeVisible();
+
+  await inherited.getByRole("link", { name: "Manage shared rules" }).click();
+  await expect(page).toHaveURL("/rules");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Remove rule - Verify quotations." })
+    .click();
+  await expect(page.getByText("Rule removed.")).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByText("## Writing style", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("- Verify quotations.", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("searchbox", { name: "Search options" }).fill("rules");
+  const results = page.getByRole("region", { name: "Matching options" });
+  await expect(results.locator('a[href="/rules#rules"]')).toBeVisible();
+  await expect(
+    results.locator('a[href="/agents/dev/rules#rules"]'),
+  ).toBeVisible();
 });
