@@ -11,14 +11,24 @@ export interface McpCatalogTool {
   inputSchema: Record<string, unknown>;
 }
 
-interface McpDefinitionSettings {
+export interface McpLocalCommand {
+  launcher: "npx" | "uvx";
+  args: string[];
+}
+
+export interface McpDefinitionSettings {
+  local?: McpLocalCommand;
+  environment?: Record<string, string> | null;
   label: string;
   endpoint: string;
   enabled: boolean;
   tools: McpCatalogTool[];
 }
 
-export interface McpDefinition extends McpDefinitionSettings {
+export interface McpDefinition extends Omit<
+  McpDefinitionSettings,
+  "environment"
+> {
   id: string;
   revision: number;
   credentialStatus: "none" | "saved" | "required";
@@ -50,23 +60,46 @@ function settings(input: unknown) {
     typeof input.label !== "string" ||
     !input.label.trim() ||
     input.label.length > 96 ||
-    typeof input.endpoint !== "string" ||
-    input.endpoint.length > 2048 ||
-    !/^https:\/\//i.test(input.endpoint) ||
-    input.endpoint.includes("#") ||
     typeof input.enabled !== "boolean" ||
     !Array.isArray(input.tools) ||
     input.tools.length > MAX_TOOLS
   )
     throw new McpCatalogValidationError("Invalid MCP definition.");
 
-  const url = URL.parse(input.endpoint);
-  if (url?.protocol !== "https:" || url.username || url.password)
-    throw new McpCatalogValidationError(
-      "Use an HTTPS endpoint without embedded credentials.",
-    );
-  if (url.href.length > 2048)
-    throw new McpCatalogValidationError("MCP endpoint is too long.");
+  let endpoint = "";
+  let localJson: string | null = null;
+  if (input.local !== undefined) {
+    const local = input.local;
+    if (
+      !record(local) ||
+      (local.launcher !== "npx" && local.launcher !== "uvx") ||
+      !Array.isArray(local.args) ||
+      !local.args.length ||
+      local.args.length > 64 ||
+      !local.args.every(
+        (arg) => typeof arg === "string" && !arg.includes("\0"),
+      ) ||
+      Buffer.byteLength(JSON.stringify(local.args)) > 8192 ||
+      (input.endpoint !== "" && input.endpoint !== undefined)
+    )
+      throw new McpCatalogValidationError("Invalid MCP launcher or arguments.");
+    localJson = JSON.stringify({ launcher: local.launcher, args: local.args });
+  } else {
+    const url =
+      typeof input.endpoint === "string" &&
+      input.endpoint.length <= 2048 &&
+      /^https:\/\//i.test(input.endpoint) &&
+      !input.endpoint.includes("#")
+        ? URL.parse(input.endpoint)
+        : null;
+    if (url?.protocol !== "https:" || url.username || url.password)
+      throw new McpCatalogValidationError(
+        "Use an HTTPS endpoint without embedded credentials.",
+      );
+    if (url.href.length > 2048)
+      throw new McpCatalogValidationError("MCP endpoint is too long.");
+    endpoint = url.href;
+  }
 
   const names = new Set<string>();
   const tools = Array.from(input.tools as unknown[], (tool): McpCatalogTool => {
@@ -110,7 +143,8 @@ function settings(input: unknown) {
     throw new McpCatalogValidationError("Invalid MCP tool review selection.");
   return {
     label: input.label.trim(),
-    endpoint: url.href,
+    endpoint,
+    localJson,
     enabled: Number(input.enabled),
     toolsJson,
     reviewedToolsJson: JSON.stringify(reviewedTools),
@@ -122,6 +156,9 @@ function definition(row: Record<string, unknown>): McpDefinition {
     id: String(row.id),
     label: String(row.label),
     endpoint: String(row.endpoint),
+    ...(row.local_json
+      ? { local: JSON.parse(String(row.local_json)) as McpLocalCommand }
+      : {}),
     enabled: row.enabled === 1,
     tools: JSON.parse(String(row.tools_json)) as McpCatalogTool[],
     revision: Number(row.revision),
@@ -149,6 +186,7 @@ export function openMcpCatalog(
         id TEXT PRIMARY KEY,
         label TEXT NOT NULL,
         endpoint TEXT NOT NULL,
+        local_json TEXT CHECK(local_json IS NULL OR json_valid(local_json)),
         enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
         tools_json TEXT NOT NULL CHECK(json_valid(tools_json) AND json_type(tools_json) = 'array'),
         revision INTEGER NOT NULL DEFAULT 1,
@@ -202,12 +240,14 @@ export function openMcpCatalog(
       input: unknown,
       pending = false,
       credentialRequired = false,
+      secretRef: string | null = null,
     ): McpDefinition {
-      const { label, endpoint, enabled, toolsJson } = settings(input);
+      const { label, endpoint, localJson, enabled, toolsJson } =
+        settings(input);
       const row = db
         .prepare(
-          `INSERT INTO mcp_definitions (id, label, endpoint, enabled, tools_json, tool_setup, credential_required)
-         SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM mcp_definitions) < ?
+          `INSERT INTO mcp_definitions (id, label, endpoint, enabled, tools_json, tool_setup, credential_required, local_json, secret_ref)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM mcp_definitions) < ?
          RETURNING *`,
         )
         .get(
@@ -218,6 +258,8 @@ export function openMcpCatalog(
           toolsJson,
           pending ? "pending" : "manual",
           Number(credentialRequired),
+          localJson,
+          secretRef,
           MAX_DEFINITIONS,
         );
       if (!row) throw new McpCatalogValidationError("MCP catalog is full.");
@@ -227,25 +269,51 @@ export function openMcpCatalog(
       id: string,
       revision: number,
       input: unknown,
+      secretRef?: string | null,
     ): McpDefinition | undefined {
-      const { label, endpoint, enabled, toolsJson, reviewedToolsJson } =
-        settings(input);
+      const {
+        label,
+        endpoint,
+        localJson,
+        enabled,
+        toolsJson,
+        reviewedToolsJson,
+      } = settings(input);
       db.exec("BEGIN IMMEDIATE");
       try {
+        const previous = db
+          .prepare(
+            "SELECT local_json FROM mcp_definitions WHERE id = ? AND revision = ?",
+          )
+          .get(id, revision);
+        if (!previous) {
+          db.exec("COMMIT");
+          return undefined;
+        }
+        if ((previous.local_json === null) !== (localJson === null))
+          throw new McpCatalogValidationError(
+            "The MCP integration transport cannot be changed.",
+          );
+        const commandChanged = previous.local_json !== localJson;
         const row = db
           .prepare(
             `UPDATE mcp_definitions
-         SET label = ?, endpoint = ?, enabled = ?, tools_json = ?, revision = revision + 1,
+         SET label = ?, endpoint = ?, enabled = ?, tools_json = ?, local_json = ?, revision = revision + 1,
+           tool_setup = CASE WHEN ? THEN 'pending' ELSE tool_setup END,
            credential_required = CASE WHEN endpoint <> ? AND secret_ref IS NOT NULL THEN 1 ELSE credential_required END,
-           secret_ref = CASE WHEN endpoint <> ? THEN NULL ELSE secret_ref END
+           secret_ref = CASE WHEN ? THEN ? WHEN endpoint <> ? THEN NULL ELSE secret_ref END
          WHERE id = ? AND revision = ? RETURNING *`,
           )
           .get(
             label,
             endpoint,
             enabled,
-            toolsJson,
+            commandChanged ? "[]" : toolsJson,
+            localJson,
+            Number(commandChanged),
             endpoint,
+            Number(secretRef !== undefined),
+            secretRef ?? null,
             endpoint,
             id,
             revision,
@@ -256,7 +324,7 @@ export function openMcpCatalog(
           tool_name IN (SELECT value FROM json_each(?)) OR
           tool_name NOT IN (SELECT json_extract(value, '$.name') FROM json_each(?))
         )`,
-          ).run(id, reviewedToolsJson, toolsJson);
+          ).run(id, reviewedToolsJson, commandChanged ? "[]" : toolsJson);
         db.exec("COMMIT");
         return row && readDefinition(row);
       } catch (error) {

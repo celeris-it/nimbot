@@ -1,3 +1,4 @@
+import type { McpLocalRuntime } from "./mcp-local.js";
 import type { McpCatalog } from "./mcp-catalog.js";
 import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
 import type { McpCredentials } from "./mcp-credentials.js";
@@ -46,7 +47,9 @@ function redact(value: unknown, secrets: string[], depth = 0): unknown {
  */
 export function createMcpExecution(config: {
   catalog: McpCatalog;
-  credentials: Pick<McpCredentials, "read">;
+  credentials: Pick<McpCredentials, "read"> &
+    Partial<Pick<McpCredentials, "readEnvironment">>;
+  localRuntime?: McpLocalRuntime;
   request?: typeof fetch;
   timeoutMs?: number;
 }) {
@@ -58,7 +61,10 @@ export function createMcpExecution(config: {
     input: unknown,
     context: { signal: AbortSignal; allowed(): boolean },
   ): Promise<ToolOutcome> {
-    let connection: ReturnType<typeof createMcpConnection> | undefined;
+    let connection:
+      | ReturnType<typeof createMcpConnection>
+      | ReturnType<McpLocalRuntime["connect"]>
+      | undefined;
     let uncertain = false;
     const allowed = () => {
       try {
@@ -89,28 +95,47 @@ export function createMcpExecution(config: {
         binding.required
       )
         return { ok: false, error: "denied" };
-      const credential = binding.reference
-        ? await config.credentials.read(
-            selected.definitionId,
-            selected.revision,
-          )
-        : undefined;
-      if (binding.reference && !credential)
+      const local = selected.local;
+      const environment =
+        local && binding.reference
+          ? await config.credentials.readEnvironment?.(
+              selected.definitionId,
+              selected.revision,
+            )
+          : undefined;
+      const credential =
+        !local && binding.reference
+          ? await config.credentials.read(
+              selected.definitionId,
+              selected.revision,
+            )
+          : undefined;
+      if (binding.reference && !credential && !environment)
         return { ok: false, error: "unavailable" };
       if (!allowed()) return { ok: false, error: "denied" };
-      connection = createMcpConnection({
-        endpoint: selected.endpoint,
-        credential,
-        signal: context.signal,
-        allowed,
-        request: config.request ?? fetch,
-        timeoutMs,
-      });
+      if (local && !config.localRuntime)
+        return { ok: false, error: "unavailable" };
+      connection = local
+        ? config.localRuntime!.connect(
+            { ...local, id: selected.definitionId },
+            environment ?? {},
+            { signal: context.signal, allowed, timeoutMs },
+          )
+        : createMcpConnection({
+            endpoint: selected.endpoint,
+            credential,
+            signal: context.signal,
+            allowed,
+            request: config.request ?? fetch,
+            timeoutMs,
+          });
       const { client, signal } = connection;
-      await client.connect(connection.transport, {
-        signal,
-        timeout: timeoutMs,
-      });
+      if ("initialize" in connection) await connection.initialize();
+      else
+        await client.connect(connection.transport, {
+          signal,
+          timeout: timeoutMs,
+        });
       let listed: Awaited<ReturnType<typeof client.listTools>>;
       try {
         listed = await client.listTools(undefined, {
@@ -179,9 +204,11 @@ export function createMcpExecution(config: {
             : { structuredContent: result.structuredContent }),
           ...(result.isError === undefined ? {} : { isError: result.isError }),
         },
-        [credential, selected.endpoint].filter(
-          (value): value is string => !!value,
-        ),
+        [
+          credential,
+          selected.endpoint,
+          ...Object.values(environment ?? {}),
+        ].filter((value): value is string => !!value),
       );
       if (Buffer.byteLength(JSON.stringify(safe)) > 12_000)
         throw new Error("MCP result exceeds limit.");

@@ -1,4 +1,58 @@
 export const spanish = {
+  "Replace saved variables": "Reemplazar las variables guardadas",
+  "Saving and checking the connection. A first download can take up to 90 seconds.":
+    "Guardando y comprobando la conexión. La primera descarga puede tardar hasta 90 segundos.",
+  "Configure tools manually (optional)":
+    "Configurar herramientas manualmente (opcional)",
+  "Use a unique variable name with letters, numbers, and underscores. Start with a letter or underscore.":
+    "Usa un nombre único con letras, números y guiones bajos. Comienza con una letra o un guion bajo.",
+  "Add at least one variable or choose another option.":
+    "Agrega al menos una variable o elige otra opción.",
+  "Add variable": "Agregar variable",
+  "Remove variable {0}": "Eliminar variable {0}",
+  "Variable value": "Valor de la variable",
+  "Variable name": "Nombre de la variable",
+  "Private environment variables (optional)":
+    "Variables de entorno privadas (opcional)",
+  "Add argument": "Agregar argumento",
+  "Add at least one launcher argument.":
+    "Agrega al menos un argumento del iniciador.",
+  "Remove argument {0}": "Eliminar argumento {0}",
+  "Argument {0}": "Argumento {0}",
+  Example: "Ejemplo",
+  "Enter one argument per field in command order.":
+    "Ingresa un argumento por campo en el orden del comando.",
+  "Import MCP configuration (JSONC)": "Importar configuración de MCP (JSONC)",
+  "MCP configuration": "Configuración de MCP",
+  "Read configuration": "Leer configuración",
+  "Server to import": "Servidor para importar",
+  "Use configuration": "Usar configuración",
+  "Paste valid JSONC with at least one named MCP server.":
+    "Pega JSONC válido con al menos un servidor MCP con nombre.",
+  "This entry uses unsupported MCP settings. Check its command, working directory, environment, or authentication options.":
+    "Esta entrada usa opciones de MCP incompatibles. Revisa el comando, el directorio de trabajo, el entorno y las opciones de autenticación.",
+  "Connection type": "Tipo de conexión",
+  "Launcher arguments": "Argumentos del iniciador",
+  "Private environment variables": "Variables de entorno privadas",
+  "Keep saved variables": "Conservar las variables guardadas",
+  "Remove saved variables": "Eliminar las variables guardadas",
+  "Enter a JSON object of environment variables.":
+    "Ingresa un objeto JSON de variables de entorno.",
+  "Invalid MCP launcher or arguments.":
+    "El iniciador o los argumentos de MCP no son válidos.",
+  "Invalid MCP environment variables.":
+    "Las variables de entorno de MCP no son válidas.",
+  "The MCP integration transport cannot be changed.":
+    "No se puede cambiar el transporte de la integración MCP.",
+  "Environment variables require a local MCP integration.":
+    "Las variables de entorno requieren una integración MCP local.",
+  "The MCP launcher is missing from Nimbot’s PATH.":
+    "El iniciador de MCP no está en el PATH de Nimbot.",
+  "The MCP process could not start. Check the launcher arguments and package source.":
+    "No se pudo iniciar el proceso MCP. Revisa los argumentos del iniciador y el origen del paquete.",
+  "Save the launcher settings before testing the connection.":
+    "Guarda los ajustes del iniciador antes de probar la conexión.",
+
   Language: "Idioma",
   "Browser default": "Predeterminado del navegador",
   "Channels for": "Canales de",

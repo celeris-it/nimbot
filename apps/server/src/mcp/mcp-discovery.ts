@@ -4,6 +4,13 @@ import {
   type McpConnectionFailure,
 } from "./mcp-connection.js";
 
+import {
+  McpLocalError,
+  type McpLocalFailure,
+  type McpLocalRuntime,
+  type McpLocalTarget,
+} from "./mcp-local.js";
+
 export interface McpDiscoveredTool {
   name: string;
   inputSchema: Record<string, unknown>;
@@ -13,7 +20,11 @@ export type McpDiscoveryResult =
   | { status: "connected"; tools: McpDiscoveredTool[]; omitted?: string[] }
   | {
       status:
-        "timeout" | "unavailable" | "pagination_limit" | McpConnectionFailure;
+        | "timeout"
+        | "unavailable"
+        | "pagination_limit"
+        | McpConnectionFailure
+        | McpLocalFailure;
     };
 
 export type McpActivationResult =
@@ -27,34 +38,52 @@ const MAX_SCHEMA_BYTES = 16 * 1024;
 export function createMcpDiscovery(
   request: typeof fetch = fetch,
   timeoutMs = 8000,
+  runtime?: McpLocalRuntime,
 ) {
   return async function discover(
     endpoint: string,
     credential?: string,
     signal?: AbortSignal,
     allowed: () => boolean = () => true,
+    local?: { target: McpLocalTarget; environment: Record<string, string> },
   ): Promise<McpDiscoveryResult> {
-    let connection: ReturnType<typeof createMcpConnection> | undefined;
+    let connection:
+      | ReturnType<typeof createMcpConnection>
+      | ReturnType<McpLocalRuntime["connect"]>
+      | undefined;
     try {
-      connection = createMcpConnection({
-        endpoint,
-        credential,
-        signal,
-        allowed,
-        request,
-        timeoutMs,
-      });
+      if (local && !runtime) throw new Error("Local MCP runtime unavailable");
+      connection = local
+        ? runtime!.connect(local.target, local.environment, {
+            signal,
+            allowed,
+            timeoutMs,
+          })
+        : createMcpConnection({
+            endpoint,
+            credential,
+            signal,
+            allowed,
+            request,
+            timeoutMs,
+          });
       const { client, signal: lifetime } = connection;
-      await client.connect(connection.transport, {
-        signal: lifetime,
-        timeout: timeoutMs,
-      });
+      if ("initialize" in connection) await connection.initialize();
+      else
+        await client.connect(connection.transport, {
+          signal: lifetime,
+          timeout: timeoutMs,
+        });
       const { tools } = await client.listTools(undefined, {
         signal: lifetime,
         timeout: timeoutMs,
         cacheMode: "bypass",
       });
-      const rejectedText = [new URL(endpoint).href, credential]
+      const rejectedText = [
+        local ? undefined : new URL(endpoint).href,
+        credential,
+        ...Object.values(local?.environment ?? {}),
+      ]
         .filter((value): value is string => !!value)
         .map((value) => JSON.stringify(value).slice(1, -1));
       const counts = new Map<string, number>();
@@ -103,6 +132,7 @@ export function createMcpDiscovery(
         status: connection?.timedOut
           ? "timeout"
           : (connection?.failure ??
+            (error instanceof McpLocalError ? error.status : undefined) ??
             (error instanceof SdkError &&
             error.code === SdkErrorCode.ListPaginationExceeded
               ? "pagination_limit"

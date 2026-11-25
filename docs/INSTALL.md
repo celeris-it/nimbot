@@ -117,6 +117,8 @@ when separation is required. Never mount the Docker socket into the application.
 5. In **Model and usage**, choose an enabled model or leave **Automatic** to use OpenCode's default.
 6. Send the connected bot a task in a private message from the configured owner account. The first message links the owner chat automatically.
 
+The Docker image includes `npx` and `uvx` for local MCP integrations. For native deployments, install Node.js with npm and install Astral uv if you use Python MCP packages. Both launchers must be on the Nimbot Server’s `PATH`. See [MCP catalog and access](OPERATIONS.md#mcp-catalog-and-access).
+
 Each messaging connection uses a distinct bot and accepts private messages from its configured owner. OpenCode stores shared provider credentials in the installation’s `ai-providers/` directory and renews OAuth tokens there. Change the selected model from each agent’s **Model and usage** page.
 
 You can cancel device login from the panel. Failed, cancelled, or timed-out attempts keep the previous credential. Device login has a ten-minute limit. Restarting Nimbot interrupts a pending login. Refreshing the browser recovers an attempt that is still running. After a credential change, the next agent turn uses the updated connection.

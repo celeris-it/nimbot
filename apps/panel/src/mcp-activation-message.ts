@@ -36,6 +36,12 @@ export function mcpActivationMessage(
       return t(
         "The tools exceed the catalog storage limit. Try a smaller toolset.",
       );
+    case "launcher_missing":
+      return t("The MCP launcher is missing from Nimbot’s PATH.");
+    case "startup_failed":
+      return t(
+        "The MCP process could not start. Check the launcher arguments and package source.",
+      );
     case "unavailable":
       return t("Tool discovery failed. Retry from the integration settings.");
   }

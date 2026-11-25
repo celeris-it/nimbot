@@ -1,15 +1,39 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import type { McpCatalog } from "./mcp-catalog.js";
+import { McpCatalogValidationError, type McpCatalog } from "./mcp-catalog.js";
 
 const MAX_TOKEN_LENGTH = 4096;
 export const isMcpBearer = (token: string) =>
   token.length <= MAX_TOKEN_LENGTH && /^[\x21-\x7e]+$/.test(token);
+export function mcpEnvironment(value: unknown): Record<string, string> | null {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new McpCatalogValidationError(
+      "Enter a JSON object of environment variables.",
+    );
+  const entries = Object.entries(value);
+  if (
+    entries.length > 32 ||
+    entries.some(
+      ([name, entry]) =>
+        !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) ||
+        /^(?:PATH|HOME|TMPDIR|XDG_(?:CONFIG|DATA)_HOME|NPM_CONFIG_(?:CACHE|YES)|UV_(?:CACHE_DIR|PYTHON_INSTALL_DIR))$/i.test(
+          name,
+        ) ||
+        typeof entry !== "string" ||
+        entry.includes("\0"),
+    ) ||
+    Buffer.byteLength(JSON.stringify(value)) > MAX_TOKEN_LENGTH
+  )
+    throw new McpCatalogValidationError("Invalid MCP environment variables.");
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 const missing = (error: unknown) =>
   (error as NodeJS.ErrnoException).code === "ENOENT";
 
-/** SQLite holds opaque references. Bearer values live only in this directory. */
+/** SQLite holds opaque references to private credential files. */
 export async function openMcpCredentials(
   catalog: McpCatalog,
   directory: string,
@@ -61,6 +85,28 @@ export async function openMcpCredentials(
     return { cleanupPending: catalog.hasRetiredCredentials() };
   }
 
+  async function read(
+    definitionId: string,
+    revision: number,
+  ): Promise<string | undefined> {
+    const before = catalog.credentialBinding(definitionId);
+    if (!before?.reference || before.revision !== revision) return undefined;
+    const filename = path(before.reference);
+    try {
+      const info = await lstat(filename);
+      if (!info.isFile() || info.mode & 0o077 || info.size > MAX_TOKEN_LENGTH)
+        throw new Error("MCP credential file is invalid.");
+      const token = await readFile(filename, "utf8");
+      const after = catalog.credentialBinding(definitionId);
+      if (after?.revision !== revision || after.reference !== before.reference)
+        return undefined;
+      return token;
+    } catch (error) {
+      if (missing(error)) return undefined;
+      throw error;
+    }
+  }
+
   return {
     cleanup,
     async set(definitionId: string, revision: number, token: string | null) {
@@ -83,31 +129,33 @@ export async function openMcpCredentials(
       if (!committed) return undefined;
       return cleanup();
     },
-    async read(
-      definitionId: string,
-      revision: number,
-    ): Promise<string | undefined> {
-      const before = catalog.credentialBinding(definitionId);
-      if (!before?.reference || before.revision !== revision) return undefined;
-      const filename = path(before.reference);
+    async withEnvironment<T>(
+      value: unknown,
+      commit: (reference?: string | null) => T,
+    ): Promise<T> {
+      if (value === undefined) return commit();
+      const environment = mcpEnvironment(value);
+      const reference = environment
+        ? await save(JSON.stringify(environment))
+        : null;
+      let result: T | undefined;
       try {
-        const info = await lstat(filename);
-        if (!info.isFile() || info.mode & 0o077 || info.size > MAX_TOKEN_LENGTH)
-          throw new Error("MCP credential file is invalid.");
-        const token = await readFile(filename, "utf8");
-        const after = catalog.credentialBinding(definitionId);
-        if (
-          after?.revision !== revision ||
-          after.reference !== before.reference
-        )
-          return undefined;
-        if (!isMcpBearer(token))
-          throw new Error("MCP credential file is invalid.");
-        return token;
-      } catch (error) {
-        if (missing(error)) return undefined;
-        throw error;
+        result = commit(reference);
+        return result;
+      } finally {
+        if (!result && reference) await erase(reference);
       }
+    },
+    async read(definitionId: string, revision: number) {
+      const token = await read(definitionId, revision);
+      if (token !== undefined && !isMcpBearer(token))
+        throw new Error("MCP credential file is invalid.");
+      return token;
+    },
+    async readEnvironment(definitionId: string, revision: number) {
+      const raw = await read(definitionId, revision);
+      if (raw !== undefined)
+        return mcpEnvironment(JSON.parse(raw)) ?? undefined;
     },
   };
 }

@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { McpCatalog, McpCatalogTool } from "./mcp-catalog.js";
+import type {
+  McpCatalog,
+  McpCatalogTool,
+  McpLocalCommand,
+} from "./mcp-catalog.js";
 import type { RemoteToolDefinition } from "../tasks/task-capabilities.js";
 import { compileMcpArguments } from "./mcp-arguments.js";
 
@@ -9,6 +13,7 @@ interface SelectedTool {
   label: string;
   revision: number;
   endpoint: string;
+  local?: McpLocalCommand;
   tool: McpCatalogTool;
 }
 
@@ -66,6 +71,7 @@ export function createMcpToolSelection(catalog: McpCatalog) {
           label: definition.label,
           revision: definition.revision,
           endpoint: definition.endpoint,
+          local: definition.local,
           tool,
         });
         if (individual && selected.length === MAX_TOOLS) return selected;

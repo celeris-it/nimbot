@@ -4591,3 +4591,93 @@ test("manages shared and per-agent Markdown rules independently", async ({
     results.locator('a[href="/agents/dev/rules#rules"]'),
   ).toBeVisible();
 });
+
+test("imports a local MCP JSONC entry and edits its private environment", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "MCP catalog" }).click();
+  await page.getByRole("link", { name: "Add integration" }).click();
+  await page
+    .getByText("Import MCP configuration (JSONC)", { exact: true })
+    .click();
+  await page.getByLabel("MCP configuration").fill(`{
+    "mcp": {"servers": {
+      "npm fixture": {"type": "local", "command": ["npx", "-y", "example@latest"]},
+      // Use the second entry.
+      "Python fixture": {"type": "local", "command": ["uvx", "example"], "environment": {"MCP_KEY": "panel-local-fixture"},},
+    }},
+  }`);
+  await page.getByRole("button", { name: "Read configuration" }).click();
+  await page.getByLabel("Server to import").selectOption("Python fixture");
+  await page.getByRole("button", { name: "Use configuration" }).click();
+  await expect(page.getByLabel("Connection type")).toHaveValue("uvx");
+  await expect(page.getByLabel("Argument 1")).toHaveValue("example");
+  await expect(page.getByLabel("Variable value")).toHaveAttribute(
+    "type",
+    "password",
+  );
+  await expect(page.getByLabel("Variable name")).toHaveValue("MCP_KEY");
+  await expect(page.getByLabel("Integration name")).toBeFocused();
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Edit Python fixture" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Private environment variables")).toHaveValue(
+    "keep",
+  );
+  await expect(page.getByLabel("Variable value")).toHaveCount(0);
+  await page.getByLabel("Private environment variables").selectOption("clear");
+  await page.getByRole("button", { name: "Save integration" }).click();
+  await expect(
+    page.getByLabel("Private environment variables", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Connected." }),
+  ).toBeVisible();
+});
+
+test("adds local launcher arguments with the keyboard on narrow screens", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "MCP catalog" }).click();
+  await page.getByRole("link", { name: "Add integration" }).click();
+  await page.getByLabel("Integration name").fill("Keyboard npm fixture");
+  await page.getByLabel("Connection type").selectOption("npx");
+  for (const width of [320, 375, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await page.setViewportSize({ width: 375, height: 900 });
+  await page.getByRole("button", { name: "Save integration" }).click();
+  const firstArg = page.getByLabel("Argument 1", { exact: true });
+  await expect(firstArg).toBeFocused();
+  await expect(firstArg).toHaveAttribute("aria-invalid", "true");
+  await firstArg.fill("-y");
+  await firstArg.press("Tab");
+  await expect(
+    page.getByRole("button", { name: "Add argument" }),
+  ).toBeFocused();
+  await page.keyboard.press("Enter");
+  const secondArg = page.getByLabel("Argument 2", { exact: true });
+  await expect(secondArg).toBeFocused();
+  await secondArg.fill("example@latest");
+  const submitted = page.waitForRequest(
+    (req) =>
+      req.method() === "POST" && new URL(req.url()).pathname === "/api/mcp",
+  );
+  await page.getByRole("button", { name: "Save integration" }).click();
+  expect((await submitted).postDataJSON()).toMatchObject({
+    local: { launcher: "npx", args: ["-y", "example@latest"] },
+    tools: [],
+  });
+  await expect(
+    page.getByRole("heading", { name: "Edit Keyboard npm fixture" }),
+  ).toBeVisible();
+});

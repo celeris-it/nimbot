@@ -90,7 +90,7 @@ export function createMcpPanel({
     signal: AbortSignal,
     activate: boolean,
   ) {
-    const { id, revision, endpoint } = definition;
+    const { id, revision, endpoint, local } = definition;
     const binding = catalog.credentialBinding(id);
     const allowed = () => catalog.credentialBinding(id)?.revision === revision;
     if (!binding || binding.revision !== revision) return;
@@ -98,15 +98,25 @@ export function createMcpPanel({
       const unauthorized = { status: "unauthorized" as const };
       return { discovery: unauthorized, activation: unauthorized };
     }
-    const credential = binding.reference
-      ? await credentials.read(id, revision)
-      : undefined;
+    const environment =
+      local && binding.reference
+        ? await credentials.readEnvironment(id, revision)
+        : undefined;
+    const credential =
+      !local && binding.reference
+        ? await credentials.read(id, revision)
+        : undefined;
     if (!allowed()) return;
-    if (binding.reference && !credential) {
+    if (binding.reference && !credential && !environment) {
       const unavailable = { status: "unavailable" as const };
       return { discovery: unavailable, activation: unavailable };
     }
-    const discovery = await discover(endpoint, credential, signal, allowed);
+    const discovery = local
+      ? await discover(endpoint, undefined, signal, allowed, {
+          target: { ...local, id },
+          environment: environment ?? {},
+        })
+      : await discover(endpoint, credential, signal, allowed);
     if (!allowed() || signal.aborted) return;
     if (!activate) return { discovery };
     if (discovery.status !== "connected")
@@ -157,8 +167,22 @@ export function createMcpPanel({
       (example) =>
         example.requiresBearerCredential && example.endpoint === endpoint,
     );
-    const definition = catalog.create(fields, pending, credentialRequired);
-    if (!pending || credentialRequired) return c.json(definition, 201);
+    if (fields.environment !== undefined && fields.local === undefined)
+      throw new McpCatalogValidationError(
+        "Environment variables require a local MCP integration.",
+      );
+    const definition =
+      fields.environment === undefined
+        ? catalog.create(fields, pending, credentialRequired)
+        : await credentials.withEnvironment(fields.environment, (reference) =>
+            catalog.create(fields, pending, credentialRequired, reference),
+          );
+    if (
+      !pending ||
+      credentialRequired ||
+      (definition.local && !definition.enabled)
+    )
+      return c.json(definition, 201);
     const outcome = await checkConnection(definition, c.req.raw.signal, true);
     return c.json(
       {
@@ -176,11 +200,18 @@ export function createMcpPanel({
   });
   app.post("/mcp/:definitionId", async (c) => {
     const fields = await jsonFields(c);
-    const updated = catalog.update(
-      c.req.param("definitionId"),
-      revisionOf(fields),
-      fields,
-    );
+    if (fields.environment !== undefined && fields.local === undefined)
+      throw new McpCatalogValidationError(
+        "Environment variables require a local MCP integration.",
+      );
+    const id = c.req.param("definitionId");
+    const revision = revisionOf(fields);
+    const updated =
+      fields.environment === undefined
+        ? catalog.update(id, revision, fields)
+        : await credentials.withEnvironment(fields.environment, (reference) =>
+            catalog.update(id, revision, fields, reference),
+          );
     if (!updated) return changed(c);
     return c.json({ definition: updated, ...(await credentials.cleanup()) });
   });
@@ -250,6 +281,8 @@ export function createMcpPanel({
     const { token } = parsed.data;
     const definitionId = c.req.param("definitionId");
     const revision = revisionOf(fields);
+    if (catalog.get(definitionId)?.local)
+      return c.json(panelError("invalid_mcp_bearer_credential"), 400);
     const result = await credentials.set(definitionId, revision, token);
     if (!result) return changed(c);
     const definition = catalog.get(definitionId);

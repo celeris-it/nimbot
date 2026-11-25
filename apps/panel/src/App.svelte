@@ -68,6 +68,7 @@
   import McpAgentAccess from "./McpAgentAccess.svelte";
   import { mcpActivationMessage } from "./mcp-activation-message.js";
   import McpCatalog from "./McpCatalog.svelte";
+  import type { McpDefinitionSettings } from "../../server/src/mcp/mcp-catalog.js";
   import McpDefinitionForm from "./McpDefinitionForm.svelte";
   import type { PeerGrant } from "../../server/src/peers/agent-grants.js";
   import type { ApprovalRequest } from "../../server/src/approvals/approval-store.js";
@@ -906,10 +907,7 @@
   }
 
   async function saveMcp(
-    settings: Pick<
-      McpDefinition,
-      "label" | "endpoint" | "enabled" | "tools"
-    > & { reviewedTools: string[] },
+    settings: McpDefinitionSettings & { reviewedTools: string[] },
   ) {
     if (mcpDefinition) {
       await mutate<{ definition: McpDefinition; cleanupPending: boolean }>(

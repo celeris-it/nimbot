@@ -65,6 +65,7 @@ import { openDiscordSecrets } from "./discord/discord-secret.js";
 import { openMcpCatalog } from "./mcp/mcp-catalog.js";
 import { openMcpCredentials } from "./mcp/mcp-credentials.js";
 import { createMcpDiscovery } from "./mcp/mcp-discovery.js";
+import { createMcpLocalRuntime } from "./mcp/mcp-local.js";
 import { createMcpExecution } from "./mcp/mcp-execution.js";
 import { createMcpTools } from "./mcp/mcp-tools.js";
 import { createDiscordConfiguration } from "./discord/discord-configuration.js";
@@ -247,7 +248,16 @@ async function main(): Promise<void> {
       await discordDelivery.sendTask(task, text, () => discordAdmit(task)),
     );
   }
+  const executablePath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
+  const localRuntime = createMcpLocalRuntime(
+    stateDir,
+    executablePath,
+    fileURLToPath(
+      new URL("../../agent-host/dist/mcp-stdio.js", import.meta.url),
+    ),
+  );
   const executeMcp = createMcpExecution({
+    localRuntime,
     catalog: mcpCatalog,
     credentials: mcpCredentials,
   });
@@ -463,7 +473,6 @@ async function main(): Promise<void> {
       : undefined,
     avatars.get,
   );
-  const executablePath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
   const processAgents: ReturnType<typeof createProcessAgents> =
     createProcessAgents({
       registry,
@@ -567,7 +576,7 @@ async function main(): Promise<void> {
       catalog: mcpCatalog,
       credentials: mcpCredentials,
       agentExists: (id) => !!registry.get(id),
-      discover: createMcpDiscovery(),
+      discover: createMcpDiscovery(fetch, undefined, localRuntime),
     },
     schedules: {
       store: scheduleStore,
@@ -717,6 +726,7 @@ async function main(): Promise<void> {
   const stop = () => {
     if (stopping) return;
     stopping = true;
+    localRuntime.close();
     void processAgents?.close().catch(() => {
       log.error("server.agent_hosts_stop_failed");
       process.exitCode = 1;

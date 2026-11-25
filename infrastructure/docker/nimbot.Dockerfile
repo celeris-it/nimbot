@@ -1,5 +1,6 @@
 # One non-root application container: Server, panel, OpenCode and Agent Hosts.
 FROM node:22-bookworm-slim
+COPY --from=ghcr.io/astral-sh/uv:0.13.10 /uv /uvx /usr/local/bin/
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
