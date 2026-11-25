@@ -82,14 +82,15 @@ export function createMcpExecution(config: {
         string,
         unknown
       >;
-      const binding = config.catalog.credentialBinding(
-        agentId,
-        selected.definitionId,
-      );
-      if (!binding) return { ok: false, error: "denied" };
+      const binding = config.catalog.credentialBinding(selected.definitionId);
+      if (
+        !binding ||
+        binding.revision !== selected.revision ||
+        binding.required
+      )
+        return { ok: false, error: "denied" };
       const credential = binding.reference
         ? await config.credentials.read(
-            agentId,
             selected.definitionId,
             selected.revision,
           )

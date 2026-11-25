@@ -761,13 +761,10 @@ test("enables discovered MCP tools with one save", async ({ page }) => {
   expect(saves).toMatchObject([{ label: "OpenAI Docs", tools: [] }]);
   await page.goto("/agents/dev/access");
   const integration = page.getByRole("region", { name: "OpenAI Docs" });
-  await expect(integration.getByText(/Access withheld/)).toBeVisible();
-  await expect(
-    integration.getByRole("button", { name: "Grant access" }),
-  ).toBeVisible();
+  await expect(integration.getByRole("switch")).toBeChecked();
 });
 
-test("enables all GitHub tools when the agent credential is saved", async ({
+test("enables GitHub tools with a shared credential and lets an agent opt out", async ({
   page,
 }) => {
   await login(page);
@@ -779,7 +776,7 @@ test("enables all GitHub tools when the agent credential is saved", async ({
   await expect(page.getByLabel("HTTPS endpoint")).toHaveValue(
     "https://api.githubcopilot.com/mcp/",
   );
-  await expect(page.getByText(/save your personal access token/)).toBeVisible();
+  await expect(page.getByText(/add your personal access token/)).toBeVisible();
   const save = page.getByRole("button", { name: "Save integration" });
   await expect(save).toBeEnabled();
   await save.click();
@@ -789,17 +786,15 @@ test("enables all GitHub tools when the agent credential is saved", async ({
   const editUrl = page.url();
   await expect(page.getByLabel("Tool name")).toHaveCount(0);
 
-  await page.goto("/agents/dev/access");
-  const integration = page.getByRole("region", { name: "GitHub", exact: true });
-  await integration.getByRole("button", { name: "Grant access" }).click();
-  await integration
-    .getByLabel("Bearer credential")
-    .fill("example-github-credential");
-  await integration.getByRole("button", { name: "Save credential" }).click();
+  await expect(page.getByText("Credential required.")).toBeVisible();
+  const credential = page.getByLabel("Bearer credential");
+  await expect(credential).toHaveAttribute("type", "password");
+  await credential.fill("example-github-credential");
+  await credential.press("Enter");
   await expect(
-    integration.getByRole("button", { name: "Replace credential" }),
+    page.getByRole("button", { name: "Replace credential" }),
   ).toBeVisible();
-
+  await expect(credential).toHaveValue("");
   await expect(page.getByText(/Enabled 46 new MCP tools/)).toBeVisible();
   await page.goto(editUrl);
   await expect(page.getByLabel("Tool name")).toHaveCount(46);
@@ -819,7 +814,10 @@ test("enables all GitHub tools when the agent credential is saved", async ({
     .uncheck();
   await page.getByRole("button", { name: "Save integration" }).click();
   await expect(page.getByText("Integration saved.")).toBeVisible();
-  await page.getByLabel("Connection credential").selectOption("dev");
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Connected." }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Update tools" }).click();
   await expect(
     page.getByText("No new compatible MCP tools were found."),
@@ -828,9 +826,24 @@ test("enables all GitHub tools when the agent credential is saved", async ({
   await expect(
     tool.getByRole("switch", { name: "Enable tool", exact: true }),
   ).not.toBeChecked();
+  await page.goto("/agents/dev/access");
+  const integration = page.getByRole("region", { name: "GitHub", exact: true });
+  const access = integration.getByRole("switch", {
+    name: "Enable GitHub for this agent",
+  });
+  await expect(access).toBeChecked();
+  await access.press("Space");
+  await expect(access).not.toBeChecked();
+  await page.reload();
+  await expect(access).not.toBeChecked();
+  await expect(integration.getByLabel("Bearer credential")).toHaveCount(0);
+  await page.goto(editUrl);
+  await expect(
+    page.getByRole("button", { name: "Replace credential" }),
+  ).toBeVisible();
 });
 
-test("edits the MCP catalog and manages an agent's grant and write-only credential", async ({
+test("edits the MCP catalog and removes a write-only shared credential", async ({
   page,
 }) => {
   await login(page);
@@ -874,34 +887,82 @@ test("edits the MCP catalog and manages an agent's grant and write-only credenti
   await page.reload();
   await expect(page.getByLabel("Tool name")).toHaveCount(1);
 
-  await page.goto("/agents/dev/setup");
-  await openAgentSection(page, "Access");
-  await expect(
-    page.getByRole("heading", { name: "Access for Developer" }),
-  ).toBeFocused();
-  const integration = page.getByRole("region", { name: "Team docs" });
-  await expect(integration.getByText(/Access withheld/)).toBeVisible();
-  await integration.getByRole("button", { name: "Grant access" }).click();
-  const credential = integration.getByLabel("Bearer credential");
+  const credential = page.getByLabel("Bearer credential");
   await expect(credential).toHaveAttribute("type", "password");
   await credential.fill("example-panel-credential");
-  await integration.getByRole("button", { name: "Save credential" }).click();
+  await page.getByRole("button", { name: "Save credential" }).click();
   await expect(
-    integration.getByRole("button", { name: "Replace credential" }),
+    page.getByRole("button", { name: "Replace credential" }),
   ).toBeVisible();
   await expect(credential).toHaveValue("");
   await page.reload();
   await expect(credential).toHaveValue("");
+  await page.getByRole("button", { name: "Remove credential" }).click();
   await expect(
-    integration.getByRole("button", { name: "Remove credential" }),
+    page.getByRole("button", { name: "Save credential" }),
   ).toBeVisible();
-  await integration.getByRole("button", { name: "Remove credential" }).click();
+  await expect(page.getByText("No credential saved.")).toBeVisible();
+});
+
+test("deletes only the confirmed MCP integration when two have the same name", async ({
+  page,
+}) => {
+  await login(page);
+  const origin = new URL(page.url()).origin;
+  const create = () =>
+    page.request.post("/api/mcp", {
+      headers: { Origin: origin },
+      data: {
+        label: "Duplicate docs",
+        endpoint: "https://docs.example.test/mcp",
+        enabled: false,
+        tools: [
+          { name: "search", access: "read", inputSchema: { type: "object" } },
+        ],
+      },
+    });
+  const firstResponse = await create();
+  const secondResponse = await create();
+  expect(firstResponse.status()).toBe(201);
+  expect(secondResponse.status()).toBe(201);
+  const first = await firstResponse.json();
+  const second = await secondResponse.json();
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto("/mcp");
+  const row = page.getByRole("listitem").filter({
+    has: page.locator(`a[href="/mcp/${first.id}"]`),
+  });
+  await expect(row).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await row
+    .getByRole("button", { name: "Delete integration Duplicate docs" })
+    .press("Enter");
+  await expect(row).toBeVisible();
+  await row.getByRole("link", { name: "Duplicate docs" }).click();
   await expect(
-    integration.getByRole("button", { name: "Save credential" }),
+    page.getByRole("heading", { name: "Edit Duplicate docs" }),
   ).toBeVisible();
-  await integration.getByRole("button", { name: "Revoke access" }).click();
-  await expect(integration.getByText(/Access withheld/)).toBeVisible();
-  await expect(credential).toHaveCount(0);
+  const dialogPromise = page.waitForEvent("dialog");
+  await Promise.all([
+    page
+      .getByRole("button", { name: "Delete integration", exact: true })
+      .click(),
+    dialogPromise.then(async (dialog) => {
+      expect(dialog.message()).toContain("Delete Duplicate docs?");
+      await dialog.accept();
+    }),
+  ]);
+  await expect(
+    page.getByText("Integration deleted.", { exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/mcp$/);
+  await expect(row).toHaveCount(0);
+  await expect(page.locator(`a[href="/mcp/${second.id}"]`)).toBeVisible();
 });
 
 test("keeps changed MCP tools disabled until an explicit schema review is saved", async ({

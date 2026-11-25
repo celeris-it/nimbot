@@ -33,7 +33,6 @@ it("maps long, mixed-case and dotted remote names to distinct Host-compatible na
     ...settings,
     tools: names.map((name) => ({ ...settings.tools[0], name })),
   });
-  f.grant();
   const descriptors = f.selection.descriptors("a");
   expect(descriptors).toHaveLength(3);
   expect(new Set(descriptors.map(({ name }) => name)).size).toBe(3);
@@ -52,16 +51,18 @@ function fixture() {
   cleanups.push(() => catalog.close());
   const definition = catalog.create(settings);
   const selection = createMcpToolSelection(catalog);
-  const grant = (agentId = "a") =>
-    catalog.grant(agentId, definition.id, catalog.get(definition.id)!.revision);
-  return { agents, catalog, definition, selection, grant };
+  const setAccess = (agentId: string, enabled: boolean) =>
+    catalog.setAccess(
+      agentId,
+      definition.id,
+      catalog.get(definition.id)!.revision,
+      enabled,
+    );
+  return { agents, catalog, definition, selection, setAccess };
 }
 
 it("selects only enabled pinned tools with independent per-agent authority", () => {
   const f = fixture();
-  expect(f.selection.descriptors("a")).toEqual([]);
-  f.grant();
-  f.grant("b");
   const [a] = f.selection.descriptors("a");
   const [b] = f.selection.descriptors("b");
   expect(a!.inputSchema).toEqual(settings.tools[0]!.inputSchema);
@@ -78,13 +79,12 @@ it("selects only enabled pinned tools with independent per-agent authority", () 
   const metadata = JSON.stringify(a);
   expect(Object.keys(a!).sort()).toEqual(["inputSchema", "name", "operation"]);
   expect(metadata).not.toContain(settings.endpoint);
-  expect(metadata).not.toContain(
-    f.catalog.credentialBinding("a", f.definition.id)!.scope,
-  );
-  f.catalog.revoke("a", f.definition.id);
+  expect(metadata).not.toContain(f.catalog.accessScope("a", f.definition.id));
+  f.setAccess("a", false);
   expect(f.selection.resolve("a", a!.operation)).toBeUndefined();
   expect(f.selection.resolve("b", b!.operation)).toBeDefined();
-  f.grant();
+  f.setAccess("a", true);
+  expect(f.selection.descriptors("a")).toHaveLength(1);
   expect(f.selection.resolve("a", a!.operation)).toBeUndefined();
   f.agents.delete("b");
   expect(f.selection.descriptors("b")).toEqual([]);
@@ -92,7 +92,6 @@ it("selects only enabled pinned tools with independent per-agent authority", () 
 
 it("invalidates old operations on edits, disable/re-enable and credential replacement", () => {
   const f = fixture();
-  f.grant();
   let revision = 1;
   const oldOperations: string[] = [];
   for (const update of [
@@ -110,39 +109,40 @@ it("invalidates old operations on edits, disable/re-enable and credential replac
       expect(f.selection.resolve("a", operation)).toBeUndefined();
   }
   const [before] = f.selection.descriptors("a");
-  const binding = f.catalog.credentialBinding("a", f.definition.id)!;
+  const [otherAgent] = f.selection.descriptors("b");
+  const beforeCredentialRevision = revision;
   expect(
     f.catalog.replaceCredential(
-      "a",
       f.definition.id,
-      binding,
+      revision++,
       "server-private-reference",
     ),
   ).toBe(true);
   expect(f.selection.resolve("a", before!.operation)).toBeUndefined();
+  expect(f.selection.resolve("b", otherAgent!.operation)).toBeUndefined();
   expect(JSON.stringify(f.selection.descriptors("a"))).not.toContain(
     "server-private-reference",
   );
   const withCredential = f.selection.descriptors("a")[0]!;
-  expect(
-    f.catalog.replaceCredential(
-      "a",
-      f.definition.id,
-      f.catalog.credentialBinding("a", f.definition.id)!,
-      null,
-    ),
-  ).toBe(true);
+  expect(f.catalog.replaceCredential(f.definition.id, revision++, null)).toBe(
+    true,
+  );
   // Returning to no credential must not resurrect the earlier credential-free lease.
   expect(f.selection.resolve("a", before!.operation)).toBeUndefined();
   expect(f.selection.resolve("a", withCredential.operation)).toBeUndefined();
-  expect(f.catalog.replaceCredential("a", f.definition.id, binding, null)).toBe(
-    false,
-  );
+  expect(
+    f.catalog.replaceCredential(
+      f.definition.id,
+      beforeCredentialRevision,
+      null,
+    ),
+  ).toBe(false);
   f.catalog.update(f.definition.id, revision, {
     ...settings,
     endpoint: "https://replacement.example.test/mcp",
   });
-  expect(f.selection.descriptors("a")).toEqual([]);
+  expect(f.selection.descriptors("a")).toHaveLength(1);
+  expect(f.selection.resolve("a", withCredential.operation)).toBeUndefined();
 });
 
 it("bounds tool count and total metadata, preserving room for local operations", () => {
@@ -154,7 +154,6 @@ it("bounds tool count and total metadata, preserving room for local operations",
       name: `search_${i}`,
     })),
   });
-  f.grant();
   expect(f.selection.descriptors("a")).toHaveLength(23);
   f.catalog.update(f.definition.id, 2, {
     ...settings,
@@ -178,7 +177,6 @@ it("bounds tool count and total metadata, preserving room for local operations",
 
 it("validates arguments only against currently granted pinned schemas", () => {
   const f = fixture();
-  f.grant();
   const operation = f.selection.descriptors("a")[0]!.operation;
   const args = { query: "hello" };
   expect(f.selection.validate("a", operation, args)).toBe(args);
@@ -211,7 +209,7 @@ it("validates arguments only against currently granted pinned schemas", () => {
   expect(f.selection.validate("a", changed, { count: 1 })).toEqual({
     count: 1,
   });
-  f.catalog.revoke("a", f.definition.id);
+  f.setAccess("a", false);
   expect(f.selection.validate("a", changed, { count: 1 })).toBeUndefined();
 });
 
@@ -224,7 +222,6 @@ it("fits catalog tools alongside all memory and peer operations in one capabilit
       name: `tool_${index}`,
     })),
   });
-  f.grant();
   const store = openTaskStore(":memory:");
   cleanups.push(() => store.close());
   const task = store.enqueue({
@@ -267,7 +264,6 @@ it("fits catalog tools alongside all memory and peer operations in one capabilit
 
 it("revokes a live task capability when its pinned catalog revision changes", () => {
   const f = fixture();
-  f.grant();
   const store = openTaskStore(":memory:");
   cleanups.push(() => store.close());
   const task = store.enqueue({

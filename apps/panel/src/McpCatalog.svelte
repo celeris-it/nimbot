@@ -9,9 +9,13 @@
   let {
     definitions,
     examples,
+    busy,
+    remove,
   }: {
     definitions: readonly McpDefinitionSummary[];
     examples: readonly McpExample[];
+    busy: boolean;
+    remove: (definition: McpDefinitionSummary) => Promise<void>;
   } = $props();
 
   let query = $state("");
@@ -35,7 +39,7 @@
       <h1 id="mcp-catalog" tabindex="-1">{$messages("MCP catalog")}</h1>
       <p class="mt-2 text-muted">
         {$messages(
-          "Add tools here, then grant access from an agent’s Access page.",
+          "Configure integrations here and manage individual access from each agent’s Access page.",
         )}
       </p>
     </div>
@@ -80,6 +84,16 @@
                   tone="warning"
                 />
               {/if}
+              <ActionButton
+                variant="danger"
+                disabled={busy}
+                aria-label={$messages(
+                  "Delete integration {0}",
+                  definition.label,
+                )}
+                onclick={() => remove(definition)}
+                >{$messages("Delete integration")}</ActionButton
+              >
             </div>
           </li>
         {/each}

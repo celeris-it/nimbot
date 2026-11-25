@@ -17,7 +17,6 @@ export interface McpPanelDeps {
   catalog: McpCatalog;
   credentials: McpCredentials;
   agentExists(id: string): boolean;
-  listAgents(): { id: string; name: string }[];
   discover: ReturnType<typeof createMcpDiscovery>;
 }
 
@@ -26,6 +25,7 @@ const summarize = ({
   label,
   enabled,
   revision,
+  credentialStatus,
   blockedTools,
   toolSetup,
 }: McpDefinition) => ({
@@ -33,6 +33,7 @@ const summarize = ({
   label,
   enabled,
   revision,
+  credentialStatus,
   ...(toolSetup ? { toolSetup } : {}),
   ...(blockedTools?.length ? { blockedTools } : {}),
 });
@@ -57,7 +58,7 @@ const REVISION_ERROR = "Invalid MCP definition revision.";
 const revisionFields = z.object({
   revision: z.int({ error: REVISION_ERROR }).min(1, { error: REVISION_ERROR }),
 });
-const discoveryFields = z.object({ agentId: z.string().optional() });
+const accessFields = z.object({ enabled: z.boolean() });
 const credentialFields = z.object({
   token: z.string().refine(isMcpBearer).nullable(),
 });
@@ -73,7 +74,6 @@ export function createMcpPanel({
   catalog,
   credentials,
   agentExists,
-  listAgents,
   discover,
 }: McpPanelDeps) {
   const app = new Hono();
@@ -87,37 +87,25 @@ export function createMcpPanel({
 
   async function checkConnection(
     definition: McpDefinition,
-    agentId: string | undefined,
     signal: AbortSignal,
     activate: boolean,
-    savedToken?: string,
   ) {
     const { id, revision, endpoint } = definition;
-    const binding =
-      agentId === undefined
-        ? undefined
-        : catalog.credentialBinding(agentId, id);
-    if (agentId !== undefined && !binding?.reference) return;
-    const allowed = () => {
-      if (catalog.get(id)?.revision !== revision) return false;
-      if (agentId === undefined) return true;
-      const current = catalog.credentialBinding(agentId, id);
-      return (
-        !!current &&
-        current.scope === binding?.scope &&
-        current.reference === binding.reference
-      );
-    };
-    const credential =
-      agentId === undefined
-        ? undefined
-        : await credentials.read(agentId, id, revision);
-    if (
-      !allowed() ||
-      (agentId !== undefined && !credential) ||
-      (savedToken !== undefined && credential !== savedToken)
-    )
-      return;
+    const binding = catalog.credentialBinding(id);
+    const allowed = () => catalog.credentialBinding(id)?.revision === revision;
+    if (!binding || binding.revision !== revision) return;
+    if (binding.required) {
+      const unauthorized = { status: "unauthorized" as const };
+      return { discovery: unauthorized, activation: unauthorized };
+    }
+    const credential = binding.reference
+      ? await credentials.read(id, revision)
+      : undefined;
+    if (!allowed()) return;
+    if (binding.reference && !credential) {
+      const unavailable = { status: "unavailable" as const };
+      return { discovery: unavailable, activation: unavailable };
+    }
     const discovery = await discover(endpoint, credential, signal, allowed);
     if (!allowed() || signal.aborted) return;
     if (!activate) return { discovery };
@@ -161,22 +149,17 @@ export function createMcpPanel({
   app.post("/mcp", async (c) => {
     const fields = await jsonFields(c);
     const pending = Array.isArray(fields.tools) && fields.tools.length === 0;
-    const definition = catalog.create(fields, pending);
-    if (
-      !pending ||
-      mcpExamples.some(
-        (example) =>
-          example.requiresBearerCredential &&
-          example.endpoint === definition.endpoint,
-      )
-    )
-      return c.json(definition, 201);
-    const outcome = await checkConnection(
-      definition,
-      undefined,
-      c.req.raw.signal,
-      true,
+    const endpoint =
+      typeof fields.endpoint === "string"
+        ? URL.parse(fields.endpoint)?.href
+        : undefined;
+    const credentialRequired = mcpExamples.some(
+      (example) =>
+        example.requiresBearerCredential && example.endpoint === endpoint,
     );
+    const definition = catalog.create(fields, pending, credentialRequired);
+    if (!pending || credentialRequired) return c.json(definition, 201);
+    const outcome = await checkConnection(definition, c.req.raw.signal, true);
     return c.json(
       {
         ...(outcome?.definition ?? catalog.get(definition.id) ?? definition),
@@ -201,13 +184,11 @@ export function createMcpPanel({
     if (!updated) return changed(c);
     return c.json({ definition: updated, ...(await credentials.cleanup()) });
   });
-  app.get("/mcp/:definitionId/discovery-agents", (c) => {
-    const id = c.req.param("definitionId");
-    if (!catalog.get(id))
-      return c.json(panelError("mcp_definition_not_found"), 404);
-    return c.json({
-      agents: listAgents().filter((agent) => credentials.has(agent.id, id)),
-    });
+  app.post("/mcp/:definitionId/delete", async (c) => {
+    const revision = revisionOf(await jsonFields(c));
+    if (!catalog.remove(c.req.param("definitionId"), revision))
+      return changed(c);
+    return c.json(await credentials.cleanup());
   });
   app.post("/mcp/:definitionId/discover", async (c) => {
     const id = c.req.param("definitionId");
@@ -215,17 +196,7 @@ export function createMcpPanel({
     const revision = revisionOf(fields);
     const definition = catalog.get(id);
     if (!definition || definition.revision !== revision) return changed(c);
-    const selection = discoveryFields.safeParse(fields);
-    if (!selection.success)
-      throw new McpCatalogValidationError(
-        "Invalid discovery credential selection.",
-      );
-    const result = await checkConnection(
-      definition,
-      selection.data.agentId,
-      c.req.raw.signal,
-      false,
-    );
+    const result = await checkConnection(definition, c.req.raw.signal, false);
     return result ? c.json(result.discovery) : changed(c);
   });
   app.post("/mcp/:definitionId/activate-tools", async (c) => {
@@ -233,17 +204,7 @@ export function createMcpPanel({
     const revision = revisionOf(fields);
     const definition = catalog.get(c.req.param("definitionId"));
     if (!definition || definition.revision !== revision) return changed(c);
-    const selection = discoveryFields.safeParse(fields);
-    if (!selection.success)
-      throw new McpCatalogValidationError(
-        "Invalid discovery credential selection.",
-      );
-    const result = await checkConnection(
-      definition,
-      selection.data.agentId,
-      c.req.raw.signal,
-      true,
-    );
+    const result = await checkConnection(definition, c.req.raw.signal, true);
     return result
       ? c.json({
           definition: result.definition ?? definition,
@@ -260,62 +221,46 @@ export function createMcpPanel({
     });
   app.get("/agents/:agentId/mcp", (c) => {
     const id = c.req.param("agentId");
-    const grants = new Set(catalog.grants(id));
     return c.json({
       definitions: catalog.list().map((definition) => ({
         ...summarize(definition),
-        granted: grants.has(definition.id),
-        hasCredential: credentials.has(id, definition.id),
+        accessEnabled: catalog.accessScope(id, definition.id) !== undefined,
       })),
     });
   });
-  app.post("/agents/:agentId/mcp/:definitionId/grant", async (c) => {
-    const revision = revisionOf(await jsonFields(c));
-    return catalog.grant(
+  app.post("/agents/:agentId/mcp/:definitionId/access", async (c) => {
+    const fields = await jsonFields(c);
+    const access = accessFields.safeParse(fields);
+    if (!access.success)
+      throw new McpCatalogValidationError("Invalid MCP access setting.");
+    return catalog.setAccess(
       c.req.param("agentId"),
       c.req.param("definitionId"),
-      revision,
+      revisionOf(fields),
+      access.data.enabled,
     )
-      ? c.json({ granted: true }, 201)
+      ? c.json({ accessEnabled: access.data.enabled })
       : changed(c);
   });
-  app.post("/agents/:agentId/mcp/:definitionId/revoke", async (c) => {
-    if (!catalog.revoke(c.req.param("agentId"), c.req.param("definitionId")))
-      return changed(c);
-    return c.json({ granted: false, ...(await credentials.cleanup()) });
-  });
-  app.post("/agents/:agentId/mcp/:definitionId/credential", async (c) => {
+  app.post("/mcp/:definitionId/credential", async (c) => {
     const fields = await jsonFields(c);
     const parsed = credentialFields.safeParse(fields);
     if (!parsed.success)
       return c.json(panelError("invalid_mcp_bearer_credential"), 400);
     const { token } = parsed.data;
-    const agentId = c.req.param("agentId");
     const definitionId = c.req.param("definitionId");
     const revision = revisionOf(fields);
-    const result = await credentials.set(
-      agentId,
-      definitionId,
-      revision,
-      token,
-    );
+    const result = await credentials.set(definitionId, revision, token);
     if (!result) return changed(c);
     const definition = catalog.get(definitionId);
-    if (
-      token === null ||
-      definition?.toolSetup !== "pending" ||
-      definition.revision !== revision
-    )
-      return c.json(result);
-    const outcome = await checkConnection(
-      definition,
-      agentId,
-      c.req.raw.signal,
-      true,
-      token,
-    );
+    if (!definition || definition.revision !== revision + 1) return changed(c);
+    if (token === null || definition.toolSetup !== "pending")
+      return c.json({ ...result, definition });
+    const outcome = await checkConnection(definition, c.req.raw.signal, true);
     return c.json({
       ...result,
+      definition:
+        outcome?.definition ?? catalog.get(definitionId) ?? definition,
       ...(outcome?.activation ? { activation: outcome.activation } : {}),
     });
   });

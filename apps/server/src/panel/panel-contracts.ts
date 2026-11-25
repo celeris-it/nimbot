@@ -28,15 +28,20 @@ export type {
 export type { McpExample } from "../mcp/mcp-examples.js";
 export type McpDefinitionSummary = Pick<
   import("../mcp/mcp-catalog.js").McpDefinition,
-  "id" | "label" | "enabled" | "revision" | "blockedTools" | "toolSetup"
+  | "id"
+  | "label"
+  | "enabled"
+  | "revision"
+  | "blockedTools"
+  | "toolSetup"
+  | "credentialStatus"
 >;
 export interface McpCatalogList {
   definitions: McpDefinitionSummary[];
   examples: readonly import("../mcp/mcp-examples.js").McpExample[];
 }
 export interface McpAgentDefinition extends McpDefinitionSummary {
-  granted: boolean;
-  hasCredential: boolean;
+  accessEnabled: boolean;
 }
 
 export interface ScheduleSettings {

@@ -16,7 +16,7 @@ export function mcpActivationMessage(
     }
     case "unauthorized":
       return t(
-        "Tool setup is pending. Save a valid credential or retry with another credential.",
+        "The endpoint rejected the connection. Save a valid shared credential and retry tool setup.",
       );
     case "timeout":
       return t(

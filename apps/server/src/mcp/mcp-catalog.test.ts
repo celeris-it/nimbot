@@ -36,7 +36,7 @@ it("persists blocked tools, invalidates stale edits and requires an explicit rev
   let catalog = openMcpCatalog(path, () => true);
   try {
     const saved = catalog.create(settings);
-    catalog.grant("a", saved.id, 1);
+    catalog.setAccess("a", saved.id, 1, false);
     expect(catalog.blockTool(saved.id, 1, "unselected")).toBe(false);
     expect(catalog.blockTool(saved.id, 1, "search")).toBe(true);
     expect(catalog.get(saved.id)).toMatchObject({
@@ -69,7 +69,7 @@ it("persists blocked tools, invalidates stale edits and requires an explicit rev
       })!.blockedTools,
     ).toBeUndefined();
     expect(catalog.blockTool(saved.id, 2, "search")).toBe(false);
-    expect(catalog.grants("a")).toEqual([saved.id]);
+    expect(catalog.accessScope("a", saved.id)).toBeUndefined();
     expect(
       catalog.blockTool(saved.id, catalog.get(saved.id)!.revision, "add"),
     ).toBe(true);
@@ -93,14 +93,14 @@ it("persists blocked tools, invalidates stale edits and requires an explicit rev
   }
 });
 
-it("rolls back settings, grants and review state together if clearing a block fails", () => {
+it("rolls back settings, access and review state together if clearing a block fails", () => {
   const directory = mkdtempSync(join(tmpdir(), "nimbot-mcp-review-rollback-"));
   const path = join(directory, "server.sqlite");
   const catalog = openMcpCatalog(path, () => true);
   const connection = new DatabaseSync(path);
   try {
     const saved = catalog.create(settings);
-    catalog.grant("a", saved.id, 1);
+    catalog.setAccess("a", saved.id, 1, false);
     catalog.blockTool(saved.id, 1, "search");
     const blocked = catalog.get(saved.id)!;
     connection.exec(
@@ -114,7 +114,7 @@ it("rolls back settings, grants and review state together if clearing a block fa
       }),
     ).toThrow();
     expect(catalog.get(saved.id)).toEqual(blocked);
-    expect(catalog.grants("a")).toEqual([saved.id]);
+    expect(catalog.accessScope("a", saved.id)).toBeUndefined();
   } finally {
     connection.close();
     catalog.close();
@@ -122,7 +122,7 @@ it("rolls back settings, grants and review state together if clearing a block fa
   }
 });
 
-it("persists stable definitions and independent, default-denied agent grants", () => {
+it("persists per-agent access and defaults existing and future agents to enabled", () => {
   const dir = mkdtempSync(join(tmpdir(), "nimbot-mcp-catalog-"));
   const agents = new Set(["a", "b"]);
   const open = () =>
@@ -131,52 +131,52 @@ it("persists stable definitions and independent, default-denied agent grants", (
   try {
     const saved = catalog.create(settings);
     expect(saved).toMatchObject({ ...settings, revision: 1 });
-    expect(catalog.grants("a")).toEqual([]);
-    expect(catalog.grant("missing", saved.id, saved.revision)).toBe(false);
-    expect(catalog.grant("a", "missing", saved.revision)).toBe(false);
-    expect(catalog.grant("a", saved.id, saved.revision)).toBe(true);
-    expect(catalog.grant("a", saved.id, saved.revision)).toBe(false);
-    expect(catalog.grant("b", saved.id, saved.revision)).toBe(true);
+    expect(catalog.accessScope("a", saved.id)).toBe("default");
+    expect(catalog.setAccess("a", saved.id, 1, true)).toBe(true);
+    expect(catalog.accessScope("a", saved.id)).toBe("default");
+    expect(catalog.setAccess("missing", saved.id, 1, false)).toBe(false);
+    expect(catalog.setAccess("a", "missing", 1, false)).toBe(false);
+    expect(catalog.setAccess("a", saved.id, 1, false)).toBe(true);
     catalog.close();
     catalog = open();
     expect(catalog.list()).toEqual([saved]);
-    expect(catalog.get(saved.id)).toEqual(saved);
-    expect(catalog.revoke("a", saved.id)).toBe(true);
-    expect(catalog.grants("a")).toEqual([]);
-    expect(catalog.grants("b")).toEqual([saved.id]);
+    expect(catalog.accessScope("a", saved.id)).toBeUndefined();
+    expect(catalog.accessScope("b", saved.id)).toBe("default");
+    agents.add("new");
+    expect(
+      [...catalog.availableForAgent("new")].map(({ definition }) => definition),
+    ).toEqual([saved]);
     agents.delete("b");
-    expect(catalog.grants("b")).toEqual([]);
+    expect([...catalog.availableForAgent("b")]).toEqual([]);
   } finally {
     catalog.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-it("rejects stale edits and requires new grants when the endpoint changes", () => {
+it("preserves agent switches through global disable and endpoint changes", () => {
   const catalog = openMcpCatalog(":memory:", () => true);
   try {
     const saved = catalog.create(settings);
-    expect(catalog.grant("a", saved.id, saved.revision)).toBe(true);
+    expect(catalog.setAccess("a", saved.id, 1, false)).toBe(true);
     const renamed = { ...settings, label: "Renamed", enabled: false };
-    expect(catalog.update(saved.id, saved.revision, renamed)).toMatchObject({
+    expect(catalog.update(saved.id, 1, renamed)).toMatchObject({
       ...renamed,
-      id: saved.id,
-      revision: saved.revision + 1,
+      revision: 2,
     });
-    expect(catalog.grants("a")).toEqual([saved.id]);
+    expect([...catalog.availableForAgent("b")]).toEqual([]);
     const replacement = {
       ...settings,
       endpoint: "https://other.example.test/mcp",
     };
-    expect(
-      catalog.update(saved.id, saved.revision, replacement),
-    ).toBeUndefined();
-    expect(catalog.grants("a")).toEqual([saved.id]);
-    const current = catalog.update(saved.id, saved.revision + 1, replacement)!;
-    expect(current).toMatchObject({ ...replacement, id: saved.id });
-    expect(catalog.grants("a")).toEqual([]);
-    expect(catalog.grant("a", saved.id, saved.revision + 1)).toBe(false);
-    expect(catalog.grant("a", saved.id, current.revision)).toBe(true);
+    expect(catalog.update(saved.id, 1, replacement)).toBeUndefined();
+    const current = catalog.update(saved.id, 2, replacement)!;
+    expect(current).toMatchObject(replacement);
+    expect(catalog.accessScope("a", saved.id)).toBeUndefined();
+    expect([...catalog.availableForAgent("b")]).toHaveLength(1);
+    expect(catalog.setAccess("a", saved.id, 2, true)).toBe(false);
+    expect(catalog.setAccess("a", saved.id, current.revision, true)).toBe(true);
+    expect(catalog.accessScope("a", saved.id)).not.toBe("default");
   } finally {
     catalog.close();
   }

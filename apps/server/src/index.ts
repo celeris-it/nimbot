@@ -495,7 +495,7 @@ async function main(): Promise<void> {
         taskServices.stop(id);
         log.warn("server.agent_host_exited", { agentId: id });
       },
-      revokeMcpGrants: (id) => mcpCatalog.revokeAgent(id),
+      removeMcpAgentAccess: (id) => mcpCatalog.removeAgentAccess(id),
     });
   const notifications = createDurableNotifications(
     notificationStore,
@@ -567,11 +567,6 @@ async function main(): Promise<void> {
       catalog: mcpCatalog,
       credentials: mcpCredentials,
       agentExists: (id) => !!registry.get(id),
-      listAgents: () =>
-        registry.listIds().flatMap((id) => {
-          const agent = registry.get(id);
-          return agent ? [{ id, name: agent.name }] : [];
-        }),
       discover: createMcpDiscovery(),
     },
     schedules: {

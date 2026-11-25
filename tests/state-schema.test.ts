@@ -106,7 +106,7 @@ it("migrates subprocess state with saved Telegram and Discord connections to opt
   );
   prepareStateSchema(path, "server-process");
   prepareStateSchema(path, "server-process");
-  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 8 });
   expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   expect(
     read(path, "SELECT owner_id, bot_id, credential_ref FROM agents"),
@@ -232,7 +232,7 @@ it("upgrades subprocess v2 schedules and run history to the fresh v3 schema", ()
   const run = read(migrated, "SELECT * FROM schedule_runs");
   for (const path of [migrated, fresh]) {
     prepareStateSchema(path, kind);
-    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
+    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 8 });
     expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
   }
   expect(read(migrated, "SELECT * FROM schedules")).toEqual({
@@ -269,7 +269,7 @@ it("migrates version 3 task history without changing execution identity or infer
   );
   const previous = read(path, "SELECT * FROM tasks");
   prepareStateSchema(path, kind);
-  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
+  expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 8 });
   expect(read(path, "SELECT * FROM tasks")).toEqual(previous);
   expect(read(path, "SELECT * FROM task_execution_details")).toBeUndefined();
   expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
@@ -312,7 +312,7 @@ it("retires the memory switch in fresh and upgraded Server state while preservin
   for (const path of [existing, fixture(kind)]) {
     prepareStateSchema(path, kind);
     prepareStateSchema(path, kind);
-    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
+    expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 8 });
     expect(
       read(
         path,
@@ -364,7 +364,7 @@ it("adds an empty rule list to fresh and upgraded Server state while preserving 
           name: "Agent A",
           instructions: "Be brief",
         });
-      expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 7 });
+      expect(read(path, "PRAGMA user_version")).toEqual({ user_version: 8 });
       expect(read(path, "PRAGMA foreign_key_check")).toBeUndefined();
       expect(registry.get("a")?.instructions).toBe("Be brief");
       expect(registry.rules.list(null)).toEqual([]);
@@ -382,7 +382,7 @@ it("adds an empty rule list to fresh and upgraded Server state while preserving 
   }
 });
 
-it("preserves MCP catalog tool selections and grants through the setup migration", () => {
+it("preserves MCP tools and review blocks while requiring a new shared credential after upgrade", () => {
   const version6 = [1, 2, 3, 4, 5, 6]
     .map((version) =>
       readFileSync(
@@ -400,19 +400,47 @@ it("preserves MCP catalog tool selections and grants through the setup migration
     PRAGMA application_id = 0x4e494d50;
     PRAGMA user_version = 6;
     INSERT INTO mcp_definitions (id, label, endpoint, enabled, tools_json)
-    VALUES ('github', 'GitHub', 'https://api.githubcopilot.com/mcp/', 1, '[]');
+    VALUES ('github', 'GitHub', 'https://api.githubcopilot.com/mcp/', 1,
+      '[{"name":"search","access":"read","inputSchema":{"type":"object"}}]'),
+      ('docs', 'Docs', 'https://docs.example.test/mcp', 1, '[]');
+    INSERT INTO mcp_tool_blocks (definition_id, tool_name) VALUES ('github', 'search');
     INSERT INTO mcp_grants (agent_id, definition_id, scope, secret_ref)
-    VALUES ('a', 'github', 'scope', 'credential-reference');
+    VALUES ('a', 'github', 'scope-a', 'ref-a'), ('b', 'github', 'scope-b', 'ref-b'), ('a', 'docs', 'scope-docs', NULL);
   `,
   );
   prepareStateSchema(path, "server-process");
+  prepareStateSchema(path, "server-process");
   expect(
-    read(path, "SELECT tool_setup, tools_json FROM mcp_definitions"),
+    read(
+      path,
+      "SELECT tool_setup, tools_json, secret_ref, credential_required FROM mcp_definitions WHERE id = 'github'",
+    ),
   ).toEqual({
     tool_setup: "manual",
-    tools_json: "[]",
+    tools_json:
+      '[{"name":"search","access":"read","inputSchema":{"type":"object"}}]',
+    secret_ref: null,
+    credential_required: 1,
   });
-  expect(read(path, "SELECT secret_ref FROM mcp_grants")).toEqual({
-    secret_ref: "credential-reference",
+  expect(read(path, "SELECT tool_name FROM mcp_tool_blocks")).toEqual({
+    tool_name: "search",
+  });
+  expect(
+    read(
+      path,
+      "SELECT secret_ref, credential_required FROM mcp_definitions WHERE id = 'docs'",
+    ),
+  ).toEqual({
+    secret_ref: null,
+    credential_required: 0,
+  });
+  expect(
+    read(
+      path,
+      "SELECT group_concat(ref) AS refs FROM (SELECT ref FROM mcp_retired_secrets ORDER BY ref)",
+    ),
+  ).toEqual({ refs: "ref-a,ref-b" });
+  expect(read(path, "SELECT count(*) AS count FROM mcp_agent_access")).toEqual({
+    count: 0,
   });
 });

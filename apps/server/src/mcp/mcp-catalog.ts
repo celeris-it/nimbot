@@ -21,15 +21,16 @@ interface McpDefinitionSettings {
 export interface McpDefinition extends McpDefinitionSettings {
   id: string;
   revision: number;
+  credentialStatus: "none" | "saved" | "required";
   toolSetup?: "pending" | "ready";
   /** Approved tools disabled after a remote change, pending explicit administrator review. */
   blockedTools?: string[];
 }
 
 interface CredentialBinding {
-  scope: string;
   revision: number;
   reference: string | null;
+  required: boolean;
 }
 
 const MAX_DEFINITIONS = 64;
@@ -124,6 +125,11 @@ function definition(row: Record<string, unknown>): McpDefinition {
     enabled: row.enabled === 1,
     tools: JSON.parse(String(row.tools_json)) as McpCatalogTool[],
     revision: Number(row.revision),
+    credentialStatus: row.secret_ref
+      ? "saved"
+      : row.credential_required === 1
+        ? "required"
+        : "none",
     ...(row.tool_setup === "pending" || row.tool_setup === "ready"
       ? { toolSetup: row.tool_setup }
       : {}),
@@ -147,13 +153,15 @@ export function openMcpCatalog(
         tools_json TEXT NOT NULL CHECK(json_valid(tools_json) AND json_type(tools_json) = 'array'),
         revision INTEGER NOT NULL DEFAULT 1,
         tool_setup TEXT NOT NULL DEFAULT 'manual'
-          CHECK (tool_setup IN ('manual', 'pending', 'ready'))
+          CHECK (tool_setup IN ('manual', 'pending', 'ready')),
+        secret_ref TEXT,
+        credential_required INTEGER NOT NULL DEFAULT 0 CHECK (credential_required IN (0, 1))
       );
-      CREATE TABLE IF NOT EXISTS mcp_grants (
+      CREATE TABLE IF NOT EXISTS mcp_agent_access (
         agent_id TEXT NOT NULL,
         definition_id TEXT NOT NULL REFERENCES mcp_definitions(id) ON DELETE CASCADE,
-        scope TEXT NOT NULL UNIQUE,
-        secret_ref TEXT,
+        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        scope TEXT NOT NULL,
         PRIMARY KEY (agent_id, definition_id)
       );
       CREATE TABLE IF NOT EXISTS mcp_retired_secrets (ref TEXT PRIMARY KEY);
@@ -162,23 +170,16 @@ export function openMcpCatalog(
         tool_name TEXT NOT NULL,
         PRIMARY KEY (definition_id, tool_name)
       );
-      CREATE INDEX IF NOT EXISTS mcp_grants_definition ON mcp_grants(definition_id);
-      CREATE TRIGGER IF NOT EXISTS mcp_grant_revoked
-      AFTER DELETE ON mcp_grants WHEN OLD.secret_ref IS NOT NULL
-      BEGIN
-        INSERT INTO mcp_retired_secrets (ref) VALUES (OLD.secret_ref);
-      END;
-      CREATE TRIGGER IF NOT EXISTS mcp_secret_replaced
-      AFTER UPDATE OF secret_ref ON mcp_grants
+      CREATE TRIGGER IF NOT EXISTS mcp_definition_secret_replaced
+      AFTER UPDATE OF secret_ref ON mcp_definitions
       WHEN OLD.secret_ref IS NOT NULL AND OLD.secret_ref IS NOT NEW.secret_ref
       BEGIN
         INSERT INTO mcp_retired_secrets (ref) VALUES (OLD.secret_ref);
       END;
-      CREATE TRIGGER IF NOT EXISTS mcp_endpoint_change
-      AFTER UPDATE OF endpoint ON mcp_definitions
-      WHEN OLD.endpoint <> NEW.endpoint
+      CREATE TRIGGER IF NOT EXISTS mcp_definition_deleted
+      AFTER DELETE ON mcp_definitions WHEN OLD.secret_ref IS NOT NULL
       BEGIN
-        DELETE FROM mcp_grants WHERE definition_id = NEW.id;
+        INSERT INTO mcp_retired_secrets (ref) VALUES (OLD.secret_ref);
       END;`);
   } catch (error) {
     db.close();
@@ -197,12 +198,16 @@ export function openMcpCatalog(
   }
 
   return {
-    create(input: unknown, pending = false): McpDefinition {
+    create(
+      input: unknown,
+      pending = false,
+      credentialRequired = false,
+    ): McpDefinition {
       const { label, endpoint, enabled, toolsJson } = settings(input);
       const row = db
         .prepare(
-          `INSERT INTO mcp_definitions (id, label, endpoint, enabled, tools_json, tool_setup)
-         SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM mcp_definitions) < ?
+          `INSERT INTO mcp_definitions (id, label, endpoint, enabled, tools_json, tool_setup, credential_required)
+         SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM mcp_definitions) < ?
          RETURNING *`,
         )
         .get(
@@ -212,6 +217,7 @@ export function openMcpCatalog(
           enabled,
           toolsJson,
           pending ? "pending" : "manual",
+          Number(credentialRequired),
           MAX_DEFINITIONS,
         );
       if (!row) throw new McpCatalogValidationError("MCP catalog is full.");
@@ -229,10 +235,21 @@ export function openMcpCatalog(
         const row = db
           .prepare(
             `UPDATE mcp_definitions
-         SET label = ?, endpoint = ?, enabled = ?, tools_json = ?, revision = revision + 1
+         SET label = ?, endpoint = ?, enabled = ?, tools_json = ?, revision = revision + 1,
+           credential_required = CASE WHEN endpoint <> ? AND secret_ref IS NOT NULL THEN 1 ELSE credential_required END,
+           secret_ref = CASE WHEN endpoint <> ? THEN NULL ELSE secret_ref END
          WHERE id = ? AND revision = ? RETURNING *`,
           )
-          .get(label, endpoint, enabled, toolsJson, id, revision);
+          .get(
+            label,
+            endpoint,
+            enabled,
+            toolsJson,
+            endpoint,
+            endpoint,
+            id,
+            revision,
+          );
         if (row)
           db.prepare(
             `DELETE FROM mcp_tool_blocks WHERE definition_id = ? AND (
@@ -246,6 +263,13 @@ export function openMcpCatalog(
         if (db.isTransaction) db.exec("ROLLBACK");
         throw error;
       }
+    },
+    remove(id: string, revision: number): boolean {
+      return (
+        db
+          .prepare("DELETE FROM mcp_definitions WHERE id = ? AND revision = ?")
+          .run(id, revision).changes === 1
+      );
     },
     activate(
       definition: McpDefinition,
@@ -340,90 +364,95 @@ export function openMcpCatalog(
         throw error;
       }
     },
-    grant(agentId: string, id: string, revision: number): boolean {
+    setAccess(
+      agentId: string,
+      id: string,
+      revision: number,
+      enabled: boolean,
+    ): boolean {
       if (!agentExists(agentId)) return false;
       return (
         db
           .prepare(
-            `INSERT INTO mcp_grants (agent_id, definition_id, scope)
-         SELECT ?, id, ? FROM mcp_definitions WHERE id = ? AND revision = ?
-         ON CONFLICT DO NOTHING`,
+            `INSERT INTO mcp_agent_access (agent_id, definition_id, enabled, scope)
+         SELECT ?, id, ?, ? FROM mcp_definitions WHERE id = ? AND revision = ?
+         ON CONFLICT (agent_id, definition_id) DO UPDATE SET
+           scope = CASE WHEN enabled <> excluded.enabled THEN ? ELSE scope END,
+           enabled = excluded.enabled`,
           )
-          .run(agentId, randomUUID(), id, revision).changes === 1
+          .run(
+            agentId,
+            Number(enabled),
+            enabled ? "default" : randomUUID(),
+            id,
+            revision,
+            randomUUID(),
+          ).changes === 1
       );
     },
-    revoke(agentId: string, id: string): boolean {
-      return (
-        db
-          .prepare(
-            "DELETE FROM mcp_grants WHERE agent_id = ? AND definition_id = ?",
-          )
-          .run(agentId, id).changes === 1
-      );
-    },
-    grants(agentId: string): string[] {
-      if (!agentExists(agentId)) return [];
-      return db
-        .prepare(
-          "SELECT definition_id FROM mcp_grants WHERE agent_id = ? ORDER BY definition_id",
-        )
-        .all(agentId)
-        .map((row) => String(row.definition_id));
-    },
-    revokeAgent(agentId: string): void {
-      db.prepare("DELETE FROM mcp_grants WHERE agent_id = ?").run(agentId);
-    },
-    credentialBinding(
-      agentId: string,
-      id: string,
-    ): CredentialBinding | undefined {
+    accessScope(agentId: string, id: string): string | undefined {
       if (!agentExists(agentId)) return undefined;
       const row = db
         .prepare(
-          `SELECT g.scope, g.secret_ref, d.revision FROM mcp_grants g
-         JOIN mcp_definitions d ON d.id = g.definition_id
-         WHERE g.agent_id = ? AND g.definition_id = ?`,
+          "SELECT enabled, scope FROM mcp_agent_access WHERE agent_id = ? AND definition_id = ?",
         )
         .get(agentId, id);
+      if (!row) return "default";
+      return row.enabled === 1 ? String(row.scope) : undefined;
+    },
+    *availableForAgent(agentId: string) {
+      if (!agentExists(agentId)) return;
+      const rows = db
+        .prepare(
+          `SELECT d.*, COALESCE(a.scope, 'default') AS access_scope
+         FROM mcp_definitions d
+         LEFT JOIN mcp_agent_access a ON a.definition_id = d.id AND a.agent_id = ?
+         WHERE d.enabled = 1 AND d.credential_required = 0 AND COALESCE(a.enabled, 1) = 1
+         ORDER BY d.id`,
+        )
+        .iterate(agentId);
+      for (const row of rows)
+        yield {
+          definition: readDefinition(row),
+          scope: String(row.access_scope),
+        };
+    },
+    removeAgentAccess(agentId: string): void {
+      db.prepare("DELETE FROM mcp_agent_access WHERE agent_id = ?").run(
+        agentId,
+      );
+    },
+    credentialBinding(id: string): CredentialBinding | undefined {
+      const row = db
+        .prepare(
+          "SELECT secret_ref, credential_required, revision FROM mcp_definitions WHERE id = ?",
+        )
+        .get(id);
       return (
         row && {
-          scope: String(row.scope),
           revision: Number(row.revision),
           reference: typeof row.secret_ref === "string" ? row.secret_ref : null,
+          required: row.credential_required === 1,
         }
       );
     },
     replaceCredential(
-      agentId: string,
       id: string,
-      previous: CredentialBinding,
+      revision: number,
       reference: string | null,
     ): boolean {
-      if (!agentExists(agentId)) return false;
-      // Rotate even when removing a secret: returning to null must not revive
-      // an earlier credential-free capability or stale credential update.
       return (
         db
           .prepare(
-            `UPDATE mcp_grants SET secret_ref = ?, scope = ?
-         WHERE agent_id = ? AND definition_id = ? AND scope = ? AND secret_ref IS ?
-         AND EXISTS (SELECT 1 FROM mcp_definitions WHERE id = ? AND revision = ?)`,
+            `UPDATE mcp_definitions SET secret_ref = ?, credential_required = 0, revision = revision + 1
+         WHERE id = ? AND revision = ?`,
           )
-          .run(
-            reference,
-            randomUUID(),
-            agentId,
-            id,
-            previous.scope,
-            previous.reference,
-            id,
-            previous.revision,
-          ).changes === 1
+          .run(reference, id, revision).changes === 1
       );
     },
     retiredCredentials(): string[] {
       return db
-        .prepare("SELECT ref FROM mcp_retired_secrets ORDER BY rowid LIMIT 64")
+        .prepare("SELECT ref FROM mcp_retired_secrets ORDER BY rowid")
         .all()
         .map((row) => String(row.ref));
     },

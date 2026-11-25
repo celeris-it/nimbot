@@ -29,7 +29,7 @@ export function createProcessAgents(options: {
   beforeStop: (agentId: string) => Promise<void>;
   afterStart: (agentId: string) => Promise<void>;
   onUnexpectedExit?: (agentId: string) => void;
-  revokeMcpGrants?: (agentId: string) => void;
+  removeMcpAgentAccess?: (agentId: string) => void;
   verifyBot?: Parameters<typeof createAgentRegistration>[3];
 }) {
   const manager = createAgentProcessManager({
@@ -121,7 +121,7 @@ export function createProcessAgents(options: {
     },
     removeBotSecret: options.botSecrets.remove,
     removeHostSecret: options.credentials.remove,
-    revokeMcpGrants: options.revokeMcpGrants,
+    removeMcpAgentAccess: options.removeMcpAgentAccess,
   });
   const register = createAgentRegistration(
     options.registry,

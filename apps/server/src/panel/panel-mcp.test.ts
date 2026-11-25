@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -35,10 +35,6 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
         catalog,
         credentials,
         agentExists,
-        listAgents: () => [
-          { id: "a", name: "Alice" },
-          { id: "b", name: "Bob" },
-        ],
         discover,
       },
     });
@@ -150,7 +146,12 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     const path = `/api/mcp/${id}`;
     const discoveryPath = `${path}/discover`;
     const agentPath = `/api/agents/a/mcp/${id}`;
-    expect(await (await get(path)).json()).toEqual({ ...draft, id, revision });
+    expect(await (await get(path)).json()).toEqual({
+      ...draft,
+      id,
+      revision,
+      credentialStatus: "none",
+    });
     const invalidSchema = await post(path, {
       ...draft,
       revision,
@@ -169,31 +170,28 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     });
     expect(invalidSchema.status).toBe(400);
     expect(await invalidSchema.text()).not.toContain("private-schema");
-    expect(await (await get(path)).json()).toEqual({ ...draft, id, revision });
+    expect(await (await get(path)).json()).toEqual({
+      ...draft,
+      id,
+      revision,
+      credentialStatus: "none",
+    });
     const token = "example-mcp-credential";
-    expect(
-      (await post(`${agentPath}/credential`, { token, revision })).status,
-    ).toBe(409);
-    expect((await post(`${agentPath}/grant`, { revision })).status).toBe(201);
-    const stored = await post(`${agentPath}/credential`, { token, revision });
+    const stored = await post(`${path}/credential`, { token, revision });
     expect(await stored.json()).toEqual({
-      hasCredential: true,
+      definition: {
+        ...draft,
+        id,
+        revision: revision + 1,
+        credentialStatus: "saved",
+      },
       cleanupPending: false,
     });
-    expect(await credentials.read("a", id, revision)).toBe(token);
-    expect(await (await get(`${path}/discovery-agents`)).json()).toEqual({
-      agents: [{ id: "a", name: "Alice" }],
-    });
-    expect((await post(discoveryPath, { agentId: "b", revision })).status).toBe(
-      409,
-    );
-    expect(
-      (await post(discoveryPath, { agentId: "a", revision: revision + 1 }))
-        .status,
-    ).toBe(409);
+    expect(await credentials.read(id, revision + 1)).toBe(token);
+    expect((await post(discoveryPath, { revision })).status).toBe(409);
     expect(discover).not.toHaveBeenCalled();
     expect(
-      await (await post(discoveryPath, { agentId: "a", revision })).json(),
+      await (await post(discoveryPath, { revision: revision + 1 })).json(),
     ).toEqual({ status: "connected", tools: [] });
     expect(discover).toHaveBeenCalledExactlyOnceWith(
       draft.endpoint,
@@ -201,7 +199,6 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
       expect.any(AbortSignal),
       expect.any(Function),
     );
-    expect(await (await get(path)).json()).toEqual({ ...draft, id, revision });
     for (const url of [
       "/api/mcp",
       path,
@@ -210,51 +207,61 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     ]) {
       const body = await (await get(url)).text();
       expect(body).not.toContain(token);
-      expect(body).not.toContain(
-        catalog.credentialBinding("a", id)!.reference!,
-      );
+      expect(body).not.toContain(catalog.credentialBinding(id)!.reference!);
     }
-    expect(await (await get("/api/agents/b/mcp")).json()).toEqual({
-      definitions: [
-        {
-          id,
-          label: draft.label,
-          enabled: true,
-          revision,
-          granted: false,
-          hasCredential: false,
-        },
-      ],
+    expect(await (await get("/api/agents/b/mcp")).json()).toMatchObject({
+      definitions: [{ id, accessEnabled: true, credentialStatus: "saved" }],
     });
     expect(
-      (await post(`${agentPath}/credential`, { token: null, revision })).status,
-    ).toBe(200);
-    expect(await credentials.read("a", id, revision)).toBeUndefined();
+      (await post(`${agentPath}/access`, { revision, enabled: false })).status,
+    ).toBe(409);
     expect(
       (
-        await post(`${agentPath}/credential`, {
-          token: "example-replacement",
-          revision,
+        await post(`${agentPath}/access`, {
+          revision: revision + 1,
+          enabled: false,
         })
       ).status,
     ).toBe(200);
-    expect(await credentials.read("a", id, revision)).toBe(
-      "example-replacement",
-    );
+    expect(await (await get("/api/agents/a/mcp")).json()).toMatchObject({
+      definitions: [{ id, accessEnabled: false, credentialStatus: "saved" }],
+    });
+    expect(await credentials.read(id, revision + 1)).toBe(token);
     expect(
-      (await post(path, { ...draft, revision: revision + 1 })).status,
+      (
+        await post(`${path}/credential`, {
+          token: null,
+          revision: revision + 1,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await credentials.read(id, revision + 2)).toBeUndefined();
+    expect(
+      (
+        await post(`${path}/credential`, {
+          token: "example-replacement",
+          revision: revision + 2,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await post(path, { ...draft, revision: revision + 2 })).status,
     ).toBe(409);
     expect(
       (
         await post(path, {
           ...draft,
-          revision,
+          revision: revision + 3,
           endpoint: "https://new.example.test/mcp",
         })
       ).status,
     ).toBe(200);
-    expect(catalog.grants("a")).toEqual([]);
-    expect(await credentials.read("a", id, revision + 1)).toBeUndefined();
+    expect(catalog.accessScope("a", id)).toBeUndefined();
+    expect(await credentials.read(id, revision + 4)).toBeUndefined();
+    expect(
+      await (await post(discoveryPath, { revision: revision + 4 })).json(),
+    ).toEqual({ status: "unauthorized" });
+    expect(discover).toHaveBeenCalledTimes(1);
     const current = catalog.get(id)!;
     expect(catalog.blockTool(id, current.revision, "search")).toBe(true);
     const blocked = catalog.get(id)!;
@@ -320,6 +327,11 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
       activation: { status: "connected", added: 1, omitted: ["unsupported"] },
     });
 
+    const reconnected = await post(`${path}/credential`, {
+      revision: catalog.get(id)!.revision,
+      token: "example-new-endpoint-token",
+    });
+    expect(reconnected.status).toBe(200);
     const alreadyConfigured = catalog.get(id)!;
     const result = await post(`${path}/activate-tools`, {
       revision: alreadyConfigured.revision,
@@ -338,14 +350,8 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
         tools: [],
       })
     ).json();
-    const protectedPath = `/api/agents/a/mcp/${protectedDefinition.id}`;
-    expect(
-      (
-        await post(`${protectedPath}/grant`, {
-          revision: protectedDefinition.revision,
-        })
-      ).status,
-    ).toBe(201);
+    expect(protectedDefinition.credentialStatus).toBe("required");
+    const protectedPath = `/api/mcp/${protectedDefinition.id}`;
     let signalEntered!: () => void;
     const entered = new Promise<void>((resolve) => {
       signalEntered = resolve;
@@ -373,7 +379,7 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     });
     const winning = await post(`${protectedPath}/credential`, {
       token: "current-github-token",
-      revision: protectedDefinition.revision,
+      revision: protectedDefinition.revision + 1,
     });
     expect(await winning.json()).toMatchObject({ activation: { added: 1 } });
     finishDiscovery({
@@ -384,6 +390,39 @@ it("authenticates catalog management and keeps bearer credentials out of all pan
     expect(catalog.get(protectedDefinition.id)?.tools).toMatchObject([
       { name: "lookup" },
     ]);
+
+    const github = catalog.get(protectedDefinition.id)!;
+    const ref = catalog.credentialBinding(github.id)!.reference!;
+    expect(
+      (await post(`${protectedPath}/delete`, { revision: github.revision - 1 }))
+        .status,
+    ).toBe(409);
+    expect(
+      (
+        await post(
+          `${protectedPath}/delete`,
+          { revision: github.revision },
+          "https://foreign.example",
+        )
+      ).status,
+    ).toBe(403);
+    expect((await get(protectedPath)).status).toBe(200);
+    const deleted = await post(`${protectedPath}/delete`, {
+      revision: github.revision,
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ cleanupPending: false });
+    await expect(stat(join(dir, "secrets", ref))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect((await get(protectedPath)).status).toBe(404);
+    expect((await get(path)).status).toBe(200);
+    const afterDelete = await (await get("/api/agents/a/mcp")).json();
+    expect(
+      afterDelete.definitions.map(
+        (integration: McpDefinition) => integration.id,
+      ),
+    ).not.toContain(github.id);
   } finally {
     catalog.close();
     await rm(dir, { recursive: true, force: true });

@@ -187,8 +187,6 @@ const panel = createPanel(
       catalog: mcpCatalog,
       credentials: mcpCredentials,
       agentExists: (id) => agents.has(id),
-      listAgents: () =>
-        [...agents].map(([id, agent]) => ({ id, name: agent.name })),
       discover: async (endpoint, credential) =>
         endpoint === "https://api.githubcopilot.com/mcp/"
           ? credential

@@ -233,8 +233,8 @@ export const spanish = {
   Disabled: "Deshabilitada",
   "Review needed": "Requiere revisión",
   Examples: "Ejemplos",
-  "Add tools here, then grant access from an agent’s Access page.":
-    "Agrega herramientas aquí y luego concede acceso desde la página Acceso de cada agente.",
+  "Configure integrations here and manage individual access from each agent’s Access page.":
+    "Configura las integraciones aquí y administra el acceso individual desde la página Acceso de cada agente.",
   "No integrations yet. Set up an example below or add your own.":
     "Todavía no hay integraciones. Configura un ejemplo de abajo o agrega una propia.",
   "Search examples": "Buscar ejemplos",
@@ -324,11 +324,16 @@ export const spanish = {
   "Login status updated.": "Se actualizó el estado del inicio de sesión.",
   "Device login started. Complete authorization using the link below.":
     "Se inició el acceso por dispositivo. Completa la autorización con el enlace de abajo.",
+  "Delete integration": "Eliminar integración",
+  "Delete integration {0}": "Eliminar integración {0}",
+  "Delete {0}? This removes the integration, its tools, and its shared credential for all agents.":
+    "¿Eliminar {0}? Se eliminarán la integración, sus herramientas y su credencial compartida para todos los agentes.",
+  "Integration deleted.": "Se eliminó la integración.",
+  "Integration deleted. Credential cleanup is pending.":
+    "Se eliminó la integración. La limpieza de credenciales está pendiente.",
   "Integration saved. Credential cleanup is pending.":
     "Se guardó la integración. Todavía hay credenciales por eliminar.",
   "Integration saved.": "Se guardó la integración.",
-  "MCP access updated. Credential cleanup is pending.":
-    "Se actualizó el acceso a MCP. Todavía hay credenciales por eliminar.",
   "MCP access updated.": "Se actualizó el acceso a MCP.",
   "Cancellation requested.": "Se solicitó la cancelación.",
   "Grant added.": "Se otorgó el permiso.",
@@ -564,28 +569,34 @@ export const spanish = {
   "MCP integrations unavailable.":
     "Las integraciones MCP no están disponibles.",
   "Retry loading MCP integrations": "Reintentar la carga de integraciones MCP",
-  "Access granted": "Acceso concedido",
-  "Access withheld": "Sin acceso",
-  "Enabled in catalog": "Habilitada en el catálogo",
   "Disabled in catalog": "Deshabilitada en el catálogo",
   "Review tools": "Revisar herramientas",
+  "Enable {0} for this agent": "Habilitar {0} para este agente",
+  "Credential required.": "Se requiere una credencial.",
+  "Set shared credential": "Configurar credencial compartida",
+  "Shared credential": "Credencial compartida",
+  "Credential removed.": "Credencial eliminada.",
+  "Credential saved.": "Credencial guardada.",
+  "Credential cleanup is pending.":
+    "La limpieza de credenciales está pendiente.",
+  "No credential saved.": "No hay una credencial guardada.",
+  "Agents with this integration enabled use the same credential.":
+    "Los agentes que tienen esta integración habilitada usan la misma credencial.",
+  "Save your integration changes before updating the credential or tools.":
+    "Guarda los cambios de la integración antes de actualizar la credencial o las herramientas.",
   "Bearer credential": "Credencial Bearer",
   "Replace credential": "Reemplazar credencial",
   "Save credential": "Guardar credencial",
   "Remove credential": "Eliminar credencial",
-  "Revoke access": "Revocar acceso",
-  "Grant access": "Conceder acceso",
   "Some tools are disabled after a remote change. Review their schemas and access before approving them again.":
     "Algunas herramientas se deshabilitaron después de un cambio remoto. Revisa sus esquemas y permisos antes de volver a aprobarlas.",
   "Integration name": "Nombre de la integración",
   "HTTPS endpoint": "URL HTTPS",
-  "Use an endpoint you trust. Changing it removes current agent grants and credentials.":
-    "Usa una URL de confianza. Al cambiarla se eliminan los permisos y las credenciales actuales de los agentes.",
+  "Use an endpoint you trust. Changing it removes the shared credential.":
+    "Usa una URL de confianza. Al cambiarla se elimina la credencial compartida.",
   "Enable integration": "Habilitar integración",
   "Available tools": "Herramientas disponibles",
   "Connection test": "Prueba de conexión",
-  "Connection credential": "Credencial de conexión",
-  "No credential": "Sin credencial",
   "Save the endpoint before testing the connection.":
     "Guarda la URL antes de probar la conexión.",
   "Test connection": "Probar conexión",
@@ -616,8 +627,8 @@ export const spanish = {
   "Connection timed out.": "Se agotó el tiempo de espera de la conexión.",
   "The endpoint attempted to redirect the connection.":
     "El servidor intentó redirigir la conexión.",
-  "The endpoint rejected the connection. Check the selected credential.":
-    "El servidor rechazó la conexión. Revisa la credencial seleccionada.",
+  "The endpoint rejected the connection. Check the shared credential.":
+    "El servidor rechazó la conexión. Revisa la credencial compartida.",
   "The MCP response exceeded Nimbot’s 256 KiB limit. If the provider offers a smaller toolset, use its endpoint.":
     "La respuesta MCP superó el límite de 256 KiB de Nimbot. Si el proveedor ofrece un conjunto de herramientas más pequeño, usa su punto de conexión.",
   "The MCP endpoint is unavailable.": "El servidor MCP no está disponible.",
@@ -1018,8 +1029,8 @@ export const spanish = {
     "La configuración de MCP no está disponible.",
   "MCP example not found.": "No se encontró el ejemplo de MCP.",
   "MCP definition not found.": "No se encontró la definición de MCP.",
-  "Invalid discovery credential selection.":
-    "La credencial seleccionada para buscar herramientas no es válida.",
+  "Invalid MCP access setting.":
+    "La configuración de acceso a MCP no es válida.",
   "Enter a bearer credential without whitespace.":
     "Ingresa una credencial Bearer sin espacios en blanco.",
   "Name must contain 1 to 60 characters.":
@@ -1213,8 +1224,8 @@ export const spanish = {
     "Consulta las guías de la API de Firecrawl y ejemplos de extracción web.",
   "Work with GitHub repositories, issues, and pull requests. Requires a personal access token.":
     "Trabaja con repositorios, incidencias y solicitudes de cambios de GitHub. Requiere un token de acceso personal.",
-  "Save this integration, then grant access and save your personal access token from the agent’s Access page. Compatible tools are enabled when the connection succeeds.":
-    "Guarda la integración. Luego concede acceso y guarda tu token de acceso personal desde la página Acceso del agente. Las herramientas compatibles se habilitan cuando se establece la conexión.",
+  "Save this integration, then add your personal access token on its edit page. Compatible tools are enabled when the connection succeeds.":
+    "Guarda esta integración y añade tu token de acceso personal en su página de edición. Las herramientas compatibles se habilitan cuando se establece la conexión.",
   "Compatible tools are enabled when the connection succeeds.":
     "Las herramientas compatibles se habilitan cuando se establece la conexión.",
   "Enabled {0} new MCP tools.": "Se habilitaron {0} herramientas MCP nuevas.",
@@ -1224,8 +1235,8 @@ export const spanish = {
     "Se omitieron herramientas incompatibles ({0}).",
   "The MCP endpoint exceeded the four-page tool listing limit.":
     "El punto de conexión MCP superó el límite de cuatro páginas para listar herramientas.",
-  "Tool setup is pending. Save a valid credential or retry with another credential.":
-    "La configuración está pendiente. Guarda una credencial válida o inténtalo con otra.",
+  "The endpoint rejected the connection. Save a valid shared credential and retry tool setup.":
+    "El servidor rechazó la conexión. Guarda una credencial compartida válida y vuelve a intentar configurar las herramientas.",
   "Tool setup is pending. Add a credential if required, or retry the connection.":
     "La configuración está pendiente. Agrega una credencial si hace falta o vuelve a intentar la conexión.",
   "Tool discovery timed out. Retry from the integration settings.":
@@ -1240,8 +1251,6 @@ export const spanish = {
   "Retry tool setup": "Reintentar la configuración",
   "Enable all tools": "Habilitar todas las herramientas",
   "Enable tool": "Habilitar herramienta",
-  "Save your changes before updating tools.":
-    "Guarda tus cambios antes de actualizar las herramientas.",
   "Search code and documentation in public GitHub repositories.":
     "Busca código y documentación en repositorios públicos de GitHub.",
   "Find guides for LangChain, LangGraph, and related tools.":

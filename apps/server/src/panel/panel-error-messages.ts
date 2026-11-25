@@ -119,7 +119,7 @@ export const panelErrorMessages = {
   mcp_unavailable: "MCP settings are unavailable.",
   mcp_example_not_found: "MCP example not found.",
   mcp_definition_not_found: "MCP definition not found.",
-  invalid_mcp_discovery_credential: "Invalid discovery credential selection.",
+  invalid_mcp_access: "Invalid MCP access setting.",
   invalid_mcp_bearer_credential:
     "Enter a bearer credential without whitespace.",
   invalid_schedule_name: "Name must contain 1 to 60 characters.",

@@ -63,17 +63,9 @@ export async function openMcpCredentials(
 
   return {
     cleanup,
-    has(agentId: string, definitionId: string): boolean {
-      return !!catalog.credentialBinding(agentId, definitionId)?.reference;
-    },
-    async set(
-      agentId: string,
-      definitionId: string,
-      revision: number,
-      token: string | null,
-    ) {
-      const previous = catalog.credentialBinding(agentId, definitionId);
-      if (!previous || previous.revision !== revision) return undefined;
+    async set(definitionId: string, revision: number, token: string | null) {
+      if (catalog.credentialBinding(definitionId)?.revision !== revision)
+        return undefined;
       if (token !== null && !isMcpBearer(token))
         throw new Error("Invalid MCP bearer credential.");
 
@@ -81,23 +73,21 @@ export async function openMcpCredentials(
       let committed = false;
       try {
         committed = catalog.replaceCredential(
-          agentId,
           definitionId,
-          previous,
+          revision,
           reference,
         );
       } finally {
         if (!committed && reference !== null) await erase(reference);
       }
       if (!committed) return undefined;
-      return { hasCredential: reference !== null, ...(await cleanup()) };
+      return cleanup();
     },
     async read(
-      agentId: string,
       definitionId: string,
       revision: number,
     ): Promise<string | undefined> {
-      const before = catalog.credentialBinding(agentId, definitionId);
+      const before = catalog.credentialBinding(definitionId);
       if (!before?.reference || before.revision !== revision) return undefined;
       const filename = path(before.reference);
       try {
@@ -105,10 +95,9 @@ export async function openMcpCredentials(
         if (!info.isFile() || info.mode & 0o077 || info.size > MAX_TOKEN_LENGTH)
           throw new Error("MCP credential file is invalid.");
         const token = await readFile(filename, "utf8");
-        const after = catalog.credentialBinding(agentId, definitionId);
+        const after = catalog.credentialBinding(definitionId);
         if (
-          after?.scope !== before.scope ||
-          after.revision !== revision ||
+          after?.revision !== revision ||
           after.reference !== before.reference
         )
           return undefined;

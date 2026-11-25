@@ -18,14 +18,14 @@ export function createAgentDeletion(deps: {
   ) => Promise<void>;
   removeBotSecret: (ref: string) => Promise<void>;
   removeHostSecret: (ref: string) => Promise<void>;
-  revokeMcpGrants?: (id: string) => void;
+  removeMcpAgentAccess?: (id: string) => void;
 }) {
   return async (id: string, deleteData = false) => {
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id))
       throw new Error("Invalid agent ID");
     await deps.removeResources(id, deleteData, () => deps.stopBot(id));
     deps.schedules.removeByAgent(id);
-    deps.revokeMcpGrants?.(id);
+    deps.removeMcpAgentAccess?.(id);
     const refs = deps.registry.finishAgentDeletion(id);
     // Secrets are erased only after the registry stopped referencing them.
     if (refs.botCredentialRef)

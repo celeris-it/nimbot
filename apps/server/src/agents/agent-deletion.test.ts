@@ -71,7 +71,7 @@ function deletion(
       }),
     removeBotSecret: async (ref) => void events.push(`bot-secret:${ref}`),
     removeHostSecret: async (ref) => void events.push(`host-secret:${ref}`),
-    revokeMcpGrants: (id) => {
+    removeMcpAgentAccess: (id) => {
       expect(registry.get(id)).toBeDefined();
       events.push(`revoke-mcp:${id}`);
     },

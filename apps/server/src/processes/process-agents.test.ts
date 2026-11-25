@@ -72,7 +72,7 @@ async function fixture() {
   const beforeStop = vi.fn(async () => {});
   const afterStart = vi.fn(async () => {});
   const removeSchedules = vi.fn(() => {});
-  const revokeMcpGrants = vi.fn(() => {});
+  const removeMcpAgentAccess = vi.fn(() => {});
   const settings = {
     registry,
     store,
@@ -85,7 +85,7 @@ async function fixture() {
     taskTimeoutSeconds: 600,
     beforeStop,
     afterStart,
-    revokeMcpGrants,
+    removeMcpAgentAccess,
     verifyBot: vi.fn(async (token: string) => ({
       id: Number(token.split(":")[0]),
       username: "fixture_bot",
@@ -104,7 +104,7 @@ async function fixture() {
     beforeStop,
     afterStart,
     removeSchedules,
-    revokeMcpGrants,
+    removeMcpAgentAccess,
   };
 }
 
@@ -321,7 +321,7 @@ it.each([false, true])(
     expect(f.registry.get(id)).toBeUndefined();
     expect(f.store.list()).toEqual([]);
     expect(f.removeSchedules).toHaveBeenCalledWith(id);
-    expect(f.revokeMcpGrants).toHaveBeenCalledWith(id);
+    expect(f.removeMcpAgentAccess).toHaveBeenCalledWith(id);
     expect(await readdir(join(f.directory, "bot-secrets"))).toEqual([]);
     expect(await readdir(join(f.directory, "host-secrets"))).toEqual([]);
     if (purge)

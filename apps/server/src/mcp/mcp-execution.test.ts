@@ -42,15 +42,13 @@ async function fixture(timeoutMs = 2000) {
     catalog.close();
     await rm(directory, { recursive: true, force: true });
   });
-  const definition = catalog.create(settings);
+  const { id } = catalog.create(settings);
   const credentials = await openMcpCredentials(
     catalog,
     join(directory, "secrets"),
   );
-  for (const id of ["a", "b"]) {
-    catalog.grant(id, definition.id, 1);
-    await credentials.set(id, definition.id, 1, `fixture-credential-${id}`);
-  }
+  await credentials.set(id, 1, "fixture-shared-credential");
+  const definition = catalog.get(id)!;
   const remote = {
     tools: settings.tools.map(({ name, inputSchema }) => ({
       name,
@@ -166,19 +164,24 @@ it("calls only pinned tools with independent credentials and revokes just the se
   expect(f.calls()).toEqual([
     {
       method: "tools/call",
-      authorization: "Bearer fixture-credential-a",
+      authorization: "Bearer fixture-shared-credential",
       params: { name: "search", arguments: { query: "hello" } },
     },
     {
       method: "tools/call",
-      authorization: "Bearer fixture-credential-b",
+      authorization: "Bearer fixture-shared-credential",
       params: { name: "search", arguments: { query: "hello" } },
     },
   ]);
   expect(f.recordings.filter(({ method }) => method === "delete")).toHaveLength(
     2,
   );
-  f.catalog.revoke("a", f.definition.id);
+  f.catalog.setAccess(
+    "a",
+    f.definition.id,
+    f.catalog.get(f.definition.id)!.revision,
+    false,
+  );
   expect(await f.execute("a", a, { query: "hello" }, f.context)).toEqual({
     ok: false,
     error: "denied",
@@ -217,16 +220,19 @@ it("rejects invalid arguments, foreign operations, revoked tasks and missing cre
     await f.execute("a", operation, { query: "hello" }, f.context),
   ).toEqual({ ok: false, error: "unavailable" });
   expect(f.request).not.toHaveBeenCalled();
-  f.catalog.update(f.definition.id, 1, { ...settings, enabled: false });
+  f.catalog.update(f.definition.id, f.definition.revision, {
+    ...settings,
+    enabled: false,
+  });
   expect(
     await f.execute("a", operation, { query: "hello" }, f.context),
   ).toEqual({ ok: false, error: "denied" });
   expect(f.request).not.toHaveBeenCalled();
 });
 
-it("allows an explicitly credential-free grant and never borrows another agent's secret", async () => {
+it("allows anonymous execution after explicit credential removal", async () => {
   const f = await fixture();
-  await f.credentials.set("a", f.definition.id, 1, null);
+  await f.credentials.set(f.definition.id, f.definition.revision, null);
   expect(
     await f.execute("a", f.operation(), { query: "hello" }, f.context),
   ).toMatchObject({ ok: true });
@@ -261,7 +267,7 @@ it.each(["missing", "duplicate", "changed", "malformed"])(
     ).toEqual({ ok: false, error: "denied" });
     expect(f.calls()).toHaveLength(0);
     expect(f.catalog.get(f.definition.id)).toMatchObject({
-      revision: 2,
+      revision: f.definition.revision + 1,
       blockedTools: ["search"],
     });
     f.request.mockClear();
@@ -273,7 +279,7 @@ it.each(["missing", "duplicate", "changed", "malformed"])(
       await f.execute("a", operation, { query: "hello" }, f.context),
     ).toEqual({ ok: false, error: "denied" });
     expect(f.request).not.toHaveBeenCalled();
-    f.catalog.update(f.definition.id, 2, {
+    f.catalog.update(f.definition.id, f.definition.revision + 1, {
       ...settings,
       reviewedTools: ["search"],
     });
@@ -302,12 +308,16 @@ it("ignores JSON key order when comparing remote schemas", async () => {
   ).toMatchObject({ ok: true });
 });
 
-it("rechecks the grant after credential reads and immediately before tools/call", async () => {
+it("rechecks access after credential reads and immediately before tools/call", async () => {
   const f = await fixture();
   const original = f.credentials.read.bind(f.credentials);
   vi.spyOn(f.credentials, "read").mockImplementationOnce(async (...args) => {
     const token = await original(...args);
-    await f.credentials.set("a", f.definition.id, 1, "fixture-replacement");
+    await f.credentials.set(
+      f.definition.id,
+      f.definition.revision,
+      "fixture-replacement",
+    );
     return token;
   });
   expect(
@@ -315,7 +325,12 @@ it("rechecks the grant after credential reads and immediately before tools/call"
   ).toEqual({ ok: false, error: "denied" });
   expect(f.request).not.toHaveBeenCalled();
   f.remote.listed = () => {
-    f.catalog.revoke("a", f.definition.id);
+    f.catalog.setAccess(
+      "a",
+      f.definition.id,
+      f.catalog.get(f.definition.id)!.revision,
+      false,
+    );
   };
   expect(
     await f.execute("a", f.operation(), { query: "hello" }, f.context),
@@ -328,7 +343,7 @@ it.each([301, 307, 401, 403])(
   async (status) => {
     const f = await fixture();
     f.request.mockResolvedValue(
-      new Response("fixture-credential-a", {
+      new Response("fixture-shared-credential", {
         status,
         headers: { Location: "https://foreign.example.test/mcp" },
       }),
@@ -354,10 +369,15 @@ it.each(["json", "sse"])(
         id: message.id,
         result: {
           content: [
-            { type: "text", text: `Bearer fixture-credential-a ${endpoint}` },
+            {
+              type: "text",
+              text: `Bearer fixture-shared-credential ${endpoint}`,
+            },
           ],
-          structuredContent: { [endpoint]: { token: "fixture-credential-a" } },
-          _meta: { secret: "fixture-credential-a" },
+          structuredContent: {
+            [endpoint]: { token: "fixture-shared-credential" },
+          },
+          _meta: { secret: "fixture-shared-credential" },
           isError: true,
         },
       };
@@ -382,7 +402,7 @@ it.each(["json", "sse"])(
       },
     });
     expect(JSON.stringify(outcome)).not.toContain(endpoint);
-    expect(JSON.stringify(outcome)).not.toContain("fixture-credential-a");
+    expect(JSON.stringify(outcome)).not.toContain("fixture-shared-credential");
   },
 );
 
@@ -427,7 +447,7 @@ it("bounds aggregate response bodies before decoding them", async () => {
 it("never retries a write after losing its response or receiving a protocol error", async () => {
   const f = await fixture();
   f.remote.call = async () => {
-    throw new Error(`Lost response ${endpoint} fixture-credential-a`);
+    throw new Error(`Lost response ${endpoint} fixture-shared-credential`);
   };
   expect(
     await f.execute(
@@ -442,7 +462,7 @@ it("never retries a write after losing its response or receiving a protocol erro
     Response.json({
       jsonrpc: "2.0",
       id: message.id,
-      error: { code: -32000, message: "fixture-credential-a" },
+      error: { code: -32000, message: "fixture-shared-credential" },
     });
   expect(
     await f.execute(
@@ -520,7 +540,12 @@ it.each(["search", "add"])(
     const f = await fixture();
     const original = f.remote.call;
     f.remote.call = async (message, init) => {
-      f.catalog.revoke("a", f.definition.id);
+      f.catalog.setAccess(
+        "a",
+        f.definition.id,
+        f.catalog.get(f.definition.id)!.revision,
+        false,
+      );
       return original(message, init);
     };
     expect(

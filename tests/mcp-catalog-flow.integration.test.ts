@@ -35,7 +35,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 const endpoint = "https://fixture-upstream.example.test/mcp";
-const credential = (id: string) => `fixture-upstream-bearer-${id}`;
+const credential = "fixture-upstream-shared-bearer";
 const schema = {
   type: "object",
   properties: { n: { type: "integer" } },
@@ -44,7 +44,7 @@ const schema = {
 };
 
 async function fixture(
-  options: { timeoutMs?: number; longNames?: boolean; grants?: boolean } = {},
+  options: { timeoutMs?: number; longNames?: boolean; access?: boolean } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "nimbot-mcp-catalog-flow-"));
   const path = join(directory, "server.sqlite");
@@ -70,12 +70,11 @@ async function fixture(
       inputSchema: schema,
     })),
   };
-  const definition = catalog.create(settings);
-  for (const id of ["a", "b"])
-    if (options.grants !== false) {
-      catalog.grant(id, definition.id, 1);
-      await credentials.set(id, definition.id, 1, credential(id));
-    }
+  const { id } = catalog.create(settings);
+  await credentials.set(id, 1, credential);
+  const definition = catalog.get(id)!;
+  if (options.access === false)
+    catalog.setAccess("a", id, definition.revision, false);
   const recordings: {
     method: string;
     authorization?: string;
@@ -112,11 +111,7 @@ async function fixture(
         authorization,
         params: message.params,
       });
-      if (
-        ![credential("a"), credential("b")].some(
-          (token) => authorization === `Bearer ${token}`,
-        )
-      ) {
+      if (authorization !== `Bearer ${credential}`) {
         response.writeHead(401).end();
         return;
       }
@@ -165,7 +160,6 @@ async function fixture(
       reply({
         content: [{ type: "text", text: `${endpoint} ${authorization}` }],
         structuredContent: {
-          agent: authorization!.endsWith("-a") ? "a" : "b",
           n: (message.params?.arguments as { n: number }).n,
         },
       });
@@ -497,7 +491,7 @@ async function fixture(
   };
 }
 
-it("routes both agents through Host outboxes using their own credentials and denies revoked grants", async () => {
+it("routes both agents through Host outboxes using the shared credential and honors agent opt-outs", async () => {
   const f = await fixture();
   await f.start("a");
   await f.start("b");
@@ -505,14 +499,14 @@ it("routes both agents through Host outboxes using their own credentials and den
     const discovered = await f.rpc(id, "tools/list");
     expect(discovered.result.tools).toHaveLength(2);
     expect(await f.call(id)).toMatchObject({
-      result: { structuredContent: { structuredContent: { agent: id, n: 7 } } },
+      result: { structuredContent: { structuredContent: { n: 7 } } },
     });
   }
   expect(f.calls().map(({ authorization }) => authorization)).toEqual([
-    `Bearer ${credential("a")}`,
-    `Bearer ${credential("b")}`,
+    `Bearer ${credential}`,
+    `Bearer ${credential}`,
   ]);
-  f.catalog.revoke("a", f.definition.id);
+  f.catalog.setAccess("a", f.definition.id, f.definition.revision, false);
   expect((await f.call("a")).result.isError).toBe(true);
   expect((await f.call("b")).result.isError).not.toBe(true);
   expect(f.calls()).toHaveLength(3);
@@ -597,15 +591,15 @@ it("keeps credentials and upstream URLs out of Host submissions, persisted files
   for (const file of await readdir(join(f.directory, "a")))
     payloads.push((await readFile(join(f.directory, "a", file))).toString());
   for (const payload of payloads)
-    for (const secret of [endpoint, credential("a"), credential("b")])
+    for (const secret of [endpoint, credential])
       expect(payload).not.toContain(secret);
   expect(result.result.structuredContent.content[0].text).toContain(
     "[redacted]",
   );
 });
 
-it("does not register MCP tools for a chat without a grant", async () => {
-  const f = await fixture({ grants: false });
+it("does not register MCP tools for a chat with MCP access turned off", async () => {
+  const f = await fixture({ access: false });
   await f.start();
   expect(f.contexts.get("a")!.tools).toBeUndefined();
   expect(f.bridges.has("a")).toBe(false);
@@ -637,24 +631,24 @@ it("denies a disabled definition and unknown operations before contacting upstre
     ).error,
   ).toBeDefined();
   expect(f.recordings).toHaveLength(0);
-  f.catalog.update(f.definition.id, 1, { ...f.settings, enabled: false });
+  f.catalog.update(f.definition.id, f.definition.revision, {
+    ...f.settings,
+    enabled: false,
+  });
   expect((await f.call("a")).result.isError).toBe(true);
   expect(f.recordings).toHaveLength(0);
 });
 
-it("does not fall back to an anonymous call when one agent's stored credential is missing", async () => {
+it("does not fall back to an anonymous call when the shared credential is missing", async () => {
   const f = await fixture();
   await f.start("a");
   await f.start("b");
-  const reference = f.catalog.credentialBinding(
-    "a",
-    f.definition.id,
-  )!.reference!;
+  const reference = f.catalog.credentialBinding(f.definition.id)!.reference!;
   await rm(join(f.directory, "secrets", reference));
   expect((await f.call("a")).result.isError).toBe(true);
   expect(f.recordings).toHaveLength(0);
-  expect((await f.call("b")).result.isError).not.toBe(true);
-  expect(f.calls()[0]!.authorization).toBe(`Bearer ${credential("b")}`);
+  expect((await f.call("b")).result.isError).toBe(true);
+  expect(f.recordings).toHaveLength(0);
 });
 
 it("does not expose or execute unreviewed remote tools", async () => {
@@ -889,7 +883,7 @@ it.skipIf(!dockerImage)(
         });
         expect(f.calls()).toMatchObject([
           {
-            authorization: `Bearer ${credential("a")}`,
+            authorization: `Bearer ${credential}`,
             params: { name: "search", arguments: { n: 7 } },
           },
         ]);
@@ -931,11 +925,7 @@ it.skipIf(!dockerImage)(
           processEnvironment,
           ...captured,
         ])
-          for (const privateValue of [
-            endpoint,
-            credential("a"),
-            credential("b"),
-          ])
+          for (const privateValue of [endpoint, credential])
             expect(artifact.includes(privateValue)).toBe(false);
       } finally {
         service.close();

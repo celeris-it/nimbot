@@ -20,7 +20,7 @@ const MAX_TOOLS = 23;
 const MAX_METADATA_BYTES = 16_384;
 
 /**
- * Select only administrator-pinned tools from current Server-owned grants.
+ * Select only administrator-pinned tools from integrations available to the agent.
  * This is the shared lookup for capability metadata and future execution handlers;
  * endpoint and credential bindings must never be attached to Host submissions.
  */
@@ -29,10 +29,8 @@ export function createMcpToolSelection(catalog: McpCatalog) {
     const selected: SelectedTool[] = [];
     const descriptors: RemoteToolDefinition[] = [];
     // Stable ordering prevents label edits from changing the bounded selection.
-    for (const definitionId of catalog.grants(agentId)) {
-      const definition = catalog.get(definitionId);
-      const binding = catalog.credentialBinding(agentId, definitionId);
-      if (!definition?.enabled || !binding) continue;
+    for (const { definition, scope } of catalog.availableForAgent(agentId)) {
+      const definitionId = definition.id;
       for (const tool of definition.tools) {
         if (
           tool.enabled === false ||
@@ -45,8 +43,7 @@ export function createMcpToolSelection(catalog: McpCatalog) {
             agentId,
             definitionId,
             revision: definition.revision,
-            scope: binding.scope,
-            credential: binding.reference,
+            scope,
             tool: tool.name,
           })}`,
           // Reserve space for the engine's MCP server prefix in provider tool names.

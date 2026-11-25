@@ -30,6 +30,10 @@ const mcpToolSetup = readFileSync(
   new URL("./state-schema/mcp-tool-setup.sql", import.meta.url),
   "utf8",
 );
+const mcpSharedCredentials = readFileSync(
+  new URL("./state-schema/mcp-shared-credentials.sql", import.meta.url),
+  "utf8",
+);
 function migrateReferencedTable(db, sql) {
   db.exec(sql);
   if (db.prepare("PRAGMA foreign_key_check").get())
@@ -37,7 +41,7 @@ function migrateReferencedTable(db, sql) {
 }
 const definitions = {
   "server-process": {
-    version: 7,
+    version: 8,
     applicationId: 0x4e494d50,
     get current() {
       return [
@@ -48,6 +52,7 @@ const definitions = {
         serverProcessV5,
         serverProcessV6,
         mcpToolSetup,
+        mcpSharedCredentials,
       ].join("\n");
     },
     migrations: {
@@ -68,6 +73,9 @@ const definitions = {
       },
       7(db) {
         db.exec(mcpToolSetup);
+      },
+      8(db) {
+        db.exec(mcpSharedCredentials);
       },
     },
   },

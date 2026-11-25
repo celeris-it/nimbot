@@ -1,6 +1,6 @@
 <script lang="ts">
   import { messages, numberFormat, pluralRules } from "./i18n/language.js";
-  import { ActionButton, Icon, PasswordField } from "./components/index.js";
+  import { ActionButton, Icon, Switch } from "./components/index.js";
   import type { McpAgentDefinition } from "../../server/src/panel/panel-contracts.js";
   let {
     definitions,
@@ -11,21 +11,8 @@
     definitions: McpAgentDefinition[] | undefined;
     refresh: () => void;
     busy: boolean;
-    action: (
-      definition: McpAgentDefinition,
-      command: "grant" | "revoke" | "credential",
-      token?: string | null,
-    ) => Promise<void>;
+    action: (definition: McpAgentDefinition, enabled: boolean) => Promise<void>;
   } = $props();
-  let tokens = $state<Record<string, string>>({});
-
-  async function save(event: SubmitEvent, definition: McpAgentDefinition) {
-    event.preventDefault();
-    const token = tokens[definition.id];
-    if (busy || !token) return;
-    delete tokens[definition.id];
-    await action(definition, "credential", token);
-  }
 </script>
 
 <section aria-labelledby="mcp-access">
@@ -54,13 +41,28 @@
           aria-labelledby={`integration-${definition.id}`}
         >
           <h3 id={`integration-${definition.id}`}>{definition.label}</h3>
-          <p>
-            {definition.granted
-              ? $messages("Access granted")
-              : $messages("Access withheld")} · {definition.enabled
-              ? $messages("Enabled in catalog")
-              : $messages("Disabled in catalog")}
-          </p>
+          <Switch
+            checked={definition.accessEnabled}
+            disabled={busy}
+            onchange={(event) => {
+              // Render the confirmed setting until the Server saves the change.
+              const enabled = event.currentTarget.checked;
+              event.currentTarget.checked = definition.accessEnabled;
+              void action(definition, enabled);
+            }}
+            >{$messages("Enable {0} for this agent", definition.label)}</Switch
+          >
+          {#if !definition.enabled}
+            <p>{$messages("Disabled in catalog")}</p>
+          {/if}
+          {#if definition.credentialStatus === "required"}
+            <p>
+              {$messages("Credential required.")}
+              <a href={`/mcp/${encodeURIComponent(definition.id)}`}
+                >{$messages("Set shared credential")}</a
+              >
+            </p>
+          {/if}
           {#if definition.blockedTools?.length}
             <p>
               {$messages(
@@ -73,49 +75,6 @@
                 >{$messages("Review tools")}</a
               >
             </p>
-          {/if}
-          {#if definition.granted}
-            <form
-              aria-describedby="form-error"
-              aria-busy={busy}
-              onsubmit={(event) => save(event, definition)}
-            >
-              <label for={`credential-${definition.id}`}
-                >{$messages("Bearer credential")}</label
-              >
-              <PasswordField
-                id={`credential-${definition.id}`}
-                bind:value={tokens[definition.id]}
-                maxlength={4096}
-                autocomplete="new-password"
-                required
-              />
-              <ActionButton variant="primary" disabled={busy} type="submit"
-                >{definition.hasCredential
-                  ? $messages("Replace credential")
-                  : $messages("Save credential")}</ActionButton
-              >
-            </form>
-            {#if definition.hasCredential}
-              <ActionButton
-                disabled={busy}
-                onclick={() => action(definition, "credential", null)}
-                >{$messages("Remove credential")}</ActionButton
-              >
-            {/if}
-            <ActionButton
-              disabled={busy}
-              onclick={() => {
-                delete tokens[definition.id];
-                return action(definition, "revoke");
-              }}>{$messages("Revoke access")}</ActionButton
-            >
-          {:else}
-            <ActionButton
-              disabled={busy}
-              onclick={() => action(definition, "grant")}
-              >{$messages("Grant access")}</ActionButton
-            >
           {/if}
         </section>
       {/each}

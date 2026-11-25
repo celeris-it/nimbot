@@ -4,6 +4,7 @@
     ActionButton,
     Checkbox,
     Select,
+    PasswordField,
     Switch,
     TextField,
   } from "./components/index.js";
@@ -27,7 +28,7 @@
     example,
     busy,
     save,
-    discoveryAgents,
+    saveCredential,
     discover,
     activate,
   }: {
@@ -35,9 +36,9 @@
     example?: McpExample;
     busy: boolean;
     save: (settings: Settings) => Promise<void>;
-    discoveryAgents: { id: string; name: string }[];
-    discover: (agentId?: string) => Promise<McpDiscoveryResult | undefined>;
-    activate: (agentId?: string) => Promise<void>;
+    saveCredential: (token: string | null) => Promise<void>;
+    discover: () => Promise<McpDiscoveryResult | undefined>;
+    activate: () => Promise<void>;
   } = $props();
   let label = $state(untrack(() => definition?.label ?? example?.label ?? ""));
   let endpoint = $state(
@@ -63,7 +64,7 @@
   let parseErrorMessage = $state<() => string>();
   const parseError = $derived(parseErrorMessage?.() ?? "");
   let discovery = $state<McpDiscoveryResult>();
-  let credentialAgent = $state("");
+  let credential = $state("");
   let endpointChanged = $derived(
     endpoint.trim() !== (definition?.endpoint ?? example?.endpoint),
   );
@@ -89,7 +90,7 @@
     timeout: $messages("Connection timed out."),
     redirect: $messages("The endpoint attempted to redirect the connection."),
     unauthorized: $messages(
-      "The endpoint rejected the connection. Check the selected credential.",
+      "The endpoint rejected the connection. Check the shared credential.",
     ),
     pagination_limit: $messages(
       "The MCP endpoint exceeded the four-page tool listing limit.",
@@ -103,7 +104,7 @@
   async function testConnection() {
     if (busy || endpointChanged) return;
     discovery = undefined;
-    discovery = await discover(credentialAgent || undefined);
+    discovery = await discover();
   }
 
   async function reviewTool(tool: McpDiscoveredTool) {
@@ -218,18 +219,67 @@
   {#if example?.requiresBearerCredential}
     <p id="mcp-endpoint-help">
       {$messages(
-        "Save this integration, then grant access and save your personal access token from the agent’s Access page. Compatible tools are enabled when the connection succeeds.",
+        "Save this integration, then add your personal access token on its edit page. Compatible tools are enabled when the connection succeeds.",
       )}
     </p>
   {:else if !example}
     <p id="mcp-endpoint-help">
       {$messages(
-        "Use an endpoint you trust. Changing it removes current agent grants and credentials.",
+        "Use an endpoint you trust. Changing it removes the shared credential.",
       )}
     </p>
     <Switch bind:checked={enabled}>{$messages("Enable integration")}</Switch>
   {/if}
   {#if definition}
+    <h2>{$messages("Shared credential")}</h2>
+    <p id="mcp-credential-status">
+      {definition.credentialStatus === "saved"
+        ? $messages("Credential saved.")
+        : definition.credentialStatus === "required"
+          ? $messages("Credential required.")
+          : $messages("No credential saved.")}
+      {$messages(
+        "Agents with this integration enabled use the same credential.",
+      )}
+    </p>
+    <label for="mcp-shared-credential">{$messages("Bearer credential")}</label>
+    <PasswordField
+      id="mcp-shared-credential"
+      bind:value={credential}
+      maxlength={4096}
+      autocomplete="new-password"
+      onkeydown={(event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        if (credential && !busy && !draftChanged)
+          void saveCredential(credential);
+      }}
+      aria-describedby="mcp-credential-status"
+      disabled={busy || draftChanged}
+    />
+    <div class="actions">
+      <ActionButton
+        type="button"
+        disabled={busy || draftChanged || !credential}
+        onclick={() => saveCredential(credential)}
+        >{definition.credentialStatus === "saved"
+          ? $messages("Replace credential")
+          : $messages("Save credential")}</ActionButton
+      >
+      {#if definition.credentialStatus === "saved"}
+        <ActionButton
+          type="button"
+          disabled={busy || draftChanged}
+          onclick={() => saveCredential(null)}
+          >{$messages("Remove credential")}</ActionButton
+        >
+      {/if}
+    </div>
+    {#if draftChanged}<p>
+        {$messages(
+          "Save your integration changes before updating the credential or tools.",
+        )}
+      </p>{/if}
     <h2>{$messages("Connection test")}</h2>
     {#if definition.toolSetup === "pending"}
       <p>
@@ -238,15 +288,6 @@
         )}
       </p>
     {/if}
-    <label for="mcp-discovery-credential"
-      >{$messages("Connection credential")}</label
-    >
-    <Select id="mcp-discovery-credential" bind:value={credentialAgent}>
-      <option value="">{$messages("No credential")}</option>
-      {#each discoveryAgents as agent (agent.id)}
-        <option value={agent.id}>{agent.name} ({agent.id})</option>
-      {/each}
-    </Select>
     {#if endpointChanged}<p>
         {$messages("Save the endpoint before testing the connection.")}
       </p>{/if}
@@ -259,7 +300,7 @@
       <ActionButton
         type="button"
         disabled={busy || draftChanged}
-        onclick={() => activate(credentialAgent || undefined)}
+        onclick={() => activate()}
         >{definition.toolSetup === "ready"
           ? $messages("Update tools")
           : definition.toolSetup === "pending"
@@ -267,9 +308,6 @@
             : $messages("Enable all tools")}</ActionButton
       >
     </div>
-    {#if draftChanged}<p>
-        {$messages("Save your changes before updating tools.")}
-      </p>{/if}
   {:else if !example?.requiresBearerCredential}
     <p>
       {$messages("Compatible tools are enabled when the connection succeeds.")}

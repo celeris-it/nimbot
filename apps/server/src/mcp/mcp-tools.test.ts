@@ -55,7 +55,6 @@ async function fixture(
         }
       : settings,
   );
-  catalog.grant("a", definition.id, 1);
   const queued =
     platform === "telegram"
       ? tasks.enqueue({
@@ -420,7 +419,13 @@ it.each(["owner", "rule", "grant", "schema", "binding"])(
         target: mcpTarget(f.definition.id, "write"),
         effect: "deny",
       });
-    if (reason === "grant") f.catalog.revoke("a", f.definition.id);
+    if (reason === "grant")
+      f.catalog.setAccess(
+        "a",
+        f.definition.id,
+        f.catalog.get(f.definition.id)!.revision,
+        false,
+      );
     if (reason === "schema")
       f.catalog.update(f.definition.id, 1, { ...settings, tools: [] });
     if (reason === "binding") f.setReachable(false);
@@ -507,7 +512,12 @@ it("lists and invokes a tool beyond the individual turn limit using the same lea
     outcome,
   );
   expect(f.execute).toHaveBeenCalledOnce();
-  f.catalog.revoke("a", f.definition.id);
+  f.catalog.setAccess(
+    "a",
+    f.definition.id,
+    f.catalog.get(f.definition.id)!.revision,
+    false,
+  );
   expect(await f.catalogCall("catalog-mcp.list", {})).toEqual({
     ok: true,
     result: { tools: [] },

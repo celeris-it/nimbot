@@ -116,7 +116,6 @@
     new URLSearchParams(location.search).get("example"),
   );
   let mcpDefinition = $state<McpDefinition>();
-  let mcpDiscoveryAgents = $state<{ id: string; name: string }[]>([]);
   let mcpAgentDefinitions = $state<McpAgentDefinition[]>();
   let peers = $state<{
     grants: PeerGrant[];
@@ -400,7 +399,6 @@
     mcpExampleId = url.searchParams.get("example");
     mcpExample = undefined;
     mcpExamples = [];
-    mcpDiscoveryAgents = [];
     mcpDefinitions = [];
     mcpAgentDefinitions = undefined;
     peers = undefined;
@@ -512,15 +510,11 @@
           }
         } else if (id !== "new") {
           const url = `/api/mcp/${id}`;
-          const [definition, discovery] = await Promise.all([
-            request<McpDefinition>(url, { signal: current.signal }),
-            request<{ agents: { id: string; name: string }[] }>(
-              `${url}/discovery-agents`,
-              { signal: current.signal },
-            ),
-          ]);
+          const definition = await request<McpDefinition>(url, {
+            signal: current.signal,
+          });
+          if (current.signal.aborted) return;
           mcpDefinition = definition;
-          mcpDiscoveryAgents = discovery.agents;
         }
       } else if (route) {
         const detail = await request<AgentDetail>(`/api/agents/${route[1]}`, {
@@ -946,26 +940,49 @@
       );
     }
   }
-  async function discoverMcp(agentId?: string) {
+  async function deleteMcp(definition: McpDefinitionSummary) {
+    if (
+      busy ||
+      !window.confirm(
+        $messages(
+          "Delete {0}? This removes the integration, its tools, and its shared credential for all agents.",
+          definition.label,
+        ),
+      )
+    )
+      return;
+    await mutate<{ cleanupPending: boolean }>(
+      `/api/mcp/${encodeURIComponent(definition.id)}/delete`,
+      JSON.stringify({ revision: definition.revision }),
+      ({ cleanupPending }) => {
+        navigate("/mcp", true);
+        noticeMessage = () =>
+          cleanupPending
+            ? $messages("Integration deleted. Credential cleanup is pending.")
+            : $messages("Integration deleted.");
+      },
+    );
+  }
+  async function discoverMcp() {
     if (!mcpDefinition || busy) return undefined;
     let result: McpDiscoveryResult | undefined;
     await mutate<McpDiscoveryResult>(
       `/api/mcp/${encodeURIComponent(mcpDefinition.id)}/discover`,
-      JSON.stringify({ revision: mcpDefinition.revision, agentId }),
+      JSON.stringify({ revision: mcpDefinition.revision }),
       (value) => {
         result = value;
       },
     );
     return result;
   }
-  async function activateMcpTools(agentId?: string) {
+  async function activateMcpTools() {
     if (!mcpDefinition) return;
     await mutate<{
       definition: McpDefinition;
       activation: McpActivationResult;
     }>(
       `/api/mcp/${encodeURIComponent(mcpDefinition.id)}/activate-tools`,
-      JSON.stringify({ revision: mcpDefinition.revision, agentId }),
+      JSON.stringify({ revision: mcpDefinition.revision }),
       (result) => {
         mcpDefinition = result.definition;
         noticeMessage = () =>
@@ -973,38 +990,49 @@
       },
     );
   }
-  async function mcpAgentAction(
-    definition: McpAgentDefinition,
-    command: "grant" | "revoke" | "credential",
-    token?: string | null,
-  ) {
-    if (!agent) return;
-    const startedPath = path;
+  async function saveMcpCredential(token: string | null) {
+    if (!mcpDefinition || busy) return;
     await mutate<{
-      cleanupPending?: boolean;
+      definition: McpDefinition;
+      cleanupPending: boolean;
       activation?: McpActivationResult;
     }>(
-      `/api/agents/${encodeURIComponent(agent.id)}/mcp/${encodeURIComponent(definition.id)}/${command}`,
-      JSON.stringify({ revision: definition.revision, token }),
+      `/api/mcp/${encodeURIComponent(mcpDefinition.id)}/credential`,
+      JSON.stringify({ revision: mcpDefinition.revision, token }),
       (result) => {
+        mcpDefinition = result.definition;
         noticeMessage = () =>
           [
-            result.cleanupPending
-              ? $messages("MCP access updated. Credential cleanup is pending.")
-              : $messages("MCP access updated."),
+            token === null
+              ? $messages("Credential removed.")
+              : $messages("Credential saved."),
             result.activation
               ? mcpActivationMessage($messages, result.activation)
+              : "",
+            result.cleanupPending
+              ? $messages("Credential cleanup is pending.")
               : "",
           ]
             .filter(Boolean)
             .join(" ");
       },
     );
-    if (path === startedPath && session) {
-      controller?.abort();
-      inFlight = false;
-      void load("mcp");
-    }
+  }
+  async function mcpAgentAction(
+    definition: McpAgentDefinition,
+    enabled: boolean,
+  ) {
+    if (!agent) return;
+    await mutate<{ accessEnabled: boolean }>(
+      `/api/agents/${encodeURIComponent(agent.id)}/mcp/${encodeURIComponent(definition.id)}/access`,
+      JSON.stringify({ revision: definition.revision, enabled }),
+      ({ accessEnabled }) => {
+        mcpAgentDefinitions = mcpAgentDefinitions?.map((item) =>
+          item.id === definition.id ? { ...item, accessEnabled } : item,
+        );
+        noticeMessage = () => $messages("MCP access updated.");
+      },
+    );
   }
   async function cancelDelegation(id: string) {
     if (!agent || busy) return;
@@ -1572,7 +1600,12 @@
       {:else if path === "/agents/new"}
         {#key path}<AgentForm mode="new" {busy} {submit} />{/key}
       {:else if path === "/mcp"}
-        <McpCatalog definitions={mcpDefinitions} examples={mcpExamples} />
+        <McpCatalog
+          definitions={mcpDefinitions}
+          examples={mcpExamples}
+          {busy}
+          remove={deleteMcp}
+        />
       {:else if mcpRoute}
         <h1 tabindex="-1">
           {mcpDefinition
@@ -1581,14 +1614,25 @@
               ? $messages("Set up {0}", mcpExample.label)
               : $messages("Add MCP integration")}
         </h1>
-        <ActionButton href="/mcp">{$messages("Back to catalog")}</ActionButton>
+        <div class="button-row">
+          <ActionButton href="/mcp">{$messages("Back to catalog")}</ActionButton
+          >
+          {#if mcpDefinition}
+            <ActionButton
+              variant="danger"
+              disabled={busy}
+              onclick={() => mcpDefinition && deleteMcp(mcpDefinition)}
+              >{$messages("Delete integration")}</ActionButton
+            >
+          {/if}
+        </div>
         {#key path + (mcpDefinition?.revision ?? mcpExample?.id ?? "")}
           <McpDefinitionForm
             definition={mcpDefinition}
             example={mcpExample}
             {busy}
             save={saveMcp}
-            discoveryAgents={mcpDiscoveryAgents}
+            saveCredential={saveMcpCredential}
             discover={discoverMcp}
             activate={activateMcpTools}
           />
