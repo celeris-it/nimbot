@@ -137,7 +137,7 @@ async function fixture(agentId = "a", remote = false) {
     },
     discord: {
       admit: () => true,
-      progress: async () => {},
+      sendTyping: async () => {},
       deliver: async () => {},
       sendApproval: async () => "1",
     },

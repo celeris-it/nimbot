@@ -133,6 +133,7 @@ async function fixture(
   let schedules = openScheduleStore(path, { now: () => clock.now });
   const notificationStore = openNotificationStore(path);
   const sent: { chatId: number; text: string; markup?: unknown }[] = [];
+  const typing = vi.fn();
   const decisions = vi.fn(createHostApprovals(host, request));
   function makeServices() {
     return createAgentTaskServices(async (id) => ({
@@ -193,6 +194,7 @@ async function fixture(
       supports_join_request_queries: false,
     };
     bot.api.config.use(async (previous, method, payload) => {
+      if (method === "sendChatAction") typing(payload);
       if (method !== "sendMessage")
         return { ok: true, result: true } as Awaited<
           ReturnType<typeof previous>
@@ -253,6 +255,7 @@ async function fixture(
     context,
     answers,
     sent,
+    typing,
     decisions,
     hostStore,
     hostIds,
@@ -531,9 +534,11 @@ it.each(["schedule_first", "chat_first"])(
           ? ["schedule", "chat"]
           : ["chat", "schedule"],
       );
-      expect(f.sent.filter((s) => s.text.startsWith("Working:"))).toHaveLength(
-        1,
-      );
+      expect(f.typing).toHaveBeenCalledExactlyOnceWith({
+        chat_id: 42,
+        action: "typing",
+      });
+      expect(f.sent.some((s) => s.text.startsWith("Working:"))).toBe(false);
       expect(f.schedules.recentRuns(schedule.id, 1)[0]?.taskStatus).toBe(
         "completed",
       );
@@ -668,7 +673,7 @@ it.each(["allow", "timeout"])(
       expect(f.schedules.recentRuns(schedule.id, 1)[0]?.taskStatus).toBe(
         "completed",
       );
-      expect(f.sent.every((s) => !s.text.startsWith("Working:"))).toBe(true);
+      expect(f.typing).not.toHaveBeenCalled();
     } finally {
       await f.close();
     }

@@ -73,7 +73,7 @@ it("shares Host context across simultaneous channel tasks, approvals, duplicates
       decide: createHostApprovals(host, request),
       discord: {
         admit: () => true,
-        progress: async () => {},
+        sendTyping: async () => {},
         sendApproval,
         acknowledge: async () => true,
         deliver: async (_task, result) => {

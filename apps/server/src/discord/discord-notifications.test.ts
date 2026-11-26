@@ -37,6 +37,47 @@ const setup = (responses: Array<Response | Error>, configured = target()) => {
   };
 };
 
+it("posts typing only to the linked DM and keeps channel rate limits separate from delivery", async () => {
+  const f = setup([
+    Response.json({ retry_after: 12 }, { status: 429 }),
+    dm(),
+    message(),
+    new Response(null, { status: 204 }),
+  ]);
+  const task = {
+    agentId: "a",
+    origin: { platform: "discord", botId, ownerId, channelId },
+  } as const;
+  const controller = new AbortController();
+  const canSend = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
+  await f.adapter.sendTyping(task, controller.signal, canSend);
+  expect(f.request).not.toHaveBeenCalled();
+
+  const sendTyping = () =>
+    f.adapter.sendTyping(task, controller.signal, () => true);
+  await sendTyping();
+  expect(f.request.mock.calls[0]).toEqual([
+    `https://discord.com/api/v10/channels/${channelId}/typing`,
+    {
+      method: "POST",
+      redirect: "error",
+      headers: { Authorization: "Bot private-token" },
+      signal: controller.signal,
+    },
+  ]);
+  f.advance(8000);
+  await sendTyping();
+  expect(f.request).toHaveBeenCalledOnce();
+  expect(await f.adapter.sendTask(task, "done")).toMatchObject({
+    status: "delivered",
+  });
+  f.advance(4000);
+  await sendTyping();
+  controller.abort();
+  await sendTyping();
+  expect(f.request).toHaveBeenCalledTimes(4);
+});
+
 it("resolves only configured agents and rejects empty text before lookup", async () => {
   const f = setup([]);
   expect(await f.adapter.send("a", " ")).toMatchObject({

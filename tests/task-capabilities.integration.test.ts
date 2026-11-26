@@ -80,7 +80,7 @@ async function fixture(enabled = true, failFinish = false) {
     discord: {
       admit: (task) =>
         task.origin.ownerId === "456" && task.origin.channelId === "789",
-      progress: async () => {},
+      sendTyping: async () => {},
       deliver: async () => {},
       sendApproval: async () => "1",
     },

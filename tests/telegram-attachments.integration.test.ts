@@ -161,7 +161,7 @@ async function setup() {
       decide: async () => false,
       discord: {
         admit: () => true,
-        progress: async () => {},
+        sendTyping: async () => {},
         deliver: async () => {},
         sendApproval: async () => "1",
       },

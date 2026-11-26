@@ -44,7 +44,7 @@ function setup() {
     },
     discord: {
       admit: () => true,
-      progress: async () => {},
+      sendTyping: async () => {},
       deliver: async () => {},
       sendApproval: async (_task, content, buttons) => {
         sent.push({ content, buttons });

@@ -138,7 +138,7 @@ async function fixture() {
       },
       discord: {
         admit: canReach,
-        progress: async () => {},
+        sendTyping: async () => {},
         deliver: async () => {},
         acknowledge: async () => true,
         async sendApproval(_task, text, buttons) {

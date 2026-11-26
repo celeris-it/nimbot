@@ -28,6 +28,7 @@ export function createDiscordNotifications(
   now: () => number = Date.now,
 ) {
   const cooldowns = new Map<string, number>();
+  const typingCooldowns = new Map<string, number>();
   const queues = new Map<string, Promise<void>>();
 
   async function deliver(
@@ -241,6 +242,62 @@ export function createDiscordNotifications(
   }
   return {
     send,
+    async sendTyping(
+      task: DiscordDestination,
+      signal: AbortSignal,
+      canSend: () => boolean,
+    ) {
+      const { botId, ownerId, channelId } = task.origin;
+      if (signal.aborted || !canSend() || !snowflake(channelId)) return;
+      const target = await resolve(task.agentId);
+      if (
+        !target ||
+        target.botId !== botId ||
+        target.ownerId !== ownerId ||
+        !target.token.trim() ||
+        !target.isCurrent() ||
+        signal.aborted ||
+        !canSend()
+      )
+        return;
+      const key = `${botId}:${channelId}`;
+      if (
+        (cooldowns.get(botId) ?? 0) > now() ||
+        (typingCooldowns.get(key) ?? 0) > now()
+      )
+        return;
+      typingCooldowns.delete(key);
+      const response = await request(
+        `https://discord.com/api/v10/channels/${channelId}/typing`,
+        {
+          method: "POST",
+          redirect: "error",
+          headers: { Authorization: `Bot ${target.token}` },
+          signal,
+        },
+      );
+      if (
+        response.status !== 429 &&
+        response.headers.get("x-ratelimit-remaining") !== "0"
+      )
+        return;
+      const data =
+        response.status === 429
+          ? record(await response.json().catch(() => undefined))
+          : {};
+      const delay = Math.max(
+        seconds(data.retry_after),
+        seconds(response.headers.get("retry-after")),
+        seconds(response.headers.get("x-ratelimit-reset-after")),
+      );
+      const retryAt = now() + (delay || 1) * 1000;
+      if (
+        data.global === true ||
+        response.headers.get("x-ratelimit-global") === "true"
+      )
+        cooldowns.set(botId, Math.max(cooldowns.get(botId) ?? 0, retryAt));
+      else typingCooldowns.set(key, retryAt);
+    },
     async sendTask(
       task: DiscordDestination,
       content: string,

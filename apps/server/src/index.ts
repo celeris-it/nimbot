@@ -375,11 +375,7 @@ async function main(): Promise<void> {
           sendFile: discordDelivery.sendFile,
           sendText: discordDelivery.sendTask,
           sendScheduleProposal: discordDelivery.sendScheduleProposal,
-          progress: async (task, message) => {
-            const delivery = await sendDiscordTask(task, `Working: ${message}`);
-            if (delivery !== "delivered")
-              throw new Error("Discord progress could not be confirmed");
-          },
+          sendTyping: discordDelivery.sendTyping,
           deliver: (task, outcome) =>
             sendDiscordTask(
               task,

@@ -50,7 +50,7 @@ async function setup() {
     },
     discord: {
       admit: () => true,
-      progress: async () => {},
+      sendTyping: async () => {},
       deliver: async () => {},
       sendApproval: async () => "1",
     },

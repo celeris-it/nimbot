@@ -81,7 +81,7 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
         task.origin.botId === (agentId === "a" ? "101" : "202") &&
         task.origin.ownerId === "42" &&
         task.origin.channelId === "300",
-      progress: async () => {},
+      sendTyping: async () => {},
       deliver: async () => {},
       acknowledge,
       sendApproval: async (_task, text, buttons) => {

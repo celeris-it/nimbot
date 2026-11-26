@@ -75,8 +75,8 @@ durable notification only for the first not-ready skip of a consecutive streak.
 
 Each executed run uses the agent's AI provider credits and shares its existing conversation
 context and FIFO queue with chat messages. Only the final result or failure is
-sent, prefixed with the schedule name saved at enqueue time; there are no
-`Working: …` messages. Results, approvals, and `/stop` use the linked owner chat
+sent, prefixed with the schedule name saved at enqueue time. Scheduled runs do
+not show a typing indicator. Results, approvals, and `/stop` use the linked owner chat
 saved when the run was queued. A new destination applies to future runs.
 
 ## Manual runs and schedule changes

@@ -120,7 +120,7 @@ function fixture() {
       canClaim: () => canRun,
       discord: {
         admit: () => linked,
-        progress: async () => {},
+        sendTyping: async () => {},
         sendApproval: async () => "99",
         attachments: createDiscordAttachments(host, resolve, request),
         sendFile: delivery.sendFile,

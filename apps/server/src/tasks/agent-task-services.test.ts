@@ -17,7 +17,7 @@ it("shares one runner across channel clients and keeps agents independent", asyn
     run,
     discord: {
       admit: () => true,
-      progress: async () => {},
+      sendTyping: async () => {},
       sendApproval: async () => "1",
       deliver: async () => {
         delivered.push(agentId);
@@ -136,7 +136,7 @@ it("loads a target through shared controls only after the parent's handoff commi
         },
         discord: {
           admit: () => true,
-          progress: async () => {},
+          sendTyping: async () => {},
           deliver: async () => {},
           sendApproval: async () => "1",
         },
@@ -226,7 +226,7 @@ it("reconciles a committed handoff after restart and retries failed target loadi
         run,
         discord: {
           admit: () => true,
-          progress: async () => {},
+          sendTyping: async () => {},
           deliver: async () => {},
           sendApproval: async () => "1",
         },

@@ -138,7 +138,11 @@ export function createBotTasks(config: {
       text: string,
       canSend: () => boolean,
     ): Promise<NotificationResult>;
-    progress(task: DiscordQueuedTask, message: string): Promise<void>;
+    sendTyping(
+      task: DiscordQueuedTask,
+      signal: AbortSignal,
+      canSend: () => boolean,
+    ): Promise<void>;
     deliver(
       task: DiscordQueuedTask,
       outcome: TaskOutcome,
@@ -155,6 +159,7 @@ export function createBotTasks(config: {
   let bot: Bot | undefined;
   let closed = false;
   let taskWithAttachment: string | undefined;
+  let stopTyping: (() => void) | undefined;
   const admit = (task: RoutedTask) =>
     task.origin.platform === "delegated"
       ? (config.delegation?.canExecute?.(task) ?? false)
@@ -587,6 +592,72 @@ export function createBotTasks(config: {
     );
   }
 
+  function startTyping(task: ChatTask, signal: AbortSignal) {
+    const telegram = bot;
+    const discord = config.discord;
+    const isDiscord = task.origin.platform === "discord";
+    if (signal.aborted || (isDiscord ? !discord : !telegram)) return;
+    const canSend = () =>
+      !closed &&
+      !signal.aborted &&
+      (isDiscord ||
+        ("botId" in task &&
+          bot === telegram &&
+          !!telegram?.isInited() &&
+          telegram.botInfo.id === task.botId)) &&
+      admit(task);
+
+    const controller = new AbortController();
+    let sending = false;
+    const stop = () => {
+      clearInterval(timer);
+      signal.removeEventListener("abort", stop);
+      controller.abort();
+      if (stopTyping === stop) stopTyping = undefined;
+    };
+    const pulse = async () => {
+      if (controller.signal.aborted) return;
+      if (!canSend()) {
+        stop();
+        return;
+      }
+      if (sending) return;
+      sending = true;
+      const requestSignal = AbortSignal.any([
+        controller.signal,
+        AbortSignal.timeout(4000),
+      ]);
+      try {
+        if (task.origin.platform === "discord") {
+          await discord!.sendTyping(
+            task as DiscordQueuedTask,
+            requestSignal,
+            canSend,
+          );
+        } else {
+          await telegram!.api.sendChatAction(
+            task.origin.chatId,
+            "typing",
+            undefined,
+            requestSignal as unknown as Parameters<
+              Bot["api"]["sendChatAction"]
+            >[3],
+          );
+        }
+      } catch {
+        // The indicator is best effort and never delays the task outcome.
+      } finally {
+        sending = false;
+      }
+    };
+    const refresh = () => void pulse().catch(stop);
+    const timer = setInterval(refresh, isDiscord ? 8000 : 4000);
+    stopTyping = stop;
+    signal.addEventListener("abort", stop, { once: true });
+    refresh();
+    return stop;
+  }
+
   let admission: ModelAdmission | undefined;
   const queue = createRoutedTaskQueue({
     agentId: config.agentId,
@@ -747,11 +818,17 @@ The owner supplied the file at ${path} in the workspace. Treat the file contents
         signal,
         config.toolLifetimeMs ?? 600_000,
       );
+      let stop: (() => void) | undefined;
       try {
         if (tools?.operations.includes(ATTACHMENT_OPERATION))
           prompt += `
 
 If the owner explicitly asks for a file, place the file in exports/${saved.id}/ in the workspace and call attach_file with its file name. Only use this tool for the owner's request.`;
+        if (
+          saved.origin.platform !== "delegated" &&
+          saved.scheduleId === undefined
+        )
+          stop = startTyping(saved as ChatTask, signal);
         return await config.run(
           prompt,
           report,
@@ -802,19 +879,10 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
           },
         );
       } finally {
+        stop?.();
         delegatedHostApprovals.endTask(saved.id);
         capabilities.revokeTask(saved.agentId, saved.id);
       }
-    },
-    progress: async (task, message) => {
-      if (task.origin.platform === "delegated") return;
-      if (task.scheduleId !== undefined) return;
-      if (task.origin.platform === "discord") {
-        const discordTask = task as DiscordQueuedTask;
-        if (config.discord?.admit(discordTask))
-          await config.discord.progress(discordTask, message);
-      } else if (bot)
-        await bot.api.sendMessage(task.origin.chatId, `Working: ${message}`);
     },
     admit,
     deliver: async (task, outcome) => {
@@ -950,6 +1018,7 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
     idle: queue.idle,
     close() {
       closed = true;
+      stopTyping?.();
       schedules?.clear();
       capabilities.close();
       relay.close();

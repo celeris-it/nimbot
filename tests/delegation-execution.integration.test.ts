@@ -221,7 +221,7 @@ async function fixture(platform: "telegram" | "discord") {
           },
           discord: {
             admit: canReach,
-            progress: async () => {},
+            sendTyping: async () => {},
             acknowledge: async () => true,
             deliver: async (_task, outcome) => {
               sent.push({

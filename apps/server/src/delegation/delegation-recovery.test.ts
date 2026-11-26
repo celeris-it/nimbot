@@ -87,7 +87,7 @@ async function fixture() {
         decide: async () => false,
         discord: {
           admit: () => true,
-          progress: async () => {},
+          sendTyping: async () => {},
           deliver: async () => {},
           sendApproval: async () => "unused",
           sendDelegation: async (_task, text, allowed) => {

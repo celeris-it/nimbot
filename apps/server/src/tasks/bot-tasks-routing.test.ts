@@ -23,7 +23,7 @@ it("resolves execution identity from the running record even when prompt text cl
     run,
     discord: {
       admit: () => true,
-      progress: async () => {},
+      sendTyping: async () => {},
       deliver: async () => {},
       sendApproval: async () => "1",
     },
@@ -72,7 +72,7 @@ it.each(["missing", "foreign", "finished"])(
       run,
       discord: {
         admit: () => true,
-        progress: async () => {},
+        sendTyping: async () => {},
         deliver: async () => {},
         sendApproval: async () => "1",
       },
@@ -139,9 +139,7 @@ it("routes Telegram and Discord through one runner and applies only acknowledged
       admit: () => true,
       sendApproval,
       acknowledge,
-      progress: async (_task, text) => {
-        discord.push(text);
-      },
+      sendTyping: async () => {},
       deliver: async (_task, result) => {
         discord.push(result.ok ? result.output : result.kind);
       },
@@ -168,7 +166,7 @@ it("routes Telegram and Discord through one runner and applies only acknowledged
     tasks.submitDiscord(origin, "discord");
     await vi.waitFor(() => expect(sendApproval).toHaveBeenCalledOnce());
     expect(context).toEqual(["telegram", "discord"]);
-    expect(telegram).toEqual(["Working: working", "telegram"]);
+    expect(telegram).toEqual(["telegram"]);
     const buttons = sendApproval.mock.calls[0]![2];
     const interaction = {
       id: "2",
@@ -189,13 +187,109 @@ it("routes Telegram and Discord through one runner and applies only acknowledged
     expect(await tasks.answerDiscord(interaction)).toBe("ok");
     await tasks.idle();
     expect(decide).toHaveBeenCalledWith("host-task", "approval", true);
-    expect(discord).toEqual(["working", "telegram,discord"]);
+    expect(discord).toEqual(["telegram,discord"]);
     expect(await tasks.answerDiscord(interaction)).toBe("expired");
   } finally {
     tasks.close();
     store.close();
   }
 });
+
+it.each(["done", "failure", "cancel", "close", "unlink"])(
+  "renews native Discord typing and stops on %s",
+  async (ending) => {
+    vi.useFakeTimers();
+    const store = openTaskStore(":memory:");
+    let finish!: (value: string) => void;
+    let fail!: (error: Error) => void;
+    const reply = new Promise<string>((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    });
+    let releaseTyping!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      releaseTyping = resolve;
+    });
+    const sendTyping = vi
+      .fn<
+        NonNullable<
+          Parameters<typeof createBotTasks>[0]["discord"]
+        >["sendTyping"]
+      >()
+      .mockRejectedValueOnce(new Error("Typing unavailable"))
+      .mockReturnValue(pending);
+    const deliver = vi.fn(async () => {});
+    let linked = true;
+    const tasks = createBotTasks({
+      agentId: "a",
+      store,
+      ownerId: () => 42,
+      run: () => reply,
+      discord: {
+        admit: () => linked,
+        sendTyping,
+        deliver,
+        sendApproval: async () => "1",
+      },
+    });
+    const origin = {
+      platform: "discord",
+      botId: "456",
+      ownerId: "789",
+      channelId: "888",
+      messageId: "1",
+    } as const;
+    try {
+      tasks.submitDiscord(origin, "work");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sendTyping).toHaveBeenCalledOnce();
+      expect(sendTyping.mock.calls[0]?.[0].origin).toEqual(origin);
+      await vi.advanceTimersByTimeAsync(7999);
+      expect(sendTyping).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sendTyping).toHaveBeenCalledTimes(2);
+      const signal = sendTyping.mock.calls[1]![1];
+      expect(signal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(sendTyping).toHaveBeenCalledTimes(2);
+
+      if (ending === "cancel")
+        expect(tasks.discordControl.stop(origin)).toBe(true);
+      if (ending === "close") tasks.close();
+      if (ending === "unlink") {
+        linked = false;
+        await vi.advanceTimersByTimeAsync(8000);
+        linked = true;
+      }
+      if (["cancel", "close", "unlink"].includes(ending)) {
+        expect(signal.aborted).toBe(true);
+        await vi.advanceTimersByTimeAsync(8000);
+      }
+      if (ending === "failure") fail(new Error("Model failed"));
+      else finish("done");
+      await tasks.idle();
+      expect(signal.aborted).toBe(true);
+      if (ending === "done" || ending === "failure") {
+        expect(deliver).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ origin }),
+          ending === "done"
+            ? { ok: true, output: "done" }
+            : { ok: false, kind: "unavailable" },
+        );
+      }
+      releaseTyping();
+      await vi.advanceTimersByTimeAsync(16000);
+      expect(sendTyping).toHaveBeenCalledTimes(2);
+    } finally {
+      tasks.close();
+      releaseTyping();
+      finish("done");
+      await tasks.idle();
+      store.close();
+      vi.useRealTimers();
+    }
+  },
+);
 
 it("rejects Discord work when the saved origin is no longer authorized", async () => {
   const store = openTaskStore(":memory:");
@@ -209,7 +303,7 @@ it("rejects Discord work when the saved origin is no longer authorized", async (
     discord: {
       admit: () => false,
       deliver,
-      progress: async () => {},
+      sendTyping: async () => {},
       sendApproval: async () => "999",
     },
   });
@@ -246,7 +340,7 @@ it("keeps restored Telegram work queued until its verified reply bot attaches", 
     run,
     discord: {
       admit: () => true,
-      progress: async () => {},
+      sendTyping: async () => {},
       sendApproval: async () => "1",
       deliver: async (_task, outcome) => {
         discord.push(outcome.ok ? outcome.output : outcome.kind);
@@ -302,7 +396,7 @@ it("can execute Discord work without any Telegram attachment when it is the FIFO
     run,
     discord: {
       admit: () => true,
-      progress: async () => {},
+      sendTyping: async () => {},
       sendApproval: async () => "1",
       deliver,
     },
@@ -392,7 +486,7 @@ it.each([
       },
       discord: {
         admit: () => current,
-        progress: async () => {},
+        sendTyping: async () => {},
         sendApproval: async () => "1",
         deliver,
         sendFile,

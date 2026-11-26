@@ -316,7 +316,7 @@ async function fixture(
       },
       discord: {
         admit: canReach,
-        progress: async () => {},
+        sendTyping: async () => {},
         deliver: async () => {},
         acknowledge: async () => true,
         async sendApproval(task, text, buttons) {
@@ -869,7 +869,7 @@ it.skipIf(!dockerImage)(
         run: createHostTasks({ url, token }, request),
         discord: {
           admit: canReach,
-          progress: async () => {},
+          sendTyping: async () => {},
           deliver,
           sendApproval: async () => {
             throw new Error("Fixture read unexpectedly asked for approval");

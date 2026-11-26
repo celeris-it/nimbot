@@ -183,7 +183,7 @@ it("dispatches persisted Discord-only messages and cancels a scheduled run from 
   const scheduleStore = openScheduleStore(f.path);
   const outcomes: string[] = [];
   const listSchedules = vi.fn(async () => {});
-  const progress = vi.fn(async () => {});
+  const sendTyping = vi.fn<(task: unknown) => Promise<void>>(async () => {});
   const run = vi.fn(
     async (
       prompt: string,
@@ -208,7 +208,7 @@ it("dispatches persisted Discord-only messages and cancels a scheduled run from 
     run,
     discord: {
       admit: () => true,
-      progress,
+      sendTyping,
       sendApproval: async () => "1",
       deliver: async (_task, outcome) => {
         outcomes.push(outcome.ok ? outcome.output : outcome.kind);
@@ -296,7 +296,10 @@ it("dispatches persisted Discord-only messages and cancels a scheduled run from 
     f.callbacks[0]!.message({ id: "3", channelId: "999", content: "/stop" });
     await runner.idle();
     expect(outcomes).toEqual(["saved before restart", "cancelled"]);
-    expect(progress).not.toHaveBeenCalled();
+    expect(sendTyping).toHaveBeenCalledOnce();
+    expect(sendTyping.mock.calls[0]?.[0]).toMatchObject({
+      prompt: "saved before restart",
+    });
     expect(f.inbox.pending("a")).toEqual([]);
   } finally {
     manager.close();

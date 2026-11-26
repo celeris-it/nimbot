@@ -68,10 +68,15 @@ function setup(
   tasks?.attach(bot);
   const sent: string[] = [];
   const destinations: number[] = [];
+  const typing = vi.fn();
   const markups: unknown[] = [];
   const callbackAnswers: { text?: string; show_alert?: boolean }[] = [];
   const edits: string[] = [];
   bot.api.config.use(async (_prev, method, payload) => {
+    if (method === "sendChatAction") {
+      typing(payload);
+      return { ok: true, result: true } as Awaited<ReturnType<typeof _prev>>;
+    }
     if (method === "answerCallbackQuery") {
       callbackAnswers.push(payload as { text?: string });
       return { ok: true, result: true } as Awaited<ReturnType<typeof _prev>>;
@@ -106,6 +111,7 @@ function setup(
     sent,
     activations,
     destinations,
+    typing,
     markups,
     callbackAnswers,
     edits,
@@ -575,23 +581,52 @@ describe("task queue through Telegram", () => {
     ]);
   });
 
-  it("shows progress through the same bot to the owner's chat before the result", async () => {
+  it("uses native typing in the owner's chat without posting tool progress", async () => {
     const execute = vi.fn(
       async (_prompt: string, onProgress?: (message: string) => void) => {
         onProgress?.("Using tool: read file");
         return "All done";
       },
     );
-    const { bot, sent, destinations, idle } = setup(execute);
+    const { bot, sent, destinations, typing, idle } = setup(execute);
     await bot.handleUpdate(message("/start"));
     const before = sent.length;
     await bot.handleUpdate(message("work"));
     await idle();
-    expect(sent.slice(before)).toEqual([
-      "Working: Using tool: read file",
-      "All done",
-    ]);
-    expect(destinations.slice(before)).toEqual([42, 42]);
+    expect(typing).toHaveBeenCalledExactlyOnceWith({
+      chat_id: 42,
+      action: "typing",
+    });
+    expect(sent.slice(before)).toEqual(["All done"]);
+    expect(destinations.slice(before)).toEqual([42]);
+  });
+
+  it("renews typing every four seconds while the model runs silently", async () => {
+    vi.useFakeTimers();
+    let finish!: (value: string) => void;
+    const reply = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const { bot, sent, typing, idle } = setup(() => reply);
+    try {
+      await bot.handleUpdate(message("/start"));
+      await bot.handleUpdate(message("work"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(typing).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(3999);
+      expect(typing).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(typing).toHaveBeenCalledTimes(2);
+      finish("done");
+      await idle();
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(typing).toHaveBeenCalledTimes(2);
+      expect(sent.at(-1)).toBe("done");
+    } finally {
+      finish("done");
+      await idle();
+      vi.useRealTimers();
+    }
   });
 
   it("cancels the running task with /stop and accepts a new task afterwards", async () => {

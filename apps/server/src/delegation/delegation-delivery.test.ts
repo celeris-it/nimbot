@@ -123,7 +123,7 @@ async function setup(platform: "telegram" | "discord" = "telegram") {
           task.origin.botId === "101" &&
           task.origin.ownerId === "42" &&
           task.origin.channelId === "300",
-        progress: async () => {},
+        sendTyping: async () => {},
         deliver: async () => {},
         sendApproval: async () => "unused",
         sendDelegation: (task, text, canSend) =>

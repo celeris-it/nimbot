@@ -482,8 +482,9 @@ message is persisted. A linked DM does not imply a live Gateway connection.
 
 A connected channel does not prove that the Host process or AI provider is ready.
 Check process state and authenticated Agent Host readiness separately. Tasks from both channels
-share one FIFO and AI context; progress, results, errors, and approval prompts
-return to the original channel. Discord connection failure does not stop
+share one FIFO and AI context. During a direct chat request, the bot shows the
+channel's native typing indicator while the model runs. Results, errors, and
+approval prompts return to the original channel. Discord connection failure does not stop
 Telegram polling, and task services survive a Telegram polling failure.
 
 After changing a Discord token or owner, the server replaces its Gateway
