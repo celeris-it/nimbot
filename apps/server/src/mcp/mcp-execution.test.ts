@@ -407,14 +407,15 @@ it.each(["json", "sse"])(
 );
 
 it.each(["search", "add"])(
-  "bounds %s results and treats an unusable write response as uncertain",
+  "returns a large %s result within the download budget",
   async (name) => {
     const f = await fixture();
+    const result = { content: [{ type: "text", text: "x".repeat(20_000) }] };
     f.remote.call = async (message) =>
       Response.json({
         jsonrpc: "2.0",
         id: message.id,
-        result: { content: [{ type: "text", text: "x".repeat(13_000) }] },
+        result,
       });
     expect(
       await f.execute(
@@ -423,13 +424,29 @@ it.each(["search", "add"])(
         { query: "hello" },
         f.context,
       ),
-    ).toEqual({
-      ok: false,
-      error: name === "add" ? "interrupted" : "unavailable",
-    });
+    ).toEqual({ ok: true, result });
     expect(f.calls()).toHaveLength(1);
   },
 );
+
+it("reports when a write response exceeds the download budget", async () => {
+  const f = await fixture();
+  f.remote.call = async ({ id }) =>
+    Response.json({
+      jsonrpc: "2.0",
+      id,
+      result: { content: [{ type: "text", text: "x".repeat(256 * 1024) }] },
+    });
+  expect(
+    await f.execute(
+      "a",
+      f.operation("a", "add"),
+      { query: "hello" },
+      f.context,
+    ),
+  ).toEqual({ ok: false, error: "response_too_large" });
+  expect(f.calls()).toHaveLength(1);
+});
 
 it("bounds aggregate response bodies before decoding them", async () => {
   const f = await fixture();

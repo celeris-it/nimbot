@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   UncertainExecutionError,
   type ApprovalGate,
@@ -20,6 +21,10 @@ export const mcpTarget = (definitionId: string, toolName: string) =>
 
 const LIST = "catalog-mcp.list";
 const CALL = "catalog-mcp.call";
+const READ_RESULT = "catalog-mcp.read-result";
+const INLINE_RESULT_BYTES = 12_000;
+const MAX_SAVED_RESULT_BYTES = 256 * 1024;
+const MAX_TASK_RESULT_BYTES = 2 * 1024 * 1024;
 const toolId = z.string().regex(/^mcp\.[a-f0-9]{64}$/);
 const cursor = z.int().min(0).optional();
 const listArgs = z.union([
@@ -30,6 +35,28 @@ const callArgs = z.strictObject({
   toolId,
   arguments: z.record(z.string(), z.unknown()),
 });
+const readResultArgs = z.strictObject({
+  resultId: z.uuid(),
+  cursor: z.int().min(1),
+});
+
+function resultPage(resultId: string, json: string, offset: number) {
+  let end = offset;
+  let high = Math.min(json.length, offset + INLINE_RESULT_BYTES);
+  // Reserve room for page metadata and measure the escaped JSON string.
+  while (end < high) {
+    const middle = Math.ceil((end + high) / 2);
+    const bytes = Buffer.byteLength(JSON.stringify(json.slice(offset, middle)));
+    if (bytes <= INLINE_RESULT_BYTES - 128) end = middle;
+    else high = middle - 1;
+  }
+  if (/[\uD800-\uDBFF]/.test(json.charAt(end - 1))) end--;
+  return {
+    resultId,
+    resultJson: json.slice(offset, end),
+    ...(end < json.length ? { nextCursor: end } : {}),
+  };
+}
 
 /** Server-owned bridge between pinned catalog grants, approvals and remote execution. */
 export function createMcpTools(config: {
@@ -54,13 +81,22 @@ export function createMcpTools(config: {
       config.canReach(saved)
     );
   };
-  const snapshots = new Map<string, Set<string>>();
+  const snapshots = new Map<
+    string,
+    {
+      operations: Set<string>;
+      results: Map<string, { operation: string; json: string }>;
+      resultBytes: number;
+    }
+  >();
   function available(task: RoutedTask) {
     const snapshot = snapshots.get(task.id);
     return active(task) && snapshot
       ? selection
           .available(task.agentId)
-          .filter(({ descriptor }) => snapshot.has(descriptor.operation))
+          .filter(({ descriptor }) =>
+            snapshot.operations.has(descriptor.operation),
+          )
       : [];
   }
   function resolve(
@@ -79,8 +115,7 @@ export function createMcpTools(config: {
       active(current) && !!selection.validate(current.agentId, operation, args);
     return {
       operation,
-      // Reads may also have an explicit Ask rule. Durable replay prevents a
-      // repeated invocation from asking again or executing a second time.
+      // Record invocations durably so replay cannot execute a tool twice.
       write: true,
       validate: (args) => selection.validate(config.agentId, operation, args),
       authorize: (current, args, outcome) =>
@@ -90,13 +125,14 @@ export function createMcpTools(config: {
           string,
           unknown
         >;
-        const run = async (signal: AbortSignal, automaticRead = false) => {
+        let responseTooLarge = false;
+        const run = async (signal: AbortSignal, automatic = false) => {
           const canRun = () => {
             const policy = rule();
             return (
               authorized(current, snapshot) &&
               policy.decision !== "deny" &&
-              (!automaticRead || policy.ruleId === null)
+              (!automatic || policy.ruleId === null)
             );
           };
           signal.throwIfAborted();
@@ -111,19 +147,25 @@ export function createMcpTools(config: {
             },
           );
           if (!outcome.ok) {
-            if (outcome.error === "interrupted")
+            responseTooLarge = outcome.error === "response_too_large";
+            if (
+              outcome.error === "interrupted" ||
+              (responseTooLarge && selected.tool.access === "write")
+            )
               throw new UncertainExecutionError();
             throw new ToolExecutionError(outcome.error);
           }
           return outcome.result;
         };
         const policy = rule();
-        if (selected.tool.access === "read" && policy.ruleId === null) {
+        if (policy.ruleId === null) {
           try {
             return await run(context.signal, true);
           } catch (error) {
             if (error instanceof UncertainExecutionError)
-              throw new ToolExecutionError("interrupted");
+              throw new ToolExecutionError(
+                responseTooLarge ? "response_too_large" : "interrupted",
+              );
             throw error;
           }
         }
@@ -139,6 +181,8 @@ export function createMcpTools(config: {
           run,
           context.signal,
         );
+        if (responseTooLarge)
+          throw new ToolExecutionError("response_too_large");
         if (decision.status === "uncertain")
           throw new ToolExecutionError("interrupted");
         if (decision.status === "denied")
@@ -155,11 +199,47 @@ export function createMcpTools(config: {
     operation: string,
     guard: ApprovalGate["guard"],
   ): ServerToolHandler | undefined {
-    if (!active(task) || !snapshots.has(task.id)) return;
+    const snapshot = snapshots.get(task.id);
+    if (!active(task) || !snapshot) return;
     const resolveCall = (current: RoutedTask, id: string) =>
-      snapshots.get(current.id)?.has(id)
+      snapshots.get(current.id)?.operations.has(id)
         ? resolve(current, id, guard)
         : undefined;
+    if (operation === READ_RESULT) {
+      const find = (current: RoutedTask, resultId: string) => {
+        if (!active(current) || snapshots.get(current.id) !== snapshot) return;
+        const result = snapshot.results.get(resultId);
+        if (!result) return;
+        const selected = selection.resolve(current.agentId, result.operation);
+        if (
+          selected &&
+          config.rules.evaluate(
+            current.agentId,
+            mcpActionType(selected.tool.access),
+            mcpTarget(selected.definitionId, selected.tool.name),
+          ).decision !== "deny"
+        )
+          return result;
+      };
+      return {
+        operation,
+        write: false,
+        validate: (args) => readResultArgs.safeParse(args).data,
+        authorize: (current, args) =>
+          !!find(current, readResultArgs.parse(args).resultId),
+        async execute(current, args) {
+          const { resultId, cursor } = readResultArgs.parse(args);
+          const result = find(current, resultId);
+          if (!result) throw new ToolExecutionError("denied");
+          if (
+            cursor >= result.json.length ||
+            /[\uDC00-\uDFFF]/.test(result.json.charAt(cursor))
+          )
+            throw new ToolExecutionError("failed");
+          return resultPage(resultId, result.json, cursor);
+        },
+      };
+    }
     if (operation === LIST)
       return {
         operation,
@@ -238,25 +318,44 @@ export function createMcpTools(config: {
           const input = callArgs.parse(args);
           const target = resolveCall(current, input.toolId);
           if (!target) throw new ToolExecutionError("denied");
-          return target.execute(current, input.arguments, context);
+          const result = await target.execute(
+            current,
+            input.arguments,
+            context,
+          );
+          const json = JSON.stringify(result);
+          const bytes = Buffer.byteLength(json);
+          if (bytes <= INLINE_RESULT_BYTES) return result;
+          context.signal.throwIfAborted();
+          if (snapshots.get(current.id) !== snapshot)
+            throw new ToolExecutionError("denied");
+          if (bytes > MAX_SAVED_RESULT_BYTES)
+            throw new ToolExecutionError("response_too_large");
+          if (snapshot.resultBytes + bytes > MAX_TASK_RESULT_BYTES)
+            throw new ToolExecutionError("result_storage_full");
+          const resultId = randomUUID();
+          snapshot.results.set(resultId, { operation: input.toolId, json });
+          snapshot.resultBytes += bytes;
+          return resultPage(resultId, json, 0);
         },
       };
   }
 
   return {
     operations(task: RoutedTask) {
-      return active(task) ? [LIST, CALL] : [];
+      return active(task) ? [LIST, CALL, READ_RESULT] : [];
     },
     snapshot(task: RoutedTask) {
       if (!active(task)) return;
-      snapshots.set(
-        task.id,
-        new Set(
+      snapshots.set(task.id, {
+        operations: new Set(
           selection
             .available(task.agentId)
             .map(({ descriptor }) => descriptor.operation),
         ),
-      );
+        results: new Map(),
+        resultBytes: 0,
+      });
       return () => snapshots.delete(task.id);
     },
     resolveCatalog,

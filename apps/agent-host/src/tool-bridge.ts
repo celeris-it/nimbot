@@ -9,6 +9,7 @@ import type { AcpHttpMcpServer } from "./acp-client.js";
 import type { EngineTaskContext } from "./engine.js";
 import { isTaskIdentity, isTaskToolAccess } from "./task-identity.js";
 import { createServerTool } from "./server-tool.js";
+import { ToolResultLimitError } from "./tool-requests.js";
 
 export interface ToolInvocation {
   context: Required<
@@ -301,7 +302,7 @@ export async function createToolBridge(
         content: [{ type: "text", text }],
         ...(object(value) ? { structuredContent: value } : {}),
       });
-    } catch {
+    } catch (error) {
       result(res, id, {
         isError: true,
         content: [
@@ -309,7 +310,9 @@ export async function createToolBridge(
             type: "text",
             text: signal.aborted
               ? "Tool call cancelled or timed out"
-              : "Tool call failed",
+              : error instanceof ToolResultLimitError
+                ? error.message
+                : "Tool call failed",
           },
         ],
       });

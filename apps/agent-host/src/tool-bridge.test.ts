@@ -9,6 +9,8 @@ import type { EngineTaskContext } from "./engine.js";
 import { request as httpRequest } from "node:http";
 import { createScheduleToolDefinitions } from "./schedule-tools.js";
 import { createAttachments } from "./attachments.js";
+import { createMcpCatalogToolDefinitions } from "./mcp-catalog-tools.js";
+import { ToolResultLimitError } from "./tool-requests.js";
 
 const bridges: ToolBridge[] = [];
 afterEach(async () => {
@@ -75,6 +77,48 @@ const call = (id = 1, args: unknown = { value: "hello" }) => ({
   id,
   method: "tools/call",
   params: { name: "echo", arguments: args },
+});
+
+it("exposes MCP result pagination and gives the model the response size error", async () => {
+  const task = context();
+  const definitions = createMcpCatalogToolDefinitions();
+  task.tools!.operations = definitions.map(({ operation }) => operation);
+  const requestTool = vi.fn<NonNullable<EngineTaskContext["requestTool"]>>();
+  task.requestTool = requestTool;
+  const bridge = await createToolBridge(task, definitions);
+  bridges.push(bridge);
+  const resultId = task.hostTaskId!;
+  const args = { resultId, cursor: 10_000 };
+  requestTool.mockResolvedValueOnce({ resultId, resultJson: "end" });
+  const read = await send(bridge, {
+    ...call(),
+    params: { name: "read_mcp_result", arguments: args },
+  });
+  expect(await read.json()).toMatchObject({
+    result: { structuredContent: { resultId, resultJson: "end" } },
+  });
+  expect(requestTool).toHaveBeenCalledWith(
+    "catalog-mcp.read-result",
+    args,
+    expect.any(String),
+    expect.any(AbortSignal),
+  );
+  requestTool.mockRejectedValueOnce(
+    new ToolResultLimitError("response_too_large"),
+  );
+  const oversized = await send(bridge, {
+    ...call(2),
+    params: {
+      name: "call_mcp_tool",
+      arguments: { toolId: "fixture", arguments: {} },
+    },
+  });
+  expect(await oversized.json()).toMatchObject({
+    result: {
+      isError: true,
+      content: [{ text: "The MCP response exceeds Nimbot's size limit." }],
+    },
+  });
 });
 
 it("registers scheduling and attachment tools together for owner chat tasks", async () => {

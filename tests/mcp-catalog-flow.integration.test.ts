@@ -154,7 +154,7 @@ async function fixture(
         return;
       }
       if (remote.mode === "large") {
-        reply({ content: [{ type: "text", text: "x".repeat(13_000) }] });
+        reply({ content: [{ type: "text", text: "x".repeat(256 * 1024) }] });
         return;
       }
       reply({
@@ -516,6 +516,12 @@ it.each(["telegram", "discord"])(
   "approves a %s write only for its owner and replays its durable outcome",
   async (platform) => {
     const f = await fixture();
+    f.rules.create({
+      agentId: "a",
+      actionType: "mcp.write",
+      target: mcpTarget(f.definition.id, "write"),
+      effect: "ask",
+    });
     await f.start("a", platform);
     const pending = f.call("a", "write");
     await vi.waitFor(() => expect(f.questions).toHaveLength(1));
@@ -705,12 +711,9 @@ it("persists uncertain write outcomes after a lost response and does not retry t
   const f = await fixture();
   f.remote.mode = "lost";
   await f.start();
-  const pending = f.call("a", "write");
-  await vi.waitFor(() => expect(f.questions).toHaveLength(1));
-  await f.click();
-  expect((await pending).result.isError).toBe(true);
+  expect((await f.call("a", "write")).result.isError).toBe(true);
+  expect(f.questions).toHaveLength(0);
   expect(f.calls()).toHaveLength(1);
-  expect(f.approvals.listByAgent("a").requests[0]!.execution).toBe("uncertain");
   expect(
     await f.executions.get("a")!.onTool!(
       await f.lastInvocation(),
@@ -738,7 +741,18 @@ it.each(["redirect", "large"])(
     const f = await fixture();
     f.remote.mode = mode;
     await f.start();
-    expect((await f.call("a")).result.isError).toBe(true);
+    const { result } = await f.call("a");
+    expect(result).toMatchObject({
+      isError: true,
+      content: [
+        {
+          text:
+            mode === "large"
+              ? "The MCP response exceeds Nimbot's size limit."
+              : "Tool call failed",
+        },
+      ],
+    });
     expect(f.calls()).toHaveLength(1);
   },
 );

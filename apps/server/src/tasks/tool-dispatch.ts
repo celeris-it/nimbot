@@ -12,7 +12,9 @@ export type ToolOutcome =
         | "cancelled"
         | "timeout"
         | "unavailable"
-        | "interrupted";
+        | "interrupted"
+        | "response_too_large"
+        | "result_storage_full";
     };
 
 /** A trusted handler may report only one of the public, payload-free failure codes. */

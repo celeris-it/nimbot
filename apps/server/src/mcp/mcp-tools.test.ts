@@ -210,6 +210,13 @@ async function fixture(
     catalogCall,
     answer,
     history,
+    requireWriteApproval: () =>
+      rules.create({
+        agentId: "a",
+        actionType: "mcp.write",
+        target: mcpTarget(definition.id, "write"),
+        effect: "ask",
+      }),
     tools: () => pipeline.tools,
     rules: () => rules,
     setReachable: (value: boolean) => {
@@ -229,9 +236,10 @@ async function fixture(
 }
 
 it.each(["telegram", "discord"] as const)(
-  "requires the original %s owner's approval before a remote write and replays it once",
+  "asks the original %s owner when a write has an Ask rule and replays it once",
   async (platform) => {
     const f = await fixture(platform);
+    f.requireWriteApproval();
     const invocationId = randomUUID();
     const pending = f.call(invocationId);
     await vi.waitFor(() => expect(f.deliveries).toHaveLength(1));
@@ -260,22 +268,21 @@ it.each(["telegram", "discord"] as const)(
   },
 );
 
-it("persists uncertain remote writes through reopened stores and never repeats the call", async () => {
+it("persists an interrupted automatic write across restarts without repeating the call", async () => {
   const f = await fixture();
   const invocationId = randomUUID();
   f.execute.mockResolvedValueOnce({ ok: false, error: "interrupted" });
-  const pending = f.call(invocationId);
-  await vi.waitFor(() => expect(f.deliveries).toHaveLength(1));
-  f.answer();
-  expect(await pending).toEqual({ ok: false, error: "interrupted" });
-  expect(f.history()[0]!.execution).toBe("uncertain");
+  expect(await f.call(invocationId)).toEqual({
+    ok: false,
+    error: "interrupted",
+  });
   f.reopen();
   expect(await f.call(invocationId)).toEqual({
     ok: false,
     error: "interrupted",
   });
   expect(f.execute).toHaveBeenCalledTimes(1);
-  expect(f.history()[0]!.execution).toBe("uncertain");
+  expect(f.deliveries).toEqual([]);
 });
 
 it("uses read grants without a prompt, but applies exact Deny and Ask rules", async () => {
@@ -338,6 +345,7 @@ it("records a configured write denial without sending a question or contacting u
 
 it("does not run a concurrent replay while its original approval is pending", async () => {
   const f = await fixture();
+  f.requireWriteApproval();
   const invocationId = randomUUID();
   const pending = f.call(invocationId);
   await vi.waitFor(() => expect(f.deliveries).toHaveLength(1));
@@ -354,6 +362,7 @@ it("does not run a concurrent replay while its original approval is pending", as
 
 it("expires a pending write approval without contacting upstream", async () => {
   const f = await fixture();
+  f.requireWriteApproval();
   vi.useFakeTimers();
   const pending = f.call();
   await vi.advanceTimersByTimeAsync(0);
@@ -369,6 +378,7 @@ it("expires a pending write approval without contacting upstream", async () => {
 
 it("denies pending approvals after reopening stores and never repeats an unresolved invocation", async () => {
   const f = await fixture();
+  f.requireWriteApproval();
   const invocationId = randomUUID();
   const pending = f.call(invocationId);
   await vi.waitFor(() => expect(f.deliveries).toHaveLength(1));
@@ -386,21 +396,16 @@ it("denies pending approvals after reopening stores and never repeats an unresol
   expect(f.deliveries).toHaveLength(1);
 });
 
-it("stops an automatic read when a new Ask rule appears before the remote effect", async () => {
+it("stops an automatic write when a new Ask rule appears before the remote effect", async () => {
   const f = await fixture();
   f.execute.mockImplementationOnce(
     async (_agent, _operation, _args, context) => {
-      f.rules().create({
-        agentId: "a",
-        actionType: "mcp.read",
-        target: mcpTarget(f.definition.id, "read"),
-        effect: "ask",
-      });
+      f.requireWriteApproval();
       expect(context.allowed()).toBe(false);
       return { ok: false, error: "denied" };
     },
   );
-  expect(await f.call(undefined, "read")).toEqual({
+  expect(await f.call()).toEqual({
     ok: false,
     error: "denied",
   });
@@ -410,6 +415,7 @@ it.each(["owner", "rule", "grant", "schema", "binding"])(
   "makes no remote call after %s denies a pending write",
   async (reason) => {
     const f = await fixture();
+    f.requireWriteApproval();
     const pending = f.call();
     await vi.waitFor(() => expect(f.deliveries).toHaveLength(1));
     if (reason === "rule")
@@ -437,6 +443,7 @@ it.each(["owner", "rule", "grant", "schema", "binding"])(
 
 it("cancels pending approval without contacting upstream and keeps invalid inputs out of history", async () => {
   const f = await fixture();
+  f.requireWriteApproval();
   expect(await f.call(undefined, "write", { text: 1 })).toEqual({
     ok: false,
     error: "failed",
@@ -477,7 +484,7 @@ it("does not expose tools to scheduled, webhook, delegated or foreign tasks", as
   expect(f.tools().descriptors(f.task)).toEqual([]);
 });
 
-it("lists and invokes a tool beyond the individual turn limit using the same lease", async () => {
+it("lists and invokes a write beyond the individual turn limit without asking", async () => {
   const f = await fixture("discord", true);
   const tools: { id: string; name: string }[] = [];
   let cursor: number | undefined;
@@ -502,12 +509,9 @@ it("lists and invokes a tool beyond the individual turn limit using the same lea
   });
   const invocationId = randomUUID();
   const args = { toolId, arguments: { text: "hello" } };
-  const pending = f.catalogCall("catalog-mcp.call", args, invocationId);
-  await vi.waitFor(() => expect(f.deliveries).toHaveLength(1));
-  expect(f.execute).not.toHaveBeenCalled();
-  await f.answer();
-  const outcome = await pending;
+  const outcome = await f.catalogCall("catalog-mcp.call", args, invocationId);
   expect(outcome).toMatchObject({ ok: true });
+  expect(f.deliveries).toEqual([]);
   expect(await f.catalogCall("catalog-mcp.call", args, invocationId)).toEqual(
     outcome,
   );
@@ -525,5 +529,74 @@ it("lists and invokes a tool beyond the individual turn limit using the same lea
   expect(
     await f.catalogCall("catalog-mcp.call", args, invocationId),
   ).toMatchObject({ ok: false });
+  expect(f.execute).toHaveBeenCalledOnce();
+});
+
+it("replays a large write result and reads its pages without calling the provider again", async () => {
+  const f = await fixture("discord", true);
+  const listing = await f.catalogCall("catalog-mcp.list", {});
+  expect(listing).toMatchObject({ ok: true });
+  const { id: toolId, name } = (
+    listing as { result: { tools: { id: string; name: string }[] } }
+  ).result.tools[0]!;
+  const remoteResult = {
+    content: [{ type: "text", text: '🙂"\\\n'.repeat(4000) }],
+    structuredContent: { completed: true },
+  };
+  f.execute.mockResolvedValueOnce({ ok: true, result: remoteResult });
+  const invocationId = randomUUID();
+  const args = { toolId, arguments: { text: "hello" } };
+  const first = await f.catalogCall("catalog-mcp.call", args, invocationId);
+  expect(first).toMatchObject({
+    ok: true,
+    result: { nextCursor: expect.any(Number) },
+  });
+  expect(await f.catalogCall("catalog-mcp.call", args, invocationId)).toEqual(
+    first,
+  );
+
+  type Page = { resultId: string; resultJson: string; nextCursor?: number };
+  let { result: page } = first as { result: Page };
+  const { resultId, nextCursor } = page;
+  const fragments = [page.resultJson];
+  while (page.nextCursor !== undefined) {
+    const outcome = await f.catalogCall("catalog-mcp.read-result", {
+      resultId,
+      cursor: page.nextCursor,
+    });
+    expect(outcome).toMatchObject({ ok: true, result: { resultId } });
+    expect(Buffer.byteLength(JSON.stringify(outcome))).toBeLessThan(16_384);
+    page = (outcome as { result: Page }).result;
+    fragments.push(page.resultJson);
+  }
+  expect(JSON.parse(fragments.join(""))).toEqual(remoteResult);
+
+  const deny = f.rules().create({
+    agentId: "a",
+    actionType: "mcp.write",
+    target: mcpTarget(f.definition.id, name),
+    effect: "deny",
+  });
+  const readNext = () =>
+    f.catalogCall("catalog-mcp.read-result", { resultId, cursor: nextCursor });
+  expect(await readNext()).toEqual({ ok: false, error: "denied" });
+  f.rules().revoke("a", deny.id);
+  f.reopen();
+  expect(await readNext()).toEqual({ ok: false, error: "denied" });
+  expect(f.execute).toHaveBeenCalledOnce();
+});
+
+it("reports an oversized response for an approved write and records the effect as uncertain", async () => {
+  const f = await fixture();
+  f.requireWriteApproval();
+  f.execute.mockResolvedValueOnce({ ok: false, error: "response_too_large" });
+  const invocationId = randomUUID();
+  const pending = f.call(invocationId);
+  await vi.waitFor(() => expect(f.deliveries).toHaveLength(1));
+  f.answer();
+  const outcome = { ok: false, error: "response_too_large" };
+  expect(await pending).toEqual(outcome);
+  expect(await f.call(invocationId)).toEqual(outcome);
+  expect(f.history()[0]?.execution).toBe("uncertain");
   expect(f.execute).toHaveBeenCalledOnce();
 });

@@ -16,8 +16,20 @@ export type ToolOutcome =
         | "cancelled"
         | "timeout"
         | "unavailable"
-        | "interrupted";
+        | "interrupted"
+        | "response_too_large"
+        | "result_storage_full";
     };
+
+export class ToolResultLimitError extends Error {
+  constructor(code: "response_too_large" | "result_storage_full") {
+    super(
+      code === "response_too_large"
+        ? "The MCP response exceeds Nimbot's size limit."
+        : "This task has reached its MCP result storage limit.",
+    );
+  }
+}
 export interface SavedToolRequest {
   status: "pending" | "completed" | "failed" | "cancelled" | "interrupted";
   result: string | null;
@@ -80,6 +92,8 @@ export function isToolOutcome(value: unknown): value is ToolOutcome {
           "timeout",
           "unavailable",
           "interrupted",
+          "response_too_large",
+          "result_storage_full",
         ].includes(outcome.error)))
   );
 }
@@ -173,6 +187,11 @@ export function createToolRequests(config: {
             if (timer) clearTimeout(timer);
             signal.removeEventListener("abort", onAbort);
             if (delivered.ok) resolve(delivered.result);
+            else if (
+              delivered.error === "response_too_large" ||
+              delivered.error === "result_storage_full"
+            )
+              reject(new ToolResultLimitError(delivered.error));
             else reject(new Error(`Tool request ${delivered.error}`));
           },
           async finish(outcome) {
