@@ -92,6 +92,25 @@ describe("Agent Host subprocess configuration", () => {
     expect(childEnv).not.toHaveProperty("PLAYWRIGHT_BROWSERS_PATH");
   });
 
+  it("recreates missing temporary and cache directories while retaining persistent files", async () => {
+    const settings = await options();
+    const prepared = await prepareAgentProcess(settings);
+    const saved = join(prepared.directories.workspace, "persistent.txt");
+    await writeFile(saved, "persistent state");
+    await rm(prepared.directories.temporary, { recursive: true });
+    await rm(prepared.directories.cache, { recursive: true });
+    await prepareAgentProcess(settings);
+    for (const path of [
+      prepared.directories.temporary,
+      prepared.directories.cache,
+    ]) {
+      const info = await stat(path);
+      expect(info.isDirectory()).toBe(true);
+      expect(info.mode & 0o777).toBe(0o700);
+    }
+    expect(await readFile(saved, "utf8")).toBe("persistent state");
+  });
+
   it("accepts an explicit shared browser executable installation", async () => {
     const prepared = await prepareAgentProcess({
       ...(await options()),

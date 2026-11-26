@@ -175,6 +175,11 @@ from the panel retains its own data unless you select the explicit purge option.
 Server and its Hosts, then restores agents whose desired state was running.
 For panel lifecycle actions, use **Start agent**, **Stop agent** or **Restart
 agent**. `/stop` in a chat cancels only that agent's current task.
+Use **Settings → Backups** for manual application-state backups and restoration
+to the same Nimbot build. Preserve deployment configuration and the matching
+Docker image separately. The optional `BACKUP_MAX_BYTES` environment setting
+defaults to 10 GiB for uploads and expanded file contents.
+
 See [OPERATIONS.md](OPERATIONS.md) for complete-volume backups, recovery,
 troubleshooting and the shared trust model. Old per-agent-container and Compose
 recovery procedures do not apply.

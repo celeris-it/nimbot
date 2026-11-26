@@ -218,3 +218,66 @@ it("stops a local MCP process group on cancellation", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("closes local transports and rejects new connections during maintenance", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-mcp-close-"));
+  const runtime = createMcpLocalRuntime(dir, process.env.PATH ?? "", "unused");
+  try {
+    await runtime.close();
+    expect(() =>
+      runtime.connect(
+        {
+          id: "12345678-1234-1234-1234-123456789012",
+          launcher: "npx",
+          args: [],
+        },
+        {},
+        { timeoutMs: 1000, allowed: () => true },
+      ),
+    ).toThrow();
+  } finally {
+    await runtime.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("waits for an active local tool process to exit before closing the runtime", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nimbot-mcp-drain-"));
+  const bin = join(dir, "bin");
+  await mkdir(bin);
+  const pidFile = join(dir, "tool.pid");
+  await writeFile(
+    join(bin, "fixture.mjs"),
+    `import {writeFileSync} from "node:fs";\nwriteFileSync(process.env.PID_FILE, String(process.pid));\n${fixture}`,
+  );
+  await writeFile(
+    join(bin, "npx"),
+    '#!/bin/sh\nexec node "$(dirname "$0")/fixture.mjs"\n',
+    { mode: 0o700 },
+  );
+  const runtime = createMcpLocalRuntime(
+    dir,
+    [bin, process.env.PATH].join(delimiter),
+    await hostEntrypoint(dir),
+  );
+  try {
+    const connection = runtime.connect(
+      {
+        id: "12345678-1234-1234-1234-123456789012",
+        launcher: "npx",
+        args: [],
+      },
+      { PID_FILE: pidFile },
+      { timeoutMs: 1000, allowed: () => true },
+    );
+    await connection.initialize();
+    const pid = Number(await readFile(pidFile, "utf8"));
+    expect(Number.isInteger(pid)).toBe(true);
+    await runtime.close();
+    expect(connection.signal.aborted).toBe(true);
+    expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    await runtime.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -93,6 +93,65 @@ The environment file supplies the administrator password hash and public panel
 origin; the data volume alone does not replace it. Installer `.env` also records
 `PANEL_PUBLISH_PORT` for CLI management. The Server ignores that metadata setting.
 
+## Panel backups
+
+Open **Settings → Backups** to create and download a `.tar.gz` copy of persistent
+installation data in `SERVER_STATE_DIR`. It includes Server SQLite, agent
+workspaces, conversation history, private memory, browser profiles, schedules, and saved
+credentials. The archive contains secrets and private sessions and is compressed
+without encryption. Keep downloaded copies private and store them off the host.
+
+Panel exports preserve the following runtime directories and their permissions as
+empty directories in the archive.
+
+- `agents/<agent-id>/tmp/`
+- `agents/<agent-id>/engine/cache/`
+- `ai-providers/agents/management/tmp/`
+- `ai-providers/agents/management/engine/cache/`
+
+Runtime temporary files and engine caches are recreated as needed after recovery.
+Tools may need network access to download dependencies again. Workspaces, home
+directories, browser profiles, engine configuration/data/state, credentials,
+databases, migration snapshots and MCP package caches remain included. The source
+files stay intact during export. Manual full-volume backups below retain the
+complete state tree.
+
+Creating a backup enters maintenance, stops integrations and Hosts, waits for
+outstanding writes, and closes SQLite before reading files. The HTTP panel stays
+available to show progress. Active tasks may be interrupted. After validating the
+archive, Nimbot reopens its services and restores the agents' saved running intent.
+The download remains available for 24 hours, until the next export, or until the
+Server restarts. Closing the browser after starting an export or restore lets the
+operation continue on the Server.
+
+To restore, select a panel-generated backup and choose **Validate backup**.
+Nimbot checks paths, sizes, checksums, build compatibility and the Server database
+before showing its date, build and expanded size. Choose **Restore this backup**
+and confirm to replace the installation state. Restoration requires the same
+Nimbot compilation that produced the archive. Copy the matching Docker image or
+retain the source revision and build inputs when moving an installation.
+
+Restoration pauses integrations and keeps the previous state under
+`SERVER_STATE_DIR/.nimbot-backups/previous/`. It persists a recovery journal before
+moving data, verifies reopening, and invalidates panel sessions on success.
+Interrupted replacements are rolled back before opening databases on startup.
+The next restoration replaces this recovery copy. Backup exports exclude the
+reserved `.nimbot-backups` directory, including this copy and temporary files.
+If recovery fails, Nimbot stays in maintenance with the panel available. Preserve
+the state directory and inspect filesystem permissions, free space and Server
+logs before restarting to retry recovery.
+
+`BACKUP_MAX_BYTES` limits both uploaded archive bytes and expanded file contents
+to 10 GiB by default (`10737418240`). Set a positive integer in the deployment
+environment to change it. Operations also check free disk space. A restore needs
+space for the uploaded archive and extracted state alongside the current state.
+Creating an export also extracts a verification copy before offering a download.
+
+The panel copy covers persistent application data. Save the host's `.env`,
+installer marker, reverse proxy configuration and Docker image separately using
+the full deployment procedure below. Panel restore keeps the destination's
+deployment configuration and panel password.
+
 ## Backup
 
 Use Bash for the command blocks below. Select `container` and `data_volume` as

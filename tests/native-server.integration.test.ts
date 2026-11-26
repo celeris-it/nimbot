@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,6 +130,82 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
         .toBe("ready");
       const file = join(directory, "agents", id, "workspace", "retained.txt");
       await writeFile(file, "persistent workspace");
+      const runtimeDirectories = [
+        join(directory, "agents", id, "tmp"),
+        join(directory, "agents", id, "engine", "cache"),
+      ];
+      for (const path of runtimeDirectories)
+        await writeFile(
+          join(path, "backup-exclusion-marker"),
+          "disposable runtime content",
+        );
+      // Exercise maintenance and reopen with an actual running Agent Host.
+      const exported = await post("/api/backups/export", {});
+      await expect
+        .poll(async () => (await get("/api/backups")).operation.status, {
+          timeout: 20000,
+        })
+        .toBe("ready");
+      const downloaded = await fetch(
+        `${origin}/api/backups/${exported.id}/download`,
+        { headers: { Cookie: cookie } },
+      );
+      expect(downloaded.status).toBe(200);
+      const archive = await downloaded.arrayBuffer();
+      expect((await get(`/api/agents/${id}`)).hostState).toBe("ready");
+      await writeFile(file, "changed after export");
+      const uploaded = await fetch(`${origin}/api/backups/upload`, {
+        method: "POST",
+        headers: {
+          Cookie: cookie,
+          Origin: origin,
+          "Content-Type": "application/octet-stream",
+        },
+        body: archive,
+      });
+      expect(uploaded.status).toBe(202);
+      const validated = await uploaded.json();
+      await expect
+        .poll(async () => (await get("/api/backups")).operation.status, {
+          timeout: 20000,
+        })
+        .toBe("ready");
+      const restoring = await fetch(`${origin}/api/backups/restore`, {
+        method: "POST",
+        headers: {
+          Cookie: cookie,
+          Origin: origin,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id: validated.id, confirm: true }),
+      });
+      expect(restoring.status).toBe(202);
+      await expect
+        .poll(
+          async () =>
+            (
+              await fetch(`${origin}/api/backups`, {
+                headers: { Cookie: cookie },
+              })
+            ).status,
+          { timeout: 20000 },
+        )
+        .toBe(401);
+      const signedIn = await fetch(`${origin}/api/login`, {
+        method: "POST",
+        headers: { Origin: origin },
+        body: new URLSearchParams({ password }),
+      });
+      expect(signedIn.status).toBe(200);
+      cookie = signedIn.headers.get("set-cookie")!.split(";")[0]!;
+      expect(await readFile(file, "utf8")).toBe("persistent workspace");
+      expect((await get(`/api/agents/${id}`)).hostState).toBe("ready");
+      for (const path of runtimeDirectories) {
+        expect((await stat(path)).isDirectory()).toBe(true);
+        await expect(
+          stat(join(path, "backup-exclusion-marker")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+      }
       await post(`/api/agents/${id}/process`, {
         action: "stop",
         confirm: id,

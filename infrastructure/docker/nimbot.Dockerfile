@@ -21,6 +21,8 @@ RUN chmod -R a+rX /app \
 
 COPY scripts/state-schema.mjs scripts/state-schema.d.mts scripts/
 COPY scripts/state-schema/ scripts/state-schema/
+COPY scripts/build-id.mjs scripts/build-id.mjs
+COPY infrastructure/docker/nimbot.Dockerfile infrastructure/docker/nimbot.Dockerfile
 COPY apps/server apps/server
 COPY apps/panel apps/panel
 COPY apps/agent-host apps/agent-host

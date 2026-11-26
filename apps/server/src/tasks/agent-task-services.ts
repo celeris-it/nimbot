@@ -21,6 +21,7 @@ export function createAgentTaskServices(
   const services = new Map<string, Promise<Service>>();
   const loaded = new Map<string, Service>();
   let closed = false;
+  const stopping = new Set<Promise<void>>();
   function get(id: string): Promise<Service> {
     if (closed)
       return Promise.reject(new Error("Agent task services are closed"));
@@ -97,8 +98,13 @@ export function createAgentTaskServices(
     const pending = services.get(id);
     services.delete(id);
     loaded.delete(id);
-    if (pending)
-      void pending.then((service) => service.close()).catch(() => {});
+    if (pending) {
+      const stopped = pending
+        .then((service) => service.close())
+        .catch(() => {});
+      stopping.add(stopped);
+      void stopped.finally(() => stopping.delete(stopped));
+    }
   }
   return {
     get,
@@ -156,9 +162,10 @@ export function createAgentTaskServices(
       }
     },
     stop,
-    close() {
+    async close() {
       closed = true;
       for (const id of services.keys()) stop(id);
+      while (stopping.size) await Promise.all([...stopping]);
     },
   };
 }

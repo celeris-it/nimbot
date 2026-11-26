@@ -133,3 +133,4 @@ test-results/
 !.env.example
 
 .playwright-mcp/
+apps/build-id

@@ -61,6 +61,7 @@
     ModelSelection,
   } from "../../server/src/providers/usage-contracts.js";
   import Memory from "./Memory.svelte";
+  import BackupSettings from "./BackupSettings.svelte";
   import Approvals from "./Approvals.svelte";
   import Peers from "./Peers.svelte";
   import Executions from "./Executions.svelte";
@@ -466,13 +467,18 @@
       else if (path === "/rules") missing = !session.capabilities.rules;
       else if (path === "/settings") {
         if (session.capabilities.scheduleSettings) {
-          const defaults = await request<ScheduleDefaults>(
-            "/api/settings/schedules",
-            {
-              signal: current.signal,
-            },
-          );
-          if (!current.signal.aborted) scheduleTimeZone = defaults.timeZone;
+          try {
+            const defaults = await request<ScheduleDefaults>(
+              "/api/settings/schedules",
+              {
+                signal: current.signal,
+              },
+            );
+            if (!current.signal.aborted) scheduleTimeZone = defaults.timeZone;
+          } catch (cause) {
+            if (!(cause instanceof ApiError && cause.status === 503))
+              throw cause;
+          }
         }
       } else if (path === "/providers") {
         try {
@@ -1467,6 +1473,9 @@
       {:else if path === "/settings"}
         <h1 tabindex="-1">{$messages("Settings")}</h1>
         <div class="settings-section-list">
+          {#if session?.capabilities.backups}
+            <BackupSettings expireSession={expired} />
+          {/if}
           <section aria-labelledby="panel-appearance-heading">
             <div class="settings-section-description">
               <h2 id="panel-appearance-heading" class="card-title">

@@ -300,3 +300,88 @@ it("prevents a late worker wake after shutdown during target credential loading"
     store.close();
   }
 });
+
+it("waits for running work and final persistence before closing services", async () => {
+  const store = openTaskStore(":memory:");
+  let finish!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const run = vi.fn(async () => {
+    await waiting;
+    return "finished";
+  });
+  const services = createAgentTaskServices(async (agentId) => ({
+    agentId,
+    store,
+    ownerId: () => 42,
+    run,
+    discord: {
+      admit: () => true,
+      sendTyping: async () => {},
+      sendApproval: async () => "1",
+      deliver: async () => {},
+    },
+  }));
+  try {
+    const runner = await services.get("a");
+    runner.submitDiscord(
+      {
+        platform: "discord",
+        botId: "123",
+        ownerId: "456",
+        channelId: "789",
+        messageId: "1",
+      },
+      "work",
+    );
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+    let stopped = false;
+    const closing = services.close().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    finish();
+    await closing;
+    expect(stopped).toBe(true);
+    await expect(services.get("a")).rejects.toThrow("closed");
+  } finally {
+    finish();
+    await services.close();
+    store.close();
+  }
+});
+
+it("waits for an outstanding loader before allowing stores to close", async () => {
+  const store = openTaskStore(":memory:");
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const load = vi.fn(async (agentId: string) => {
+    await waiting;
+    store.getTask("missing");
+    return { agentId, store, ownerId: () => 42, run: async () => "unused" };
+  });
+  const services = createAgentTaskServices(load);
+  try {
+    const loading = services.get("a");
+    const rejected = expect(loading).rejects.toThrow("stopped");
+    await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
+    let stopped = false;
+    const closing = services.close().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    release();
+    await rejected;
+    await closing;
+    expect(stopped).toBe(true);
+  } finally {
+    release();
+    await services.close();
+    store.close();
+  }
+});

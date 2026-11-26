@@ -309,3 +309,40 @@ it("dispatches persisted Discord-only messages and cancels a scheduled run from 
     await f.close();
   }
 });
+
+it("waits for an in-flight credential load before shutdown completes", async () => {
+  const f = await fixture();
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const read = vi.fn(async () => {
+    await waiting;
+    return "secret";
+  });
+  const manager = createRegisteredDiscord(
+    f.registry,
+    { read },
+    f.inbox,
+    f.makeGateway,
+  );
+  try {
+    const starting = manager.start("a");
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+    let stopped = false;
+    const closing = manager.close().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    release();
+    await starting;
+    await closing;
+    expect(stopped).toBe(true);
+    expect(f.callbacks).toHaveLength(0);
+  } finally {
+    release();
+    await manager.close();
+    await f.close();
+  }
+});

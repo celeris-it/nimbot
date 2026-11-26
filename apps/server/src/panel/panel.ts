@@ -56,6 +56,8 @@ import { createMcpPanel, type McpPanelDeps } from "../mcp/mcp-panel.js";
 import { agentRules, RuleLimitError } from "../agents/agent-rules.js";
 import { DiscordBotAlreadyAssigned } from "../agents/agent-registry.js";
 import { InvalidDiscordBotToken } from "../discord/discord-identity.js";
+import { BackupError, type createBackups } from "../backups/service.js";
+import { Readable } from "node:stream";
 
 export interface RegisteredAgentSettings {
   get(id: string): { name: string; instructions: string } | undefined;
@@ -65,6 +67,7 @@ export interface RegisteredAgentSettings {
   hostStatus?(id: string): Promise<HostStatus>;
 }
 export interface PanelDeps {
+  backups?: ReturnType<typeof createBackups>;
   executions?: ReturnType<
     typeof import("../tasks/execution-history.js").createExecutionHistory
   >;
@@ -191,6 +194,7 @@ export function createPanel(
   config: PanelConfig,
   deps: PanelDeps = {},
   now = Date.now,
+  sessions = new Map<string, number>(),
 ) {
   const {
     registerAgent,
@@ -200,7 +204,6 @@ export function createPanel(
     deleteAgent,
   } = deps;
   const app = new Hono();
-  const sessions = new Map<string, number>();
   let attempts = 0;
   let windowEnd = 0;
   const secure = config.origin.startsWith("https:");
@@ -222,6 +225,25 @@ export function createPanel(
       referrerPolicy: "same-origin",
     }),
   );
+  app.use("*", async (c, next) => {
+    if (
+      deps.backups?.maintenance &&
+      ![
+        "/login",
+        "/api/login",
+        "/api/logout",
+        "/logout",
+        "/api/session",
+        "/settings",
+      ].includes(c.req.path) &&
+      !c.req.path.startsWith("/api/backups") &&
+      !c.req.path.startsWith("/assets/")
+    ) {
+      c.header("Retry-After", "5");
+      return c.json({ error: "Nimbot is in maintenance mode." }, 503);
+    }
+    await next();
+  });
   // This exact POST route authenticates independently of panel cookies and Origin.
   app.post(
     "/hooks/schedules/:scheduleId",
@@ -309,12 +331,15 @@ export function createPanel(
       return c.json(panelError("origin_not_allowed"), 403);
     await next();
   });
-  app.use("*", (c, next) =>
-    bodyLimit({
+  app.use("*", (c, next) => {
+    // Uploads count bytes while streaming to disk. bodyLimit buffers chunked bodies.
+    if (c.req.path === "/api/backups/upload" && c.req.method === "POST")
+      return next();
+    return bodyLimit({
       maxSize: /^\/api\/mcp\/[^/]+$/.test(c.req.path) ? 1024 * 1024 : 65536,
       onError: (c) => c.json(panelError("request_too_large"), 413),
-    })(c, next),
-  );
+    })(c, next);
+  });
   const entry = async (c: Context) => {
     try {
       return c.html(await readFile(new URL("index.html", panelDist), "utf8"));
@@ -407,6 +432,7 @@ export function createPanel(
         ...(deps.schedules ? { scheduleSettings: true } : {}),
         ...(deps.rules ? { rules: true } : {}),
         ...(deps.executions ? { executions: true } : {}),
+        ...(deps.backups ? { backups: true } : {}),
       },
     } satisfies PanelSession),
   );
@@ -419,6 +445,47 @@ export function createPanel(
   };
   app.post("/logout", signOut);
   app.post("/api/logout", signOut);
+  if (deps.backups) {
+    const backups = deps.backups;
+    app.get("/api/backups", (c) => c.json(backups.status()));
+    app.post("/api/backups/export", (c) => c.json(backups.export(), 202));
+    app.post("/api/backups/upload", async (c) => {
+      if (
+        c.req.header("Content-Type") !== "application/octet-stream" ||
+        !c.req.raw.body
+      )
+        return c.json({ error: "Select a backup file to upload." }, 400);
+      const length = c.req.header("Content-Length");
+      if (length && Number(length) > backups.status().maxBytes)
+        return c.json(
+          { error: "Backup exceeds the configured size limit." },
+          413,
+        );
+      return c.json(await backups.upload(c.req.raw.body), 202);
+    });
+    app.post("/api/backups/restore", async (c) => {
+      const body: unknown = await c.req.json();
+      const input = z
+        .object({ id: z.string().uuid(), confirm: z.literal(true) })
+        .strict()
+        .safeParse(body);
+      if (!input.success)
+        return c.json(
+          { error: "Confirm the validated backup before restoring." },
+          400,
+        );
+      return c.json(backups.restore(input.data.id), 202);
+    });
+    app.get("/api/backups/:id/download", async (c) => {
+      const { stream, size } = await backups.download(c.req.param("id"));
+      return c.body(Readable.toWeb(stream) as ReadableStream, 200, {
+        "Content-Type": "application/gzip",
+        "Content-Length": String(size),
+        "Content-Disposition": 'attachment; filename="nimbot-backup.tar.gz"',
+        "Cache-Control": "no-store",
+      });
+    });
+  }
   if (deps.mcp) app.route("/api", createMcpPanel(deps.mcp));
   for (const path of [
     "/api/agents/:id/schedules",
@@ -1317,6 +1384,16 @@ export function createPanel(
     });
   }
   app.onError((error, c) => {
+    if (error instanceof BackupError)
+      return c.json({ error: error.message }, error.status);
+    if (c.req.path.startsWith("/api/backups"))
+      return c.json(
+        {
+          error:
+            "The backup operation failed. Check the file and available disk space.",
+        },
+        400,
+      );
     if (error instanceof ScheduleValidationError)
       return c.json(describePanelError(error.message, error.cause), 400);
     if (error instanceof HostMemoryError) {

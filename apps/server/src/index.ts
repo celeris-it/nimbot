@@ -72,35 +72,25 @@ import { createDiscordConfiguration } from "./discord/discord-configuration.js";
 import { createBotTokenUpdate } from "./telegram/bot-token-update.js";
 import { createTelegramLink } from "./telegram/agent-registration.js";
 import { openAgentRegistry } from "./agents/agent-registry.js";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getHostStatus } from "./host/agent-host.js";
 import { serve } from "@hono/node-server";
 import { createPanel } from "./panel/panel.js";
-import { readPanelConfig } from "./panel/panel-config.js";
+import { readPanelConfig, type PanelConfig } from "./panel/panel-config.js";
+import { createBackups, readBackupMaxBytes } from "./backups/service.js";
 import { readTaskTimeoutSeconds, taskWaitMs } from "./tasks/task-timeout.js";
 
-async function main(): Promise<void> {
-  let panelConfig;
-  let serverMode: ReturnType<typeof readServerMode>;
+async function openRuntime(
+  panelConfig: PanelConfig,
+  serverMode: ReturnType<typeof readServerMode>,
+  backups: ReturnType<typeof createBackups>,
+  sessions: Map<string, number>,
+) {
   let processStore: ReturnType<typeof openAgentProcessStore> | undefined;
   let processCredentials:
     Awaited<ReturnType<typeof openProcessHostCredentials>> | undefined;
-  let taskTimeoutSeconds: number;
-  try {
-    taskTimeoutSeconds = readTaskTimeoutSeconds(process.env);
-    panelConfig = readPanelConfig(process.env);
-    serverMode = readServerMode(process.env, panelConfig);
-  } catch (error) {
-    log.error("server.config_invalid", {
-      message:
-        error instanceof Error
-          ? error.message
-          : "Invalid server configuration.",
-    });
-    process.exitCode = 1;
-    return;
-  }
+  const taskTimeoutSeconds = readTaskTimeoutSeconds(process.env);
   const stateDir = serverMode.stateDirectory;
   let statePath;
   let taskStore;
@@ -183,10 +173,12 @@ async function main(): Promise<void> {
           ? error.message
           : "Check SERVER_STATE_DIR, writable storage and compatibility with the pinned OpenCode version.",
     });
-    process.exitCode = 1;
-    return;
+    throw error;
   }
-  process.once("exit", () => {
+  let storesClosed = false;
+  const closeStores = () => {
+    if (storesClosed) return;
+    storesClosed = true;
     mcpCatalog.close();
     agentNotes.close();
     agentGrants.close();
@@ -200,500 +192,690 @@ async function main(): Promise<void> {
     usageStore.close();
     registry.close();
     processStore?.close();
-  });
-  const hosts = { read: (id: string) => processAgents!.readHost(id) };
-  const runtimeReady = (id: string) => processAgents?.ready(id) ?? false;
-  const agentAccess = (id: string) =>
-    createAgentAccess(registry, id, () => runtimeReady(id));
-  const allowsWork = runtimeReady;
-  async function inspectHost(id: string) {
-    try {
-      return await getHostStatus(await hosts!.read(id));
-    } catch {
-      return "unavailable" as const;
-    }
-  }
-  const discord = createDiscordConfiguration(registry, discordSecrets);
-  const linkTelegram = createTelegramLink(registry, botSecrets);
-  const discordDelivery = createDiscordNotifications(discord.resolve);
-  function linkedDiscord(id: string): DiscordConversation | undefined {
-    const connection = registry.getDiscordConnection(id);
-    const channelId = discordInbox.getBinding(id);
-    if (!connection || !channelId) return undefined;
-    return {
-      platform: "discord",
-      botId: connection.botId,
-      ownerId: connection.ownerId,
-      channelId,
-    };
-  }
-  function matchesDiscord(task: DiscordDestination) {
-    const current = linkedDiscord(task.agentId);
-    return (
-      current?.botId === task.origin.botId &&
-      current.ownerId === task.origin.ownerId &&
-      current.channelId === task.origin.channelId
-    );
-  }
-  function discordAdmit(task: DiscordDestination) {
-    return (
-      runtimeReady(task.agentId) &&
-      matchesDiscord(task) &&
-      !!registry.getHostCredentialRef(task.agentId)
-    );
-  }
-  async function sendDiscordTask(task: DiscordDestination, text: string) {
-    if (!discordAdmit(task)) return "not_sent" as const;
-    return notificationDelivery(
-      await discordDelivery.sendTask(task, text, () => discordAdmit(task)),
-    );
-  }
-  const executablePath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
-  const localRuntime = createMcpLocalRuntime(
-    stateDir,
-    executablePath,
-    fileURLToPath(
-      new URL("../../agent-host/dist/mcp-stdio.js", import.meta.url),
-    ),
-  );
-  const executeMcp = createMcpExecution({
-    localRuntime,
-    catalog: mcpCatalog,
-    credentials: mcpCredentials,
-  });
-  const usage = createAgentUsage(
-    usageStore,
-    createHostUsage(async (id) => {
-      if (!hosts) throw new Error("Agent Host unavailable");
-      return hosts.read(id);
-    }),
-  );
-  const taskServices = createAgentTaskServices(
-    async (id, { wake }) => {
-      if (!hosts || !registry.get(id)) throw new Error("Agent is unavailable");
-      const host = await hosts!.read(id);
-      const canReach = (task: RoutedTask) =>
-        task.origin.platform === "delegated"
-          ? false
-          : task.origin.platform === "discord"
-            ? discordAdmit(task as DiscordQueuedTask)
-            : agentAccess(task.agentId).canExecute(
-                task.origin.botId,
-                registry.get(task.agentId)?.ownerId ?? 0,
-                task.origin.chatId,
-              );
-      const peerTools = createPeerTools({
-        agentId: id,
-        grants: agentGrants,
-        notes: agentNotes,
-        tasks: taskStore,
-        name: (agentId) => registry.get(agentId)?.name,
-        canReach,
-      });
-      const mcpTools = createMcpTools({
-        agentId: id,
-        catalog: mcpCatalog,
-        tasks: taskStore,
-        rules: approvalRules,
-        canReach,
-        execute: executeMcp,
-      });
-      const canHandoff = (parent: ChatTask, target: string) =>
-        canReach(parent) &&
-        agentGrants.allows(
-          parent.agentId,
-          target,
-          "delegate",
-          parent.origin.platform,
-        );
-      const delegatedExecution = createDelegationExecution({
-        agentId: id,
-        tasks: taskStore,
-        ready: () => {
-          const agent = registry.get(id);
-          const chatId = registry.getOwnerChat(id);
-          return (
-            !!agent &&
-            agent.ownerId !== null &&
-            agent.botId !== null &&
-            chatId !== undefined &&
-            agentAccess(id).canExecute(agent.botId, agent.ownerId, chatId)
-          );
-        },
-        canReach,
-        allowed: canHandoff,
-      });
-      return {
-        agentId: id,
-        canClaim: () => allowsWork(id),
-        prepareModel: () => usage.prepare(id),
-        recordUsage: (taskId, hostId, reading) =>
-          usage.record(id, taskId, hostId, reading),
-        store: taskStore,
-        ownerId: () => registry.get(id)?.ownerId ?? 0,
-        schedules: { store: scheduleStore },
-        onScheduleOutcome: async (scheduleId: string) =>
-          await operationalAlerts?.scheduleOutcome(id, scheduleId),
-        approvals: { store: approvalStore, rules: approvalRules },
-        notificationStore,
-        approvalReach: canReach,
-        approvalRoute: (task) =>
-          task.origin.platform === "delegated"
-            ? delegatedExecution.parent(task)
-            : task,
-        toolPolicy: {
-          canExecute: (task) => task.agentId === id && canReach(task),
-          allowedOperations: (task) => [
-            ...memoryOperationsForTask(task),
-            ...peerTools.operations(task),
-            ...mcpTools.operations(task),
-          ],
-          onIssue: mcpTools.snapshot,
-        },
-        toolHandlers: peerTools.handlers,
-        resolveToolHandler: mcpTools.resolveCatalog,
-        delegation: {
-          canHandoff,
-          canExecute: delegatedExecution.canExecute,
-          wake,
-        },
-        run: withAgentInstructions(
-          createHostTasks(
-            host,
-            fetch,
-            undefined,
-            taskWaitMs(taskTimeoutSeconds),
-          ),
-          () => registry.taskInstructions(id),
-        ),
-        attachments: createTelegramAttachments(host),
-        decide: createHostApprovals(host),
-        access: agentAccess(id),
-        discord: {
-          admit: discordAdmit,
-          attachments: createDiscordAttachments(host, discord.resolve),
-          sendFile: discordDelivery.sendFile,
-          sendText: discordDelivery.sendTask,
-          sendScheduleProposal: discordDelivery.sendScheduleProposal,
-          sendTyping: discordDelivery.sendTyping,
-          deliver: (task, outcome) =>
-            sendDiscordTask(
-              task,
-              !outcome.ok &&
-                outcome.kind === "attachment_unavailable" &&
-                task.discordAttachment?.error === "multiple"
-                ? "Send one document at a time."
-                : !outcome.ok &&
-                    outcome.kind === "attachment_unavailable" &&
-                    task.discordAttachment?.error === "too_large"
-                  ? "Documents must be 10 MiB or smaller."
-                  : taskOutcomeText(outcome, task.scheduleName),
-            ),
-          sendApproval: discordDelivery.sendApproval,
-          sendDelegation: (task, text, canSend) =>
-            discordDelivery.sendTask(task, text, canSend),
-        },
-      };
-    },
-    {
-      store: taskStore,
-      cancelHostTask: async (id, serverTaskId) => {
-        const hostTaskId = taskStore.getHostTaskId(id, serverTaskId);
-        if (!hostTaskId || !hosts) return;
-        const host = await hosts!.read(id);
-        const task = taskStore.getTask(serverTaskId);
-        if (
-          task?.agentId !== id ||
-          task.status !== "running" ||
-          task.origin.platform !== "delegated" ||
-          !taskStore.getDelegation(
-            task.origin.sourceAgentId,
-            task.origin.delegationId,
-          )?.cancellationRequested
-        )
-          return;
-        await createHostCancellation(host)(hostTaskId);
-      },
-      targetStatus: (id) => {
-        if (!registry.get(id)) return "deleted";
-        if (!allowsWork(id)) return "paused";
-        return "ready";
-      },
-    },
-  );
-  const avatars = createAgentAvatars(stateDir, (id) => !!registry.get(id));
-  const registeredBots = hosts
-    ? createRegisteredBots(
-        registry,
-        {
-          statePath,
-          taskStore,
-          schedules: scheduleStore,
-          tasks: (id) => taskServices.get(id),
-          taskWaitMs: taskWaitMs(taskTimeoutSeconds),
-          allowsWork,
-          runtimeReady,
-          loadAvatar: avatars.get,
-        },
-        botSecrets,
-        hosts,
-      )
-    : undefined;
-  const requireAgent = (id: string) => {
-    if (!registry.get(id)) throw new Error("Agent not found");
   };
-  const registeredDiscord = createRegisteredDiscord(
-    registry,
-    discordSecrets,
-    discordInbox,
-    undefined,
-    hosts
-      ? {
-          get: (id) => taskServices.get(id),
-          inbox: discordInbox,
-          async listSchedules(agentId, origin) {
-            const agent = registry.get(agentId);
-            if (!agent) return;
-            const task = { agentId, origin };
-            await discordDelivery.sendTask(
-              task,
-              formatScheduleList(
-                scheduleStore.listByAgent(agentId),
-                agent.name,
-                "Ask in this chat to create a schedule. Manage schedules in this agent's panel.",
-              ),
-              () => matchesDiscord(task),
-            );
-          },
-        }
-      : undefined,
-    avatars.get,
-  );
-  const processAgents: ReturnType<typeof createProcessAgents> =
-    createProcessAgents({
-      registry,
-      store: processStore!,
-      credentials: processCredentials!,
-      botSecrets,
-      schedules: scheduleStore,
-      dataDirectory: stateDir,
-      hostEntrypoint: fileURLToPath(
-        new URL("../../agent-host/dist/serve.js", import.meta.url),
-      ),
+  let stopping = false;
+  let closeRuntime: (() => Promise<void>) | undefined;
+  try {
+    const hosts = { read: (id: string) => processAgents!.readHost(id) };
+    const runtimeReady = (id: string) => processAgents?.ready(id) ?? false;
+    const agentAccess = (id: string) =>
+      createAgentAccess(registry, id, () => runtimeReady(id));
+    const allowsWork = runtimeReady;
+    async function inspectHost(id: string) {
+      try {
+        return await getHostStatus(await hosts!.read(id));
+      } catch {
+        return "unavailable" as const;
+      }
+    }
+    const discord = createDiscordConfiguration(registry, discordSecrets);
+    const linkTelegram = createTelegramLink(registry, botSecrets);
+    const discordDelivery = createDiscordNotifications(discord.resolve);
+    function linkedDiscord(id: string): DiscordConversation | undefined {
+      const connection = registry.getDiscordConnection(id);
+      const channelId = discordInbox.getBinding(id);
+      if (!connection || !channelId) return undefined;
+      return {
+        platform: "discord",
+        botId: connection.botId,
+        ownerId: connection.ownerId,
+        channelId,
+      };
+    }
+    function matchesDiscord(task: DiscordDestination) {
+      const current = linkedDiscord(task.agentId);
+      return (
+        current?.botId === task.origin.botId &&
+        current.ownerId === task.origin.ownerId &&
+        current.channelId === task.origin.channelId
+      );
+    }
+    function discordAdmit(task: DiscordDestination) {
+      return (
+        runtimeReady(task.agentId) &&
+        matchesDiscord(task) &&
+        !!registry.getHostCredentialRef(task.agentId)
+      );
+    }
+    async function sendDiscordTask(task: DiscordDestination, text: string) {
+      if (!discordAdmit(task)) return "not_sent" as const;
+      return notificationDelivery(
+        await discordDelivery.sendTask(task, text, () => discordAdmit(task)),
+      );
+    }
+    const executablePath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
+    const localRuntime = createMcpLocalRuntime(
+      stateDir,
       executablePath,
-      sharedEngineDirectory: sharedEngine.directory,
-      purgeEngineSessions: sharedEngine.purge,
-      taskTimeoutSeconds,
-      playwrightBrowsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH,
-      beforeStop: async (id) => {
-        await registeredBots?.stop(id);
-        registeredDiscord.stop(id);
-        taskServices.stop(id);
-      },
-      afterStart: async (id) => {
-        if (agentAccess(id).getSetup().bot === "linked")
-          registeredBots?.start(id);
-        void registeredDiscord.start(id);
-        await taskServices.wake([id]);
-      },
-      onUnexpectedExit: (id) => {
-        taskServices.stop(id);
-        log.warn("server.agent_host_exited", { agentId: id });
-      },
-      removeMcpAgentAccess: (id) => mcpCatalog.removeAgentAccess(id),
-    });
-  const notifications = createDurableNotifications(
-    notificationStore,
-    createNotifications({
-      discord: discordDelivery,
-      ...(registeredBots ? { telegram: registeredBots.notifications } : {}),
-    }),
-  );
-  const providers = createSharedProviders({
-    directory: sharedEngine.directory,
-    executablePath,
-    conflicts: sharedEngine.conflicts,
-    changed() {
-      const ids = registry.listIds();
-      for (const id of ids) usage.invalidate(id);
-      void taskServices.wake(ids).catch(() => {});
-      void operationalAlerts?.tick().catch(() => {});
-    },
-  });
-  const operationalAlerts = registeredBots
-    ? createOperationalAlerts({
-        registry,
-        tasks: taskStore,
-        schedules: scheduleStore,
-        store: operationalAlertStore,
-        notifications,
-        outbox: notificationStore,
-        canNotify: registeredBots.canNotify,
-        checkProviders: providers.checks,
-        process: processAgents,
-      })
-    : undefined;
-  const scheduler = createScheduler({
-    store: scheduleStore,
-    admit: hosts
-      ? createScheduleAdmission(
-          registry,
-          hosts,
-          undefined,
-          allowsWork,
-          (id) => {
-            const origin = linkedDiscord(id);
-            return origin && discordAdmit({ agentId: id, origin })
-              ? origin
-              : undefined;
-          },
-        )
-      : async () => undefined,
-    isOverlapping: taskStore.isScheduleOverlapping,
-    kick: async (id) => {
-      (await taskServices.get(id)).resume();
-    },
-    notifySkip: createScheduleSkipNotifier(notifications, {
-      origin: linkedDiscord,
-      send(agentId, origin, text) {
-        const task = { agentId, origin };
-        return discordDelivery.sendTask(task, text, () => matchesDiscord(task));
-      },
-    }),
-  });
-  const panel = createPanel(panelConfig, {
-    deploymentMode: serverMode.mode,
-    rules: registry.rules,
-    loadAvatar: avatars.get,
-    processAction: async (id, action) => {
-      await processAgents![action](id);
-    },
-    mcp: {
+      fileURLToPath(
+        new URL("../../agent-host/dist/mcp-stdio.js", import.meta.url),
+      ),
+    );
+    const executeMcp = createMcpExecution({
+      localRuntime,
       catalog: mcpCatalog,
       credentials: mcpCredentials,
-      agentExists: (id) => !!registry.get(id),
-      discover: createMcpDiscovery(fetch, undefined, localRuntime),
-    },
-    schedules: {
-      store: scheduleStore,
-      runNow: scheduler.runNow,
-      ownerLinked: (id) => registry.getOwnerChat(id) !== undefined,
-      discordOwnerLinked: (id) => !!linkedDiscord(id),
-    },
-    providers,
-    executions: createExecutionHistory(taskStore, stateDir),
-    usage: { ...usage, wake: (id) => taskServices.wake([id]) },
-    approvals: { rules: approvalRules, history: approvalStore },
-    delegations: {
-      store: taskStore,
-      cancel: (sourceId, id) => taskServices.cancelDelegation(sourceId, id),
-    },
-    peers: {
-      grants: agentGrants,
-      candidates: (id) => {
-        const owner = registry.get(id)?.ownerId;
-        if (owner == null) return [];
-        return registry
-          .listIds()
-          .filter((other) => other !== id)
-          .flatMap((other) => {
-            const agent = registry.get(other);
-            return agent && agent.ownerId === owner
-              ? [{ id: other, name: agent.name }]
-              : [];
-          });
-      },
-    },
-    memories: hosts ? createHostMemories((id) => hosts!.read(id)) : undefined,
-    discord: {
-      status: (id) => ({
-        state: registeredDiscord.getState(id),
-        ownerLinked: discordInbox.getBinding(id) !== undefined,
+    });
+    const usage = createAgentUsage(
+      usageStore,
+      createHostUsage(async (id) => {
+        if (!hosts) throw new Error("Agent Host unavailable");
+        return hosts.read(id);
       }),
-      get: (id) => {
-        const connection = registry.getDiscordConnection(id);
-        return connection
-          ? {
-              botId: connection.botId,
-              botUsername: connection.botUsername,
-              ownerId: connection.ownerId,
-            }
-          : undefined;
+    );
+    const taskServices = createAgentTaskServices(
+      async (id, { wake }) => {
+        if (!hosts || !registry.get(id))
+          throw new Error("Agent is unavailable");
+        const host = await hosts!.read(id);
+        const canReach = (task: RoutedTask) =>
+          task.origin.platform === "delegated"
+            ? false
+            : task.origin.platform === "discord"
+              ? discordAdmit(task as DiscordQueuedTask)
+              : agentAccess(task.agentId).canExecute(
+                  task.origin.botId,
+                  registry.get(task.agentId)?.ownerId ?? 0,
+                  task.origin.chatId,
+                );
+        const peerTools = createPeerTools({
+          agentId: id,
+          grants: agentGrants,
+          notes: agentNotes,
+          tasks: taskStore,
+          name: (agentId) => registry.get(agentId)?.name,
+          canReach,
+        });
+        const mcpTools = createMcpTools({
+          agentId: id,
+          catalog: mcpCatalog,
+          tasks: taskStore,
+          rules: approvalRules,
+          canReach,
+          execute: executeMcp,
+        });
+        const canHandoff = (parent: ChatTask, target: string) =>
+          canReach(parent) &&
+          agentGrants.allows(
+            parent.agentId,
+            target,
+            "delegate",
+            parent.origin.platform,
+          );
+        const delegatedExecution = createDelegationExecution({
+          agentId: id,
+          tasks: taskStore,
+          ready: () => {
+            const agent = registry.get(id);
+            const chatId = registry.getOwnerChat(id);
+            return (
+              !!agent &&
+              agent.ownerId !== null &&
+              agent.botId !== null &&
+              chatId !== undefined &&
+              agentAccess(id).canExecute(agent.botId, agent.ownerId, chatId)
+            );
+          },
+          canReach,
+          allowed: canHandoff,
+        });
+        return {
+          agentId: id,
+          canClaim: () => allowsWork(id),
+          prepareModel: () => usage.prepare(id),
+          recordUsage: (taskId, hostId, reading) =>
+            usage.record(id, taskId, hostId, reading),
+          store: taskStore,
+          ownerId: () => registry.get(id)?.ownerId ?? 0,
+          schedules: { store: scheduleStore },
+          onScheduleOutcome: async (scheduleId: string) =>
+            await operationalAlerts?.scheduleOutcome(id, scheduleId),
+          approvals: { store: approvalStore, rules: approvalRules },
+          notificationStore,
+          approvalReach: canReach,
+          approvalRoute: (task) =>
+            task.origin.platform === "delegated"
+              ? delegatedExecution.parent(task)
+              : task,
+          toolPolicy: {
+            canExecute: (task) => task.agentId === id && canReach(task),
+            allowedOperations: (task) => [
+              ...memoryOperationsForTask(task),
+              ...peerTools.operations(task),
+              ...mcpTools.operations(task),
+            ],
+            onIssue: mcpTools.snapshot,
+          },
+          toolHandlers: peerTools.handlers,
+          resolveToolHandler: mcpTools.resolveCatalog,
+          delegation: {
+            canHandoff,
+            canExecute: delegatedExecution.canExecute,
+            wake,
+          },
+          run: withAgentInstructions(
+            createHostTasks(
+              host,
+              fetch,
+              undefined,
+              taskWaitMs(taskTimeoutSeconds),
+            ),
+            () => registry.taskInstructions(id),
+          ),
+          attachments: createTelegramAttachments(host),
+          decide: createHostApprovals(host),
+          access: agentAccess(id),
+          discord: {
+            admit: discordAdmit,
+            attachments: createDiscordAttachments(host, discord.resolve),
+            sendFile: discordDelivery.sendFile,
+            sendText: discordDelivery.sendTask,
+            sendScheduleProposal: discordDelivery.sendScheduleProposal,
+            sendTyping: discordDelivery.sendTyping,
+            deliver: (task, outcome) =>
+              sendDiscordTask(
+                task,
+                !outcome.ok &&
+                  outcome.kind === "attachment_unavailable" &&
+                  task.discordAttachment?.error === "multiple"
+                  ? "Send one document at a time."
+                  : !outcome.ok &&
+                      outcome.kind === "attachment_unavailable" &&
+                      task.discordAttachment?.error === "too_large"
+                    ? "Documents must be 10 MiB or smaller."
+                    : taskOutcomeText(outcome, task.scheduleName),
+              ),
+            sendApproval: discordDelivery.sendApproval,
+            sendDelegation: (task, text, canSend) =>
+              discordDelivery.sendTask(task, text, canSend),
+          },
+        };
       },
-      configure: async (id, ownerId, token) => {
-        const result = await discord.configure(id, ownerId, token);
-        await registeredDiscord.start(id);
-        return result;
+      {
+        store: taskStore,
+        cancelHostTask: async (id, serverTaskId) => {
+          const hostTaskId = taskStore.getHostTaskId(id, serverTaskId);
+          if (!hostTaskId || !hosts) return;
+          const host = await hosts!.read(id);
+          const task = taskStore.getTask(serverTaskId);
+          if (
+            task?.agentId !== id ||
+            task.status !== "running" ||
+            task.origin.platform !== "delegated" ||
+            !taskStore.getDelegation(
+              task.origin.sourceAgentId,
+              task.origin.delegationId,
+            )?.cancellationRequested
+          )
+            return;
+          await createHostCancellation(host)(hostTaskId);
+        },
+        targetStatus: (id) => {
+          if (!registry.get(id)) return "deleted";
+          if (!allowsWork(id)) return "paused";
+          return "ready";
+        },
       },
-      remove: async (id) => {
-        const result = await discord.remove(id);
-        registeredDiscord.stop(id);
-        return result;
-      },
-      test: (id, requestId) =>
-        notifications.send(
-          id,
-          requestId,
-          "discord",
-          "Nimbot Discord notification test.",
-        ),
-    },
-    registerAgent: processAgents.register,
-    connectTelegram: async (id, ownerId, token) => {
-      await linkTelegram(id, ownerId, token);
-      if (runtimeReady(id)) registeredBots?.start(id);
-    },
-    getAgentSetup: (id) => {
-      const agent = registry.get(id);
-      return agent
+    );
+    const avatars = createAgentAvatars(stateDir, (id) => !!registry.get(id));
+    const registeredBots = hosts
+      ? createRegisteredBots(
+          registry,
+          {
+            statePath,
+            taskStore,
+            schedules: scheduleStore,
+            tasks: (id) => taskServices.get(id),
+            taskWaitMs: taskWaitMs(taskTimeoutSeconds),
+            allowsWork,
+            runtimeReady,
+            loadAvatar: avatars.get,
+          },
+          botSecrets,
+          hosts,
+        )
+      : undefined;
+    const requireAgent = (id: string) => {
+      if (!registry.get(id)) throw new Error("Agent not found");
+    };
+    const registeredDiscord = createRegisteredDiscord(
+      registry,
+      discordSecrets,
+      discordInbox,
+      undefined,
+      hosts
         ? {
-            name: agent.name,
-            botUsername: agent.botUsername,
-            provisioning: processAgents!.setupStatus(id),
-            botConnection: registeredBots?.getState(id),
-            setupAccess: agentAccess(id).getSetup(),
-            process: {
-              state: processAgents!.status(id),
-              desiredState: processStore!.getDesiredState(id),
+            get: (id) => taskServices.get(id),
+            inbox: discordInbox,
+            async listSchedules(agentId, origin) {
+              const agent = registry.get(agentId);
+              if (!agent) return;
+              const task = { agentId, origin };
+              await discordDelivery.sendTask(
+                task,
+                formatScheduleList(
+                  scheduleStore.listByAgent(agentId),
+                  agent.name,
+                  "Ask in this chat to create a schedule. Manage schedules in this agent's panel.",
+                ),
+                () => matchesDiscord(task),
+              );
             },
           }
-        : undefined;
-    },
-    agentSettings: {
-      get: (id) => {
-        const agent = registry.get(id);
-        return agent
-          ? { name: agent.name, instructions: agent.instructions }
-          : undefined;
+        : undefined,
+      avatars.get,
+    );
+    const processAgents: ReturnType<typeof createProcessAgents> =
+      createProcessAgents({
+        registry,
+        store: processStore!,
+        credentials: processCredentials!,
+        botSecrets,
+        schedules: scheduleStore,
+        dataDirectory: stateDir,
+        hostEntrypoint: fileURLToPath(
+          new URL("../../agent-host/dist/serve.js", import.meta.url),
+        ),
+        executablePath,
+        sharedEngineDirectory: sharedEngine.directory,
+        purgeEngineSessions: sharedEngine.purge,
+        taskTimeoutSeconds,
+        playwrightBrowsersPath: process.env.PLAYWRIGHT_BROWSERS_PATH,
+        beforeStop: async (id) => {
+          await registeredBots?.stop(id);
+          registeredDiscord.stop(id);
+          taskServices.stop(id);
+        },
+        afterStart: async (id) => {
+          if (agentAccess(id).getSetup().bot === "linked")
+            registeredBots?.start(id);
+          void registeredDiscord.start(id);
+          await taskServices.wake([id]);
+        },
+        onUnexpectedExit: (id) => {
+          taskServices.stop(id);
+          log.warn("server.agent_host_exited", { agentId: id });
+        },
+        removeMcpAgentAccess: (id) => mcpCatalog.removeAgentAccess(id),
+      });
+    const notifications = createDurableNotifications(
+      notificationStore,
+      createNotifications({
+        discord: discordDelivery,
+        ...(registeredBots ? { telegram: registeredBots.notifications } : {}),
+      }),
+    );
+    const providers = createSharedProviders({
+      directory: sharedEngine.directory,
+      executablePath,
+      conflicts: sharedEngine.conflicts,
+      changed() {
+        const ids = registry.listIds();
+        for (const id of ids) usage.invalidate(id);
+        void taskServices.wake(ids).catch(() => {});
+        void operationalAlerts?.tick().catch(() => {});
       },
-      hostStatus: inspectHost,
-      providerChecks: operationalAlerts?.checks,
-      saveToken: async (id, token) => {
-        requireAgent(id);
-        await createBotTokenUpdate(id, registry, botSecrets)(token);
+    });
+    const operationalAlerts = registeredBots
+      ? createOperationalAlerts({
+          registry,
+          tasks: taskStore,
+          schedules: scheduleStore,
+          store: operationalAlertStore,
+          notifications,
+          outbox: notificationStore,
+          canNotify: registeredBots.canNotify,
+          checkProviders: providers.checks,
+          process: processAgents,
+        })
+      : undefined;
+    const scheduler = createScheduler({
+      store: scheduleStore,
+      admit: hosts
+        ? createScheduleAdmission(
+            registry,
+            hosts,
+            undefined,
+            allowsWork,
+            (id) => {
+              const origin = linkedDiscord(id);
+              return origin && discordAdmit({ agentId: id, origin })
+                ? origin
+                : undefined;
+            },
+          )
+        : async () => undefined,
+      isOverlapping: taskStore.isScheduleOverlapping,
+      kick: async (id) => {
+        (await taskServices.get(id)).resume();
       },
-      save: (id, name, instructions) => {
-        requireAgent(id);
-        registry.updateSettings(id, name, instructions);
+      notifySkip: createScheduleSkipNotifier(notifications, {
+        origin: linkedDiscord,
+        send(agentId, origin, text) {
+          const task = { agentId, origin };
+          return discordDelivery.sendTask(task, text, () =>
+            matchesDiscord(task),
+          );
+        },
+      }),
+    });
+    const panel = createPanel(
+      panelConfig,
+      {
+        backups,
+        deploymentMode: serverMode.mode,
+        rules: registry.rules,
+        loadAvatar: avatars.get,
+        processAction: async (id, action) => {
+          await processAgents![action](id);
+        },
+        mcp: {
+          catalog: mcpCatalog,
+          credentials: mcpCredentials,
+          agentExists: (id) => !!registry.get(id),
+          discover: createMcpDiscovery(fetch, undefined, localRuntime),
+        },
+        schedules: {
+          store: scheduleStore,
+          runNow: scheduler.runNow,
+          ownerLinked: (id) => registry.getOwnerChat(id) !== undefined,
+          discordOwnerLinked: (id) => !!linkedDiscord(id),
+        },
+        providers,
+        executions: createExecutionHistory(taskStore, stateDir),
+        usage: { ...usage, wake: (id) => taskServices.wake([id]) },
+        approvals: { rules: approvalRules, history: approvalStore },
+        delegations: {
+          store: taskStore,
+          cancel: (sourceId, id) => taskServices.cancelDelegation(sourceId, id),
+        },
+        peers: {
+          grants: agentGrants,
+          candidates: (id) => {
+            const owner = registry.get(id)?.ownerId;
+            if (owner == null) return [];
+            return registry
+              .listIds()
+              .filter((other) => other !== id)
+              .flatMap((other) => {
+                const agent = registry.get(other);
+                return agent && agent.ownerId === owner
+                  ? [{ id: other, name: agent.name }]
+                  : [];
+              });
+          },
+        },
+        memories: hosts
+          ? createHostMemories((id) => hosts!.read(id))
+          : undefined,
+        discord: {
+          status: (id) => ({
+            state: registeredDiscord.getState(id),
+            ownerLinked: discordInbox.getBinding(id) !== undefined,
+          }),
+          get: (id) => {
+            const connection = registry.getDiscordConnection(id);
+            return connection
+              ? {
+                  botId: connection.botId,
+                  botUsername: connection.botUsername,
+                  ownerId: connection.ownerId,
+                }
+              : undefined;
+          },
+          configure: async (id, ownerId, token) => {
+            const result = await discord.configure(id, ownerId, token);
+            await registeredDiscord.start(id);
+            return result;
+          },
+          remove: async (id) => {
+            const result = await discord.remove(id);
+            registeredDiscord.stop(id);
+            return result;
+          },
+          test: (id, requestId) =>
+            notifications.send(
+              id,
+              requestId,
+              "discord",
+              "Nimbot Discord notification test.",
+            ),
+        },
+        registerAgent: processAgents.register,
+        connectTelegram: async (id, ownerId, token) => {
+          await linkTelegram(id, ownerId, token);
+          if (runtimeReady(id)) registeredBots?.start(id);
+        },
+        getAgentSetup: (id) => {
+          const agent = registry.get(id);
+          return agent
+            ? {
+                name: agent.name,
+                botUsername: agent.botUsername,
+                provisioning: processAgents!.setupStatus(id),
+                botConnection: registeredBots?.getState(id),
+                setupAccess: agentAccess(id).getSetup(),
+                process: {
+                  state: processAgents!.status(id),
+                  desiredState: processStore!.getDesiredState(id),
+                },
+              }
+            : undefined;
+        },
+        agentSettings: {
+          get: (id) => {
+            const agent = registry.get(id);
+            return agent
+              ? { name: agent.name, instructions: agent.instructions }
+              : undefined;
+          },
+          hostStatus: inspectHost,
+          providerChecks: operationalAlerts?.checks,
+          saveToken: async (id, token) => {
+            requireAgent(id);
+            await createBotTokenUpdate(id, registry, botSecrets)(token);
+          },
+          save: (id, name, instructions) => {
+            requireAgent(id);
+            registry.updateSettings(id, name, instructions);
+          },
+        },
+        listAgentIds: () => registry.listIds(),
+        deleteAgent: async (id, deleteData) => {
+          requireAgent(id);
+          if (deleteData)
+            await avatars.withPurge(id, () => processAgents.remove(id, true));
+          else await processAgents.remove(id);
+          operationalAlerts?.removeAgent(id);
+          if ((await mcpCredentials.cleanup()).cleanupPending)
+            log.warn("mcp.credential_cleanup_pending");
+          await taskServices.wake([id]);
+        },
       },
+      Date.now,
+      sessions,
+    );
+    let recoveringUsage = false;
+    const background = new Set<Promise<unknown>>();
+    function track(work: Promise<unknown>) {
+      background.add(work);
+      void work.finally(() => background.delete(work)).catch(() => {});
+    }
+    const refreshQueues = () => {
+      if (stopping) return;
+      track(taskServices.wake(usageStore.queuedAgents()).catch(() => {}));
+      if (recoveringUsage) return;
+      recoveringUsage = true;
+      track(
+        usage
+          .recover()
+          .catch(() => {})
+          .finally(() => {
+            recoveringUsage = false;
+          }),
+      );
+    };
+    let usageTimer: ReturnType<typeof setInterval> | undefined;
+    let closing: Promise<void> | undefined;
+    closeRuntime = () => {
+      if (closing) return closing;
+      stopping = true;
+      clearInterval(usageTimer);
+      // Stop admission before terminating Hosts. Their outstanding requests must
+      // settle while stores are still open.
+      const tasksStopped = taskServices.close();
+      closing = (async () => {
+        const results = await Promise.allSettled([
+          scheduler.close(),
+          registeredDiscord.close(),
+          registeredBots?.close(),
+          operationalAlerts?.close(),
+          localRuntime.close(),
+          processAgents.close(),
+          providers.close(),
+          tasksStopped,
+        ]);
+        while (background.size) await Promise.allSettled([...background]);
+        if (results.some((result) => result.status === "rejected"))
+          throw new Error("Could not stop every runtime service.");
+        closeStores();
+      })();
+      return closing;
+    };
+    let started: Promise<void> | undefined;
+    const start = () =>
+      (started ??= (async () => {
+        if (stopping) throw new Error("Runtime is closing.");
+        const restored = await processAgents.restore();
+        for (const result of restored)
+          if (result.status === "rejected")
+            log.warn("server.agent_host_restore_failed");
+        if (stopping) return;
+        track(
+          taskServices.resumeDelegations(taskStore).catch(() => {
+            log.warn("server.delegation_resume_failed");
+          }),
+        );
+        track(
+          taskServices.resumeDelegationResults(taskStore).catch(() => {
+            log.warn("server.delegation_result_resume_failed");
+          }),
+        );
+        track(scheduler.start());
+        operationalAlerts?.start();
+        usageTimer = setInterval(refreshQueues, 30_000);
+        usageTimer.unref();
+        refreshQueues();
+      })());
+    return { panel, close: closeRuntime, start };
+  } catch (error) {
+    if (closeRuntime) await closeRuntime();
+    else closeStores();
+    throw error;
+  }
+}
+
+async function main() {
+  let panelConfig: PanelConfig;
+  let serverMode: ReturnType<typeof readServerMode>;
+  let buildId: string;
+  let maxBytes: number;
+  try {
+    panelConfig = readPanelConfig(process.env);
+    serverMode = readServerMode(process.env, panelConfig);
+    readTaskTimeoutSeconds(process.env);
+    maxBytes = readBackupMaxBytes(process.env);
+    buildId = (
+      await readFile(new URL("../../build-id", import.meta.url), "utf8")
+    ).trim();
+    if (!/^[a-f0-9]{64}$/.test(buildId))
+      throw new Error("Build identity is invalid. Run pnpm build.");
+  } catch (error) {
+    log.error("server.config_invalid", {
+      message:
+        error instanceof Error
+          ? error.message
+          : "Invalid server configuration.",
+    });
+    process.exitCode = 1;
+    return;
+  }
+  const sessions = new Map<string, number>();
+  let runtime: Awaited<ReturnType<typeof openRuntime>> | undefined;
+  const requests = new Set<Promise<void>>();
+  let terminating = false;
+  const backups = createBackups({
+    stateDir: serverMode.stateDirectory,
+    buildId,
+    maxBytes,
+    async pause() {
+      while (requests.size) await Promise.all([...requests]);
+      await runtime?.close();
+      runtime = undefined;
     },
-    listAgentIds: () => registry.listIds(),
-    deleteAgent: async (id, deleteData) => {
-      requireAgent(id);
-      if (deleteData)
-        await avatars.withPurge(id, () => processAgents.remove(id, true));
-      else await processAgents.remove(id);
-      operationalAlerts?.removeAgent(id);
-      if ((await mcpCredentials.cleanup()).cleanupPending)
-        log.warn("mcp.credential_cleanup_pending");
-      await taskServices.wake([id]);
+    async resume() {
+      if (terminating) throw new Error("Server is shutting down.");
+      if (runtime) throw new Error("Previous runtime has not stopped.");
+      runtime = await openRuntime(panelConfig, serverMode, backups, sessions);
     },
+    async activateRuntime() {
+      if (terminating || !runtime) throw new Error("Runtime is unavailable.");
+      await runtime.start();
+    },
+    invalidateSessions: () => sessions.clear(),
   });
+  const fallback = createPanel(
+    panelConfig,
+    {
+      deploymentMode: serverMode.mode,
+      backups,
+    },
+    Date.now,
+    sessions,
+  );
+  let startup = Promise.resolve();
   const server = serve({
-    fetch: panel.fetch,
     hostname: panelConfig.hostname,
     port: panelConfig.port,
+    async fetch(request) {
+      const panel = runtime && !backups.maintenance ? runtime.panel : fallback;
+      // Backup control requests must remain available while business requests
+      // finish. Tracking begins synchronously before dispatch to the runtime.
+      if (
+        panel === fallback ||
+        /^\/(?:api\/backups(?:\/|$)|assets\/|login$|api\/(?:login|logout|session)$)/.test(
+          new URL(request.url).pathname,
+        )
+      )
+        return panel.fetch(request);
+      let done!: () => void;
+      const completed = new Promise<void>((resolve) => {
+        done = resolve;
+      });
+      requests.add(completed);
+      try {
+        return await panel.fetch(request);
+      } finally {
+        requests.delete(completed);
+        done();
+      }
+    },
   });
+  const stop = () => {
+    if (terminating) return;
+    terminating = true;
+    server.close();
+    if ("closeIdleConnections" in server) server.closeIdleConnections();
+    void (async () => {
+      await startup;
+      await backups.settled();
+      while (requests.size) await Promise.all([...requests]);
+      await runtime?.close();
+    })().catch(() => {
+      log.error("server.runtime_stop_failed");
+      process.exitCode = 1;
+    });
+  };
   server.on("error", () => {
     log.error("server.panel_start_failed", {
       hint: "Check PANEL_HOST and PANEL_PORT.",
@@ -701,66 +883,30 @@ async function main(): Promise<void> {
     stop();
     process.exitCode = 1;
   });
-  log.info("server.panel_listening", { origin: panelConfig.origin });
-  let recoveringUsage = false;
-  const refreshQueues = () => {
-    void taskServices.wake(usageStore.queuedAgents()).catch(() => {});
-    if (recoveringUsage) return;
-    recoveringUsage = true;
-    void usage
-      .recover()
-      .catch(() => {})
-      .finally(() => {
-        recoveringUsage = false;
-      });
-  };
-  const usageTimer = setInterval(() => {
-    refreshQueues();
-  }, 30_000);
-  usageTimer.unref();
-  let stopping = false;
-  const stop = () => {
-    if (stopping) return;
-    stopping = true;
-    localRuntime.close();
-    void processAgents?.close().catch(() => {
-      log.error("server.agent_hosts_stop_failed");
-      process.exitCode = 1;
-    });
-    void providers.close().catch(() => {
-      log.error("server.provider_process_stop_failed");
-      process.exitCode = 1;
-    });
-    clearInterval(usageTimer);
-    void operationalAlerts
-      ?.close()
-      .catch(() => log.warn("operational_alert.poll_failed"));
-    void scheduler.close();
-    registeredDiscord.close();
-    taskServices.close();
-    void registeredBots?.close().catch(() => {
-      log.error("server.registered_bots_stop_failed");
-      process.exitCode = 1;
-    });
-    server.close();
-    if ("closeIdleConnections" in server) server.closeIdleConnections();
-  };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  const restored = await processAgents.restore();
-  for (const result of restored)
-    if (result.status === "rejected")
-      log.warn("server.agent_host_restore_failed");
-  if (stopping) return;
-  void taskServices.resumeDelegations(taskStore).catch(() => {
-    log.warn("server.delegation_resume_failed");
-  });
-  void taskServices.resumeDelegationResults(taskStore).catch(() => {
-    log.warn("server.delegation_result_resume_failed");
-  });
-  void scheduler.start();
-  operationalAlerts?.start();
-  refreshQueues();
+  log.info("server.panel_listening", { origin: panelConfig.origin });
+  startup = (async () => {
+    try {
+      await backups.initialize();
+      if (terminating) return;
+      runtime = await openRuntime(panelConfig, serverMode, backups, sessions);
+      if (!terminating) await runtime.start();
+      if (!terminating) backups.activate();
+    } catch {
+      backups.failMaintenance();
+      try {
+        await runtime?.close();
+        runtime = undefined;
+      } catch {
+        log.error("server.runtime_stop_failed");
+      }
+      log.error("server.runtime_start_failed", {
+        hint: "Check persisted state and backup recovery before starting work.",
+      });
+    }
+  })();
+  await startup;
 }
 
 await main();

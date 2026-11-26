@@ -21,9 +21,13 @@ export function createMcpLocalRuntime(
   entrypoint: string,
 ) {
   const shutdown = new AbortController();
+  const connections = new Set<() => Promise<void>>();
   const root = resolve(stateDir, "mcp-runtime");
   return {
-    close: () => shutdown.abort(),
+    async close() {
+      shutdown.abort();
+      await Promise.all([...connections].map((close) => close()));
+    },
     connect(
       target: McpLocalTarget,
       environment: Record<string, string>,
@@ -33,6 +37,7 @@ export function createMcpLocalRuntime(
         allowed(): boolean;
       },
     ) {
+      shutdown.signal.throwIfAborted();
       if (!/^[a-f0-9-]{36}$/.test(target.id))
         throw new Error("Invalid MCP integration ID");
       if (
@@ -119,9 +124,11 @@ export function createMcpLocalRuntime(
           clearTimeout(timer);
           await closeTransport();
           await client.close().catch(() => {});
+          connections.delete(close);
         })());
       let closing: Promise<void> | undefined;
       signal.addEventListener("abort", abort, { once: true });
+      connections.add(close);
 
       return {
         client,

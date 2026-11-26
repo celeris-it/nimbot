@@ -1027,6 +1027,9 @@ If the owner explicitly asks for a file, place the file in exports/${saved.id}/ 
       gate?.close();
       discordApprovals.close();
       queue.close();
+      return Promise.allSettled([queue.idle(), recoveringResults]).then(
+        () => {},
+      );
     },
     approvals: {
       /** "expired" covers unknown, reused, foreign and timed-out approvals alike. */

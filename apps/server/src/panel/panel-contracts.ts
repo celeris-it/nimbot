@@ -82,6 +82,7 @@ export interface PanelSession {
     scheduleSettings?: boolean;
     rules?: boolean;
     executions?: boolean;
+    backups?: boolean;
   };
 }
 export interface DiscordConversationStatus {
@@ -116,4 +117,23 @@ export interface AgentDirectoryEntry extends AgentSummary {
 }
 export interface PanelStatus {
   agents: AgentDirectoryEntry[];
+}
+
+export interface BackupOperation {
+  id: string;
+  kind: "export" | "restore" | "validate";
+  phase: string;
+  status: "running" | "ready" | "completed" | "failed";
+  error?: string;
+}
+
+export interface BackupStatus {
+  operation?: BackupOperation;
+  download?: { id: string; createdAt: string };
+  restore?: {
+    id: string;
+    manifest: { createdAt: string; buildId: string; totalBytes?: number };
+  };
+  maintenance: boolean;
+  maxBytes: number;
 }

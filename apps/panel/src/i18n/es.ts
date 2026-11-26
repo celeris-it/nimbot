@@ -1,4 +1,96 @@
 export const spanish = {
+  "Runtime temporary files and engine caches are excluded. Tools may download dependencies again after restoration.":
+    "Se excluyen los archivos temporales de ejecución y las cachés del motor. Las herramientas pueden volver a descargar dependencias después de la restauración.",
+  "Choose a backup file before validating.":
+    "Elige un archivo de copia de seguridad antes de validarlo.",
+  "Save your installation or restore a previous backup.":
+    "Guarda tu instalación o restaura una copia anterior.",
+  "Agents and integrations are paused. This operation continues if you leave the page.":
+    "Los agentes y las integraciones están pausados. La operación continúa si sales de la página.",
+  "Save a copy": "Guardar una copia",
+  "Download your agents’ files, conversations and settings.":
+    "Descarga los archivos, las conversaciones y la configuración de tus agentes.",
+  "Contains unencrypted secrets and browser sessions. Store it securely.":
+    "Contiene secretos y sesiones del navegador sin cifrar. Guárdala en un lugar seguro.",
+  "Created {0}. Download before the next export, server restart or 24 hours.":
+    "Creada el {0}. Descárgala antes de la próxima exportación, el reinicio del servidor o en un plazo de 24 horas.",
+  "Restore from a file": "Restaurar desde un archivo",
+  "Choose a .tar.gz backup from the same Nimbot build. Your data is checked before restoration.":
+    "Elige una copia .tar.gz de la misma compilación de Nimbot. Los datos se comprueban antes de restaurarlos.",
+  "Choose file": "Elegir archivo",
+  "No file selected": "Ningún archivo seleccionado",
+  "Backup contents and requirements": "Contenido y requisitos de la copia",
+  "Includes files, conversations, private memory, schedules and saved credentials. Keep the deployment’s .env and Docker image separately.":
+    "Incluye archivos, conversaciones, memoria privada, programaciones y credenciales guardadas. Conserva el .env del despliegue y la imagen de Docker por separado.",
+  "Creating or restoring a backup pauses agents and integrations and may interrupt active tasks.":
+    "Crear o restaurar una copia pausa los agentes y las integraciones y puede interrumpir las tareas activas.",
+  "Uploading the backup…": "Subiendo la copia de seguridad…",
+  "A backup operation is already running.":
+    "Ya hay una operación de copia de seguridad en curso.",
+  "Nimbot is in maintenance mode.": "Nimbot está en modo de mantenimiento.",
+  "Backup recovery failed. Nimbot remains in maintenance mode.":
+    "La recuperación de la copia falló. Nimbot continúa en modo de mantenimiento.",
+  "The backup operation failed. Check the file and available disk space.":
+    "La operación de copia de seguridad falló. Revisa el archivo y el espacio disponible en disco.",
+  "Backup exceeds the configured size limit.":
+    "La copia de seguridad supera el límite de tamaño configurado.",
+  "Not enough disk space for the backup.":
+    "No hay suficiente espacio en disco para la copia de seguridad.",
+  "No validated backup is available.":
+    "No hay ninguna copia de seguridad validada disponible.",
+  "Backup download has expired. Create another backup.":
+    "La descarga de la copia venció. Crea otra copia de seguridad.",
+  "Select a backup file to upload.":
+    "Selecciona un archivo de copia de seguridad para subir.",
+  "Confirm the validated backup before restoring.":
+    "Confirma la copia de seguridad validada antes de restaurarla.",
+  Backups: "Copias de seguridad",
+  "Pausing agents and services…": "Pausando agentes y servicios…",
+  "Creating the backup…": "Creando la copia de seguridad…",
+  "Validating the backup…": "Validando la copia de seguridad…",
+  "Starting agents and services…": "Iniciando agentes y servicios…",
+  "Restoring installation data…": "Restaurando los datos de la instalación…",
+  "Recovering the previous installation…":
+    "Recuperando la instalación anterior…",
+  "Operation completed.": "Operación completada.",
+  "Backup ready.": "Copia de seguridad lista.",
+  "Backup operation failed.": "La operación de copia de seguridad falló.",
+  "Could not connect to the backup service. Try again.":
+    "No se pudo conectar al servicio de copias de seguridad. Vuelve a intentarlo.",
+  "Pause agents and integrations to create a backup? Active tasks may be interrupted.":
+    "¿Pausar los agentes y las integraciones para crear una copia de seguridad? Las tareas activas pueden interrumpirse.",
+  "The selected backup exceeds the upload limit.":
+    "La copia seleccionada supera el límite de carga.",
+  "Replace all installation data with this backup? Agents and integrations will pause. You will need to sign in again after restoration.":
+    "¿Reemplazar todos los datos de la instalación con esta copia? Los agentes y las integraciones se pausarán. Deberás volver a iniciar sesión después de la restauración.",
+  "Save or restore the complete installation state. Creating or restoring a backup pauses agents and integrations and may interrupt active tasks.":
+    "Guarda o restaura el estado completo de la instalación. Crear o restaurar una copia pausa los agentes y las integraciones y puede interrumpir las tareas activas.",
+  "Backups contain secrets, private conversations and browser sessions. Keep them private. The archive is compressed without encryption.":
+    "Las copias contienen secretos, conversaciones privadas y sesiones del navegador. Mantenlas privadas. El archivo se comprime sin cifrado.",
+  "Keep the deployment’s .env and Docker image separately. Restore requires the same Nimbot build.":
+    "Conserva el .env del despliegue y la imagen de Docker por separado. La restauración requiere la misma compilación de Nimbot.",
+  "Backup validated. Review its details before restoring.":
+    "Copia validada. Revisa sus detalles antes de restaurarla.",
+  "Processing backup…": "Procesando la copia de seguridad…",
+  "Loading backup status…": "Cargando el estado de las copias de seguridad…",
+  "Nimbot is in maintenance. Keep this page open to follow progress.":
+    "Nimbot está en mantenimiento. Mantén esta página abierta para seguir el progreso.",
+  "Create backup": "Crear copia de seguridad",
+  "Download backup": "Descargar copia de seguridad",
+  "Created {0}. Available for 24 hours or until the next export.":
+    "Creada el {0}. Disponible durante 24 horas o hasta la próxima exportación.",
+  "Backup file": "Archivo de copia de seguridad",
+  "Upload a Nimbot .tar.gz backup to validate it before replacing data.":
+    "Sube una copia de Nimbot en formato .tar.gz para validarla antes de reemplazar los datos.",
+  "Maximum upload size {0} GiB.": "Tamaño máximo de carga de {0} GiB.",
+  "Validate backup": "Validar copia de seguridad",
+  "Validated backup": "Copia de seguridad validada",
+  "Backup date": "Fecha de la copia",
+  "Nimbot build": "Compilación de Nimbot",
+  "Expanded size": "Tamaño expandido",
+  "Restoration replaces all installation data. A recovery copy is saved before applying changes.":
+    "La restauración reemplaza todos los datos de la instalación. Se guarda una copia de recuperación antes de aplicar los cambios.",
+  "Restore this backup": "Restaurar esta copia",
   "Replace saved variables": "Reemplazar las variables guardadas",
   "Saving and checking the connection. A first download can take up to 90 seconds.":
     "Guardando y comprobando la conexión. La primera descarga puede tardar hasta 90 segundos.",
