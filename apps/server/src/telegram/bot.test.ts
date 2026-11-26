@@ -67,6 +67,7 @@ function setup(
   };
   tasks?.attach(bot);
   const sent: string[] = [];
+  const sentEntities: unknown[] = [];
   const destinations: number[] = [];
   const typing = vi.fn();
   const markups: unknown[] = [];
@@ -93,6 +94,7 @@ function setup(
     )
       throw new Error("Unexpected API call");
     sent.push(payload.text);
+    sentEntities.push("entities" in payload ? payload.entities : undefined);
     markups.push("reply_markup" in payload ? payload.reply_markup : undefined);
     destinations.push(Number(payload.chat_id));
     expect("parse_mode" in payload).toBe(false);
@@ -109,6 +111,7 @@ function setup(
   return {
     bot,
     sent,
+    sentEntities,
     activations,
     destinations,
     typing,
@@ -202,6 +205,19 @@ describe("Telegram access", () => {
     expect(sent.slice(count).join("")).toBe(output);
     expect(destinations.slice(count)).toEqual([42, 42]);
     expect(sent.slice(count).every((part) => part.length <= 4096)).toBe(true);
+  });
+  it("renders agent replies with Telegram bold and links", async () => {
+    const url = "https://example.com/news_(2026)?lang=es";
+    const f = setup(async () => `📰 **Fuentes:** [Comunicado](${url}).`);
+    await f.bot.handleUpdate(message("news"));
+    await f.idle();
+    expect(f.sent).toEqual(["📰 Fuentes: Comunicado."]);
+    expect(f.sentEntities).toEqual([
+      [
+        { type: "bold", offset: 3, length: 8 },
+        { type: "text_link", offset: 12, length: 10, url },
+      ],
+    ]);
   });
   it("saves the first text before executing it and reuses the binding", async () => {
     const binding = openChatBinding(":memory:", { id: "test", ownerId: 42 });

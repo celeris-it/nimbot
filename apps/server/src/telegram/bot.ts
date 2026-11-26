@@ -7,6 +7,7 @@ import { log } from "../logger.js";
 import type { HostStatus } from "../host/agent-host.js";
 import type { ChatBinding } from "./chat-binding.js";
 import { splitTelegramText } from "./telegram-text.js";
+import { formatTelegramMarkdown } from "./telegram-markdown.js";
 import type { TaskOutcome } from "../tasks/task-queue.js";
 import { Bot, GrammyError, type Api } from "grammy";
 import type { DeliveryOutcome } from "../tasks/execution-history.js";
@@ -42,12 +43,20 @@ export async function sendTaskOutcome(
   canSend: () => boolean = () => true,
 ): Promise<DeliveryOutcome> {
   let sent = false;
-  for (const part of splitTelegramText(
-    taskOutcomeText(outcome, scheduleName),
-  )) {
+  const parts =
+    outcome.ok && outcome.output
+      ? formatTelegramMarkdown(outcome.output, schedulePrefix(scheduleName))
+      : splitTelegramText(taskOutcomeText(outcome, scheduleName)).map(
+          (text) => ({
+            text,
+            entities: [],
+          }),
+        );
+  for (const { text, entities } of parts) {
     if (!canSend()) return sent ? "unconfirmed" : "not_sent";
     try {
-      await api.sendMessage(chatId, part);
+      if (entities.length) await api.sendMessage(chatId, text, { entities });
+      else await api.sendMessage(chatId, text);
     } catch (error) {
       return !sent &&
         error instanceof GrammyError &&
@@ -61,13 +70,17 @@ export async function sendTaskOutcome(
   return "delivered";
 }
 
+function schedulePrefix(scheduleName?: string) {
+  return scheduleName === undefined
+    ? ""
+    : `Scheduled task "${scheduleName}":\n\n`;
+}
+
 export function taskOutcomeText(outcome: TaskOutcome, scheduleName?: string) {
-  const prefix =
-    scheduleName === undefined ? "" : `Scheduled task "${scheduleName}":\n\n`;
   const text = outcome.ok
     ? outcome.output || "The task finished without a text response."
     : failureMessages[outcome.kind];
-  return prefix + text;
+  return schedulePrefix(scheduleName) + text;
 }
 
 /**
