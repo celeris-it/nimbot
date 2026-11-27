@@ -207,7 +207,7 @@ svg {
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 8px 12px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   text-decoration: none;
@@ -230,7 +230,7 @@ svg {
 }
 @media (width >= 840px) {
   #app:has([data-ui="main-navigation"]) {
-    --sidebar-width: 160px;
+    --sidebar-width: 184px;
     --content-inline-start: calc(
       var(--screen-gutter) + var(--sidebar-width) + var(--pane-gap)
     );
