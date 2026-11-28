@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
-import { hashPassword } from "../apps/server/src/panel/panel-auth.js";
 
 const execute = promisify(execFile);
 const image = process.env.NIMBOT_TEST_APPLICATION_IMAGE;
@@ -30,7 +29,6 @@ it.skipIf(!image)(
         await execute("docker", args, { timeout: 120000, maxBuffer: 2000000 })
       ).stdout.trim();
     const password = "application-fixture-password";
-    const hash = await hashPassword(password);
     let origin = "";
     let cookie = "";
     async function start(dataVolume = volume) {
@@ -48,8 +46,6 @@ it.skipIf(!image)(
         `type=volume,src=${dataVolume},dst=/data`,
         "--mount",
         `type=bind,src=${fixture},dst=/app/tests/fixtures/native-telegram.mjs,readonly`,
-        "--env",
-        `PANEL_PASSWORD_HASH=${hash}`,
         "--env",
         "NODE_OPTIONS=--import=/app/tests/fixtures/native-telegram.mjs",
         image!,
@@ -88,6 +84,39 @@ it.skipIf(!image)(
           { timeout: 20000 },
         )
         .toBe(401);
+      const status = await (await fetch(`${origin}/api/auth/status`)).json();
+      const link = await docker(
+        "exec",
+        name,
+        "node",
+        "apps/server/dist/setup-link.js",
+      );
+      if (status.setupRequired) {
+        const token = new URLSearchParams(new URL(link).hash.slice(1)).get(
+          "token",
+        )!;
+        const setup = await fetch(`${origin}/api/auth/setup`, {
+          method: "POST",
+          headers: { Origin: "http://localhost:3000" },
+          body: new URLSearchParams({
+            token,
+            password,
+            confirmation: password,
+          }),
+        });
+        expect(setup.status).toBe(200);
+        expect(await docker("logs", name)).not.toContain(token);
+        expect(
+          await docker(
+            "exec",
+            name,
+            "stat",
+            "-c",
+            "%a",
+            "/data/panel-auth/password-hash",
+          ),
+        ).toBe("600");
+      } else expect(link).toBe("http://localhost:3000/login");
       const response = await fetch(`${origin}/api/login`, {
         method: "POST",
         headers: { Origin: "http://localhost:3000" },

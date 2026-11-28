@@ -338,3 +338,41 @@ it("preserves an existing export when exclusive output creation fails", async ()
   ).rejects.toThrow();
   expect(await readFile(archive, "utf8")).toBe("previous export");
 });
+
+it("backs up the panel password hash but excludes activation tokens and unfinished writes", async () => {
+  const { state, archive, staging } = await fixture();
+  await mkdir(join(state, "panel-auth"), { mode: 0o700 });
+  await writeFile(join(state, "panel-auth/password-hash"), "saved-hash", {
+    mode: 0o600,
+  });
+  await writeFile(join(state, "panel-auth/setup-token"), "transient-token", {
+    mode: 0o600,
+  });
+  await writeFile(
+    join(state, "panel-auth/password-example.tmp"),
+    "unfinished",
+    { mode: 0o600 },
+  );
+  const manifest = await createArchive(
+    state,
+    archive,
+    "build-one",
+    1024 * 1024,
+  );
+  expect(
+    manifest.files.some((file) => file.path === "panel-auth/password-hash"),
+  ).toBe(true);
+  expect(
+    manifest.files.some(
+      (file) =>
+        file.path === "panel-auth/setup-token" || file.path.endsWith(".tmp"),
+    ),
+  ).toBe(false);
+  await validateArchive(archive, staging, "build-one", 1024 * 1024);
+  expect(
+    await readFile(join(staging, "data/panel-auth/password-hash"), "utf8"),
+  ).toBe("saved-hash");
+  expect(
+    (await stat(join(staging, "data/panel-auth/password-hash"))).mode & 0o777,
+  ).toBe(0o600);
+});

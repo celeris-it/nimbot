@@ -1,4 +1,16 @@
 export const panelErrorMessages = {
+  authentication_unavailable:
+    "Panel authentication is unavailable. Wait a moment and try again.",
+  setup_required:
+    "Create your administrator password using the activation link.",
+  setup_complete:
+    "The administrator password is already configured. Sign in to continue.",
+  invalid_setup_token:
+    "This activation link is invalid. Get the current link from your server.",
+  invalid_setup_password:
+    "Passwords must match and be between 8 and 256 characters long.",
+  setup_save_failed:
+    "Could not save the password. Check the server's data directory and try again.",
   origin_not_allowed: "Origin not allowed.",
   request_too_large: "Request too large.",
   login_rate_limited: "Too many attempts. Try again in 15 minutes.",

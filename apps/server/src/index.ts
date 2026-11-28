@@ -77,6 +77,10 @@ import { resolve } from "node:path";
 import { getHostStatus } from "./host/agent-host.js";
 import { serve } from "@hono/node-server";
 import { createPanel } from "./panel/panel.js";
+import {
+  createPanelAuthentication,
+  environmentPasswordHash,
+} from "./panel/panel-authentication.js";
 import { readPanelConfig, type PanelConfig } from "./panel/panel-config.js";
 import { createBackups, readBackupMaxBytes } from "./backups/service.js";
 import { readTaskTimeoutSeconds, taskWaitMs } from "./tasks/task-timeout.js";
@@ -86,6 +90,7 @@ async function openRuntime(
   serverMode: ReturnType<typeof readServerMode>,
   backups: ReturnType<typeof createBackups>,
   sessions: Map<string, number>,
+  authentication: ReturnType<typeof createPanelAuthentication>,
 ) {
   let processStore: ReturnType<typeof openAgentProcessStore> | undefined;
   let processCredentials:
@@ -562,6 +567,7 @@ async function openRuntime(
     const panel = createPanel(
       panelConfig,
       {
+        authentication,
         backups,
         deploymentMode: serverMode.mode,
         rules: registry.rules,
@@ -811,6 +817,23 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  const authentication = createPanelAuthentication(
+    serverMode.stateDirectory,
+    await environmentPasswordHash(process.env),
+  );
+  async function reloadAuthentication() {
+    try {
+      await authentication.reload();
+    } catch (error) {
+      log.error("server.authentication_invalid", {
+        message:
+          error instanceof Error
+            ? error.message
+            : "Cannot read panel authentication state.",
+      });
+      throw error;
+    }
+  }
   const sessions = new Map<string, number>();
   let runtime: Awaited<ReturnType<typeof openRuntime>> | undefined;
   const requests = new Set<Promise<void>>();
@@ -827,7 +850,14 @@ async function main() {
     async resume() {
       if (terminating) throw new Error("Server is shutting down.");
       if (runtime) throw new Error("Previous runtime has not stopped.");
-      runtime = await openRuntime(panelConfig, serverMode, backups, sessions);
+      await reloadAuthentication();
+      runtime = await openRuntime(
+        panelConfig,
+        serverMode,
+        backups,
+        sessions,
+        authentication,
+      );
     },
     async activateRuntime() {
       if (terminating || !runtime) throw new Error("Runtime is unavailable.");
@@ -839,6 +869,7 @@ async function main() {
     panelConfig,
     {
       deploymentMode: serverMode.mode,
+      authentication,
       backups,
     },
     Date.now,
@@ -854,7 +885,7 @@ async function main() {
       // finish. Tracking begins synchronously before dispatch to the runtime.
       if (
         panel === fallback ||
-        /^\/(?:api\/backups(?:\/|$)|assets\/|login$|api\/(?:login|logout|session)$)/.test(
+        /^\/(?:api\/backups(?:\/|$)|assets\/|login$|setup$|api\/auth(?:\/|$)|api\/(?:login|logout|session)$)/.test(
           new URL(request.url).pathname,
         )
       )
@@ -901,7 +932,14 @@ async function main() {
     try {
       await backups.initialize();
       if (terminating) return;
-      runtime = await openRuntime(panelConfig, serverMode, backups, sessions);
+      await reloadAuthentication();
+      runtime = await openRuntime(
+        panelConfig,
+        serverMode,
+        backups,
+        sessions,
+        authentication,
+      );
       if (!terminating) await runtime.start();
       if (!terminating) backups.activate();
     } catch {
@@ -913,7 +951,7 @@ async function main() {
         log.error("server.runtime_stop_failed");
       }
       log.error("server.runtime_start_failed", {
-        hint: "Check persisted state and backup recovery before starting work.",
+        hint: "Check persisted state, panel-auth permissions and password hash, and backup recovery before starting work.",
       });
     }
   })();

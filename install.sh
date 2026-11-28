@@ -1,27 +1,49 @@
 #!/usr/bin/env bash
-# Supports Bash 3.2 (macOS) and newer. Prompts use the terminal, not piped stdin.
+# Supports Bash 3.2 (macOS) and newer. Installation does not require a terminal.
 set +x
 set -euo pipefail
 umask 077
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
-usage() { printf 'Usage: bash install.sh [--directory PATH] [--version vX.Y.Z]\n'; }
+usage() { printf 'Usage: bash install.sh [--directory PATH] [--version vX.Y.Z] [--port PORT] [--url ORIGIN]\n'; }
 install_dir="$HOME/.local/share/nimbot"
 version='development'
+port_option=''
+url_option=''
+panel_port=3000
+configured_hash=${PANEL_PASSWORD_HASH:-}
+configured_password=${PANEL_PASSWORD:-}
+unset PANEL_PASSWORD PANEL_PASSWORD_HASH
 version_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --directory) [ "$#" -ge 2 ] || fail '--directory requires a path'; install_dir="$2"; shift 2 ;;
     --version) [ "$#" -ge 2 ] && [[ "$2" =~ $version_pattern ]] || fail 'A release tag such as v1.0.0 is required.'; version="$2"; shift 2 ;;
+    --port) [ "$#" -ge 2 ] && [ -n "$2" ] || fail '--port requires a port'; port_option="$2"; shift 2 ;;
+    --url) [ "$#" -ge 2 ] && [ -n "$2" ] || fail '--url requires an origin'; url_option="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) usage >&2; fail "Unknown option: $1" ;;
   esac
 done
 case "$(uname -s)" in Linux|Darwin) ;; *) fail 'Only Linux and macOS are supported.' ;; esac
-for tool in curl tar docker mktemp stty; do command -v "$tool" >/dev/null || fail "Required command not found: $tool"; done
-exec 3<> /dev/tty || fail 'An interactive terminal is required.'
-tty_settings=$(stty -g <&3)
-ask() { printf '%s' "$1" >&3; IFS= read -r answer <&3 || fail 'Input cancelled.'; }
+for tool in curl tar docker mktemp; do command -v "$tool" >/dev/null || fail "Required command not found: $tool"; done
 valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535)); }
+valid_url() {
+  [ "$1" = "http://localhost:$panel_port" ] && return 0
+  if [[ "$1" =~ ^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:([0-9]{1,5}))?$ ]]; then
+    [ -z "${BASH_REMATCH[2]:-}" ] || valid_port "${BASH_REMATCH[2]}"
+  else return 1; fi
+}
+if [ -n "$port_option" ]; then
+  valid_port "$port_option" || fail 'Enter a port between 1 and 65535 using --port.'
+  panel_port=$((10#$port_option))
+fi
+panel_url="${url_option:-http://localhost:$panel_port}"
+valid_url "$panel_url" || fail 'Use --url with an HTTPS origin without a path, query or credentials, or the default localhost URL.'
+if [ -n "$configured_hash" ]; then
+  [[ "$configured_hash" =~ ^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$ ]] || fail 'PANEL_PASSWORD_HASH is invalid.'
+elif [ -n "$configured_password" ]; then
+  [ "${#configured_password}" -ge 8 ] && [ "${#configured_password}" -le 256 ] || fail 'PANEL_PASSWORD must be between 8 and 256 characters long.'
+fi
 if [ -n "${DOCKER_CONTEXT:-}" ]; then
   endpoint=$(docker context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}')
 elif [ -n "${DOCKER_HOST:-}" ]; then endpoint="$DOCKER_HOST"
@@ -36,7 +58,7 @@ marker="$install_dir/.nimbot-installation"
 work_dir=''
 lock="$install_dir/.nimbot-maintenance"
 ln -s "$$" "$lock" 2>/dev/null || fail 'Installation maintenance is already in progress.'
-cleanup() { rm -f -- "$lock"; stty "$tty_settings" <&3 || true; [ -z "$work_dir" ] || rm -rf -- "$work_dir"; }
+cleanup() { rm -f -- "$lock"; [ -z "$work_dir" ] || rm -rf -- "$work_dir"; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 trap 'printf "Installation failed. Configuration and Docker resources were kept. Retry with the same --directory.\n" >&2' ERR
@@ -93,6 +115,19 @@ saved_volume=$(lookup volume "$volume")
 [ -z "$saved_container" ] || owned container "$container"
 [ -z "$saved_volume" ] || owned volume "$volume"
 if [ -z "$saved_volume" ] && { [ -n "$saved_container" ] || [ -f "$install_dir/.env" ]; }; then fail 'The saved data volume is missing. Restore it before starting this installation.'; fi
+if [ -f "$install_dir/.env" ]; then
+  saved_url=$(sed -n 's/^PANEL_URL=//p' "$install_dir/.env")
+  saved_port=$(sed -n 's/^PANEL_PUBLISH_PORT=//p' "$install_dir/.env")
+  valid_port "$saved_port" && [ -n "$saved_url" ] || fail 'Restore PANEL_URL and PANEL_PUBLISH_PORT in .env.'
+  [ -z "$port_option" ] || [ "$panel_port" = "$saved_port" ] || fail 'To change the port, edit .env and recreate the container using the documented manual procedure.'
+  [ -z "$url_option" ] || [ "$panel_url" = "$saved_url" ] || fail 'To change the URL, edit .env and recreate the container using the documented manual procedure.'
+  panel_port="$saved_port"
+  panel_url="$saved_url"
+  valid_url "$panel_url" || fail 'Restore a valid PANEL_URL in .env.'
+fi
+if [ -z "$saved_container" ] && (exec 4<>"/dev/tcp/127.0.0.1/$panel_port") 2>/dev/null; then
+  fail "Port $panel_port is already in use. Retry with --port PORT; for an existing installation, edit .env and recreate the container using the documented manual procedure."
+fi
 if [ -z "$saved_container" ]; then
   printf 'Building the application image (this can take several minutes)...\n'
   docker build -f "$install_dir/infrastructure/docker/nimbot.Dockerfile" -t "$image" "$install_dir"
@@ -103,39 +138,14 @@ if [ -z "$saved_volume" ]; then
 fi
 if [ ! -f "$install_dir/.env" ]; then
   [ -z "$saved_container" ] || fail 'Saved configuration is missing. Restore .env before retrying.'
-  panel_port=3000
-  while :; do
-    ask 'Panel host port [default: 3000]: '
-    [ -n "$answer" ] || break
-    if valid_port "$answer"; then panel_port=$((10#$answer)); break; fi
-    printf 'Enter a port between 1 and 65535.\n' >&3
-  done
-  local_url="http://localhost:$panel_port"
-  while :; do
-    ask "Panel URL [default: $local_url, or enter an HTTPS origin]: "
-    panel_url="${answer:-$local_url}"
-    [ "$panel_url" = "$local_url" ] && break
-    if [[ "$panel_url" =~ ^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:([0-9]{1,5}))?$ ]]; then
-      https_port="${BASH_REMATCH[2]:-}"
-      if [ -z "$https_port" ] || valid_port "$https_port"; then break; fi
-    fi
-    printf 'Enter %s or an HTTPS origin without a path, query or credentials.\n' "$local_url" >&3
-  done
-  while :; do
-    stty -echo <&3
-    printf 'Panel password (8–256 characters, hidden): ' >&3
-    IFS= read -r -s password <&3 || fail 'Input cancelled.'; printf '\n' >&3
-    printf 'Repeat password: ' >&3
-    IFS= read -r -s confirmation <&3 || fail 'Input cancelled.'; printf '\n' >&3
-    stty "$tty_settings" <&3
-    if [ "$password" != "$confirmation" ]; then printf 'Passwords do not match. Try again.\n' >&3; continue; fi
-    if password_hash=$(printf '%s' "$password" | docker run --rm -i --entrypoint node "$image" apps/server/dist/password.js --stdin); then break; fi
-    printf 'Password was rejected. Try again.\n' >&3
-  done
-  unset password confirmation
-  [[ "$password_hash" =~ ^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$ ]] || fail 'Password helper returned an invalid hash.'
+  password_hash="$configured_hash"
+  if [ -z "$password_hash" ] && [ -n "$configured_password" ]; then
+    password_hash=$(printf '%s' "$configured_password" | docker run --rm -i --entrypoint node "$image" apps/server/dist/password.js --stdin) || fail 'Could not hash PANEL_PASSWORD.'
+    [[ "$password_hash" =~ ^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$ ]] || fail 'Password helper returned an invalid hash.'
+  fi
   env_file=$(mktemp "$install_dir/.env.XXXXXX")
-  printf 'PANEL_PASSWORD_HASH=%s\nPANEL_URL=%s\nPANEL_PUBLISH_PORT=%s\nTASK_TIMEOUT_SECONDS=600\n' "$password_hash" "$panel_url" "$panel_port" > "$env_file"
+  if [ -n "$password_hash" ]; then printf 'PANEL_PASSWORD_HASH=%s\n' "$password_hash" > "$env_file"; fi
+  printf 'PANEL_URL=%s\nPANEL_PUBLISH_PORT=%s\nTASK_TIMEOUT_SECONDS=600\n' "$panel_url" "$panel_port" >> "$env_file"
   chmod 600 "$env_file"
   mv "$env_file" "$install_dir/.env"
   unset password_hash
@@ -145,6 +155,7 @@ else
   [ -n "$panel_url" ] && valid_port "$panel_port" || fail 'Restore PANEL_URL and PANEL_PUBLISH_PORT in .env.'
   chmod 600 "$install_dir/.env"
 fi
+unset configured_password configured_hash
 if [ -z "$saved_container" ]; then
   docker run -d --init --name "$container" --restart unless-stopped --stop-timeout 30 \
     --label "io.nimbot.installation=$installation_id" --label io.nimbot.layout=subprocess-v1 \
@@ -164,7 +175,9 @@ for attempt in {1..60}; do
   esac
 done
 "$ready" || fail 'Application did not become healthy within 120 seconds. Configuration and data were kept.'
-printf '\nNimbot is ready at %s\nInstallation: %s\n' "$panel_url" "$install_dir"
+activation_url=$(docker exec "$container" node apps/server/dist/setup-link.js) || fail 'Could not read the activation link. Check application logs and retry.'
+printf '\nNimbot is ready at %s\nInstallation: %s\n'  "$panel_url" "$install_dir"
+printf 'Open this link to create your password or sign in:\n%s\n' "$activation_url"
 if [ "$panel_url" = "http://localhost:$panel_port" ]; then
   printf 'For a remote host: ssh -L %s:127.0.0.1:%s YOUR_USER@YOUR_SERVER\n' "$panel_port" "$panel_port"
 else

@@ -107,3 +107,11 @@ export const scheduleForm = z.strictObject({
   cadence: z.string(),
   timeZone: z.string(),
 });
+
+export const setupPasswordForm = z
+  .strictObject({
+    token: z.string().max(256),
+    password: z.string().min(8).max(256),
+    confirmation: z.string().min(8).max(256),
+  })
+  .refine((value) => value.password === value.confirmation);

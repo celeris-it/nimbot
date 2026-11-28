@@ -11,7 +11,7 @@ The self-hosted app is free. You provide the server and AI provider connection.
 ## Get started
 
 1. [Install Nimbot with Docker](docs/INSTALL.md). If you're coming from the older per-agent Docker layout, [start with a new data volume](docs/INSTALL.md#fresh-installation-requirement) and keep your old data.
-2. Sign in to the web panel and create an agent. In **Channels**, connect your Telegram or Discord bot. You can connect both.
+2. Open the installer’s activation link and create your administrator password, or sign in if a password is already configured. Create an agent. In **Channels**, connect your Telegram or Discord bot. You can connect both.
 3. Connect a provider from **AI providers**. Under **Model and usage**, choose a model for your agent or use the default.
 4. Send the bot a private message from the owner account you configured. The first message links your chat and starts your first task.
 

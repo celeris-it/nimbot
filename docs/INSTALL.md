@@ -15,18 +15,31 @@ upgrade and per-agent-volume recovery scripts are retired.
 ## Optional assisted installation
 
 Docker Engine or Docker Desktop must already be running. On Linux and macOS,
-run this in an interactive terminal (you can download and inspect it first):
+run this command (you can download and inspect it first):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/celeris-it/nimbot/main/install.sh | bash
 ```
 
-The script downloads source, builds one application image, asks for the panel
-port, origin and password, creates one named data volume, and starts one
-application container. It does not use Compose or mount the Docker socket.
-Password input is hidden and travels only over stdin to the hash helper.
-Configuration is saved in a private `.env`; its additional `PANEL_PUBLISH_PORT`
-setting is installer metadata, not a Server bind setting.
+The script downloads source, builds one application image, creates one named
+data volume, and starts one application container without asking questions or
+requiring a terminal. The panel defaults to `http://localhost:3000`. When no
+password is configured, the installer prints an activation link. Open it to
+create and confirm your administrator password in the browser. Keep this link
+private until setup is complete. It stops working after setup or a server restart.
+
+Use `--port 3100` to select another host port and `--url https://nimbot.example.com`
+for an existing HTTPS proxy. A busy port causes an error with retry instructions;
+the installer does not silently select another port. It does not use Compose or
+mount the Docker socket. Configuration is saved in a private `.env`; its additional
+`PANEL_PUBLISH_PORT` setting is installer metadata, not a Server bind setting.
+
+For unattended configuration, pass `PANEL_PASSWORD_HASH` or `PANEL_PASSWORD` to
+the installer environment. The hash takes priority; only a hash is written to
+`.env`. When piping the script, export variables before the pipeline so they
+reach Bash. Existing installations retain their saved `.env`; environment values
+do not replace it. To change the port or URL, edit `.env` and recreate the
+container using the manual Docker procedure.
 
 Use `--directory /absolute/path` to choose an empty destination, and optionally
 `--version vX.Y.Z` for an initial release tag that includes this layout:
@@ -54,19 +67,20 @@ inside the image; they are not prerequisites on the Docker host.
 
 ```sh
 docker build -f infrastructure/docker/nimbot.Dockerfile -t nimbot:local .
-docker run --rm -it --entrypoint node nimbot:local apps/server/dist/password.js
 ```
 
-The second command prompts for the administrator password and prints a
-`PANEL_PASSWORD_HASH=...` line. Put that line in a private `.env` file beside the
-checkout, followed by:
+Create a private `.env` file beside the checkout:
 
 ```dotenv
 PANEL_URL=http://localhost:3000
 TASK_TIMEOUT_SECONDS=600
 ```
 
-Run `chmod 600 .env`. Do not put a plaintext password in this file or commit it.
+Run `chmod 600 .env`. You can leave the password unset to create it from the web.
+Alternatively, set `PANEL_PASSWORD_HASH` (generated with the image’s
+`apps/server/dist/password.js` command) or `PANEL_PASSWORD` in your private
+deployment configuration. Never commit credentials.
+
 Create a new named volume and start the application:
 
 ```sh
@@ -76,8 +90,25 @@ docker run -d --init --name nimbot --restart unless-stopped --stop-timeout 30 \
   --mount type=volume,source=nimbot-data,target=/data nimbot:local
 ```
 
-Open `http://localhost:3000`. The installation starts with zero agents. Only the
-panel is published. Agent Hosts and OpenCode APIs bind to container loopback;
+Get your private activation link:
+
+```sh
+docker exec nimbot node apps/server/dist/setup-link.js
+```
+
+Open the link to set your password. If the password is already configured, this
+command prints the sign-in URL instead. After a restart, run the command again
+to get the current link. With an installer-managed container, use the exact
+container name shown in its logs command, or rerun the installer in the same
+directory. For a remote host using the default URL, first open an SSH tunnel:
+
+```sh
+ssh -L 3000:127.0.0.1:3000 YOUR_USER@YOUR_SERVER
+```
+
+The link uses `PANEL_URL`; an HTTPS deployment still needs its existing reverse
+proxy configured before opening the panel. The installation starts with zero
+agents. Only the panel is published. Agent Hosts and OpenCode APIs bind to container loopback;
 each Host has its own API token. The complete application runs as `node` (UID
 1000). All persistent state lives under `/data`, including Server SQLite, bot and
 MCP credentials, agent workspaces, task state, provider state and browser profiles.
@@ -95,6 +126,25 @@ Keep the Docker port bound to host loopback. Configure an existing reverse proxy
 with TLS, point it at `http://127.0.0.1:3000`, and set `PANEL_URL` to the exact
 HTTPS origin (no path). Recreate the application container after changing `.env`.
 Remote access requires HTTPS. Proxy provisioning is outside Nimbot's scope.
+
+### Password configuration and storage
+
+Authentication uses the first available source: `PANEL_PASSWORD_HASH`,
+`PANEL_PASSWORD`, or the hash saved in `SERVER_STATE_DIR/panel-auth/password-hash`
+(`/data/panel-auth/password-hash` in Docker). Empty environment variables are
+ignored. An invalid explicit hash or invalid saved file stops authentication;
+it never silently reopens setup. Passwords must be 8–256 characters long.
+
+Web setup stores only a scrypt hash in a private file, retained across container
+recreation and included in panel backups. Environment credentials override the
+saved hash without changing it; removing those variables restores the saved
+password, or requires activation if none was saved. A password supplied directly
+to the Server through `PANEL_PASSWORD` is hashed in memory, not saved to disk.
+The installer instead converts it to a hash in its private `.env`.
+
+The activation token is temporary, excluded from panel backups, and never
+printed in normal Server logs. Creating a password signs you in automatically.
+Changing an existing password from the panel is outside this initial setup flow.
 
 ## Trust model
 

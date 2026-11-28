@@ -25,6 +25,8 @@ import { HostProviderError } from "../../apps/server/dist/providers/host-provide
 import { serve } from "../../apps/server/node_modules/@hono/node-server/dist/index.mjs";
 import { Hono } from "../../apps/server/node_modules/hono/dist/index.js";
 import { createPanel } from "../../apps/server/dist/panel/panel.js";
+import { createPanelAuthentication } from "../../apps/server/dist/panel/panel-authentication.js";
+import { readFile } from "node:fs/promises";
 import { hashPassword } from "../../apps/server/dist/panel/panel-auth.js";
 import { providers } from "../../apps/server/dist/providers/provider-contracts.js";
 import { InvalidDiscordBotToken } from "../../apps/server/dist/discord/discord-identity.js";
@@ -152,14 +154,28 @@ function reset() {
   });
 }
 reset();
+const fixtureHash = await hashPassword("panel-test-password");
+let fixtureAuthentication = createPanelAuthentication(stateDir, fixtureHash);
+await fixtureAuthentication.reload();
 const panel = createPanel(
   {
-    passwordHash: await hashPassword("panel-test-password"),
+    passwordHash: fixtureHash,
     origin: "http://127.0.0.1:3199",
     hostname: "127.0.0.1",
     port: 3199,
   },
   {
+    authentication: {
+      get ready() {
+        return fixtureAuthentication.ready;
+      },
+      get pending() {
+        return fixtureAuthentication.pending;
+      },
+      verify: (password) => fixtureAuthentication.verify(password),
+      setup: (token, password) => fixtureAuthentication.setup(token, password),
+      setupRetryAfter: (now) => fixtureAuthentication.setupRetryAfter(now),
+    },
     get deploymentMode() {
       return nativeMode ? "native" : "docker";
     },
@@ -359,7 +375,19 @@ app.post("/__test/native", (c) => {
   nativeMode = true;
   return c.json({ ok: true });
 });
-app.post("/__test/reset", (c) => {
+app.post("/__test/setup", async (c) => {
+  rmSync(join(stateDir, "panel-auth"), { recursive: true, force: true });
+  fixtureAuthentication = createPanelAuthentication(stateDir);
+  await fixtureAuthentication.reload();
+  const token = await readFile(
+    join(stateDir, "panel-auth/setup-token"),
+    "utf8",
+  );
+  return c.json({ token });
+});
+app.post("/__test/reset", async (c) => {
+  fixtureAuthentication = createPanelAuthentication(stateDir, fixtureHash);
+  await fixtureAuthentication.reload();
   reset();
   return c.json({ ok: true });
 });

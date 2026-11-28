@@ -18,6 +18,7 @@
     McpDefinitionSummary,
     McpDiscoveryResult,
     McpExample,
+    PanelAuthStatus,
     PanelSession,
     PanelStatus,
     ScheduleList,
@@ -36,6 +37,7 @@
     systemAppearance,
     type Appearance,
   } from "./appearance.js";
+  import PasswordSetup from "./PasswordSetup.svelte";
   import Dashboard from "./Dashboard.svelte";
   import {
     ActionButton,
@@ -82,6 +84,11 @@
   const { initialAppearance }: { initialAppearance: Appearance } = $props();
   let appearance = $state(untrack(() => initialAppearance));
   let path = $state(location.pathname);
+  let setupToken = $state("");
+  if (location.pathname === "/setup") {
+    setupToken = new URLSearchParams(location.hash.slice(1)).get("token") ?? "";
+    history.replaceState(null, "", location.pathname + location.search);
+  }
   let pageSearch = location.search;
   let session = $state<PanelSession>();
   let status = $state<PanelStatus>({ agents: [] });
@@ -198,8 +205,9 @@
       ] as const
     ).filter((link) => link.available),
   );
-  let desktopSidebar = $derived(rail && session && path !== "/login");
-  let pageCard = $derived(!!session && path !== "/login");
+  const authenticationPage = $derived(path === "/login" || path === "/setup");
+  let desktopSidebar = $derived(rail && session && !authenticationPage);
+  let pageCard = $derived(!!session && !authenticationPage);
   let agentLinks = $derived(
     (
       [
@@ -283,46 +291,48 @@
     } else if (!directoryLoading) directoryAttempt++;
   }
   let title = $derived(
-    path === "/login"
-      ? $messages("Sign in")
-      : path === "/"
-        ? $messages("Agents")
-        : path === "/providers"
-          ? $messages("AI providers")
-          : mcpRoute
-            ? $messages("MCP catalog")
-            : route?.[2] === "executions"
-              ? $messages("Executions")
-              : route?.[2] === "channels"
-                ? $messages("Channels")
-                : route?.[2] === "access"
-                  ? $messages("Access")
-                  : route?.[2] === "usage"
-                    ? $messages("Model and usage")
-                    : route?.[2] === "schedules"
-                      ? scheduleText.pageTitle
-                      : route?.[2] === "delegations"
-                        ? $messages("Delegations")
-                        : route?.[2] === "approvals"
-                          ? $messages("Approvals")
-                          : route?.[2] === "memory"
-                            ? $messages("Memory")
-                            : path === "/agents/new"
-                              ? $messages("Create agent")
-                              : route?.[2] === "settings"
-                                ? $messages("Edit agent")
-                                : route?.[2] === "token"
-                                  ? $messages("Bot token")
-                                  : route?.[2] === "delete"
-                                    ? $messages("Delete agent")
-                                    : route?.[2] === "process/restart"
-                                      ? $messages("Restart agent")
-                                      : route?.[2] === "process/stop"
-                                        ? $messages("Stop agent")
-                                        : path === "/rules" ||
-                                            route?.[2] === "rules"
-                                          ? $messages("Rules")
-                                          : $messages("Agent setup"),
+    path === "/setup"
+      ? $messages("Create administrator password")
+      : path === "/login"
+        ? $messages("Sign in")
+        : path === "/"
+          ? $messages("Agents")
+          : path === "/providers"
+            ? $messages("AI providers")
+            : mcpRoute
+              ? $messages("MCP catalog")
+              : route?.[2] === "executions"
+                ? $messages("Executions")
+                : route?.[2] === "channels"
+                  ? $messages("Channels")
+                  : route?.[2] === "access"
+                    ? $messages("Access")
+                    : route?.[2] === "usage"
+                      ? $messages("Model and usage")
+                      : route?.[2] === "schedules"
+                        ? scheduleText.pageTitle
+                        : route?.[2] === "delegations"
+                          ? $messages("Delegations")
+                          : route?.[2] === "approvals"
+                            ? $messages("Approvals")
+                            : route?.[2] === "memory"
+                              ? $messages("Memory")
+                              : path === "/agents/new"
+                                ? $messages("Create agent")
+                                : route?.[2] === "settings"
+                                  ? $messages("Edit agent")
+                                  : route?.[2] === "token"
+                                    ? $messages("Bot token")
+                                    : route?.[2] === "delete"
+                                      ? $messages("Delete agent")
+                                      : route?.[2] === "process/restart"
+                                        ? $messages("Restart agent")
+                                        : route?.[2] === "process/stop"
+                                          ? $messages("Stop agent")
+                                          : path === "/rules" ||
+                                              route?.[2] === "rules"
+                                            ? $messages("Rules")
+                                            : $messages("Agent setup"),
   );
   let viewLabel = $derived(
     path === "/settings"
@@ -381,6 +391,12 @@
     controller?.abort();
     controller = undefined;
     inFlight = false;
+    const destination = new URL(next, location.origin);
+    if (destination.pathname === "/setup" && destination.hash) {
+      setupToken =
+        new URLSearchParams(destination.hash.slice(1)).get("token") ?? "";
+      next = destination.pathname + destination.search;
+    } else if (destination.pathname !== "/setup") setupToken = "";
     if (replace) history.replaceState(null, "", next);
     else history.pushState(null, "", next);
     const url = new URL(next, location.origin);
@@ -445,8 +461,15 @@
     }
   }
   async function load(accessSection?: "peers" | "mcp") {
-    if (inFlight || path === "/login") {
-      if (path === "/login") loaded = true;
+    if (inFlight) return;
+    if (authenticationPage) {
+      loaded = true;
+      if (path === "/login") {
+        const auth = await request<PanelAuthStatus>("/api/auth/status").catch(
+          () => undefined,
+        );
+        if (path === "/login" && auth?.setupRequired) navigate("/setup", true);
+      }
       return;
     }
     inFlight = true;
@@ -1351,7 +1374,7 @@
   </header>
 {/if}
 <div data-ui="panel-shell">
-  {#if session && path !== "/login" && (!compact || menuOpen)}
+  {#if session && !authenticationPage && (!compact || menuOpen)}
     <nav
       aria-label={$messages("Main navigation")}
       data-ui="main-navigation"
@@ -1410,13 +1433,13 @@
       tabindex="-1"
       oninvalidcapture={(event) => localizeInvalidField(event, $messages)}
       oninputcapture={clearFieldValidation}
-      data-page={path === "/login"
+      data-page={authenticationPage
         ? "login"
         : path === "/"
           ? "dashboard"
           : "detail"}
     >
-      {#if path !== "/login"}<p id="form-error" role="alert" tabindex="-1">
+      {#if !authenticationPage}<p id="form-error" role="alert" tabindex="-1">
           {error}
         </p>{/if}
       {#if notice && path !== "/settings"}<p role="status">{notice}</p>{/if}
@@ -1424,7 +1447,16 @@
         <ActionButton onclick={() => load()}
           >{$messages("Retry loading")} {viewLabel}</ActionButton
         >{/if}
-      {#if path === "/login"}
+      {#if path === "/setup"}
+        <PasswordSetup
+          token={setupToken}
+          done={() => {
+            setupToken = "";
+            session = undefined;
+            navigate("/");
+          }}
+        />
+      {:else if path === "/login"}
         <section data-ui="sign-in" aria-label={$messages("Sign in")}>
           <small>{$messages("ADMINISTRATION")}</small>
           <h1 tabindex="-1">{$messages("Your agent workspace.")}</h1>
@@ -1454,7 +1486,7 @@
                 bind:value={password}
               />
               <p id="password-help">
-                {$messages("Use the password configured on your server.")}
+                {$messages("Use your administrator password.")}
               </p>
               <p id="form-error" role="alert" tabindex="-1">{error}</p>
               <ActionButton variant="primary" type="submit" disabled={busy}

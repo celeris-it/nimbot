@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   mkdtemp,
   mkdir,
@@ -13,8 +13,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createServer } from "node:net";
+import { once } from "node:events";
 
 const execute = promisify(execFile);
+// Each case invokes several real Bash/Python subprocesses; allow for loaded CI hosts.
+vi.setConfig({ testTimeout: 20000 });
 const root = resolve(import.meta.dirname, "..");
 const temporary: string[] = [];
 afterEach(async () => {
@@ -74,6 +78,10 @@ if args[0] == 'context': print(os.environ.get('FAKE_ENDPOINT', 'unix://' + os.en
 elif args[0] == 'info': pass
 elif args[0] == 'build':
     if os.environ.get('FAKE_FAIL') == 'build': fail()
+elif args[0] == 'exec':
+    env = Path(state['container'][args[1]]['env']).read_text()
+    origin = next(line.split('=',1)[1] for line in env.splitlines() if line.startswith('PANEL_URL='))
+    print(origin + ('/login' if 'PANEL_PASSWORD_HASH=' in env else '/setup#token=' + 'a'*64))
 elif args[0] == 'run':
     if '-i' in args:
         password = sys.stdin.read()
@@ -82,7 +90,7 @@ elif args[0] == 'run':
     elif '-d' in args:
         if os.environ.get('FAKE_FAIL') == 'run': fail()
         name = args[args.index('--name')+1]
-        state['container'][name] = {'labels': labels(), 'status':'running', 'health':'healthy'}
+        state['container'][name] = {'labels': labels(), 'status':'running', 'health':'healthy', 'env':args[args.index('--env-file')+1]}
         save(); print(name)
     else: sys.exit(2)
 elif args[0] in ['container', 'volume']:
@@ -110,12 +118,7 @@ elif args[0] in ['container', 'volume']:
     else: sys.exit(2)
 else: sys.exit(2)
 `;
-const panelAnswers = [
-  ["Panel host port [default: 3000]: ", ""],
-  ["Panel URL [default: http://localhost:3000,", ""],
-  ["characters, hidden): ", "long-enough-password"],
-  ["Repeat password: ", "long-enough-password"],
-];
+const panelAnswers: string[][] = [];
 type Resource = {
   labels: Record<string, string>;
   status?: string;
@@ -161,6 +164,8 @@ async function fixture() {
     FAKE_LOG: log,
     FAKE_ARCHIVE: archive,
     FAKE_SOCKET: join(directory, "docker.sock"),
+    PANEL_PASSWORD: "",
+    PANEL_PASSWORD_HASH: "",
     DOCKER_HOST: "",
     DOCKER_CONTEXT: "",
   };
@@ -224,6 +229,11 @@ async function fixture() {
     commands,
     resources,
     install: () => run("install", panelAnswers),
+    installWithoutTerminal: () =>
+      execute("bash", [join(root, "install.sh"), "--directory", destination], {
+        env,
+        maxBuffer: 1024 * 1024,
+      }),
   };
 }
 
@@ -234,7 +244,8 @@ it("installs one application through piped stdin without Compose or a socket mou
   expect(result.output).toContain("Nimbot is ready at http://localhost:3000");
   expect(result.output).not.toContain("long-enough-password");
   const env = await readFile(join(f.destination, ".env"), "utf8");
-  expect(env).toContain("PANEL_PASSWORD_HASH=scrypt:");
+  expect(env).not.toContain("PANEL_PASSWORD_HASH=");
+  expect(result.output).toContain("/setup#token=");
   expect(env).not.toMatch(
     /DOCKER_SOCKET|AGENT_HOST_IMAGE|long-enough-password|'scrypt/,
   );
@@ -276,19 +287,23 @@ it("reuses configuration and the retained volume after uninstall without downloa
   expect(later.some((a) => a[0] === "volume" && a[1] === "create")).toBe(false);
 });
 
-it("validates ports and URLs and saves a Docker env-file with an HTTPS origin", async () => {
+it("accepts explicit ports and HTTPS origins without prompting", async () => {
   const f = await fixture();
-  const result = await f.run("install", [
-    ["Panel host port [default: 3000]: ", "65536"],
-    ["Panel host port [default: 3000]: ", "3101"],
-    ["Panel URL [default: http://localhost:3101,", "https://example.test/path"],
-    [
-      "Panel URL [default: http://localhost:3101,",
-      "https://nimbot.example.test",
-    ],
-    ["characters, hidden): ", "long-enough-password"],
-    ["Repeat password: ", "long-enough-password"],
-  ]);
+  for (const options of [
+    ["--port", "65536"],
+    ["--port", "0"],
+    ["--port", ""],
+    ["--url", ""],
+    ["--url", "https://example.test/path"],
+  ]) {
+    expect((await f.run("install", [], options)).code).toBe(1);
+  }
+  expect(await f.commands()).toEqual([]);
+  const result = await f.run(
+    "install",
+    [],
+    ["--port", "3101", "--url", "https://nimbot.example.test"],
+  );
   expect(result.code, result.output).toBe(0);
   const env = await readFile(join(f.destination, ".env"), "utf8");
   expect(env).toContain("PANEL_PUBLISH_PORT=3101");
@@ -296,6 +311,88 @@ it("validates ports and URLs and saves a Docker env-file with an HTTPS origin", 
   expect(
     (await f.commands()).find((a) => a[0] === "run" && a.includes("-d")),
   ).toContain("127.0.0.1:3101:3000");
+  expect((await f.run("install", [], ["--port", "3102"])).output).toContain(
+    "edit .env",
+  );
+  expect(
+    (await f.run("install", [], ["--url", "https://other.test"])).output,
+  ).toContain("edit .env");
+  expect((await f.run("install")).code).toBe(0);
+  expect(await readFile(join(f.destination, ".env"), "utf8")).toBe(env);
+});
+
+it("reports an occupied port before building or creating Docker resources", async () => {
+  const listener = createServer();
+  listener.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  try {
+    const address = listener.address();
+    if (!address || typeof address === "string")
+      throw new Error("Missing port");
+    const f = await fixture();
+    const result = await f.run("install", [], ["--port", String(address.port)]);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("already in use. Retry with --port");
+    expect(
+      (await f.commands()).some(
+        (args) => ["build", "run"].includes(args[0]!) || args[1] === "create",
+      ),
+    ).toBe(false);
+  } finally {
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
+  }
+});
+
+it("installs with no controlling terminal", async () => {
+  const f = await fixture();
+  const result = await f.installWithoutTerminal();
+  expect(result.stdout).toContain("/setup#token=");
+});
+
+it.each(["PANEL_PASSWORD", "PANEL_PASSWORD_HASH"])(
+  "uses %s from the environment and saves only its hash",
+  async (key) => {
+    const f = await fixture();
+    const value =
+      key === "PANEL_PASSWORD"
+        ? "long-enough-password"
+        : "scrypt:" + "c".repeat(32) + ":" + "d".repeat(128);
+    const result = await f.run("install", [], [], { [key]: value });
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).not.toContain(value);
+    expect(result.output).toContain("/login");
+    const env = await readFile(join(f.destination, ".env"), "utf8");
+    expect(env).toContain("PANEL_PASSWORD_HASH=scrypt:");
+    expect(env).not.toContain("PANEL_PASSWORD=");
+    expect(env).not.toContain("long-enough-password");
+    expect(JSON.stringify(await f.commands())).not.toContain(value);
+  },
+);
+
+it("rejects invalid environment passwords before Docker operations and gives the hash priority", async () => {
+  const f = await fixture();
+  expect(
+    (await f.run("install", [], [], { PANEL_PASSWORD: "short" })).code,
+  ).toBe(1);
+  expect(
+    (
+      await f.run("install", [], [], {
+        PANEL_PASSWORD_HASH: "invalid",
+        PANEL_PASSWORD: "valid-password",
+      })
+    ).code,
+  ).toBe(1);
+  expect(await f.commands()).toEqual([]);
+  const hash = "scrypt:" + "c".repeat(32) + ":" + "d".repeat(128);
+  expect(
+    (
+      await f.run("install", [], [], {
+        PANEL_PASSWORD_HASH: hash,
+        PANEL_PASSWORD: "short",
+      })
+    ).code,
+  ).toBe(0);
+  expect(await readFile(join(f.destination, ".env"), "utf8")).toContain(hash);
 });
 
 it("rejects remote Docker and pre-existing legacy state without mutating resources", async () => {

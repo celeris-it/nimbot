@@ -77,6 +77,11 @@ async function inventory(
     for (const name of (await readdir(join(directory, parent))).sort()) {
       if (!parent && name === BACKUP_DIRECTORY) continue;
       const path = parent ? `${parent}/${name}` : name;
+      if (
+        path === "panel-auth/setup-token" ||
+        /^panel-auth\/.*\.tmp$/.test(path)
+      )
+        continue;
       if (!validPath(path)) throw new Error("Unsupported backup file path.");
       const absolute = join(directory, path);
       const info = await lstat(absolute);

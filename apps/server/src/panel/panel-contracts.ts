@@ -72,6 +72,10 @@ export interface ScheduleDefaults {
 export type AgentSummary = NonNullable<
   ReturnType<NonNullable<PanelDeps["getAgentSetup"]>>
 > & { id: string };
+export interface PanelAuthStatus {
+  setupRequired: boolean;
+}
+
 export interface PanelSession {
   authenticated: true;
   deploymentMode: "native" | "docker";

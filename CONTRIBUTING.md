@@ -26,9 +26,20 @@ pnpm add --global --allow-build=@opencode/cli @opencode/cli@2.2.7
 pnpm --filter @nimbot/agent-host exec playwright install --with-deps chromium
 ```
 
-Copy `.env.example` to `.env`, run `pnpm panel:password`, and set
-`PANEL_PASSWORD_HASH` to the generated hash. Run `pnpm dev` and open
-`http://localhost:3000` (or your configured `PANEL_URL`). The command builds and
+Copy `.env.example` to `.env` and run `pnpm dev`. Leave the password settings
+empty to create your password in the web panel. In a second terminal, get the
+activation link after the Server starts:
+
+```sh
+NIMBOT_MODE=native node --env-file-if-exists=.env apps/server/dist/setup-link.js
+```
+
+Open that private link and choose a password. It is saved as a scrypt hash under
+`.nimbot-native/panel-auth/` and survives restarts. If you restart before completing
+setup, get a new link using the same command. Alternatively, set
+`PANEL_PASSWORD_HASH` using `pnpm panel:password`, or set `PANEL_PASSWORD` in your
+private environment. The hash takes priority, followed by the plaintext environment
+setting, then the saved hash. `pnpm dev` builds and
 serves the panel, selects native mode, and detects the shared Chromium cache.
 Re-run it after source changes. See [Panel development](#panel-development) for
 hot reload.

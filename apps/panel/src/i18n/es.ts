@@ -1,4 +1,27 @@
 export const spanish = {
+  "Panel authentication is unavailable. Wait a moment and try again.":
+    "La autenticación del panel no está disponible. Espera un momento y vuelve a intentarlo.",
+  "Create your administrator password using the activation link.":
+    "Crea tu contraseña de administrador usando el enlace de activación.",
+  "The administrator password is already configured. Sign in to continue.":
+    "La contraseña de administrador ya está configurada. Inicia sesión para continuar.",
+  "This activation link is invalid. Get the current link from your server.":
+    "Este enlace de activación no es válido. Obtén el enlace actual desde tu servidor.",
+  "Passwords must match and be between 8 and 256 characters long.":
+    "Las contraseñas deben coincidir y tener entre 8 y 256 caracteres.",
+  "Could not save the password. Check the server's data directory and try again.":
+    "No se pudo guardar la contraseña. Revisa el directorio de datos del servidor y vuelve a intentarlo.",
+  "Create administrator password": "Crear contraseña de administrador",
+  "Open the activation link shown by the installer. To get it again, run the setup-link command on your server.":
+    "Abre el enlace de activación que mostró el instalador. Para obtenerlo de nuevo, ejecuta el comando setup-link en tu servidor.",
+  "Choose a password to protect your administration panel.":
+    "Elige una contraseña para proteger tu panel de administración.",
+  "Use 8–256 characters. You can paste a password from your password manager.":
+    "Usa entre 8 y 256 caracteres. Puedes pegar una contraseña desde tu gestor de contraseñas.",
+  "Confirm password": "Confirmar contraseña",
+  "Save password and open panel": "Guardar contraseña y abrir el panel",
+  "Use your administrator password.": "Usa tu contraseña de administrador.",
+
   "Runtime temporary files and engine caches are excluded. Tools may download dependencies again after restoration.":
     "Se excluyen los archivos temporales de ejecución y las cachés del motor. Las herramientas pueden volver a descargar dependencias después de la restauración.",
   "Choose a backup file before validating.":

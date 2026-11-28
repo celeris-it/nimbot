@@ -1,4 +1,4 @@
-import { passwordHashPattern } from "./panel-auth.js";
+import { validateEnvironmentPassword } from "./panel-authentication.js";
 
 export interface PanelConfig {
   passwordHash: string;
@@ -9,8 +9,7 @@ export interface PanelConfig {
 
 export function readPanelConfig(env: NodeJS.ProcessEnv): PanelConfig {
   const passwordHash = env.PANEL_PASSWORD_HASH ?? "";
-  if (!passwordHashPattern.test(passwordHash))
-    throw new Error("Set PANEL_PASSWORD_HASH using pnpm panel:password.");
+  validateEnvironmentPassword(env);
   // Blank values (e.g. `PANEL_HOST=` in .env) fall back to the defaults.
   const urlText = env.PANEL_URL?.trim() || "http://localhost:3000";
   if (!URL.canParse(urlText))

@@ -89,9 +89,25 @@ All Docker state lives in the single `/data` volume:
 
 Back up the complete volume and `.env`, including retained directories of removed
 agents. Backups contain secrets, private conversations and browser sessions.
-The environment file supplies the administrator password hash and public panel
-origin; the data volume alone does not replace it. Installer `.env` also records
+The environment file supplies the public panel origin and optional password
+configuration. A password created in the web panel is stored as a private scrypt
+hash in `panel-auth/password-hash` inside the data volume. Keep `.env` separately;
+the data volume alone does not replace deployment configuration. Installer `.env` also records
 `PANEL_PUBLISH_PORT` for CLI management. The Server ignores that metadata setting.
+
+## Initial panel password
+
+If neither environment credentials nor a saved password exist, the panel requires
+an activation link before it accepts a new administrator password. Obtain it with
+`docker exec "$container" node apps/server/dist/setup-link.js`. The installer also
+prints the link when run again with its original directory. Restarting Nimbot
+invalidates unfinished activation links; completed setup removes the token.
+
+Authentication priority is `PANEL_PASSWORD_HASH`, then `PANEL_PASSWORD`, then
+`panel-auth/password-hash`. Empty environment variables are ignored. Environment
+settings do not replace a saved hash. An invalid hash or unreadable/private-file
+permission error requires repairing configuration or restoring the saved file;
+it does not open password creation to the next visitor.
 
 ## Panel backups
 
@@ -150,7 +166,10 @@ Creating an export also extracts a verification copy before offering a download.
 The panel copy covers persistent application data. Save the host's `.env`,
 installer marker, reverse proxy configuration and Docker image separately using
 the full deployment procedure below. Panel restore keeps the destination's
-deployment configuration and panel password.
+deployment configuration. A password created in the web panel is restored from
+the backup; environment password settings continue to take priority. Existing
+sessions are invalidated. Activation tokens are excluded and regenerated when
+setup is required.
 
 ## Backup
 
@@ -321,7 +340,8 @@ replayed. Telegram delivery requires the Nimbot Server to be running.
 ## Troubleshooting
 
 - **Application unhealthy:** inspect `docker logs --tail 100 "$container"`. Check
-  the panel password hash, `PANEL_URL`, the data mount and available disk space.
+  the configured or saved panel password hash, `panel-auth/` permissions,
+  `PANEL_URL`, the data mount and available disk space.
   The image expects `/data` writable by UID 1000. Do not replace it with an empty
   volume to hide a startup failure; preserve the original and diagnose it.
 - **Fresh installation required:** a previous Server schema was detected. Choose

@@ -13,9 +13,11 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import { verifyPassword } from "./panel-auth.js";
+import type { PanelAuthentication } from "./panel-authentication.js";
 import type { HostStatus } from "../host/agent-host.js";
 import type { PanelConfig } from "./panel-config.js";
 import type {
+  PanelAuthStatus,
   AgentDetail,
   PanelSession,
   PanelStatus,
@@ -35,6 +37,7 @@ import type { ScheduleRunNowResult } from "../schedules/scheduler.js";
 import { isProviderId } from "../providers/provider-contracts.js";
 import { parseForm, validated } from "./validate.js";
 import {
+  setupPasswordForm,
   approvalRuleForm,
   confirmForm,
   processForm,
@@ -67,6 +70,7 @@ export interface RegisteredAgentSettings {
   hostStatus?(id: string): Promise<HostStatus>;
 }
 export interface PanelDeps {
+  authentication?: PanelAuthentication;
   backups?: ReturnType<typeof createBackups>;
   executions?: ReturnType<
     typeof import("../tasks/execution-history.js").createExecutionHistory
@@ -209,6 +213,7 @@ export function createPanel(
   let attempts = 0;
   let windowEnd = 0;
   const secure = config.origin.startsWith("https:");
+  const authentication = deps.authentication;
   app.use(
     "*",
     secureHeaders({
@@ -233,6 +238,7 @@ export function createPanel(
       ![
         "/login",
         "/api/login",
+        "/api/auth/status",
         "/api/logout",
         "/logout",
         "/api/session",
@@ -369,9 +375,76 @@ export function createPanel(
       return c.notFound();
     }
   });
-  app.get("/login", entry);
+  app.get("/login", (c) =>
+    authentication && !authentication.ready
+      ? c.json(panelError("authentication_unavailable"), 503)
+      : entry(c),
+  );
+  app.get("/setup", entry);
+  app.get("/api/auth/status", (c) => {
+    if (authentication && !authentication.ready)
+      return c.json(panelError("authentication_unavailable"), 503);
+    return c.json({
+      setupRequired: authentication?.pending ?? false,
+    } satisfies PanelAuthStatus);
+  });
+  const createSession = (c: Context) => {
+    for (const [id, expires] of sessions)
+      if (expires <= now()) sessions.delete(id);
+    if (sessions.size >= 10) sessions.delete(sessions.keys().next().value!);
+    const id = randomBytes(32).toString("hex");
+    sessions.set(id, now() + ttl);
+    setCookie(c, cookieName, id, {
+      httpOnly: true,
+      secure,
+      sameSite: "Strict",
+      path: "/",
+      maxAge: ttl / 1000,
+    });
+  };
+  app.post(
+    "/api/auth/setup",
+    bodyLimit({
+      maxSize: 4096,
+      onError: (c) => c.json(panelError("request_too_large"), 413),
+    }),
+    async (c) => {
+      if (!authentication || !authentication.ready)
+        return c.json(panelError("authentication_unavailable"), 503);
+      if (!authentication.pending)
+        return c.json(panelError("setup_complete"), 409);
+      const retry = authentication.setupRetryAfter(now());
+      if (retry) {
+        c.header("Retry-After", String(retry));
+        return c.json(panelError("login_rate_limited"), 429);
+      }
+      const parsed = await parseForm(
+        c,
+        setupPasswordForm,
+        "invalid_setup_password",
+      );
+      if (parsed.response) return parsed.response;
+      const { token, password } = parsed.data;
+      try {
+        const result = await authentication.setup(token, password);
+        if (result === "complete")
+          return c.json(panelError("setup_complete"), 409);
+        if (result === "invalid_token")
+          return c.json(panelError("invalid_setup_token"), 403);
+        sessions.clear();
+        createSession(c);
+        return c.json({ authenticated: true });
+      } catch {
+        return c.json(panelError("setup_save_failed"), 503);
+      }
+    },
+  );
   const signIn = async (c: Context) => {
     const api = c.req.path.startsWith("/api/");
+    if (authentication && !authentication.ready)
+      return c.json(panelError("authentication_unavailable"), 503);
+    if (authentication?.pending)
+      return c.json(panelError("setup_required"), 409);
     if (now() >= windowEnd) {
       attempts = 0;
       windowEnd = now() + 15 * 60 * 1000;
@@ -385,22 +458,13 @@ export function createPanel(
     if (
       typeof body.password !== "string" ||
       body.password.length > 256 ||
-      !(await verifyPassword(body.password, config.passwordHash))
+      !(await (authentication
+        ? authentication.verify(body.password)
+        : verifyPassword(body.password, config.passwordHash)))
     )
       return c.json(panelError("incorrect_password"), 401);
     attempts = 0;
-    for (const [id, expires] of sessions)
-      if (expires <= now()) sessions.delete(id);
-    if (sessions.size >= 10) sessions.delete(sessions.keys().next().value!);
-    const id = randomBytes(32).toString("hex");
-    sessions.set(id, now() + ttl);
-    setCookie(c, cookieName, id, {
-      httpOnly: true,
-      secure,
-      sameSite: "Strict",
-      path: "/",
-      maxAge: ttl / 1000,
-    });
+    createSession(c);
     return api ? c.json({ authenticated: true }) : c.redirect("/", 303);
   };
   for (const path of ["/login", "/api/login"])
@@ -413,6 +477,10 @@ export function createPanel(
       signIn,
     );
   app.use("*", async (c, next) => {
+    if (authentication && (!authentication.ready || authentication.pending))
+      return c.req.path.startsWith("/api/")
+        ? c.json(panelError("unauthorized"), 401)
+        : c.redirect("/setup", 303);
     const id = getCookie(c, cookieName);
     const expires = id ? sessions.get(id) : undefined;
     if (!expires || expires <= now()) {

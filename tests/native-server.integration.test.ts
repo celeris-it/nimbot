@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { hashPassword } from "../apps/server/src/panel/panel-auth.js";
+import { promisify } from "node:util";
+const execute = promisify(execFile);
 
 /** Run after pnpm build: NIMBOT_TEST_NATIVE_BUILD=1 pnpm test tests/native-server.integration.test.ts */
 it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
@@ -15,7 +16,6 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
     const directory = await mkdtemp(join(tmpdir(), "nimbot-native-server-"));
     const root = fileURLToPath(new URL("../", import.meta.url));
     const password = "fixture-password";
-    const hash = await hashPassword(password);
     let child: ChildProcess | undefined;
     let origin = "";
     let cookie = "";
@@ -49,7 +49,6 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
             NODE_OPTIONS: `--import=${join(root, "tests/fixtures/native-telegram.mjs")}`,
             NIMBOT_MODE: bootstrap ? "docker" : "native",
             SERVER_STATE_DIR: directory,
-            PANEL_PASSWORD_HASH: hash,
             PANEL_HOST: "127.0.0.1",
             PANEL_PORT: String(port),
             PANEL_URL: origin,
@@ -80,6 +79,47 @@ it.skipIf(process.env.NIMBOT_TEST_NATIVE_BUILD !== "1")(
           { timeout: 15000 },
         )
         .toBe(401);
+      await expect
+        .poll(
+          async () => fetch(`${origin}/api/auth/status`).then((r) => r.status),
+          { timeout: 15000 },
+        )
+        .toBe(200);
+      const authentication = await (
+        await fetch(`${origin}/api/auth/status`)
+      ).json();
+      if (bootstrap) {
+        expect(authentication.setupRequired).toBe(true);
+        const { stdout } = await execute(
+          process.execPath,
+          [join(root, "apps/server/dist/setup-link.js")],
+          {
+            cwd: root,
+            env: {
+              PATH: process.env.PATH,
+              NIMBOT_MODE: "native",
+              SERVER_STATE_DIR: directory,
+              PANEL_URL: origin,
+              PANEL_PORT: String(port),
+            },
+          },
+        );
+        const link = new URL(stdout.trim());
+        expect(link.origin).toBe(origin);
+        const token = new URLSearchParams(link.hash.slice(1)).get("token")!;
+        const setup = await fetch(`${origin}/api/auth/setup`, {
+          method: "POST",
+          headers: { Origin: origin },
+          body: new URLSearchParams({
+            token,
+            password,
+            confirmation: password,
+          }),
+        });
+        expect(setup.status).toBe(200);
+        expect(output).not.toContain(token);
+        expect(output).not.toContain(password);
+      } else expect(authentication.setupRequired).toBe(false);
       const login = await fetch(`${origin}/api/login`, {
         method: "POST",
         headers: { Origin: origin },
