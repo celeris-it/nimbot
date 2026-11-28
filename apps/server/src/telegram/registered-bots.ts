@@ -62,6 +62,9 @@ export function createRegisteredBots(
   async function run(id: string, connection: Connection) {
     let binding: ReturnType<typeof openChatBinding> | undefined;
     let credentialsLoaded = false;
+    let stage = "credentials";
+    let errorCode: number | undefined;
+    let failureKind: string | undefined;
     try {
       const agent = registry.get(id);
       const ownerId = agent?.ownerId;
@@ -132,6 +135,7 @@ export function createRegisteredBots(
       // Avoid init's automatic retries: one bounded identity check, without starting polling.
       // grammY's Node declarations use a legacy AbortSignal shim. Its client only
       // uses aborted/addEventListener, which the native Node signal implements.
+      stage = "identity_check";
       const info = await retryTransient(
         () =>
           bot.api.getMe(
@@ -156,6 +160,7 @@ export function createRegisteredBots(
       registry.bindBot(id, info.id, info.username);
       bot.botInfo = info;
       tasks.attach(bot);
+      stage = "polling";
       await bot.start({
         allowed_updates: ["message", "callback_query"],
         onStart: async () => {
@@ -191,6 +196,11 @@ export function createRegisteredBots(
           failure: "telegram_unavailable",
         };
     } catch (error) {
+      if (error instanceof GrammyError) {
+        errorCode = error.error_code;
+        failureKind =
+          errorCode === 409 ? "polling_conflict" : "telegram_rejected";
+      } else failureKind = "connection_error";
       if (!connection.controller.signal.aborted)
         connection.state = {
           status: "failed",
@@ -208,6 +218,9 @@ export function createRegisteredBots(
         log.error("bot.connection_failed", {
           agentId: id,
           reason: connection.state.failure,
+          stage,
+          errorCode,
+          failureKind,
         });
       if (!config.tasks) connection.tasks?.close();
       try {

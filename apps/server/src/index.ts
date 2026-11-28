@@ -154,7 +154,8 @@ async function openRuntime(
     });
     agentNotes = openAgentNotes(statePath);
     // A task left running by the previous process cannot be proven finished.
-    taskStore.markRunningInterrupted();
+    const interruptedTasks = taskStore.markRunningInterrupted();
+    log.info("server.task_recovery_finished", { interruptedTasks });
     // Grants that no longer qualify (changed owner, removed agent) do not survive a restart.
     agentGrants.prune();
   } catch (error) {

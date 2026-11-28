@@ -53,6 +53,26 @@ choose **System**, **Light**, or **Dark** to save a preference in this browser.
 Agents reply in the language you request or follow the conversation’s language,
 with English as the fallback.
 
+Application logs are structured JSON lines. Follow a task by `agentId` and
+`taskId`; `task.host_accepted` adds `hostTaskId` to correlate Server and Host work.
+`task.queued` records how many tasks were ahead at submission.
+`task.preparation_started` / `task.preparation_finished` cover model preparation;
+`ready: false` leaves the task queued. `task.host_submission_started`,
+`task.host_accepted`, and `task.host_completed` distinguish submission from execution.
+`task.host_polling_failed` and `task.host_polling_resumed` report observation outages
+without logging each retry. `task.waiting` repeats every 30 seconds while a queue
+worker is waiting, with its current `stage` and `elapsedMs` in that stage. It is a
+diagnostic notice, not proof that work is stuck. The stages are `preparing`,
+`executing`, `progress_delivery`, `finalizing`, and `chat_delivery`.
+`task.delivery_finished` means the delivery handler returned; inspect the panel's
+**Chat delivery** status to confirm delivery. `task.finalization_failed` identifies
+a failure to persist the final task state. On startup,
+`server.task_recovery_finished` records the number of previously running tasks
+marked interrupted or cancelled. Telegram `bot.connection_failed` includes its
+connection `stage` and, when Telegram returned one, `errorCode`; a 409 is classified
+as `polling_conflict`. These diagnostics omit prompts, response text, provider error
+bodies, connection URLs, and credentials.
+
 ### Telegram commands
 
 Each agent uses a distinct bot for each connected platform. The bot accepts

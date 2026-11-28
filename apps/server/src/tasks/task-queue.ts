@@ -1193,13 +1193,15 @@ export function openTaskStore(path: string) {
         db.exec(
           "UPDATE task_execution_details SET delivery = 'unconfirmed' WHERE delivery = 'pending'",
         );
-        db.prepare(
-          `UPDATE tasks SET status = CASE WHEN platform = 'delegated' AND EXISTS (
+        const interrupted = db
+          .prepare(
+            `UPDATE tasks SET status = CASE WHEN platform = 'delegated' AND EXISTS (
             SELECT 1 FROM delegations d WHERE d.id = tasks.delegation_id AND d.child_task_id = tasks.id
             AND d.source_task_id = tasks.parent_task_id AND d.source_agent_id = tasks.source_agent_id
             AND d.target_agent_id = tasks.agent_id AND d.cancel_requested_at IS NOT NULL
           ) THEN 'cancelled' ELSE 'interrupted' END, updated_at = ? WHERE status = 'running'`,
-        ).run(Date.now());
+          )
+          .run(Date.now());
         db.prepare(
           `UPDATE delegations SET result_json = CASE WHEN cancel_requested_at IS NOT NULL THEN '{"ok":false,"kind":"cancelled"}' ELSE '{"ok":false,"kind":"interrupted"}' END, updated_at = ?
           WHERE state = 'admitted' AND result_json IS NULL AND child_task_id IN (
@@ -1214,6 +1216,7 @@ export function openTaskStore(path: string) {
           "UPDATE delegations SET state = 'discarded', reason = 'parent_interrupted', updated_at = ? WHERE state = 'pending' AND source_task_id IN (SELECT id FROM tasks WHERE status IN ('completed', 'failed', 'cancelled', 'interrupted'))",
         ).run(Date.now());
         db.exec("COMMIT");
+        return Number(interrupted.changes);
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
@@ -1382,18 +1385,39 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
   const active = new Map<string, AbortController>();
   async function drain() {
     const key = config.agentId;
+    let stage = "preparing";
+    let taskId: string | undefined;
+    let stageStartedAt = Date.now();
+    const enterStage = (next: string, id = taskId) => {
+      stage = next;
+      taskId = id;
+      stageStartedAt = Date.now();
+    };
+    const waiting = setInterval(() => {
+      log.warn("task.waiting", {
+        taskId,
+        stage,
+        elapsedMs: Date.now() - stageStartedAt,
+      });
+    }, 30_000);
+    waiting.unref();
     // Registered by kick() before this body runs, so the exit below cannot race a submit.
     await Promise.resolve();
     try {
       while (!closed) {
         let task: T | undefined;
         try {
+          enterStage("preparing");
+          taskId = undefined;
           if (config.prepare && (!(await config.prepare()) || closed)) return;
           task = config.claim();
         } catch {
+          log.error("task.queue_failed", { stage });
           return;
         }
         if (!task) return;
+        enterStage("executing", task.id);
+        const startedAt = Date.now();
         log.info("task.started", { taskId: task.id });
         let outcome: TaskOutcome;
         const controller = new AbortController();
@@ -1418,7 +1442,13 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
                 return;
               lastSent = now;
               lastMessage = message;
-              sending.push(config.progress(current, message).catch(() => {}));
+              sending.push(
+                config.progress(current, message).catch(() => {
+                  log.warn("task.progress_delivery_failed", {
+                    taskId: current.id,
+                  });
+                }),
+              );
             };
             outcome = {
               ok: true,
@@ -1440,6 +1470,7 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
         }
         active.delete(conversationKey);
         // Progress must reach the chat before the final result does.
+        enterStage("progress_delivery");
         await Promise.allSettled(sending);
         const finalStatus = outcome.ok
           ? "completed"
@@ -1449,8 +1480,10 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
         log[outcome.ok ? "info" : "warn"]("task.finished", {
           taskId: task.id,
           status: finalStatus,
+          durationMs: Date.now() - startedAt,
           ...(outcome.ok ? {} : { reason: outcome.kind }),
         });
+        enterStage("finalizing");
         let finalized = true;
         try {
           if (config.finalize)
@@ -1458,6 +1491,7 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
           else config.finish(task.id, finalStatus);
         } catch {
           finalized = false;
+          log.error("task.finalization_failed", { taskId: task.id });
           /* The store may be closed during shutdown; uncertain work is never replayed. */
         }
         // A child outcome must be committed before it can be published to its requester.
@@ -1469,12 +1503,19 @@ function createAgentQueue<T extends { id: string; prompt: string }>(
         )
           continue;
         try {
+          enterStage("chat_delivery");
+          log.info("task.delivery_started", { taskId: task.id });
           await config.deliver(task, outcome);
+          log.info("task.delivery_finished", {
+            taskId: task.id,
+            durationMs: Date.now() - stageStartedAt,
+          });
         } catch {
           log.warn("task.delivery_failed", { taskId: task.id });
         }
       }
     } finally {
+      clearInterval(waiting);
       // Synchronous with the last claimNext: nothing can enqueue in between.
       draining.delete(key);
     }
@@ -1538,6 +1579,12 @@ export function createTaskQueue(
         prompt,
         ...(updateId === undefined ? {} : { updateId }),
       });
+      if (!saved.duplicate)
+        (config.log ?? defaultLog).info("task.queued", {
+          agentId: config.agentId,
+          taskId: saved.id,
+          ahead: saved.ahead,
+        });
       queue.kick();
       return saved;
     },
@@ -1577,7 +1624,25 @@ export function createRoutedTaskQueue(
         const task = config.store.peekNextTask?.(config.agentId);
         if (!task || config.ready?.(task) === false) return false;
         preparedId = task.id;
-        return config.prepare!(task);
+        const logger = config.log ?? defaultLog;
+        const fields = { agentId: config.agentId, taskId: task.id };
+        const startedAt = Date.now();
+        logger.info("task.preparation_started", fields);
+        try {
+          const ready = await config.prepare!(task);
+          logger[ready ? "info" : "warn"]("task.preparation_finished", {
+            ...fields,
+            ready,
+            durationMs: Date.now() - startedAt,
+          });
+          return ready;
+        } catch (error) {
+          logger.error("task.preparation_failed", {
+            ...fields,
+            durationMs: Date.now() - startedAt,
+          });
+          throw error;
+        }
       }),
     requeue: (task) => config.store.requeueUnaccepted?.(task.id) ?? false,
     execute: async (task, report, signal) => {
@@ -1621,6 +1686,12 @@ export function createRoutedTaskQueue(
         replyDocumentId: attachment?.replyDocumentId,
         ...(updateId === undefined ? {} : { updateId }),
       });
+      if (!saved.duplicate)
+        (config.log ?? defaultLog).info("task.queued", {
+          agentId: config.agentId,
+          taskId: saved.id,
+          ahead: saved.ahead,
+        });
       queue.kick();
       return saved;
     },
@@ -1635,6 +1706,12 @@ export function createRoutedTaskQueue(
         prompt,
         discordAttachment,
       });
+      if (!saved.duplicate)
+        (config.log ?? defaultLog).info("task.queued", {
+          agentId: config.agentId,
+          taskId: saved.id,
+          ahead: saved.ahead,
+        });
       queue.kick();
       return saved;
     },

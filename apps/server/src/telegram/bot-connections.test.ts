@@ -397,3 +397,33 @@ it("reports a revoked token once, without retrying it or stopping other bots", a
     vi.unstubAllEnvs();
   }
 });
+
+it("logs polling conflicts with a safe error code and stage", async () => {
+  vi.stubEnv("NIMBOT_LOG", "");
+  const f = await fixture();
+  try {
+    f.errors.set("alpha:getUpdates", 409);
+    f.bots.start("alpha");
+    await vi.waitFor(() =>
+      expect(f.bots.getState("alpha").status).toBe("failed"),
+    );
+    const entries = f.error.mock.calls.map(([line]) =>
+      JSON.parse(String(line)),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        event: "bot.connection_failed",
+        agentId: "alpha",
+        reason: "telegram_unavailable",
+        stage: "polling",
+        errorCode: 409,
+        failureKind: "polling_conflict",
+      }),
+    );
+    expect(JSON.stringify(entries)).not.toContain("saved-token");
+    expect(JSON.stringify(entries)).not.toContain("test error");
+  } finally {
+    await f.close();
+    vi.unstubAllEnvs();
+  }
+});

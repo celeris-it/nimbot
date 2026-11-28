@@ -1,3 +1,4 @@
+import { createLogger } from "../logger.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -68,7 +69,8 @@ describe("task queue", () => {
       expect(store.bindHostTask("a", second.id, otherHostId)).toBe(true);
       store.close();
       store = openTaskStore(file);
-      store.markRunningInterrupted();
+      expect(store.markRunningInterrupted()).toBe(1);
+      expect(store.markRunningInterrupted()).toBe(0);
       expect(store.getHostTaskId("a", task.id)).toBe(hostId);
       expect(store.getHostTaskId("a", second.id)).toBe(otherHostId);
       expect(store.getTask(second.id)?.status).toBe("interrupted");
@@ -397,7 +399,6 @@ describe("duplicate Telegram updates", () => {
 });
 
 it("logs task start and finish with agent and task IDs but never the prompt", async () => {
-  const { createLogger } = await import("../logger.js");
   const lines: Record<string, unknown>[] = [];
   const dir = await mkdtemp(join(tmpdir(), "nimbot-queue-log-"));
   const store = openTaskStore(join(dir, "state.sqlite"));
@@ -417,10 +418,16 @@ it("logs task start and finish with agent and task IDs but never the prompt", as
     await queue.idle();
     const events = lines.map((l) => `${l.event}:${l.status ?? ""}`);
     expect(events).toEqual([
+      "task.queued:",
+      "task.queued:",
       "task.started:",
       "task.finished:completed",
+      "task.delivery_started:",
+      "task.delivery_finished:",
       "task.started:",
       "task.finished:failed",
+      "task.delivery_started:",
+      "task.delivery_finished:",
     ]);
     expect(lines.every((l) => l.agentId === "developer" && l.taskId)).toBe(
       true,
@@ -467,5 +474,56 @@ it("keeps different agents independent while serializing all conversations of on
     a.close();
     b.close();
     store.close();
+  }
+});
+
+it("identifies stalled progress delivery without logging task contents and clears its wait timer", async () => {
+  vi.useFakeTimers();
+  const entries: Record<string, unknown>[] = [];
+  const hold = gate();
+  const store = openTaskStore(":memory:");
+  const queue = createTaskQueue({
+    agentId: "agent-a",
+    store,
+    log: createLogger((_level, line) => entries.push(JSON.parse(line))),
+    execute: async (_task, report) => {
+      report("private progress");
+      return "private response";
+    },
+    progress: () => hold.promise,
+    deliver: async () => {},
+  });
+  try {
+    const { id } = queue.submit(1, 42, "private prompt");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(queue.isRunning(1, 42)).toBe(false);
+    expect(store.getTask(id)?.status).toBe("running");
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        event: "task.waiting",
+        agentId: "agent-a",
+        taskId: id,
+        stage: "progress_delivery",
+        elapsedMs: 30_000,
+      }),
+    );
+    hold.open();
+    await queue.idle();
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        event: "task.delivery_finished",
+        taskId: id,
+      }),
+    );
+    const count = entries.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(entries).toHaveLength(count);
+    expect(JSON.stringify(entries)).not.toContain("private");
+  } finally {
+    hold.open();
+    await queue.idle();
+    queue.close();
+    store.close();
+    vi.useRealTimers();
   }
 });

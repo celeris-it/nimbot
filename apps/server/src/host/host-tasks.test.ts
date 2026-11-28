@@ -1,3 +1,4 @@
+import { log } from "../logger.js";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolOutcome } from "../tasks/tool-dispatch.js";
 import {
@@ -691,4 +692,69 @@ describe("tool relay", () => {
     expect(onTool).toHaveBeenCalledTimes(1);
     expect(f.replies).toEqual([]);
   });
+});
+
+it("logs Host correlation and outage recovery without prompts, outputs, URLs or raw errors", async () => {
+  const hostTaskId = "a0000000-0000-4000-8000-000000000001";
+  const info = vi.spyOn(log, "info").mockImplementation(() => {});
+  const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      Response.json({ id: hostTaskId, status: "accepted" }),
+    )
+    .mockRejectedValueOnce(new Error("private credential and URL"))
+    .mockResolvedValueOnce(
+      Response.json({
+        id: hostTaskId,
+        events: [
+          { sequence: 1, status: "completed", output: "private response" },
+        ],
+      }),
+    );
+  try {
+    await expect(
+      createHostTasks(config, request, async () => {})(
+        "private prompt",
+        undefined,
+        undefined,
+        undefined,
+        {
+          identity: { agentId: "a", serverTaskId: "server-task" },
+          onAccepted: () => true,
+        },
+      ),
+    ).resolves.toBe("private response");
+    expect(info).toHaveBeenCalledWith(
+      "task.host_accepted",
+      expect.objectContaining({
+        agentId: "a",
+        taskId: "server-task",
+        hostTaskId,
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "task.host_polling_failed",
+      expect.objectContaining({
+        taskId: "server-task",
+        hostTaskId,
+        reason: "connection_error",
+      }),
+    );
+    expect(info).toHaveBeenCalledWith(
+      "task.host_polling_resumed",
+      expect.objectContaining({ failedPolls: 1 }),
+    );
+    expect(info).toHaveBeenCalledWith(
+      "task.host_completed",
+      expect.objectContaining({ hostTaskId }),
+    );
+    const entries = JSON.stringify([...info.mock.calls, ...warn.mock.calls]);
+    expect(entries).not.toContain("private");
+    expect(entries).not.toContain(config.token);
+    expect(entries).not.toContain(config.url);
+  } finally {
+    info.mockRestore();
+    warn.mockRestore();
+  }
 });

@@ -1,3 +1,4 @@
+import { createLogger } from "../logger.js";
 import { expect, it, vi } from "vitest";
 import {
   createRoutedTaskQueue,
@@ -294,6 +295,43 @@ it("preserves ordinary chat completion semantics after a Host cancellation race"
     });
   } finally {
     release();
+    queue.close();
+    store.close();
+  }
+});
+
+it("correlates model preparation failures with the queued task without exposing the error", async () => {
+  const store = openTaskStore(":memory:");
+  const entries: Record<string, unknown>[] = [];
+  const queue = createRoutedTaskQueue({
+    agentId: "a",
+    store,
+    log: createLogger((_level, line) => entries.push(JSON.parse(line))),
+    prepare: async () => {
+      throw new Error("private provider credential");
+    },
+    execute: vi.fn(),
+    deliver: vi.fn(),
+  });
+  try {
+    const { id } = queue.submitTelegram(1, 42, "private prompt");
+    await queue.idle();
+    expect(store.getTask(id)?.status).toBe("queued");
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        event: "task.preparation_failed",
+        taskId: id,
+        agentId: "a",
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        event: "task.queue_failed",
+        stage: "preparing",
+      }),
+    );
+    expect(JSON.stringify(entries)).not.toContain("private");
+  } finally {
     queue.close();
     store.close();
   }

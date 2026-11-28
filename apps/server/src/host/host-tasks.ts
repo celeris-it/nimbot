@@ -1,3 +1,4 @@
+import { log } from "../logger.js";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AgentHostConfig } from "./agent-host.js";
 import type { TaskCapability } from "../tasks/task-capabilities.js";
@@ -194,6 +195,12 @@ export function createHostTasks(
     }
     let removeCancelListener = () => {};
     let acceptedId: string | undefined;
+    const startedAt = Date.now();
+    const fields = () => ({
+      agentId: execution?.identity.agentId,
+      taskId: execution?.identity.serverTaskId,
+      hostTaskId: acceptedId,
+    });
     const toolCalls = new Map<string, AbortController>();
     const cancelOnHost = (id: string) => {
       void request(`${config.url}/tasks/${encodeURIComponent(id)}/cancel`, {
@@ -204,6 +211,7 @@ export function createHostTasks(
       }).catch(() => {});
     };
     try {
+      log.info("task.host_submission_started", fields());
       const accepted = await call(
         "/tasks",
         JSON.stringify({
@@ -261,6 +269,10 @@ export function createHostTasks(
           throw new HostTaskError("unavailable");
         }
       }
+      log.info("task.host_accepted", {
+        ...fields(),
+        durationMs: Date.now() - startedAt,
+      });
       const hostId = accepted.id;
       const replyTool = async (invocationId: string, outcome: ToolOutcome) => {
         try {
@@ -310,8 +322,18 @@ export function createHostTasks(
           result = await call(
             `/tasks/${encodeURIComponent(accepted.id)}/events?after=${sequence}`,
           );
+          if (failedPolls)
+            log.info("task.host_polling_resumed", { ...fields(), failedPolls });
           failedPolls = 0;
         } catch (error) {
+          if (!failedPolls)
+            log.warn("task.host_polling_failed", {
+              ...fields(),
+              reason:
+                error instanceof HostTaskError
+                  ? error.kind
+                  : "connection_error",
+            });
           // Reading state is safe to repeat; the restarted Host reports what happened.
           if (
             (error instanceof HostTaskError && error.kind === "busy") ||
@@ -365,6 +387,10 @@ export function createHostTasks(
               throw new HostTaskError("unavailable");
             if ("attachment" in result && result.attachment === true)
               execution?.onAttachment?.();
+            log.info("task.host_completed", {
+              ...fields(),
+              durationMs: Date.now() - startedAt,
+            });
             return event.output;
           }
           if (event.status === "approval") {
@@ -416,6 +442,19 @@ export function createHostTasks(
       }
       throw new HostTaskError("timeout");
     } catch (error) {
+      log.warn("task.host_failed", {
+        ...fields(),
+        stage: acceptedId ? "observing" : "submission",
+        durationMs: Date.now() - startedAt,
+        reason:
+          error instanceof HostModelAdmissionExpired
+            ? "model_admission_expired"
+            : error instanceof HostTaskError
+              ? error.kind
+              : deadline.aborted
+                ? "timeout"
+                : "connection_error",
+      });
       if (error instanceof HostModelAdmissionExpired) throw error;
       if (error instanceof HostTaskError) {
         if (error.kind === "timeout" && acceptedId) cancelOnHost(acceptedId);
