@@ -50,6 +50,8 @@ export const panelErrorMessages = {
   invalid_execution_cursor: "Invalid execution cursor.",
   execution_not_found: "Execution not found.",
   avatar_unavailable: "Avatar unavailable.",
+  avatar_sync_failed:
+    "Could not update the avatar. Check that the agent’s bots are connected and try again.",
   invalid_agent_rule: "Enter Markdown of up to 4000 characters.",
   agent_rule_scope_limit:
     "Rules in this list may use up to 16000 characters combined, including spacing between rules.",

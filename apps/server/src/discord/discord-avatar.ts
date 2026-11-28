@@ -4,6 +4,7 @@ export async function syncDiscordAvatar(
   load: () => Promise<Buffer | undefined>,
   isCurrent: () => boolean,
   request: typeof fetch = fetch,
+  force = false,
 ) {
   const bytes = await load();
   if (!bytes || !isCurrent()) return;
@@ -30,7 +31,7 @@ export async function syncDiscordAvatar(
     (bot.avatar !== null && typeof bot.avatar !== "string")
   )
     throw new Error("Discord avatar lookup returned an unexpected user");
-  if (bot.avatar !== null || !isCurrent()) return;
+  if ((!force && bot.avatar !== null) || !isCurrent()) return;
   const update = await request(url, {
     ...options,
     method: "PATCH",

@@ -1095,6 +1095,10 @@ export const spanish = {
   "Rule not found.": "No se encontró la regla.",
   "Memory unavailable.": "La memoria no está disponible.",
   "Invalid execution cursor.": "El cursor de ejecuciones no es válido.",
+  "Could not update the avatar. Check that the agent’s bots are connected and try again.":
+    "No se pudo actualizar el avatar. Comprueba que los bots del agente estén conectados e inténtalo de nuevo.",
+  "Update bot avatars": "Actualizar avatares de los bots",
+  "Bot avatars updated.": "Se actualizaron los avatares de los bots.",
   "Avatar unavailable.": "El avatar no está disponible.",
   "Enter a name of up to 128 characters and instructions of up to 4000 characters.":
     "Ingresa un nombre de hasta 128 caracteres e instrucciones de hasta 4000 caracteres.",

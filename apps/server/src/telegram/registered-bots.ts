@@ -288,6 +288,32 @@ export function createRegisteredBots(
       connections.set(id, connection);
       connection.done = run(id, connection);
     },
+    /** Re-applies the saved avatar over the bot's current profile photo. */
+    async refreshAvatar(id: string) {
+      const connection = connections.get(id);
+      const loadAvatar = config.loadAvatar;
+      const agent = registry.get(id);
+      if (
+        !loadAvatar ||
+        !agent ||
+        !connection?.bot ||
+        connection.state.status !== "polling" ||
+        connection.bot.botInfo.id !== agent.botId
+      )
+        throw new Error("Telegram connection is not ready");
+      const bytes = await loadAvatar(id);
+      if (!bytes) throw new Error("Avatar unavailable");
+      await syncTelegramAvatar(
+        connection.bot.api,
+        agent.botId,
+        async () => bytes,
+        () =>
+          !connection.controller.signal.aborted &&
+          registry.get(id)?.credentialRef === agent.credentialRef,
+        connection.controller.signal,
+        true,
+      );
+    },
     getState(id: string): RegisteredBotState {
       return { ...(connections.get(id)?.state ?? { status: "not_started" }) };
     },

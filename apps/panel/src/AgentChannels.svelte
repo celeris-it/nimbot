@@ -22,10 +22,12 @@
     refresh,
     connectTelegram,
     discordAction,
+    syncAvatar,
   }: {
     agent: AgentDetail;
     busy: boolean;
     refresh: () => void;
+    syncAvatar: () => Promise<void>;
     connectTelegram: (fields: Record<string, string>) => Promise<void>;
     discordAction: (
       kind: "save" | "remove" | "test",
@@ -47,9 +49,14 @@
 
 <div data-ui="page-heading" class="flex-wrap">
   <h1 tabindex="-1">{$messages("Channels for")} {agent.name}</h1>
-  <ActionButton disabled={busy} onclick={refresh}>
-    <Icon name="refresh" size={16} />{$messages("Refresh channel status")}
-  </ActionButton>
+  <div class="button-row">
+    <ActionButton disabled={busy} onclick={syncAvatar}>
+      <Icon name="refresh" size={16} />{$messages("Update bot avatars")}
+    </ActionButton>
+    <ActionButton disabled={busy} onclick={refresh}>
+      <Icon name="refresh" size={16} />{$messages("Refresh channel status")}
+    </ActionButton>
+  </div>
 </div>
 <div class="settings-section-list" data-ui="agent-channels">
   <section

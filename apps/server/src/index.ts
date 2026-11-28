@@ -566,6 +566,17 @@ async function openRuntime(
         deploymentMode: serverMode.mode,
         rules: registry.rules,
         loadAvatar: avatars.get,
+        async refreshAvatar(id) {
+          const jobs: Promise<void>[] = [];
+          if (registry.get(id)?.credentialRef && registeredBots)
+            jobs.push(registeredBots.refreshAvatar(id));
+          if (registry.getDiscordConnection(id))
+            jobs.push(registeredDiscord.refreshAvatar(id));
+          if (!jobs.length) throw new Error("No connected bots");
+          const results = await Promise.allSettled(jobs);
+          if (results.some((result) => result.status === "rejected"))
+            throw new Error("Avatar update failed");
+        },
         processAction: async (id, action) => {
           await processAgents![action](id);
         },

@@ -183,6 +183,8 @@ export interface PanelDeps {
   rules?: ReturnType<typeof agentRules>;
   listAgentIds?: () => string[];
   loadAvatar?: (id: string) => Promise<Buffer | undefined>;
+  /** Re-applies the saved avatar to the agent's connected bots, replacing their current photos. */
+  refreshAvatar?: (id: string) => Promise<void>;
   deleteAgent?: (agentId: string, deleteData: boolean) => Promise<void>;
 }
 
@@ -1043,6 +1045,17 @@ export function createPanel(
     return c.body(new Uint8Array(avatar), 200, {
       "Content-Type": "image/jpeg",
     });
+  });
+  app.post("/api/agents/:id/avatar/sync", async (c) => {
+    const id = c.req.param("id");
+    if (!deps.refreshAvatar || !getAgentSetup?.(id))
+      return c.json(panelError("agent_not_found"), 404);
+    try {
+      await deps.refreshAvatar(id);
+      return c.json({ agentId: id, status: "completed" });
+    } catch {
+      return c.json(panelError("avatar_sync_failed"), 502);
+    }
   });
   app.get("/api/agents/:id", async (c) => {
     const id = c.req.param("id");

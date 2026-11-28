@@ -783,6 +783,16 @@
       },
     );
   }
+  async function syncAvatar() {
+    if (!agent) return;
+    await mutate(
+      `/api/agents/${encodeURIComponent(agent.id)}/avatar/sync`,
+      {},
+      () => {
+        noticeMessage = () => $messages("Bot avatars updated.");
+      },
+    );
+  }
   async function discordAction(
     kind: "save" | "remove" | "test",
     fields: Record<string, string>,
@@ -1740,6 +1750,7 @@
               {agent}
               {busy}
               {discordAction}
+              {syncAvatar}
               {connectTelegram}
               refresh={() => load()}
             />{/key}

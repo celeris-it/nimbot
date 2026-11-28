@@ -44,3 +44,13 @@ it("preserves existing photos and skips updates after a failed lookup, identity 
     request.mock.calls.every(([, options]) => options?.method === undefined),
   ).toBe(true);
 });
+
+it("replaces an existing avatar when forced", async () => {
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(Response.json({ ...bot, avatar: "custom" }))
+    .mockResolvedValueOnce(Response.json({ ...bot, avatar: "generated" }));
+  await syncDiscordAvatar("secret", bot.id, load, () => true, request, true);
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls[1]![1]).toMatchObject({ method: "PATCH" });
+});

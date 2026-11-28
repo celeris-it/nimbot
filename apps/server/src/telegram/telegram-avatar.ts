@@ -6,6 +6,7 @@ export async function syncTelegramAvatar(
   load: () => Promise<Buffer | undefined>,
   isCurrent: () => boolean,
   connectionSignal: AbortSignal,
+  force = false,
 ) {
   const bytes = await load();
   if (!bytes || !isCurrent()) return;
@@ -13,8 +14,11 @@ export async function syncTelegramAvatar(
     connectionSignal,
     AbortSignal.timeout(5000),
   ]) as unknown as Parameters<Api["setMyProfilePhoto"]>[1];
-  const photos = await api.getUserProfilePhotos(botId, { limit: 1 }, signal);
-  if (photos.total_count !== 0 || !isCurrent()) return;
+  if (!force) {
+    const photos = await api.getUserProfilePhotos(botId, { limit: 1 }, signal);
+    if (photos.total_count !== 0) return;
+    if (!isCurrent()) return;
+  }
   await api.setMyProfilePhoto(
     { type: "static", photo: new InputFile(bytes, "avatar.jpg") },
     signal,

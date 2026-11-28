@@ -108,7 +108,7 @@ The server verifies BotFather tokens with Telegram and rejects bots already link
 
 Agent names and instructions persist across restarts. Instructions are snapshotted as context for each new task; edits do not modify running work or the Telegram bot's profile. Names allow up to 128 characters and instructions up to 4000 characters.
 
-Nimbot uses the agent ID to download a Bottts Neutral avatar from DiceBear and stores the image with the agent's data. The Dashboard uses initials while the avatar is unavailable. When Telegram or Discord starts, Nimbot applies the generated avatar if the bot has no profile photo. Existing profile photos are preserved, and an unsuccessful avatar sync does not interrupt the connection.
+Nimbot uses the agent ID to download a Bottts Neutral avatar from DiceBear and stores the image with the agent's data. The Dashboard uses initials while the avatar is unavailable. When Telegram or Discord starts, Nimbot applies the generated avatar if the bot has no profile photo. Existing profile photos are preserved, and an unsuccessful avatar sync does not interrupt the connection. The Channels page has an "Update bot avatars" action that re-applies the stored avatar to the connected bots and replaces their current photos.
 
 The Server saves the agent and its desired process state before starting its Agent
 Host. Each agent gets distinct workspace, engine, task and browser directories

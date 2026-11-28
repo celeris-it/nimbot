@@ -131,6 +131,23 @@ export function createRegisteredDiscord(
   return {
     start: (id: string) => track(start(id)),
     stop,
+    /** Re-applies the saved avatar over the bot's current profile picture. */
+    async refreshAvatar(id: string) {
+      const connection = registry.getDiscordConnection(id);
+      if (!loadAvatar || !connection)
+        throw new Error("Discord is not connected");
+      const token = await secrets.read(connection.credentialRef);
+      await syncDiscordAvatar(
+        token,
+        connection.botId,
+        () => loadAvatar(id),
+        () =>
+          registry.getDiscordConnection(id)?.credentialRef ===
+          connection.credentialRef,
+        fetch,
+        true,
+      );
+    },
     getState(id: string) {
       const entry = entries.get(id);
       return entry?.failed

@@ -56,3 +56,17 @@ it("preserves existing photos and skips uploads after a failed lookup or disconn
   await sync();
   expect(api.setMyProfilePhoto).not.toHaveBeenCalled();
 });
+
+it("replaces an existing profile photo when forced", async () => {
+  const { api, controller } = fixture();
+  await syncTelegramAvatar(
+    api,
+    123,
+    async () => Buffer.from("image"),
+    () => true,
+    controller.signal,
+    true,
+  );
+  expect(api.getUserProfilePhotos).not.toHaveBeenCalled();
+  expect(api.setMyProfilePhoto).toHaveBeenCalledOnce();
+});

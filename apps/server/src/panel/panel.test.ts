@@ -471,6 +471,26 @@ it("serves agent avatars only to authenticated panel requests", async () => {
   expect((await get("/api/agents/other/avatar", cookie)).status).toBe(503);
 });
 
+it("refreshes agent avatars only for authenticated requests and reports failures", async () => {
+  const refreshAvatar = vi
+    .fn<(id: string) => Promise<void>>()
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(new Error("telegram down"));
+  const { post, login } = apiSetup({ refreshAvatar });
+  expect((await post("/api/agents/dev/avatar/sync", {})).status).toBe(401);
+  const cookie = await login();
+  expect(
+    (await post("/api/agents/missing/avatar/sync", {}, cookie)).status,
+  ).toBe(404);
+  expect(refreshAvatar).not.toHaveBeenCalled();
+  const ok = await post("/api/agents/dev/avatar/sync", {}, cookie);
+  expect(ok.status).toBe(200);
+  expect(refreshAvatar).toHaveBeenCalledWith("dev");
+  expect((await post("/api/agents/dev/avatar/sync", {}, cookie)).status).toBe(
+    502,
+  );
+});
+
 it("validates and protects first-time Telegram linking", async () => {
   const connectTelegram = vi.fn(
     async (_id: string, _ownerId: number, token: string) => {
