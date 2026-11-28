@@ -17,19 +17,43 @@ export function parseMcpJsonc(source: string): [string, unknown][] {
     ),
   );
   if (!record(value)) throw new Error("Expected a named MCP server");
-  const servers = record(value.mcp) ? value.mcp.servers : value;
+  const servers = record(value.mcp)
+    ? value.mcp.servers
+    : value.mcpServers !== undefined
+      ? value.mcpServers
+      : value;
   if (!record(servers) || !Object.keys(servers).length)
     throw new Error("No named MCP servers");
   return Object.entries(servers);
 }
 
-export function mcpDraft(label: string, entry: unknown): McpDefinitionSettings {
+export function mcpDraft(label: string, value: unknown): McpDefinitionSettings {
   if (
-    !record(entry) ||
-    (entry.disabled !== undefined && typeof entry.disabled !== "boolean")
+    !record(value) ||
+    (value.disabled !== undefined && typeof value.disabled !== "boolean")
   )
     throw new Error("Invalid MCP server");
+  let entry: Record<string, unknown> = value;
   const base = { label, enabled: entry.disabled !== true, tools: [] };
+  if (entry.type === undefined || entry.type === "stdio") {
+    if (
+      Object.keys(entry).some(
+        (key) =>
+          !["type", "command", "args", "env", "cwd", "disabled"].includes(key),
+      ) ||
+      (entry.command !== "npx" && entry.command !== "uvx") ||
+      !Array.isArray(entry.args) ||
+      !entry.args.every((arg) => typeof arg === "string")
+    )
+      throw new Error("Unsupported local MCP settings");
+    entry = {
+      type: "local",
+      command: [entry.command, ...entry.args],
+      environment: entry.env,
+      cwd: entry.cwd,
+      disabled: entry.disabled,
+    };
+  }
   if (entry.type === "local") {
     if (
       Object.keys(entry).some(
